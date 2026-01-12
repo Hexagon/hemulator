@@ -10,7 +10,8 @@ pub enum InspectorTab {
     // Generic tabs (available for all systems)
     Log,
     Memory,
-    Debug, // Generic debugger with CPU state, memory, disassembly
+    Debug,  // Generic debugger with CPU state, memory, disassembly
+    Mounts, // Mount points and loaded media
 
     // System-specific tabs
     NesTiles,
@@ -33,6 +34,9 @@ pub enum InspectorTab {
     Atari2600Palette,
     Atari2600Collision,
 
+    Chip8Display,
+    Chip8Registers,
+
     PcBda, // BIOS Data Area
 }
 
@@ -43,6 +47,7 @@ impl InspectorTab {
             InspectorTab::Log => "📋 Log",
             InspectorTab::Memory => "💾 Memory",
             InspectorTab::Debug => "🔧 Debug",
+            InspectorTab::Mounts => "💿 Mounts",
             InspectorTab::NesTiles => "🎨 Tiles",
             InspectorTab::NesPalettes => "🎨 Palettes",
             InspectorTab::NesNametables => "🗺️ Nametables",
@@ -58,6 +63,8 @@ impl InspectorTab {
             InspectorTab::Atari2600Sprites => "👾 Sprites",
             InspectorTab::Atari2600Palette => "🎨 Palette",
             InspectorTab::Atari2600Collision => "💥 Collision",
+            InspectorTab::Chip8Display => "📺 Display",
+            InspectorTab::Chip8Registers => "📝 Registers",
             InspectorTab::PcBda => "🖥️ BDA/EBDA",
         }
     }
@@ -66,14 +73,19 @@ impl InspectorTab {
     pub fn is_generic(&self) -> bool {
         matches!(
             self,
-            InspectorTab::Log | InspectorTab::Memory | InspectorTab::Debug
+            InspectorTab::Log | InspectorTab::Memory | InspectorTab::Debug | InspectorTab::Mounts
         )
     }
 }
 
 /// Get the list of tabs that should be shown for a given system
 pub fn get_tabs_for_system(system_type: Option<&SystemType>) -> Vec<InspectorTab> {
-    let mut tabs = vec![InspectorTab::Log, InspectorTab::Debug, InspectorTab::Memory];
+    let mut tabs = vec![
+        InspectorTab::Log,
+        InspectorTab::Debug,
+        InspectorTab::Memory,
+        InspectorTab::Mounts,
+    ];
 
     if let Some(sys_type) = system_type {
         match sys_type {
@@ -112,8 +124,11 @@ pub fn get_tabs_for_system(system_type: Option<&SystemType>) -> Vec<InspectorTab
                     InspectorTab::Atari2600Collision,
                 ]);
             }
+            SystemType::Chip8 => {
+                tabs.extend_from_slice(&[InspectorTab::Chip8Display, InspectorTab::Chip8Registers]);
+            }
             _ => {
-                // For other systems (N64, Chip8), just show generic tabs
+                // For other systems (N64), just show generic tabs
             }
         }
     }
@@ -130,6 +145,9 @@ pub fn render_inspector_tab(tab: &InspectorTab, ui: &mut Ui, tab_manager: &mut T
         }
         InspectorTab::Memory => {
             tab_manager.render_memory_tab(ui);
+        }
+        InspectorTab::Mounts => {
+            tab_manager.render_mounts_tab(ui);
         }
         InspectorTab::NesTiles
         | InspectorTab::GbTiles
@@ -160,6 +178,12 @@ pub fn render_inspector_tab(tab: &InspectorTab, ui: &mut Ui, tab_manager: &mut T
         }
         InspectorTab::Atari2600Collision => {
             tab_manager.render_atari2600_collision_tab(ui);
+        }
+        InspectorTab::Chip8Display => {
+            tab_manager.render_chip8_display_tab(ui);
+        }
+        InspectorTab::Chip8Registers => {
+            tab_manager.render_chip8_registers_tab(ui);
         }
         InspectorTab::PcBda => {
             render_pc_bda_tab(ui, tab_manager);
@@ -193,100 +217,121 @@ fn render_log_tab(ui: &mut Ui) {
         (LogCategory::Stubs, "Stubs"),
     ];
 
-    ScrollArea::vertical()
-        .auto_shrink([false; 2])
-        .show(ui, |ui| {
-            // Top section: Log level controls
-            ui.heading("Logging Configuration");
-            ui.separator();
-            ui.add_space(5.0);
+    // Use horizontal layout: controls on left, log messages on right
+    ui.horizontal_top(|ui| {
+        // Left panel: Logging configuration (40% width)
+        let left_width = ui.available_width() * 0.4;
+        ui.allocate_ui_with_layout(
+            egui::vec2(left_width, ui.available_height()),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ScrollArea::vertical()
+                    .id_salt("log_config_scroll")
+                    .auto_shrink([false; 2])
+                    .show(ui, |ui| {
+                        // Top section: Log level controls
+                        ui.heading("Logging Configuration");
+                        ui.separator();
+                        ui.add_space(5.0);
 
-            // Global log level
-            ui.horizontal(|ui| {
-                ui.label("Global Level:");
-                ui.add_space(10.0);
+                        // Global log level
+                        ui.label(egui::RichText::new("Global Level:").strong());
+                        ui.add_space(5.0);
 
-                let global_level = log_config.get_global_level();
+                        let global_level = log_config.get_global_level();
 
-                for (level, name) in &levels {
-                    if ui.selectable_label(global_level == *level, *name).clicked() {
-                        log_config.set_global_level(*level);
-                    }
-                }
-            });
-
-            ui.add_space(10.0);
-            ui.separator();
-            ui.add_space(10.0);
-
-            // Category-specific log levels
-            ui.heading("Component-Specific Levels");
-            ui.add_space(5.0);
-            ui.label("Override global level for specific components:");
-            ui.add_space(10.0);
-
-            egui::Grid::new("log_category_grid")
-                .num_columns(7)
-                .spacing([10.0, 8.0])
-                .striped(true)
-                .show(ui, |ui| {
-                    // Header row
-                    ui.label("");
-                    for (_, name) in &levels {
-                        ui.label(*name);
-                    }
-                    ui.end_row();
-
-                    // Category rows
-                    for (category, name) in &categories {
-                        ui.label(format!("{}:", name));
-                        let current_level = log_config.get_level(*category);
-
-                        for (level, _) in &levels {
-                            if ui.selectable_label(current_level == *level, "•").clicked() {
-                                log_config.set_level(*category, *level);
+                        ui.vertical(|ui| {
+                            for (level, name) in &levels {
+                                if ui.selectable_label(global_level == *level, *name).clicked() {
+                                    log_config.set_global_level(*level);
+                                }
                             }
+                        });
+
+                        ui.add_space(10.0);
+                        ui.separator();
+                        ui.add_space(10.0);
+
+                        // Category-specific log levels
+                        ui.heading("Component-Specific Levels");
+                        ui.add_space(5.0);
+                        ui.label("Override global level:");
+                        ui.add_space(10.0);
+
+                        egui::Grid::new("log_category_grid")
+                            .num_columns(7)
+                            .spacing([10.0, 8.0])
+                            .striped(true)
+                            .show(ui, |ui| {
+                                // Header row
+                                ui.label("");
+                                for (_, name) in &levels {
+                                    ui.label(*name);
+                                }
+                                ui.end_row();
+
+                                // Category rows
+                                for (category, name) in &categories {
+                                    ui.label(format!("{}:", name));
+                                    let current_level = log_config.get_level(*category);
+
+                                    for (level, _) in &levels {
+                                        if ui
+                                            .selectable_label(current_level == *level, "•")
+                                            .clicked()
+                                        {
+                                            log_config.set_level(*category, *level);
+                                        }
+                                    }
+                                    ui.end_row();
+                                }
+                            });
+
+                        ui.add_space(10.0);
+                        ui.separator();
+                        ui.add_space(10.0);
+
+                        // Rate limit configuration
+                        ui.heading("Rate Limiting");
+                        ui.add_space(5.0);
+                        ui.label("Max logs/sec per category:");
+                        ui.add_space(10.0);
+
+                        let mut rate_limit = log_config.get_rate_limit() as i32;
+                        let slider = egui::Slider::new(&mut rate_limit, 1..=1000)
+                            .text("logs/sec")
+                            .logarithmic(true);
+
+                        if ui.add(slider).changed() {
+                            log_config.set_rate_limit(rate_limit as usize);
                         }
-                        ui.end_row();
-                    }
-                });
 
-            ui.add_space(10.0);
-            ui.separator();
-            ui.add_space(10.0);
+                        ui.add_space(5.0);
+                        ui.label(format!(
+                            "Current: {} logs/sec per category",
+                            log_config.get_rate_limit()
+                        ));
+                        ui.label("When exceeded, logs are dropped.");
 
-            // Rate limit configuration
-            ui.heading("Rate Limiting");
-            ui.add_space(5.0);
-            ui.label("Control the maximum number of logs per second per category:");
-            ui.add_space(10.0);
+                        ui.add_space(10.0);
+                        ui.separator();
+                        ui.add_space(10.0);
 
-            ui.horizontal(|ui| {
-                ui.label("Max logs/second:");
-                ui.add_space(10.0);
+                        // Info section
+                        ui.heading("About Logging");
+                        ui.add_space(5.0);
+                        ui.label("Messages are written to stderr by default.");
+                        ui.label("Use --log-file <path> to log to a file.");
+                        ui.label("Category levels override global level.");
+                        ui.label("Set to 'Off' to use global level.");
+                    });
+            },
+        );
 
-                let mut rate_limit = log_config.get_rate_limit() as i32;
-                let slider = egui::Slider::new(&mut rate_limit, 1..=1000)
-                    .text("logs/sec")
-                    .logarithmic(true);
+        ui.separator();
 
-                if ui.add(slider).changed() {
-                    log_config.set_rate_limit(rate_limit as usize);
-                }
-            });
-
-            ui.add_space(5.0);
-            ui.label(format!(
-                "Current limit: {} logs per second per category",
-                log_config.get_rate_limit()
-            ));
-            ui.label("When exceeded, logs are dropped and a warning is emitted.");
-
-            ui.add_space(10.0);
-            ui.separator();
-            ui.add_space(10.0);
-
-            // Log messages
+        // Right panel: Log messages (60% width)
+        ui.vertical(|ui| {
             ui.heading("Log Messages");
             ui.add_space(5.0);
 
@@ -295,15 +340,17 @@ fn render_log_tab(ui: &mut Ui) {
                 ui.label(egui::RichText::new("No log messages yet").weak());
                 ui.add_space(5.0);
                 ui.label(
-                    egui::RichText::new("Enable logging levels above to see messages")
+                    egui::RichText::new("Enable logging levels on the left to see messages")
                         .weak()
                         .italics(),
                 );
             } else {
                 // Show messages in a scrollable area
+                let available_height = ui.available_height() - 40.0; // Reserve space for button
                 egui::ScrollArea::vertical()
+                    .id_salt("log_messages_scroll")
                     .auto_shrink([false; 2])
-                    .max_height(300.0)
+                    .max_height(available_height)
                     .show(ui, |ui| {
                         for msg in messages.iter().rev() {
                             let color = match msg.level {
@@ -327,19 +374,8 @@ fn render_log_tab(ui: &mut Ui) {
                     log_config.clear_messages();
                 }
             }
-
-            ui.add_space(10.0);
-            ui.separator();
-            ui.add_space(10.0);
-
-            // Info section
-            ui.heading("About Logging");
-            ui.add_space(5.0);
-            ui.label("Log messages are written to stderr by default.");
-            ui.label("Use --log-file <path> CLI argument to log to a file.");
-            ui.label("Category-specific levels override the global level.");
-            ui.label("Set a category to 'Off' to use the global level.");
         });
+    });
 }
 
 /// Render the Palettes tab (for systems with palette support)

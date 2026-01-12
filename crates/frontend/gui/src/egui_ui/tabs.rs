@@ -24,6 +24,7 @@ pub enum SystemTileData {
     SMS(SmsTileData),
     SNES(SnesTileData),
     Atari2600(Atari2600TileData),
+    Chip8(Chip8TileData),
 }
 
 /// NES tile viewer data
@@ -86,6 +87,43 @@ pub struct SnesTileData {
     pub palette: Vec<u32>,
     pub bg_mode: u8,
     pub screen_enabled: bool,
+}
+
+/// CHIP-8 inspector data
+#[derive(Clone)]
+pub struct Chip8TileData {
+    /// V registers (V0-VF)
+    pub v_registers: [u8; 16],
+    /// Index register
+    pub i: u16,
+    /// Program counter
+    pub pc: u16,
+    /// Stack pointer
+    pub sp: u8,
+    /// Stack contents
+    pub stack: [u16; 16],
+    /// Delay timer
+    pub delay_timer: u8,
+    /// Sound timer
+    pub sound_timer: u8,
+    /// Display plane 0 (primary display)
+    pub display_plane0: Vec<bool>,
+    /// Display plane 1 (for XO-CHIP)
+    pub display_plane1: Vec<bool>,
+    /// Display width
+    pub display_width: usize,
+    /// Display height
+    pub display_height: usize,
+    /// Current mode (Chip8, SuperChip, XoChip, etc.)
+    pub mode: String,
+    /// Selected drawing plane (bitmask for XO-CHIP)
+    pub selected_plane: u8,
+    /// High resolution mode enabled
+    pub high_res: bool,
+    /// Waiting for key press
+    pub waiting_for_key: bool,
+    /// Key states (16 keys)
+    pub keys: [bool; 16],
 }
 
 /// Atari 2600 inspector data
@@ -167,6 +205,21 @@ pub struct PcBdaData {
     pub ebda_segment: u16,
 }
 
+/// Mount point information for inspector
+#[derive(Clone, Debug)]
+pub struct MountInfo {
+    /// Mount point ID (e.g., "Cartridge", "Floppy0")
+    pub id: String,
+    /// User-friendly name
+    pub name: String,
+    /// File extensions accepted
+    pub extensions: Vec<String>,
+    /// Whether required
+    pub required: bool,
+    /// Currently mounted file path (if any)
+    pub mounted_file: Option<String>,
+}
+
 /// Actions that can be triggered from tabs
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TabAction {
@@ -190,6 +243,7 @@ pub struct TabManager {
     pub enhanced_debug_state: Option<EnhancedDebugState>,
     pub system_tile_data: Option<SystemTileData>,
     pub pc_bda_data: Option<PcBdaData>,
+    pub mount_info: Vec<MountInfo>,
     pub new_project_visible: bool,
     pub selected_system: String,
     pub pending_action: Option<TabAction>,
@@ -213,6 +267,7 @@ impl TabManager {
             enhanced_debug_state: None,
             system_tile_data: None,
             pc_bda_data: None,
+            mount_info: Vec::new(),
             new_project_visible: false,
             selected_system: "NES".to_string(),
             pending_action: None,
@@ -238,6 +293,10 @@ impl TabManager {
 
     pub fn update_pc_bda_data(&mut self, data: PcBdaData) {
         self.pc_bda_data = Some(data);
+    }
+
+    pub fn update_mount_info(&mut self, mounts: Vec<MountInfo>) {
+        self.mount_info = mounts;
     }
 
     pub fn show_help_tab(&mut self) {
@@ -482,148 +541,6 @@ impl TabManager {
         });
     }
 
-    pub fn render_log_tab(&self, ui: &mut Ui) {
-        use emu_core::logging::{LogCategory, LogConfig, LogLevel};
-
-        let log_config = LogConfig::global();
-
-        // Define levels array once for reuse
-        let levels = [
-            (LogLevel::Off, "Off"),
-            (LogLevel::Error, "Error"),
-            (LogLevel::Warn, "Warn"),
-            (LogLevel::Info, "Info"),
-            (LogLevel::Debug, "Debug"),
-            (LogLevel::Trace, "Trace"),
-        ];
-
-        let categories = [
-            (LogCategory::CPU, "CPU"),
-            (LogCategory::Bus, "Bus"),
-            (LogCategory::PPU, "PPU"),
-            (LogCategory::APU, "APU"),
-            (LogCategory::Interrupts, "Interrupts"),
-            (LogCategory::Stubs, "Stubs"),
-        ];
-
-        // Top section: Log level controls
-        ui.heading("Logging Configuration");
-        ui.separator();
-        ui.add_space(5.0);
-
-        ScrollArea::vertical()
-            .auto_shrink([false; 2])
-            .show(ui, |ui| {
-                // Global log level
-                ui.horizontal(|ui| {
-                    ui.label("Global Level:");
-                    ui.add_space(10.0);
-
-                    let global_level = log_config.get_global_level();
-
-                    for (level, name) in &levels {
-                        if ui.selectable_label(global_level == *level, *name).clicked() {
-                            log_config.set_global_level(*level);
-                        }
-                    }
-                });
-
-                ui.add_space(10.0);
-                ui.separator();
-                ui.add_space(10.0);
-
-                // Category-specific log levels
-                ui.heading("Component-Specific Levels");
-                ui.add_space(5.0);
-                ui.label("Override global level for specific components:");
-                ui.add_space(10.0);
-
-                egui::Grid::new("log_category_grid")
-                    .num_columns(7)
-                    .spacing([10.0, 8.0])
-                    .striped(true)
-                    .show(ui, |ui| {
-                        // Header row
-                        ui.label("");
-                        for (_, name) in &levels {
-                            ui.label(*name);
-                        }
-                        ui.end_row();
-
-                        // Category rows
-                        for (category, name) in &categories {
-                            ui.label(format!("{}:", name));
-                            let current_level = log_config.get_level(*category);
-
-                            for (level, _) in &levels {
-                                if ui.selectable_label(current_level == *level, "•").clicked() {
-                                    log_config.set_level(*category, *level);
-                                }
-                            }
-                            ui.end_row();
-                        }
-                    });
-
-                ui.add_space(10.0);
-                ui.separator();
-                ui.add_space(10.0);
-
-                // Rate limit configuration
-                ui.heading("Rate Limiting");
-                ui.add_space(5.0);
-                ui.label("Control the maximum number of logs per second per category:");
-                ui.add_space(10.0);
-
-                ui.horizontal(|ui| {
-                    ui.label("Max logs/second:");
-                    ui.add_space(10.0);
-
-                    let mut rate_limit = log_config.get_rate_limit() as i32;
-                    let slider = egui::Slider::new(&mut rate_limit, 1..=1000)
-                        .text("logs/sec")
-                        .logarithmic(true);
-
-                    if ui.add(slider).changed() {
-                        log_config.set_rate_limit(rate_limit as usize);
-                    }
-                });
-
-                ui.add_space(5.0);
-                ui.label(format!(
-                    "Current limit: {} logs per second per category",
-                    log_config.get_rate_limit()
-                ));
-                ui.label("When exceeded, logs are dropped and a warning is emitted.");
-
-                ui.add_space(10.0);
-                ui.separator();
-                ui.add_space(10.0);
-
-                // Info section
-                ui.heading("About Logging");
-                ui.add_space(5.0);
-                ui.label("Log messages are written to stderr by default.");
-                ui.label("Use --log-file <path> CLI argument to log to a file.");
-                ui.label("Category-specific levels override the global level.");
-                ui.label("Set a category to 'Off' to use the global level.");
-
-                ui.add_space(10.0);
-
-                // Application log messages
-                if !self.log_messages.is_empty() {
-                    ui.add_space(15.0);
-                    ui.separator();
-                    ui.add_space(10.0);
-                    ui.heading("Application Messages");
-                    ui.add_space(5.0);
-
-                    for msg in &self.log_messages {
-                        ui.label(msg);
-                    }
-                }
-            });
-    }
-
     pub fn render_memory_tab(&mut self, ui: &mut Ui) {
         // If we have enhanced debug state, show memory explorer
         if let Some(state) = self.enhanced_debug_state.clone() {
@@ -758,6 +675,179 @@ impl TabManager {
                 ui.label("Load a ROM to see memory contents");
             });
         }
+    }
+
+    pub fn render_mounts_tab(&self, ui: &mut Ui) {
+        ui.vertical(|ui| {
+            ui.heading("💿 Mount Points");
+            ui.separator();
+            ui.add_space(10.0);
+
+            if self.mount_info.is_empty() {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(40.0);
+                    ui.label(egui::RichText::new("💿").size(48.0));
+                    ui.add_space(10.0);
+                    ui.heading("No Mount Points");
+                    ui.add_space(10.0);
+                    ui.label("Load a ROM or create a system to see mount points");
+                });
+            } else {
+                ui.label("Currently available mount points for this system:");
+                ui.add_space(10.0);
+
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false; 2])
+                    .show(ui, |ui| {
+                        for mount in &self.mount_info {
+                            egui::Frame::new()
+                                .fill(ui.visuals().faint_bg_color)
+                                .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
+                                .corner_radius(4.0)
+                                .inner_margin(12.0)
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        // Icon based on mount status
+                                        let icon = if mount.mounted_file.is_some() {
+                                            "✅"
+                                        } else if mount.required {
+                                            "⚠️"
+                                        } else {
+                                            "⚪"
+                                        };
+                                        ui.label(egui::RichText::new(icon).size(20.0));
+
+                                        ui.vertical(|ui| {
+                                            // Mount point name and ID
+                                            ui.horizontal(|ui| {
+                                                ui.label(
+                                                    egui::RichText::new(&mount.name)
+                                                        .strong()
+                                                        .size(16.0),
+                                                );
+                                                if mount.required {
+                                                    ui.label(
+                                                        egui::RichText::new("(required)")
+                                                            .weak()
+                                                            .italics(),
+                                                    );
+                                                }
+                                            });
+
+                                            ui.add_space(5.0);
+
+                                            // Mount point ID
+                                            ui.horizontal(|ui| {
+                                                ui.label(
+                                                    egui::RichText::new("ID:").weak().size(12.0),
+                                                );
+                                                ui.label(
+                                                    egui::RichText::new(&mount.id)
+                                                        .monospace()
+                                                        .size(12.0),
+                                                );
+                                            });
+
+                                            // Accepted file types
+                                            if !mount.extensions.is_empty() {
+                                                ui.horizontal(|ui| {
+                                                    ui.label(
+                                                        egui::RichText::new("Accepts:")
+                                                            .weak()
+                                                            .size(12.0),
+                                                    );
+                                                    ui.label(
+                                                        egui::RichText::new(
+                                                            mount.extensions.join(", "),
+                                                        )
+                                                        .monospace()
+                                                        .size(12.0),
+                                                    );
+                                                });
+                                            }
+
+                                            ui.add_space(5.0);
+
+                                            // Current mount status
+                                            if let Some(ref file_path) = mount.mounted_file {
+                                                // Extract just the filename from the path
+                                                let filename = std::path::Path::new(file_path)
+                                                    .file_name()
+                                                    .and_then(|n| n.to_str())
+                                                    .unwrap_or(file_path);
+
+                                                ui.horizontal(|ui| {
+                                                    ui.label(
+                                                        egui::RichText::new("Mounted:")
+                                                            .color(egui::Color32::from_rgb(
+                                                                100, 200, 100,
+                                                            ))
+                                                            .strong(),
+                                                    );
+                                                    ui.label(
+                                                        egui::RichText::new(filename)
+                                                            .monospace()
+                                                            .color(egui::Color32::from_rgb(
+                                                                100, 200, 100,
+                                                            )),
+                                                    );
+                                                });
+
+                                                // Show full path on separate line if different from filename
+                                                if filename != file_path {
+                                                    ui.label(
+                                                        egui::RichText::new(file_path)
+                                                            .weak()
+                                                            .italics()
+                                                            .size(10.0),
+                                                    );
+                                                }
+                                            } else {
+                                                ui.horizontal(|ui| {
+                                                    ui.label(egui::RichText::new("Status:").color(
+                                                        egui::Color32::from_rgb(200, 200, 100),
+                                                    ));
+                                                    ui.label(
+                                                        egui::RichText::new("Empty")
+                                                            .weak()
+                                                            .italics(),
+                                                    );
+                                                });
+                                            }
+                                        });
+                                    });
+                                });
+
+                            ui.add_space(8.0);
+                        }
+
+                        ui.add_space(10.0);
+                        ui.separator();
+                        ui.add_space(10.0);
+
+                        // Summary
+                        let mounted_count = self
+                            .mount_info
+                            .iter()
+                            .filter(|m| m.mounted_file.is_some())
+                            .count();
+                        let required_count = self.mount_info.iter().filter(|m| m.required).count();
+
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("Total mount points:").strong());
+                            ui.label(self.mount_info.len().to_string());
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("Mounted:").strong());
+                            ui.label(mounted_count.to_string());
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("Required:").strong());
+                            ui.label(required_count.to_string());
+                        });
+                    });
+            }
+        });
     }
 
     fn render_new_project_tab(&mut self, ui: &mut Ui) {
@@ -1636,6 +1726,11 @@ impl TabManager {
 
                             ui.add_space(5.0);
                             ui.label("See Playfield, Sprites, Palette, and Collision tabs for detailed views");
+                        }
+                        SystemTileData::Chip8(_) => {
+                            ui.heading("📺 CHIP-8 Inspector");
+                            ui.separator();
+                            ui.label("CHIP-8 doesn't use tiles. See Display and Registers tabs for debugging info.");
                         }
                     }
                 } else {
@@ -3501,6 +3596,315 @@ impl TabManager {
                         ui.heading("Collision Detection");
                         ui.add_space(10.0);
                         ui.label("Load an Atari 2600 ROM to view collision data");
+                    });
+                }
+            });
+    }
+
+    pub fn render_chip8_display_tab(&self, ui: &mut egui::Ui) {
+        egui::ScrollArea::vertical()
+            .auto_shrink([false; 2])
+            .show(ui, |ui| {
+                if let Some(SystemTileData::Chip8(ref data)) = self.system_tile_data {
+                    ui.heading("📺 CHIP-8 Display");
+                    ui.separator();
+
+                    // Display information
+                    ui.label(egui::RichText::new("Display Information").strong());
+                    egui::Grid::new("chip8_display_info")
+                        .num_columns(2)
+                        .spacing([10.0, 5.0])
+                        .striped(true)
+                        .show(ui, |ui| {
+                            ui.label("Mode:");
+                            ui.label(&data.mode);
+                            ui.end_row();
+
+                            ui.label("Resolution:");
+                            ui.label(format!("{}x{}", data.display_width, data.display_height));
+                            ui.end_row();
+
+                            ui.label("High-Res:");
+                            ui.label(if data.high_res { "Yes" } else { "No" });
+                            ui.end_row();
+
+                            ui.label("Selected Plane:");
+                            ui.label(format!(
+                                "{} (0x{:X})",
+                                data.selected_plane, data.selected_plane
+                            ));
+                            ui.end_row();
+                        });
+
+                    ui.add_space(10.0);
+
+                    // Display planes visualization
+                    ui.label(egui::RichText::new("Display Planes").strong());
+
+                    // Calculate scale factor to fit display nicely
+                    let available_width = ui.available_width().min(640.0);
+                    let scale = (available_width / data.display_width as f32)
+                        .floor()
+                        .max(1.0);
+
+                    ui.horizontal(|ui| {
+                        // Plane 0 (always present)
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new("Plane 0").strong());
+                            let (response, painter) = ui.allocate_painter(
+                                egui::Vec2::new(
+                                    data.display_width as f32 * scale,
+                                    data.display_height as f32 * scale,
+                                ),
+                                egui::Sense::hover(),
+                            );
+
+                            let rect = response.rect;
+                            let pixel_size = scale;
+
+                            // Draw background
+                            painter.rect_filled(rect, 0.0, egui::Color32::BLACK);
+
+                            // Draw pixels
+                            for y in 0..data.display_height {
+                                for x in 0..data.display_width {
+                                    let idx = y * data.display_width + x;
+                                    if idx < data.display_plane0.len() && data.display_plane0[idx] {
+                                        let pixel_rect = egui::Rect::from_min_size(
+                                            egui::pos2(
+                                                rect.min.x + x as f32 * pixel_size,
+                                                rect.min.y + y as f32 * pixel_size,
+                                            ),
+                                            egui::vec2(pixel_size, pixel_size),
+                                        );
+                                        painter.rect_filled(
+                                            pixel_rect,
+                                            0.0,
+                                            egui::Color32::from_rgb(0, 255, 0), // Green
+                                        );
+                                    }
+                                }
+                            }
+                        });
+
+                        // Plane 1 (for XO-CHIP)
+                        if data.mode.contains("XO-CHIP") {
+                            ui.vertical(|ui| {
+                                ui.label(egui::RichText::new("Plane 1").strong());
+                                let (response, painter) = ui.allocate_painter(
+                                    egui::Vec2::new(
+                                        data.display_width as f32 * scale,
+                                        data.display_height as f32 * scale,
+                                    ),
+                                    egui::Sense::hover(),
+                                );
+
+                                let rect = response.rect;
+                                let pixel_size = scale;
+
+                                // Draw background
+                                painter.rect_filled(rect, 0.0, egui::Color32::BLACK);
+
+                                // Draw pixels
+                                for y in 0..data.display_height {
+                                    for x in 0..data.display_width {
+                                        let idx = y * data.display_width + x;
+                                        if idx < data.display_plane1.len()
+                                            && data.display_plane1[idx]
+                                        {
+                                            let pixel_rect = egui::Rect::from_min_size(
+                                                egui::pos2(
+                                                    rect.min.x + x as f32 * pixel_size,
+                                                    rect.min.y + y as f32 * pixel_size,
+                                                ),
+                                                egui::vec2(pixel_size, pixel_size),
+                                            );
+                                            painter.rect_filled(
+                                                pixel_rect,
+                                                0.0,
+                                                egui::Color32::from_rgb(255, 0, 0), // Red
+                                            );
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                    });
+
+                    ui.add_space(10.0);
+                    ui.label(egui::RichText::new("🟢 Green = Plane 0 | 🔴 Red = Plane 1").weak());
+                } else {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(40.0);
+                        ui.label(egui::RichText::new("📺").size(48.0));
+                        ui.add_space(10.0);
+                        ui.heading("CHIP-8 Display");
+                        ui.add_space(10.0);
+                        ui.label("Load a CHIP-8 program to view display data");
+                    });
+                }
+            });
+    }
+
+    pub fn render_chip8_registers_tab(&self, ui: &mut egui::Ui) {
+        egui::ScrollArea::vertical()
+            .auto_shrink([false; 2])
+            .show(ui, |ui| {
+                if let Some(SystemTileData::Chip8(ref data)) = self.system_tile_data {
+                    ui.heading("📝 CHIP-8 Registers");
+                    ui.separator();
+
+                    // Main registers
+                    ui.label(egui::RichText::new("Main Registers").strong());
+                    egui::Grid::new("chip8_main_regs")
+                        .num_columns(4)
+                        .spacing([10.0, 5.0])
+                        .striped(true)
+                        .show(ui, |ui| {
+                            ui.label("PC:");
+                            ui.label(egui::RichText::new(format!("${:04X}", data.pc)).monospace());
+                            ui.label("I:");
+                            ui.label(egui::RichText::new(format!("${:04X}", data.i)).monospace());
+                            ui.end_row();
+
+                            ui.label("SP:");
+                            ui.label(egui::RichText::new(format!("${:02X}", data.sp)).monospace());
+                            ui.label("Mode:");
+                            ui.label(&data.mode);
+                            ui.end_row();
+                        });
+
+                    ui.add_space(10.0);
+
+                    // Timers
+                    ui.label(egui::RichText::new("Timers").strong());
+                    egui::Grid::new("chip8_timers")
+                        .num_columns(4)
+                        .spacing([10.0, 5.0])
+                        .striped(true)
+                        .show(ui, |ui| {
+                            ui.label("Delay:");
+                            ui.label(
+                                egui::RichText::new(format!("{}", data.delay_timer)).monospace(),
+                            );
+                            ui.label("Sound:");
+                            ui.label(
+                                egui::RichText::new(format!("{}", data.sound_timer)).monospace(),
+                            );
+                            ui.end_row();
+                        });
+
+                    ui.add_space(10.0);
+
+                    // V Registers (V0-VF)
+                    ui.label(egui::RichText::new("V Registers (V0-VF)").strong());
+                    egui::Grid::new("chip8_v_regs")
+                        .num_columns(8)
+                        .spacing([10.0, 5.0])
+                        .striped(true)
+                        .show(ui, |ui| {
+                            for (i, &value) in data.v_registers.iter().enumerate() {
+                                ui.label(format!("V{:X}:", i));
+                                let color = if i == 0xF {
+                                    egui::Color32::from_rgb(255, 200, 100) // Highlight VF (flag register)
+                                } else {
+                                    egui::Color32::WHITE
+                                };
+                                ui.label(
+                                    egui::RichText::new(format!("${:02X}", value))
+                                        .monospace()
+                                        .color(color),
+                                );
+                                if (i + 1) % 4 == 0 {
+                                    ui.end_row();
+                                }
+                            }
+                        });
+
+                    ui.add_space(10.0);
+
+                    // Stack
+                    ui.label(egui::RichText::new("Stack").strong());
+                    ui.label(format!("Stack Pointer: {} / 16", data.sp));
+
+                    egui::Grid::new("chip8_stack")
+                        .num_columns(8)
+                        .spacing([10.0, 5.0])
+                        .striped(true)
+                        .show(ui, |ui| {
+                            for (i, &value) in data.stack.iter().enumerate() {
+                                ui.label(format!("[{}]:", i));
+                                let color = if i < data.sp as usize {
+                                    egui::Color32::WHITE
+                                } else {
+                                    egui::Color32::DARK_GRAY // Dim unused stack entries
+                                };
+                                ui.label(
+                                    egui::RichText::new(format!("${:04X}", value))
+                                        .monospace()
+                                        .color(color),
+                                );
+                                if (i + 1) % 4 == 0 {
+                                    ui.end_row();
+                                }
+                            }
+                        });
+
+                    ui.add_space(10.0);
+
+                    // Input state
+                    ui.label(egui::RichText::new("Input State").strong());
+                    if data.waiting_for_key {
+                        ui.label(
+                            egui::RichText::new("⏸ Waiting for key press...")
+                                .color(egui::Color32::YELLOW),
+                        );
+                    }
+
+                    ui.label("Hexadecimal Keypad (0x0-0xF):");
+                    egui::Grid::new("chip8_keys")
+                        .num_columns(4)
+                        .spacing([5.0, 5.0])
+                        .show(ui, |ui| {
+                            // CHIP-8 keypad layout:
+                            // 1 2 3 C
+                            // 4 5 6 D
+                            // 7 8 9 E
+                            // A 0 B F
+                            let keypad = [
+                                [0x1, 0x2, 0x3, 0xC],
+                                [0x4, 0x5, 0x6, 0xD],
+                                [0x7, 0x8, 0x9, 0xE],
+                                [0xA, 0x0, 0xB, 0xF],
+                            ];
+
+                            for row in &keypad {
+                                for &key in row {
+                                    let pressed = data.keys[key];
+                                    let text = format!("{:X}", key);
+                                    let color = if pressed {
+                                        egui::Color32::from_rgb(100, 255, 100) // Green when pressed
+                                    } else {
+                                        egui::Color32::from_rgb(60, 60, 60) // Gray when not pressed
+                                    };
+                                    ui.label(
+                                        egui::RichText::new(text)
+                                            .monospace()
+                                            .color(color)
+                                            .size(16.0),
+                                    );
+                                }
+                                ui.end_row();
+                            }
+                        });
+                } else {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(40.0);
+                        ui.label(egui::RichText::new("📝").size(48.0));
+                        ui.add_space(10.0);
+                        ui.heading("CHIP-8 Registers");
+                        ui.add_space(10.0);
+                        ui.label("Load a CHIP-8 program to view register data");
                     });
                 }
             });

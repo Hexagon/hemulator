@@ -92,11 +92,13 @@
 //! - ✅ CGB-specific registers (VBK, BCPS/BCPD, OCPS/OCPD, KEY1, SVBK)
 //! - ✅ Speed switching (KEY1 at 0xFF4D, CGB only)
 //! - ✅ WRAM banking (SVBK at 0xFF70, CGB only)
+//! - ✅ Serial transfer (0xFF01, 0xFF02, with loopback mode)
+//! - ✅ HDMA (0xFF51-0xFF55, CGB only) - General Purpose and HBlank DMA
+//! - ✅ Infrared port (RP at 0xFF56, CGB only, register access only)
 //!
 //! ## Not Implemented
-//! - ❌ Serial transfer (0xFF01, 0xFF02)
-//! - ❌ HDMA (0xFF51-0xFF55, CGB only)
-//! - ❌ Infrared port (RP at 0xFF56, CGB only)
+//! - ❌ External link cable hardware emulation
+//! - ❌ Actual infrared hardware communication
 
 use crate::apu::GbApu;
 use crate::mappers::Mapper;
@@ -140,6 +142,44 @@ pub struct GbBus {
     /// Bit 7 (read): Current speed (0=normal 4.19 MHz, 1=double 8.39 MHz)
     /// Bit 0 (write): Speed switch prepare flag
     key1: u8,
+    /// Serial transfer data (0xFF01)
+    sb: u8,
+    /// Serial control (0xFF02)
+    /// Bit 7: Transfer start (1=start, 0=no transfer in progress)
+    /// Bit 1: Clock speed (CGB only, 0=normal, 1=fast)
+    /// Bit 0: Clock source (0=external, 1=internal)
+    sc: u8,
+    /// Serial transfer bit counter (for internal clock mode)
+    serial_bit_counter: u8,
+    /// Serial transfer cycle counter
+    serial_cycle_counter: u32,
+    /// Infrared port register (0xFF56, CGB only)
+    /// Bits 6-7: LED control (0=off, 1=on for bits 6 and 7)
+    /// Bits 0-1: Signal receive (read-only, stubbed to 0)
+    /// Bits 2-5: Unused
+    rp: u8,
+    /// HDMA Source High (0xFF51, CGB only)
+    hdma1: u8,
+    /// HDMA Source Low (0xFF52, CGB only)
+    hdma2: u8,
+    /// HDMA Destination High (0xFF53, CGB only)
+    hdma3: u8,
+    /// HDMA Destination Low (0xFF54, CGB only)
+    hdma4: u8,
+    /// HDMA Length/Mode/Start (0xFF55, CGB only)
+    /// Bit 7: 0=General Purpose DMA, 1=HBlank DMA
+    /// Bits 0-6: Length (in 16-byte blocks - 1)
+    hdma5: u8,
+    /// HDMA active flag
+    hdma_active: bool,
+    /// HDMA remaining length (in 16-byte blocks)
+    hdma_remaining: u8,
+    /// HDMA source address (actual address, updated during transfer)
+    hdma_source: u16,
+    /// HDMA destination address (actual address, updated during transfer)
+    hdma_dest: u16,
+    /// GDMA pending flag (deferred execution to avoid nested read/write)
+    gdma_pending: bool,
 }
 
 impl GbBus {
@@ -159,6 +199,21 @@ impl GbBus {
             button_state: 0xFF,
             cgb_mode: false,
             key1: 0, // Start in normal speed mode
+            sb: 0,
+            sc: 0,
+            serial_bit_counter: 0,
+            serial_cycle_counter: 0,
+            rp: 0,
+            hdma1: 0,
+            hdma2: 0,
+            hdma3: 0,
+            hdma4: 0,
+            hdma5: 0xFF, // All bits set when inactive
+            hdma_active: false,
+            hdma_remaining: 0,
+            hdma_source: 0,
+            hdma_dest: 0,
+            gdma_pending: false,
         }
     }
 
@@ -176,6 +231,150 @@ impl GbBus {
     /// Bit 4: Joypad
     pub fn request_interrupt(&mut self, interrupt_bit: u8) {
         self.if_reg |= interrupt_bit;
+    }
+
+    /// Tick the mapper (e.g., for MBC3 RTC)
+    /// Should be called once per frame
+    pub fn tick_mapper(&mut self) {
+        if let Some(mapper) = &mut self.mapper {
+            mapper.tick();
+        }
+    }
+
+    /// Step the serial transfer
+    /// Returns true if a serial interrupt should be generated
+    /// Should be called with CPU cycles
+    pub fn step_serial(&mut self, cycles: u32) -> bool {
+        // Only process if transfer is active and using internal clock
+        if (self.sc & 0x80) == 0 || (self.sc & 0x01) == 0 {
+            return false;
+        }
+
+        self.serial_cycle_counter += cycles;
+
+        // Serial transfer takes 512 cycles per bit in normal speed
+        // (8192 Hz clock rate, which is CPU clock / 512)
+        // In CGB fast mode (bit 1 set), it takes 16 cycles per bit
+        let cycles_per_bit = if (self.sc & 0x02) != 0 { 16 } else { 512 };
+
+        if self.serial_cycle_counter >= cycles_per_bit {
+            self.serial_cycle_counter -= cycles_per_bit;
+
+            if self.serial_bit_counter > 0 {
+                // Shift out one bit from SB, shift in 0xFF (no device connected)
+                // In loopback mode, we just shift in what we shift out
+                let _out_bit = (self.sb >> 7) & 0x01;
+                self.sb = (self.sb << 1) | 0x01; // Shift in 1 (disconnected = all high)
+
+                self.serial_bit_counter -= 1;
+
+                // When all 8 bits are transferred, clear transfer flag and request interrupt
+                if self.serial_bit_counter == 0 {
+                    self.sc &= !0x80; // Clear transfer start bit
+                    return true; // Request serial interrupt
+                }
+            }
+        }
+
+        false
+    }
+
+    /// Write to HDMA5 register - triggers DMA transfer
+    fn write_hdma5(&mut self, val: u8) {
+        // If bit 7 is 0, this is a General Purpose DMA (immediate transfer)
+        // If bit 7 is 1, this is an HBlank DMA (transfer during HBlank)
+
+        let is_hblank_mode = (val & 0x80) != 0;
+        let length = ((val & 0x7F) + 1) as u16; // Length in 16-byte blocks
+
+        // If HDMA is active and we're writing 0 to bit 7, stop the transfer
+        if self.hdma_active && !is_hblank_mode {
+            self.hdma_active = false;
+            self.hdma5 = 0xFF;
+            return;
+        }
+
+        // Calculate source and destination addresses
+        // Source: HDMA1:HDMA2, but lower 4 bits of HDMA2 are ignored
+        let source = ((self.hdma1 as u16) << 8) | ((self.hdma2 as u16) & 0xF0);
+
+        // Destination: HDMA3:HDMA4 + 0x8000, lower 4 bits of HDMA4 are ignored
+        // Destination is always in VRAM (0x8000-0x9FFF)
+        let dest = 0x8000 | (((self.hdma3 as u16) << 8) | ((self.hdma4 as u16) & 0xF0)) & 0x1FFF;
+
+        self.hdma_source = source;
+        self.hdma_dest = dest;
+        self.hdma_remaining = length as u8;
+        self.hdma5 = val & 0x7F; // Store the length part
+
+        if is_hblank_mode {
+            // HBlank DMA - will be performed during HBlank periods
+            self.hdma_active = true;
+        } else {
+            // General Purpose DMA - defer execution to avoid nested read/write
+            self.gdma_pending = true;
+            self.hdma_active = false;
+        }
+    }
+
+    /// Perform General Purpose DMA (immediate transfer)
+    fn perform_gdma(&mut self) {
+        // Transfer all blocks immediately
+        let blocks = self.hdma_remaining;
+
+        for _ in 0..blocks {
+            // Transfer one 16-byte block
+            for i in 0..16 {
+                let byte = self.read(self.hdma_source + i);
+                self.ppu.write_vram(self.hdma_dest - 0x8000 + i, byte);
+            }
+
+            self.hdma_source += 16;
+            self.hdma_dest += 16;
+        }
+
+        self.hdma_remaining = 0;
+        self.hdma_active = false;
+    }
+
+    /// Execute pending GDMA if flagged
+    /// Should be called from the main loop to avoid nested read/write issues
+    pub fn execute_pending_gdma(&mut self) {
+        if self.gdma_pending {
+            self.gdma_pending = false;
+            self.perform_gdma();
+            self.hdma5 = 0xFF; // Transfer complete
+        }
+    }
+
+    /// Perform one block of HBlank DMA
+    /// Should be called during HBlank period
+    /// Returns true if transfer is complete
+    pub fn step_hdma(&mut self) -> bool {
+        if !self.hdma_active || self.hdma_remaining == 0 {
+            return false;
+        }
+
+        // Transfer one 16-byte block during HBlank
+        for i in 0..16 {
+            let byte = self.read(self.hdma_source + i);
+            self.ppu.write_vram(self.hdma_dest - 0x8000 + i, byte);
+        }
+
+        self.hdma_source += 16;
+        self.hdma_dest += 16;
+        self.hdma_remaining -= 1;
+
+        // Update HDMA5 register
+        if self.hdma_remaining == 0 {
+            // Transfer complete
+            self.hdma_active = false;
+            self.hdma5 = 0xFF;
+            true
+        } else {
+            self.hdma5 = self.hdma_remaining - 1;
+            false
+        }
     }
 
     /// Check if CGB mode is enabled
@@ -372,6 +571,9 @@ impl MemoryLr35902 for GbBus {
                     }
                     result
                 }
+                // Serial transfer registers
+                0xFF01 => self.sb,
+                0xFF02 => self.sc | 0x7C, // Bits 2-6 unused, always read as 1
                 // Timer registers
                 0xFF04..=0xFF07 => self.timer.read_register(addr),
                 0xFF0F => self.if_reg | 0xE0, // Bits 5-7 unused, always read as 1
@@ -393,11 +595,25 @@ impl MemoryLr35902 for GbBus {
                 0xFF4D => self.read_key1(), // KEY1 - Speed switch (CGB only)
                 // CGB registers
                 0xFF4F => self.ppu.get_vram_bank(), // VBK - VRAM bank
-                0xFF68 => self.ppu.read_bgpi(),     // BCPS/BGPI - BG palette index
-                0xFF69 => self.ppu.read_bgpd(),     // BCPD/BGPD - BG palette data
-                0xFF6A => self.ppu.read_obpi(),     // OCPS/OBPI - OBJ palette index
-                0xFF6B => self.ppu.read_obpd(),     // OCPD/OBPD - OBJ palette data
-                0xFF70 => self.read_svbk(),         // SVBK - WRAM bank (CGB only)
+                // HDMA registers (CGB only)
+                0xFF51 => self.hdma1,
+                0xFF52 => self.hdma2,
+                0xFF53 => self.hdma3,
+                0xFF54 => self.hdma4,
+                0xFF55 => {
+                    // Reading HDMA5 returns remaining length or 0xFF if inactive
+                    if self.hdma_active {
+                        (self.hdma_remaining.saturating_sub(1)) & 0x7F // Bit 7 is 0 during HBlank DMA, value is (remaining - 1)
+                    } else {
+                        0xFF
+                    }
+                }
+                0xFF56 => self.rp,              // RP - Infrared port (CGB only)
+                0xFF68 => self.ppu.read_bgpi(), // BCPS/BGPI - BG palette index
+                0xFF69 => self.ppu.read_bgpd(), // BCPD/BGPD - BG palette data
+                0xFF6A => self.ppu.read_obpi(), // OCPS/OBPI - OBJ palette index
+                0xFF6B => self.ppu.read_obpd(), // OCPD/OBPD - OBJ palette data
+                0xFF70 => self.read_svbk(),     // SVBK - WRAM bank (CGB only)
                 _ => 0xFF,
             },
             // High RAM
@@ -455,6 +671,18 @@ impl MemoryLr35902 for GbBus {
             0xFF00..=0xFF7F => {
                 match addr {
                     0xFF00 => self.joypad = val & 0x30, // Only bits 4-5 are writable
+                    // Serial transfer registers
+                    0xFF01 => self.sb = val,
+                    0xFF02 => {
+                        self.sc = val & 0x83; // Only bits 0, 1, and 7 are writable
+
+                        // If transfer start bit is set and using internal clock
+                        if (val & 0x80) != 0 && (val & 0x01) != 0 {
+                            // Start serial transfer
+                            self.serial_bit_counter = 8;
+                            self.serial_cycle_counter = 0;
+                        }
+                    }
                     // Timer registers
                     0xFF04..=0xFF07 => self.timer.write_register(addr, val),
                     0xFF0F => self.if_reg = val & 0x1F, // Only bits 0-4 are writable
@@ -485,11 +713,18 @@ impl MemoryLr35902 for GbBus {
                     0xFF4D => self.write_key1(val), // KEY1 - Speed switch (CGB only)
                     // CGB registers
                     0xFF4F => self.ppu.set_vram_bank(val), // VBK - VRAM bank
-                    0xFF68 => self.ppu.write_bgpi(val),    // BCPS/BGPI
-                    0xFF69 => self.ppu.write_bgpd(val),    // BCPD/BGPD
-                    0xFF6A => self.ppu.write_obpi(val),    // OCPS/OBPI
-                    0xFF6B => self.ppu.write_obpd(val),    // OCPD/OBPD
-                    0xFF70 => self.write_svbk(val),        // SVBK - WRAM bank (CGB only)
+                    // HDMA registers (CGB only)
+                    0xFF51 => self.hdma1 = val,
+                    0xFF52 => self.hdma2 = val & 0xF0, // Lower 4 bits are ignored
+                    0xFF53 => self.hdma3 = val & 0x1F, // Only bits 0-4 are used (VRAM range 0x8000-0x9FFF)
+                    0xFF54 => self.hdma4 = val & 0xF0, // Lower 4 bits are ignored
+                    0xFF55 => self.write_hdma5(val),   // HDMA Length/Mode/Start
+                    0xFF56 => self.rp = val & 0xC1, // RP - Infrared port (CGB only, only bits 0, 6, 7)
+                    0xFF68 => self.ppu.write_bgpi(val), // BCPS/BGPI
+                    0xFF69 => self.ppu.write_bgpd(val), // BCPD/BGPD
+                    0xFF6A => self.ppu.write_obpi(val), // OCPS/OBPI
+                    0xFF6B => self.ppu.write_obpd(val), // OCPD/OBPD
+                    0xFF70 => self.write_svbk(val), // SVBK - WRAM bank (CGB only)
                     0xFF50 => self.boot_rom_enabled = false, // Disable boot ROM
                     _ => {}
                 }
