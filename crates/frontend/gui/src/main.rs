@@ -3274,6 +3274,23 @@ fn main() {
                     // Other systems don't have tile viewers yet
                 }
             }
+
+            // Update mount point information for Mounts tab
+            let mount_points = sys.mount_points();
+            let mount_info: Vec<egui_ui::MountInfo> = mount_points
+                .into_iter()
+                .map(|mp| {
+                    let mounted_file = runtime_state.current_mounts.get(&mp.id).cloned();
+                    egui_ui::MountInfo {
+                        id: mp.id,
+                        name: mp.name,
+                        extensions: mp.extensions,
+                        required: mp.required,
+                        mounted_file,
+                    }
+                })
+                .collect();
+            egui_app.tab_manager.update_mount_info(mount_info);
         }
 
         // Render egui UI
