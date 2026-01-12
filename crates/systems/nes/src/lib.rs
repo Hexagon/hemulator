@@ -344,25 +344,7 @@ impl NesSystem {
         self.instruction_tracer.is_enabled()
     }
 
-    /// Add an execution breakpoint
-    pub fn add_breakpoint(&mut self, address: u32) {
-        self.breakpoint_manager.add_execute(address);
-    }
-
-    /// Remove an execution breakpoint
-    pub fn remove_breakpoint(&mut self, address: u32) {
-        self.breakpoint_manager.remove_execute(address);
-    }
-
-    /// Clear all breakpoints
-    pub fn clear_breakpoints(&mut self) {
-        self.breakpoint_manager.clear();
-    }
-
-    /// Get all execution breakpoints
-    pub fn get_breakpoints(&self) -> Vec<u32> {
-        self.breakpoint_manager.get_execute_breakpoints()
-    }
+    emu_core::impl_breakpoint_methods!();
 
     /// Enable or disable breakpoints
     pub fn set_breakpoints_enabled(&mut self, enabled: bool) {

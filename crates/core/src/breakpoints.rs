@@ -164,6 +164,48 @@ impl Default for BreakpointManager {
     }
 }
 
+/// Helper macro to implement standard breakpoint management methods.
+/// This eliminates boilerplate for systems that have a `breakpoint_manager` field.
+///
+/// Provides:
+/// - `add_breakpoint(address: u32)` - Add an execution breakpoint
+/// - `remove_breakpoint(address: u32)` - Remove an execution breakpoint
+/// - `clear_breakpoints()` - Clear all breakpoints
+/// - `get_breakpoints() -> Vec<u32>` - Get all execution breakpoint addresses
+///
+/// # Example
+/// ```ignore
+/// impl MySystem {
+///     impl_breakpoint_methods!();
+///     
+///     // ... other methods ...
+/// }
+/// ```
+#[macro_export]
+macro_rules! impl_breakpoint_methods {
+    () => {
+        /// Add an execution breakpoint
+        pub fn add_breakpoint(&mut self, address: u32) {
+            self.breakpoint_manager.add_execute(address);
+        }
+
+        /// Remove an execution breakpoint
+        pub fn remove_breakpoint(&mut self, address: u32) {
+            self.breakpoint_manager.remove_execute(address);
+        }
+
+        /// Clear all breakpoints
+        pub fn clear_breakpoints(&mut self) {
+            self.breakpoint_manager.clear();
+        }
+
+        /// Get all execution breakpoints
+        pub fn get_breakpoints(&self) -> Vec<u32> {
+            self.breakpoint_manager.get_execute_breakpoints()
+        }
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
