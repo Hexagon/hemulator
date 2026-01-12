@@ -5453,11 +5453,26 @@ fn main() {
             // Render only the last frame to the display (always update client screen - requirement 3.2)
             if let Some(mut frame) = last_frame_opt {
                 // Apply display filter to the frame
-                settings.display_filter.apply(
-                    &mut frame.pixels,
-                    frame.width as usize,
-                    frame.height as usize,
-                );
+                // For phosphor persistence filter, use previous frame for temporal blending
+                if settings.display_filter.requires_frame_history() {
+                    // Extract previous frame pixels if available
+                    let prev_pixels = latest_frame_buffer
+                        .as_ref()
+                        .map(|(pixels, _, _)| pixels.as_slice());
+                    settings.display_filter.apply_with_history(
+                        &mut frame.pixels,
+                        prev_pixels,
+                        frame.width as usize,
+                        frame.height as usize,
+                    );
+                } else {
+                    // For non-temporal filters, use regular apply
+                    settings.display_filter.apply(
+                        &mut frame.pixels,
+                        frame.width as usize,
+                        frame.height as usize,
+                    );
+                }
 
                 // Store frame buffer for screenshots (after filter is applied)
                 latest_frame_buffer = Some((

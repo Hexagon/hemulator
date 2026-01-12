@@ -415,6 +415,14 @@ impl Ppu {
         self.chr.get(addr).copied().unwrap_or(0)
     }
 
+    /// Fast CHR fetch for rendering hot path - skips callbacks when suppress_a12 is true.
+    /// This optimization eliminates RefCell borrow overhead in the rendering loop.
+    /// Callbacks are invoked separately during scanline rendering for mapper compatibility.
+    #[inline(always)]
+    fn chr_fetch_fast(&self, addr: usize) -> u8 {
+        self.chr.get(addr).copied().unwrap_or(0)
+    }
+
     /// Read a PPU register (very partial implementation).
     pub fn read_register(&self, reg: u16) -> u8 {
         match reg & 0x7 {
@@ -927,36 +935,28 @@ impl Ppu {
         let mut bg_priority = [false; 256];
 
         // Background pixels for this scanline.
+        // Optimization: Process background in 8-pixel tile chunks instead of per-pixel
+        // to reduce divisions/modulos and improve cache locality.
         if bg_enabled {
-            for screen_x in 0..width {
-                // Clip leftmost 8 pixels if PPUMASK bit 1 is clear
-                let should_render_bg = show_bg_left || screen_x >= 8;
+            // Calculate the starting tile position based on scroll
+            let mut current_tile_x = coarse_x;
+            let mut current_nt_x = nt_x;
+            let pixel_offset_in_first_tile = fine_x_val as usize;
 
-                // Calculate which pixel within the scrolling world to render.
-                // The fine_x offset determines which pixel we start at within the first tile.
-                let pixel_x = screen_x + fine_x_val as u32;
+            let mut screen_x = 0u32;
 
-                // Determine which tile we're in (relative to current nametable)
-                let tile_x = (coarse_x as u32 + (pixel_x / 8)) as u8;
-                let fine_x_in_tile = (pixel_x % 8) as usize;
-
-                // Handle horizontal wrapping: when tile_x >= 32, flip nametable X and wrap
-                let (tile_x_wrapped, nt_x_adjusted) = if tile_x >= 32 {
-                    (tile_x - 32, nt_x ^ 1)
-                } else {
-                    (tile_x, nt_x)
-                };
-
-                // Nametable selection from v register bits
-                let nt = nt_x_adjusted | (nt_y_adjusted << 1);
-
-                let tx = tile_x_wrapped as usize;
+            while screen_x < width {
+                // Calculate tile coordinates
+                let nt = current_nt_x | (nt_y_adjusted << 1);
+                let tx = current_tile_x as usize;
                 let ty = tile_y_wrapped as usize;
 
+                // Fetch tile data once for the entire tile
                 let nt_addr = 0x2000u16 + (nt as u16) * 0x0400;
                 let tile_addr = nt_addr + (ty as u16) * 32 + (tx as u16);
                 let tile_index = self.vram[self.map_nametable_addr(tile_addr)];
 
+                // Fetch attribute once for the tile
                 let attr_x = tx / 4;
                 let attr_y = ty / 4;
                 let attr_addr = nt_addr + 0x03C0 + (attr_y as u16) * 8 + (attr_x as u16);
@@ -965,35 +965,68 @@ impl Ppu {
                 let shift = (quadrant * 2) as u8;
                 let palette_idx = (attr_byte >> shift) & 0x03;
 
-                let tile_addr = bg_pattern_base + (tile_index as usize) * 16;
-                let lo = self.chr_fetch(tile_addr + fine_y_in_tile);
-                let hi = self.chr_fetch(tile_addr + fine_y_in_tile + 8);
-                let bit = 7 - fine_x_in_tile;
-                let lo_bit = (lo >> bit) & 1;
-                let hi_bit = (hi >> bit) & 1;
-                let color_in_tile = (hi_bit << 1) | lo_bit;
+                // Fetch CHR pattern data once for the tile (optimized - no callbacks during fetch)
+                let tile_chr_addr = bg_pattern_base + (tile_index as usize) * 16;
+                let lo = self.chr_fetch_fast(tile_chr_addr + fine_y_in_tile);
+                let hi = self.chr_fetch_fast(tile_chr_addr + fine_y_in_tile + 8);
 
-                let idx = (y * width + screen_x) as usize;
-                let out = if !should_render_bg {
-                    // Leftmost 8 pixels are clipped - use black
-                    bg_priority[screen_x as usize] = false;
-                    0x00000000 // Black
-                } else if color_in_tile == 0 {
-                    // Tile color is 0 (backdrop)
-                    bg_priority[screen_x as usize] = false;
-                    universal_bg
+                // Invoke CHR read callback for MMC2/MMC4 latch switching compatibility
+                // This is done once per tile instead of per pixel for performance
+                if let Some(cb) = &mut *self.chr_read_callback.borrow_mut() {
+                    cb((tile_chr_addr + fine_y_in_tile) as u16);
+                }
+
+                // Render 8 pixels from this tile (or remaining pixels if less than 8)
+                let start_pixel = if screen_x == 0 {
+                    pixel_offset_in_first_tile
                 } else {
-                    bg_priority[screen_x as usize] = true;
-                    let pal_base = (palette_idx as usize) * 4;
-                    let mut pal_entry =
-                        self.palette[palette_mirror_index(pal_base + (color_in_tile as usize))];
-                    if (self.mask & 0x01) != 0 {
-                        pal_entry &= 0x30;
-                    }
-                    nes_palette_rgb(pal_entry)
+                    0
                 };
 
-                frame.pixels[idx] = out;
+                for pixel_in_tile in start_pixel..8 {
+                    if screen_x >= width {
+                        break;
+                    }
+
+                    // Clip leftmost 8 pixels if PPUMASK bit 1 is clear
+                    let should_render_bg = show_bg_left || screen_x >= 8;
+
+                    // Extract pixel color from tile pattern
+                    let bit = 7 - pixel_in_tile;
+                    let lo_bit = (lo >> bit) & 1;
+                    let hi_bit = (hi >> bit) & 1;
+                    let color_in_tile = (hi_bit << 1) | lo_bit;
+
+                    let idx = (y * width + screen_x) as usize;
+                    let out = if !should_render_bg {
+                        // Leftmost 8 pixels are clipped - use black
+                        bg_priority[screen_x as usize] = false;
+                        0x00000000 // Black
+                    } else if color_in_tile == 0 {
+                        // Tile color is 0 (backdrop)
+                        bg_priority[screen_x as usize] = false;
+                        universal_bg
+                    } else {
+                        bg_priority[screen_x as usize] = true;
+                        let pal_base = (palette_idx as usize) * 4;
+                        let mut pal_entry =
+                            self.palette[palette_mirror_index(pal_base + (color_in_tile as usize))];
+                        if (self.mask & 0x01) != 0 {
+                            pal_entry &= 0x30;
+                        }
+                        nes_palette_rgb(pal_entry)
+                    };
+
+                    frame.pixels[idx] = out;
+                    screen_x += 1;
+                }
+
+                // Move to next tile
+                current_tile_x = current_tile_x.wrapping_add(1);
+                if current_tile_x >= 32 {
+                    current_tile_x = 0;
+                    current_nt_x ^= 1; // Flip nametable X
+                }
             }
         } else {
             // Background disabled: fill this scanline with backdrop.
@@ -1073,8 +1106,13 @@ impl Ppu {
                 };
 
                 let addr = pattern_base + (tile_index as usize) * 16;
-                let lo = self.chr_fetch(addr + fine_y);
-                let hi = self.chr_fetch(addr + fine_y + 8);
+                let lo = self.chr_fetch_fast(addr + fine_y);
+                let hi = self.chr_fetch_fast(addr + fine_y + 8);
+
+                // Invoke CHR read callback for MMC2/MMC4 latch switching compatibility
+                if let Some(cb) = &mut *self.chr_read_callback.borrow_mut() {
+                    cb((addr + fine_y) as u16);
+                }
 
                 for col in 0..8 {
                     let sx_bit = if flip_h { col } else { 7 - col };
