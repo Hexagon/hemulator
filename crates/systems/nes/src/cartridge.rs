@@ -228,6 +228,30 @@ impl Cartridge {
         f.read_to_end(&mut data)?;
         Self::from_bytes(&data)
     }
+
+    /// Create a test cartridge with minimal fields (for unit tests only)
+    #[cfg(test)]
+    pub fn new_test(
+        prg_rom: Vec<u8>,
+        chr_rom: Vec<u8>,
+        mapper: u8,
+        mirroring: Mirroring,
+        timing: TimingMode,
+    ) -> Self {
+        Self {
+            prg_rom,
+            chr_rom,
+            mapper,
+            mirroring,
+            timing,
+            crc32: 0,
+            header_mapper: mapper,
+            header_mirroring: mirroring,
+            db_mapper_override: false,
+            db_mirroring_override: false,
+            board_name: None,
+        }
+    }
 }
 
 #[cfg(test)]

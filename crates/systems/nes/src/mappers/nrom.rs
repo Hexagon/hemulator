@@ -42,13 +42,7 @@ mod tests {
     fn nrom_16kb_mirroring() {
         use crate::cartridge::Mirroring;
 
-        let cart = Cartridge {
-            prg_rom: vec![0x42; 0x4000], // 16KB PRG
-            chr_rom: vec![],
-            mapper: 0,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Horizontal,
-        };
+        let cart = Cartridge::new_test(vec![0x42; 0x4000], vec![], 0, Mirroring::Horizontal, TimingMode::Ntsc);
         let nrom = Nrom::new(cart);
 
         // 16KB ROM should mirror at 0x8000 and 0xC000
@@ -65,13 +59,7 @@ mod tests {
         prg[0] = 0x11;
         prg[0x4000] = 0x22;
 
-        let cart = Cartridge {
-            prg_rom: prg,
-            chr_rom: vec![],
-            mapper: 0,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Horizontal,
-        };
+        let cart = Cartridge::new_test(prg, vec![], 0, Mirroring::Horizontal, TimingMode::Ntsc);
         let nrom = Nrom::new(cart);
 
         // 32KB ROM should not mirror
@@ -83,13 +71,7 @@ mod tests {
     fn nrom_empty_rom() {
         use crate::cartridge::Mirroring;
 
-        let cart = Cartridge {
-            prg_rom: vec![], // Empty ROM
-            chr_rom: vec![],
-            mapper: 0,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Horizontal,
-        };
+        let cart = Cartridge::new_test(vec![], vec![], 0, Mirroring::Horizontal, TimingMode::Ntsc);
         let nrom = Nrom::new(cart);
 
         // Empty ROM should return 0
@@ -105,13 +87,7 @@ mod tests {
         prg[0] = 0xAA;
         prg[0x3FFF] = 0xBB;
 
-        let cart = Cartridge {
-            prg_rom: prg,
-            chr_rom: vec![],
-            mapper: 0,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Horizontal,
-        };
+        let cart = Cartridge::new_test(prg, vec![], 0, Mirroring::Horizontal, TimingMode::Ntsc);
         let nrom = Nrom::new(cart);
 
         // Test address wrapping at boundaries
@@ -130,13 +106,7 @@ mod tests {
         prg[0] = 0x11;
         prg[0x4000] = 0x22;
 
-        let cart = Cartridge {
-            prg_rom: prg,
-            chr_rom: vec![],
-            mapper: 0,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Horizontal,
-        };
+        let cart = Cartridge::new_test(prg, vec![], 0, Mirroring::Horizontal, TimingMode::Ntsc);
         let nrom = Nrom::new(cart);
 
         // Should wrap at 24KB boundary

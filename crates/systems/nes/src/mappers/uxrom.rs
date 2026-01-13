@@ -59,13 +59,7 @@ mod tests {
         prg[0] = 0x11; // Bank 0 start
         prg[0x4000] = 0x22; // Bank 1 start
 
-        let cart = Cartridge {
-            prg_rom: prg,
-            chr_rom: vec![],
-            mapper: 2,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Vertical,
-        };
+        let cart = Cartridge::new_test(prg, vec![], 2, Mirroring::Vertical, TimingMode::Ntsc);
 
         let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut uxrom = Uxrom::new(cart, &mut ppu);
@@ -87,13 +81,7 @@ mod tests {
         prg[0x4000] = 0x22;
         prg[0x8000] = 0x33;
 
-        let cart = Cartridge {
-            prg_rom: prg,
-            chr_rom: vec![],
-            mapper: 2,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Vertical,
-        };
+        let cart = Cartridge::new_test(prg, vec![], 2, Mirroring::Vertical, TimingMode::Ntsc);
 
         let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let uxrom = Uxrom::new(cart, &mut ppu);
@@ -108,13 +96,7 @@ mod tests {
         prg[0] = 0x11;
         prg[0x4000] = 0x22;
 
-        let cart = Cartridge {
-            prg_rom: prg,
-            chr_rom: vec![],
-            mapper: 2,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Vertical,
-        };
+        let cart = Cartridge::new_test(prg, vec![], 2, Mirroring::Vertical, TimingMode::Ntsc);
 
         let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut uxrom = Uxrom::new(cart, &mut ppu);
@@ -134,13 +116,7 @@ mod tests {
         prg[0] = 0x11;
         prg[0x4000] = 0x22;
 
-        let cart = Cartridge {
-            prg_rom: prg,
-            chr_rom: vec![],
-            mapper: 2,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Vertical,
-        };
+        let cart = Cartridge::new_test(prg, vec![], 2, Mirroring::Vertical, TimingMode::Ntsc);
 
         let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut uxrom = Uxrom::new(cart, &mut ppu);
@@ -159,13 +135,7 @@ mod tests {
         let mut prg = vec![0; 0x4000]; // Only 1 bank of 16KB
         prg[0] = 0xAA;
 
-        let cart = Cartridge {
-            prg_rom: prg,
-            chr_rom: vec![],
-            mapper: 2,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Vertical,
-        };
+        let cart = Cartridge::new_test(prg, vec![], 2, Mirroring::Vertical, TimingMode::Ntsc);
 
         let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let uxrom = Uxrom::new(cart, &mut ppu);
@@ -185,13 +155,7 @@ mod tests {
         prg[0] = 0x11;
         prg[0x4000] = 0x22;
 
-        let cart = Cartridge {
-            prg_rom: prg,
-            chr_rom: vec![],
-            mapper: 2,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Vertical,
-        };
+        let cart = Cartridge::new_test(prg, vec![], 2, Mirroring::Vertical, TimingMode::Ntsc);
 
         let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut uxrom = Uxrom::new(cart, &mut ppu);

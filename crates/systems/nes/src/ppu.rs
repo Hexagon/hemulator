@@ -1278,23 +1278,19 @@ impl Ppu {
         let pre_render_scanline = self.pre_render_scanline();
 
         // Handle cycle-accurate events at specific scanline/dot positions
-        match (scanline, dot) {
-            // Scanline 241, dot 1: VBlank starts (same for NTSC and PAL)
-            (241, 1) => {
-                // Set VBlank flag
-                let was_vblank = self.vblank.replace(true);
+        // Scanline 241, dot 1: VBlank starts (same for NTSC and PAL)
+        if (scanline, dot) == (241, 1) {
+            // Set VBlank flag
+            let was_vblank = self.vblank.replace(true);
 
-                // If VBlank just started and NMI is enabled, trigger NMI
-                if !was_vblank && self.nmi_enabled() {
-                    log(LogCategory::PPU, LogLevel::Trace, || {
-                        "PPU: VBlank started at scanline 241, dot 1, triggering NMI".to_string()
-                    });
-                    self.nmi_pending.set(true);
-                    nmi_triggered = true;
-                }
+            // If VBlank just started and NMI is enabled, trigger NMI
+            if !was_vblank && self.nmi_enabled() {
+                log(LogCategory::PPU, LogLevel::Trace, || {
+                    "PPU: VBlank started at scanline 241, dot 1, triggering NMI".to_string()
+                });
+                self.nmi_pending.set(true);
+                nmi_triggered = true;
             }
-
-            _ => {}
         }
 
         // Pre-render scanline, dot 1: Clear VBlank and sprite flags

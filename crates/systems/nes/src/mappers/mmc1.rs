@@ -185,13 +185,7 @@ mod tests {
 
     #[test]
     fn mmc1_serial_write() {
-        let cart = Cartridge {
-            prg_rom: vec![0; 0x8000], // 2 banks
-            chr_rom: vec![0; 0x2000], // 2 banks
-            mapper: 1,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Horizontal,
-        };
+        let cart = Cartridge::new_test(vec![0; 0x8000], vec![0; 0x2000], 1, Mirroring::Horizontal, TimingMode::Ntsc);
 
         let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc1 = Mmc1::new(cart, &mut ppu);
@@ -210,13 +204,7 @@ mod tests {
 
     #[test]
     fn mmc1_reset_on_bit7() {
-        let cart = Cartridge {
-            prg_rom: vec![0; 0x4000],
-            chr_rom: vec![],
-            mapper: 1,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Horizontal,
-        };
+        let cart = Cartridge::new_test(vec![0; 0x4000], vec![], 1, Mirroring::Horizontal, TimingMode::Ntsc);
 
         let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc1 = Mmc1::new(cart, &mut ppu);
@@ -241,13 +229,7 @@ mod tests {
         prg[0x8000] = 0x33; // Bank 2
         prg[0xC000] = 0x44; // Bank 3
 
-        let cart = Cartridge {
-            prg_rom: prg,
-            chr_rom: vec![],
-            mapper: 1,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Horizontal,
-        };
+        let cart = Cartridge::new_test(prg, vec![], 1, Mirroring::Horizontal, TimingMode::Ntsc);
 
         let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mmc1 = Mmc1::new(cart, &mut ppu);
@@ -260,13 +242,7 @@ mod tests {
 
     #[test]
     fn mmc1_partial_write_sequence() {
-        let cart = Cartridge {
-            prg_rom: vec![0; 0x8000],
-            chr_rom: vec![],
-            mapper: 1,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Horizontal,
-        };
+        let cart = Cartridge::new_test(vec![0; 0x8000], vec![], 1, Mirroring::Horizontal, TimingMode::Ntsc);
 
         let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc1 = Mmc1::new(cart, &mut ppu);
@@ -291,13 +267,7 @@ mod tests {
             prg[i * 0x4000] = (0x10 + i) as u8;
         }
 
-        let cart = Cartridge {
-            prg_rom: prg,
-            chr_rom: vec![],
-            mapper: 1,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Horizontal,
-        };
+        let cart = Cartridge::new_test(prg, vec![], 1, Mirroring::Horizontal, TimingMode::Ntsc);
 
         let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc1 = Mmc1::new(cart, &mut ppu);
@@ -326,13 +296,7 @@ mod tests {
             prg[i * 0x4000] = (0x10 + i) as u8;
         }
 
-        let cart = Cartridge {
-            prg_rom: prg,
-            chr_rom: vec![],
-            mapper: 1,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Horizontal,
-        };
+        let cart = Cartridge::new_test(prg, vec![], 1, Mirroring::Horizontal, TimingMode::Ntsc);
 
         let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc1 = Mmc1::new(cart, &mut ppu);
@@ -365,13 +329,7 @@ mod tests {
             chr[i * 0x1000] = (0x20 + i) as u8;
         }
 
-        let cart = Cartridge {
-            prg_rom: vec![0; 0x8000],
-            chr_rom: chr,
-            mapper: 1,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Horizontal,
-        };
+        let cart = Cartridge::new_test(vec![0; 0x8000], chr, 1, Mirroring::Horizontal, TimingMode::Ntsc);
 
         let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc1 = Mmc1::new(cart, &mut ppu);
@@ -405,13 +363,7 @@ mod tests {
             chr[i * 0x1000] = (0x30 + i) as u8;
         }
 
-        let cart = Cartridge {
-            prg_rom: vec![0; 0x8000],
-            chr_rom: chr,
-            mapper: 1,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Horizontal,
-        };
+        let cart = Cartridge::new_test(vec![0; 0x8000], chr, 1, Mirroring::Horizontal, TimingMode::Ntsc);
 
         let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc1 = Mmc1::new(cart, &mut ppu);
@@ -429,13 +381,7 @@ mod tests {
 
     #[test]
     fn mmc1_all_mirroring_modes() {
-        let cart = Cartridge {
-            prg_rom: vec![0; 0x8000],
-            chr_rom: vec![],
-            mapper: 1,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Horizontal,
-        };
+        let cart = Cartridge::new_test(vec![0; 0x8000], vec![], 1, Mirroring::Horizontal, TimingMode::Ntsc);
 
         let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc1 = Mmc1::new(cart, &mut ppu);
@@ -471,13 +417,7 @@ mod tests {
         prg[0] = 0x11;
         prg[0x4000] = 0x22;
 
-        let cart = Cartridge {
-            prg_rom: prg,
-            chr_rom: vec![],
-            mapper: 1,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Horizontal,
-        };
+        let cart = Cartridge::new_test(prg, vec![], 1, Mirroring::Horizontal, TimingMode::Ntsc);
 
         let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc1 = Mmc1::new(cart, &mut ppu);
@@ -496,13 +436,7 @@ mod tests {
         chr[0] = 0xAA;
         chr[0x1000] = 0xBB;
 
-        let cart = Cartridge {
-            prg_rom: vec![0; 0x8000],
-            chr_rom: chr,
-            mapper: 1,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Horizontal,
-        };
+        let cart = Cartridge::new_test(vec![0; 0x8000], chr, 1, Mirroring::Horizontal, TimingMode::Ntsc);
 
         let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc1 = Mmc1::new(cart, &mut ppu);
