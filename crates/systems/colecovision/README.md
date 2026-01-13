@@ -93,6 +93,24 @@ The ColecoVision requires a BIOS ROM to boot, which must be provided separately 
 - Controllers limited to standard joystick (no Super Action Controllers, spinners, etc.)
 - Audio output currently stubbed (PSG implemented but not connected to audio pipeline)
 
+## Recent Improvements
+
+### VDP Edge Cases (January 2026)
+- **Sprite Collision Detection**: Now uses dedicated sprite buffer instead of color comparison, correctly detecting sprite-to-sprite overlap
+- **Sprite Overflow Handling**: Flags now properly persist across scanlines within a frame, matching TMS9918A hardware behavior
+- **Sprite Y Position**: Correctly implements Y offset (-1) for proper sprite positioning
+- **Array Bounds Checking**: Added validation for sprite pattern and attribute table accesses to prevent buffer overruns
+- **PSG Reset**: PSG state now properly resets on system reset
+- **Sprite Rendering**: Corrected sprite enable logic - sprites render whenever display is enabled (no separate enable bit)
+
+### Testing
+Unit tests now cover:
+- System creation and reset
+- VDP sprite collision detection
+- VDP sprite overflow detection (5th sprite flag)
+- VDP address register wrapping
+- Save state roundtrip
+
 ## References
 
 ### Technical Documentation

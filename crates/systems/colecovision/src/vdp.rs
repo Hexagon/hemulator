@@ -38,6 +38,9 @@ pub struct Vdp {
     sprite_overflow: bool,
     sprite_collision: bool,
 
+    // Sprite collision tracking buffer (one bit per pixel to track sprite coverage)
+    sprite_buffer: Vec<bool>,
+
     // Current scanline
     scanline: u16,
 
@@ -59,6 +62,7 @@ impl Vdp {
             frame_interrupt_pending: false,
             sprite_overflow: false,
             sprite_collision: false,
+            sprite_buffer: vec![false; 256 * 192],
             scanline: 262, // Start at end of frame
             palette: [
                 // TMS9918A standard palette (ARGB8888)
@@ -166,8 +170,10 @@ impl Vdp {
         // In a full implementation, this would be the number of the first sprite
         // that couldn't be displayed
 
-        // Clear interrupt flag on read
+        // Clear flags on status read (per TMS9918A spec)
         self.frame_interrupt_pending = false;
+        self.sprite_overflow = false;
+        self.sprite_collision = false;
 
         status
     }
@@ -326,6 +332,12 @@ impl Vdp {
             self.frame.pixels[line_offset + x] = backdrop_color;
         }
 
+        // Clear sprite buffer for this scanline
+        let sprite_line_offset = line_offset;
+        for x in 0..256 {
+            self.sprite_buffer[sprite_line_offset + x] = false;
+        }
+
         // Only render if display is enabled
         if !display_enabled {
             return;
@@ -340,10 +352,8 @@ impl Vdp {
             _ => {} // Invalid mode
         }
 
-        // Render sprites if enabled
-        if (self.registers[1] & 0x02) != 0 {
-            self.render_sprites(line, line_offset);
-        }
+        // Render sprites (always enabled when display is on)
+        self.render_sprites(line, line_offset);
     }
 
     /// Get current graphics mode from register bits
@@ -545,19 +555,26 @@ impl Vdp {
         let actual_size = sprite_size * mag;
 
         let mut sprite_count = 0;
-        self.sprite_overflow = false;
 
         // Scan through sprite attribute table (32 sprites max)
         for sprite_num in 0..32 {
             let attr_addr = sprite_attr_base + (sprite_num * 4);
 
-            // Get sprite Y position
-            let sprite_y = self.vram[attr_addr] as i16;
-
-            // Check for end-of-sprite-list marker
-            if sprite_y == 0xD0 {
+            // Bounds check for attribute table access
+            if attr_addr + 3 >= self.vram.len() {
                 break;
             }
+
+            // Get sprite Y position
+            let sprite_y_raw = self.vram[attr_addr];
+
+            // Check for end-of-sprite-list marker (0xD0 = 208)
+            if sprite_y_raw == 0xD0 {
+                break;
+            }
+
+            // Y position is offset by 1 (Y=0 means sprite at Y=-1, off-screen)
+            let sprite_y = (sprite_y_raw as i16).wrapping_sub(1);
 
             // Check if sprite is on this scanline
             let line_i16 = line as i16;
@@ -596,7 +613,13 @@ impl Vdp {
                     (pattern_num * 8) + pattern_row
                 };
 
-                let pattern_byte = self.vram[sprite_pattern_base + pattern_addr];
+                // Bounds check for pattern access
+                let final_pattern_addr = sprite_pattern_base + pattern_addr;
+                if final_pattern_addr >= self.vram.len() {
+                    continue;
+                }
+
+                let pattern_byte = self.vram[final_pattern_addr];
 
                 // Render sprite pixels
                 for bit in 0..8 {
@@ -606,13 +629,13 @@ impl Vdp {
                             let x = sprite_x + x_offset + (bit * mag) as i16 + mx as i16;
                             if (0..256).contains(&x) {
                                 let pixel_idx = line_offset + x as usize;
-                                // Check for sprite collision
-                                if self.frame.pixels[pixel_idx] != 0
-                                    && self.frame.pixels[pixel_idx]
-                                        != self.palette[(self.registers[7] & 0x0F) as usize]
-                                {
+                                // Check for sprite collision - another sprite already rendered here
+                                if self.sprite_buffer[pixel_idx] {
                                     self.sprite_collision = true;
                                 }
+                                // Mark this pixel as having a sprite
+                                self.sprite_buffer[pixel_idx] = true;
+                                // Render the sprite pixel
                                 self.frame.pixels[pixel_idx] = sprite_color;
                             }
                         }
@@ -627,6 +650,11 @@ impl Vdp {
                         sprite_pattern_base + ((pattern_num & 0xFC) * 8) + 24 + (pattern_row - 8)
                     };
 
+                    // Bounds check for pattern access
+                    if pattern_addr >= self.vram.len() {
+                        continue;
+                    }
+
                     let pattern_byte = self.vram[pattern_addr];
 
                     for bit in 0..8 {
@@ -636,12 +664,13 @@ impl Vdp {
                                 let x = sprite_x + x_offset + ((8 + bit) * mag) as i16 + mx as i16;
                                 if (0..256).contains(&x) {
                                     let pixel_idx = line_offset + x as usize;
-                                    if self.frame.pixels[pixel_idx] != 0
-                                        && self.frame.pixels[pixel_idx]
-                                            != self.palette[(self.registers[7] & 0x0F) as usize]
-                                    {
+                                    // Check for sprite collision
+                                    if self.sprite_buffer[pixel_idx] {
                                         self.sprite_collision = true;
                                     }
+                                    // Mark this pixel as having a sprite
+                                    self.sprite_buffer[pixel_idx] = true;
+                                    // Render the sprite pixel
                                     self.frame.pixels[pixel_idx] = sprite_color;
                                 }
                             }
