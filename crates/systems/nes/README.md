@@ -200,6 +200,62 @@ let frame = nes.step_frame()?;
 let samples = nes.audio_samples();
 ```
 
+## ROM Database
+
+The NES emulator includes a ROM database system to override incorrect or missing cartridge header information.
+
+**Location**: `src/rom_db.rs`
+
+### Purpose
+
+Some NES ROM files have corrupted or incorrect headers due to:
+- DiskDude! corruption (automated header fixing is already implemented)
+- Incorrect mapper assignments
+- Incorrect mirroring flags
+- Homebrew ROMs not following iNES conventions
+
+The ROM database allows overriding the mapper number and mirroring mode based on the ROM's CRC32 checksum.
+
+### Adding Database Entries
+
+To add a ROM to the database:
+
+1. Calculate the CRC32 of the entire ROM file (including header):
+   ```rust
+   use emu_nes::rom_db::calculate_crc32;
+   let crc32 = calculate_crc32(&rom_data);
+   println!("CRC32: 0x{:08X}", crc32);
+   ```
+
+2. Determine the correct mapper and mirroring from:
+   - BootGod's Database: http://bootgod.dyndns.org:7777/
+   - NesCartDB: https://nescartdb.com/
+   - NESdev Wiki: https://www.nesdev.org/
+
+3. Add an entry to `ROM_DATABASE` in `src/rom_db.rs`:
+   ```rust
+   RomDbEntry::new(
+       0x12345678,                      // CRC32 of full ROM file
+       Some(4),                          // Override to mapper 4 (MMC3)
+       Some(Mirroring::Horizontal),      // Override to horizontal mirroring
+       Some("TLSROM"),                   // Board type (optional)
+   ),
+   ```
+
+### How It Works
+
+When a ROM is loaded:
+1. CRC32 is calculated for the entire ROM file
+2. The database is checked for a matching CRC32
+3. If found, mapper and/or mirroring are overridden
+4. Log messages indicate when overrides are applied
+
+Example log output:
+```
+NES ROM DB: Overriding mapper 0 -> 4 for CRC32 0x12345678 (TLSROM)
+NES ROM DB: Overriding mirroring Vertical -> Horizontal for CRC32 0x12345678 (TLSROM)
+```
+
 ## Known Limitations
 
 See [User Manual](https://hemulator.56k.guru/user/manual.html#nes-nintendo-entertainment-system) for user-facing limitations.

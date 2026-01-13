@@ -161,6 +161,8 @@ pub struct Ppu {
     /// Cycle-accurate timing: odd frame flag for skipping cycle on scanline 0
     /// On odd frames, dot 0 of scanline 0 is skipped (goes directly from -1,340 to 0,1)
     odd_frame: Cell<bool>,
+    /// Monotonic frame counter (increments when scanline wraps 261 -> 0).
+    frame_counter: Cell<u64>,
 }
 
 impl fmt::Debug for Ppu {
@@ -214,6 +216,7 @@ impl Ppu {
             scanline: Cell::new(261),
             dot: Cell::new(0),
             odd_frame: Cell::new(false),
+            frame_counter: Cell::new(0),
         }
     }
 
@@ -813,9 +816,47 @@ impl Ppu {
     pub fn render_frame(&self) -> Frame {
         // TEST-ONLY: Helper that renders using scanline-based rendering.
         // This ensures tests use the same rendering path as production code.
+        //
+        // Since tests don't call tick(), we need to manually initialize the v register
+        // from t before rendering, simulating what tick() would do at pre-render
+        // scanline dots 280-304 and dot 257.
+        let rendering_enabled = (self.mask & 0x18) != 0;
+        if rendering_enabled {
+            let t = self.temp_vram_addr.get();
+            let v = self.vram_addr.get();
+            // Copy both vertical and horizontal bits from t to v
+            let mut new_v = (v & !0x7BE0) | (t & 0x7BE0); // Vertical bits
+            new_v = (new_v & !0x041F) | (t & 0x041F); // Horizontal bits
+            self.vram_addr.set(new_v);
+        }
+
         let mut frame = Frame::new(256, 240);
         for scanline in 0..240 {
             self.render_scanline(scanline, &mut frame);
+
+            // Simulate tick()'s dot 256 v register increment (for scanlines 0-238)
+            // This would normally happen in tick() but tests don't call tick()
+            if rendering_enabled && scanline < 239 {
+                let mut v = self.vram_addr.get();
+                let fine_y = (v >> 12) & 0x0007;
+
+                if fine_y < 7 {
+                    v = (v & !0x7000) | ((fine_y + 1) << 12);
+                } else {
+                    v &= !0x7000;
+                    let coarse_y = (v >> 5) & 0x001F;
+                    let new_coarse_y = if coarse_y == 29 {
+                        v ^= 0x0800;
+                        0
+                    } else if coarse_y == 31 {
+                        0
+                    } else {
+                        coarse_y + 1
+                    };
+                    v = (v & !0x03E0) | (new_coarse_y << 5);
+                }
+                self.vram_addr.set(v);
+            }
         }
         frame
     }
@@ -835,7 +876,7 @@ impl Ppu {
         // Debug: log scroll and mirroring for first few scanlines
         if y < 3 {
             use emu_core::logging::{log, LogCategory, LogLevel};
-            log(LogCategory::PPU, LogLevel::Info, || {
+            log(LogCategory::PPU, LogLevel::Debug, || {
                 format!(
                     "Scanline {}: scroll=({},{}), ctrl=0x{:02X}, mirroring={:?}",
                     y,
@@ -862,35 +903,15 @@ impl Ppu {
         let show_bg_left = (self.mask & 0x02) != 0; // PPUMASK bit 1: show background in leftmost 8 pixels
         let show_sprites_left = (self.mask & 0x04) != 0; // PPUMASK bit 2: show sprites in leftmost 8 pixels
 
-        // Simulate hardware v register updates from t register at scanline boundaries.
-        // This is critical for split-screen effects like SMB3's HUD.
+        // Note: In production (cycle-accurate mode with tick()), v register initialization
+        // and increment happen in tick() at specific dots:
+        // - Pre-render scanline (261) dots 280-304: vertical bits copied from t to v
+        // - All visible scanlines dot 256: v register incremented
+        // - All scanlines dot 257: horizontal bits copied from t to v
         //
-        // In real hardware (matching Mesen2 implementation):
-        // - At dot 257 of each visible scanline: v horizontal bits ← t horizontal bits
-        // - At dots 280-304 of pre-render scanline: v vertical bits ← t vertical bits
-        //
-        // For our frame-based renderer, we simulate this by updating v from t at the
-        // start of each scanline. This ensures mid-frame $2005 writes (which update t)
-        // take effect at scanline boundaries, not immediately.
-        let rendering_enabled = bg_enabled || sprites_enabled;
-        if rendering_enabled {
-            let t = self.temp_vram_addr.get();
-            let v = self.vram_addr.get();
-
-            // At scanline 0: copy both vertical and horizontal bits from t to v
-            // (simulates pre-render scanline dot 280-304 + dot 257 behavior)
-            if y == 0 {
-                // Vertical bits: 5-9 (coarse Y), 11 (nametable Y), 12-14 (fine Y)
-                let mut new_v = (v & !0x7BE0) | (t & 0x7BE0);
-                // Horizontal bits: 0-4 (coarse X), 10 (nametable X)
-                new_v = (new_v & !0x041F) | (t & 0x041F);
-                self.vram_addr.set(new_v);
-            } else {
-                // Copy horizontal scroll bits from t to v at start of every other scanline
-                // (simulates dot 257 behavior)
-                self.vram_addr.set((v & !0x041F) | (t & 0x041F));
-            }
-        }
+        // This render_scanline() function should NOT modify the v register.
+        // The v register state at the time render_scanline() is called should already
+        // be correct from the tick() updates.
 
         // Note: Sprite evaluation for overflow detection is now done in tick() at dot 192
         // for cycle-accurate timing. Games like Bee 52 rely on polling PPUSTATUS bit 5.
@@ -918,6 +939,22 @@ impl Ppu {
         // The v register is incremented after each scanline to "walk through" the nametable.
         let v = self.vram_addr.get();
         let fine_x_val = self.fine_x.get();
+
+        let coarse_x = (v & 0x001F) as u8; // Bits 0-4: tile column (0-31)
+        let coarse_y = ((v >> 5) & 0x001F) as u8; // Bits 5-9: tile row (0-31)
+        let nt_x = ((v >> 10) & 0x0001) as u8; // Bit 10: nametable X
+        let nt_y = ((v >> 11) & 0x0001) as u8; // Bit 11: nametable Y
+        let fine_y = ((v >> 12) & 0x0007) as u8; // Bits 12-14: fine Y scroll (0-7)
+
+        // Debug: log v register for scanline 207
+        if y == 207 {
+            log(LogCategory::PPU, LogLevel::Debug, || {
+                format!(
+                    "Scanline 207: v=0x{:04X} coarse_x={} coarse_y={} nt_x={} nt_y={} fine_y={} fine_x={}",
+                    v, coarse_x, coarse_y, nt_x, nt_y, fine_y, fine_x_val
+                )
+            });
+        }
 
         let coarse_x = (v & 0x001F) as u8; // Bits 0-4: tile column (0-31)
         let coarse_y = ((v >> 5) & 0x001F) as u8; // Bits 5-9: tile row (0-31)
@@ -1145,6 +1182,7 @@ impl Ppu {
             }
 
             // Composite sprite buffer with background using priority rules and detect sprite 0 hit.
+            let mut sprite_0_logged = false;
             for x in 0..width as usize {
                 if let Some((sprite_color, behind_bg, sprite_idx)) = sprite_buffer[x] {
                     // Clip leftmost 8 pixels if PPUMASK bit 2 is clear
@@ -1153,15 +1191,28 @@ impl Ppu {
                     let idx = (y * width + x as u32) as usize;
 
                     // Sprite 0 hit detection - check if sprite 0 pixel overlaps opaque background
-                    if sprite_idx == 0
-                        && bg_enabled
-                        && !self.sprite_0_hit.get()
-                        && bg_priority[x]
-                        && x < 255
-                    {
-                        // Check left clipping - sprite 0 hit doesn't occur in clipped region
-                        if show_bg_left && show_sprites_left || x >= 8 {
-                            self.sprite_0_hit.set(true);
+                    if sprite_idx == 0 {
+                        if !sprite_0_logged && !self.sprite_0_hit.get() {
+                            log(LogCategory::PPU, LogLevel::Debug, || {
+                                format!(
+                                    "Sprite 0 at scanline {} x={}: bg_enabled={}, bg_priority={}, already_hit={}",
+                                    y, x, bg_enabled, bg_priority[x], self.sprite_0_hit.get()
+                                )
+                            });
+                            sprite_0_logged = true;
+                        }
+
+                        if bg_enabled && !self.sprite_0_hit.get() && bg_priority[x] && x < 255 {
+                            // Check left clipping - sprite 0 hit doesn't occur in clipped region
+                            if show_bg_left && show_sprites_left || x >= 8 {
+                                log(LogCategory::PPU, LogLevel::Info, || {
+                                    format!(
+                                        "Sprite 0 HIT at scanline {} x={} (bg_priority={}, show_bg_left={}, show_sprites_left={})",
+                                        y, x, bg_priority[x], show_bg_left, show_sprites_left
+                                    )
+                                });
+                                self.sprite_0_hit.set(true);
+                            }
                         }
                     }
 
@@ -1174,37 +1225,9 @@ impl Ppu {
             }
         }
 
-        // Increment v register's fine_y after rendering this scanline (simulates dot 256).
-        // This is critical for proper mid-frame scroll splits (e.g., SMB3 HUD).
-        // When fine_y overflows from 7 to 0, coarse_y is incremented.
-        // When coarse_y reaches 30, it wraps to 0 and nametable Y is toggled.
-        if rendering_enabled {
-            let mut v = self.vram_addr.get();
-            let fine_y = (v >> 12) & 0x0007;
-
-            if fine_y < 7 {
-                // Simple case: just increment fine_y
-                v = (v & !0x7000) | ((fine_y + 1) << 12);
-            } else {
-                // fine_y was 7, now wraps to 0
-                v &= !0x7000; // Clear fine_y bits
-
-                let coarse_y = (v >> 5) & 0x001F;
-                let new_coarse_y = if coarse_y == 29 {
-                    // Wrap at row 30 (NES quirk: attribute table is at rows 30-31)
-                    v ^= 0x0800; // Toggle nametable Y bit
-                    0
-                } else if coarse_y == 31 {
-                    // Edge case: if coarse_y is already 31, just wrap to 0 without toggling
-                    0
-                } else {
-                    coarse_y + 1
-                };
-                v = (v & !0x03E0) | (new_coarse_y << 5);
-            }
-
-            self.vram_addr.set(v);
-        }
+        // NOTE: v register increment now happens in tick() at dot 256 of each visible scanline.
+        // render_scanline() should NOT modify the v register - it only renders based on current state.
+        // This ensures proper cycle-accurate timing and prevents drift issues.
 
         self.suppress_a12.set(prev_suppress);
     }
@@ -1222,6 +1245,7 @@ impl Ppu {
         let scanline = self.scanline.get();
         let dot = self.dot.get();
         let mut nmi_triggered = false;
+        let mut ended_frame_number: Option<u64> = None;
 
         // Handle cycle-accurate events at specific scanline/dot positions
         match (scanline, dot) {
@@ -1263,7 +1287,75 @@ impl Ppu {
                 }
             }
 
+            // Pre-render scanline (261), dots 280-304: Copy vertical bits from t to v
+            // In the hardware-accurate / cycle-accurate tick() path, vertical bits are
+            // copied repeatedly during dots 280-304 of the pre-render scanline.
+            // (render_scanline() also copies these bits for compatibility when called without tick().)
+            // Critical for games with vertical scrolling and split-screen effects.
+            // Reference: https://www.nesdev.org/wiki/PPU_scrolling
+            (261, dot) if dot >= 280 && dot <= 304 => {
+                let rendering_enabled = (self.mask & 0x18) != 0;
+                if rendering_enabled {
+                    let t = self.temp_vram_addr.get();
+                    let v = self.vram_addr.get();
+                    // Copy vertical bits from t to v:
+                    // Bits 5-9 (coarse Y), bit 11 (nametable Y), bits 12-14 (fine Y)
+                    let new_v = (v & !0x7BE0) | (t & 0x7BE0);
+                    self.vram_addr.set(new_v);
+                }
+            }
+
             _ => {}
+        }
+
+        // Visible and pre-render scanlines, dot 257: Copy horizontal bits from t to v
+        // This happens at the end of each scanline's rendering
+        // Reference: https://www.nesdev.org/wiki/PPU_scrolling
+        if (scanline < 240 || scanline == 261) && dot == 257 {
+            let rendering_enabled = (self.mask & 0x18) != 0;
+            if rendering_enabled {
+                let t = self.temp_vram_addr.get();
+                let v = self.vram_addr.get();
+                // Copy horizontal bits from t to v:
+                // Bits 0-4 (coarse X), bit 10 (nametable X)
+                let new_v = (v & !0x041F) | (t & 0x041F);
+                self.vram_addr.set(new_v);
+            }
+        }
+
+        // Visible scanlines, dot 256: Increment v register's vertical position
+        // This prepares the address for the next scanline's background fetches.
+        // Reference: https://www.nesdev.org/wiki/PPU_scrolling
+        // Skip increment for scanline 239 to allow clean reinitialization at pre-render.
+        if scanline < 239 && dot == 256 {
+            let rendering_enabled = (self.mask & 0x18) != 0;
+            if rendering_enabled {
+                let mut v = self.vram_addr.get();
+                let fine_y = (v >> 12) & 0x0007;
+
+                if fine_y < 7 {
+                    // Simple case: just increment fine_y
+                    v = (v & !0x7000) | ((fine_y + 1) << 12);
+                } else {
+                    // fine_y was 7, now wraps to 0
+                    v &= !0x7000; // Clear fine_y bits
+
+                    let coarse_y = (v >> 5) & 0x001F;
+                    let new_coarse_y = if coarse_y == 29 {
+                        // Wrap at row 30 (NES quirk: attribute table is at rows 30-31)
+                        v ^= 0x0800; // Toggle nametable Y bit
+                        0
+                    } else if coarse_y == 31 {
+                        // Edge case: if coarse_y is already 31, just wrap to 0 without toggling
+                        0
+                    } else {
+                        coarse_y + 1
+                    };
+                    v = (v & !0x03E0) | (new_coarse_y << 5);
+                }
+
+                self.vram_addr.set(v);
+            }
         }
 
         // Cycle-accurate sprite evaluation during visible scanlines
@@ -1292,6 +1384,10 @@ impl Ppu {
                 next_scanline = 0;
                 // Toggle odd frame flag
                 self.odd_frame.set(!self.odd_frame.get());
+
+                let frame_number = self.frame_counter.get() + 1;
+                self.frame_counter.set(frame_number);
+                ended_frame_number = Some(frame_number);
             }
         }
 
@@ -1303,6 +1399,20 @@ impl Ppu {
                 next_dot = 1;
                 log(LogCategory::PPU, LogLevel::Trace, || {
                     "PPU: Odd frame cycle skip (0,0 -> 0,1)".to_string()
+                });
+            }
+        }
+
+        if let Some(frame_number) = ended_frame_number {
+            if frame_number % 60 == 0 {
+                let v = self.vram_addr.get();
+                let t = self.temp_vram_addr.get();
+                let x = self.fine_x.get();
+                let w = self.addr_latch.get();
+                log(LogCategory::PPU, LogLevel::Info, move || {
+                    format!(
+                        "PPU: Frame {frame_number}: loopy v=${v:04X} t=${t:04X} x={x} w={w} (next {next_scanline},{next_dot})"
+                    )
                 });
             }
         }
@@ -1321,6 +1431,13 @@ impl Ppu {
     /// Get current dot within scanline (0-340)
     pub fn get_dot(&self) -> u16 {
         self.dot.get()
+    }
+
+    /// Get the monotonic PPU frame counter.
+    ///
+    /// This increments when the PPU wraps from scanline 261 back to scanline 0.
+    pub fn get_frame_counter(&self) -> u64 {
+        self.frame_counter.get()
     }
 
     /// Check if currently in VBlank region (scanlines 241-260)
