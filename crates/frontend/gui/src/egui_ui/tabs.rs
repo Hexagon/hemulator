@@ -573,28 +573,28 @@ impl TabManager {
                         "memory_inspector_region_selector_{}",
                         state.system_type
                     ))
-                        .selected_text(
-                            state
-                                .memory_regions
-                                .get(self.selected_memory_region_index)
-                                .map(|r| r.name.as_str())
-                                .unwrap_or("Select region"),
-                        )
-                        .show_ui(ui, |ui| {
-                            for (idx, region) in state.memory_regions.iter().enumerate() {
-                                if ui
-                                    .selectable_value(
-                                        &mut self.selected_memory_region_index,
-                                        idx,
-                                        &region.name,
-                                    )
-                                    .clicked()
-                                {
-                                    // Reset view address to region start when changing regions
-                                    self.memory_view_address = region.start;
-                                }
+                    .selected_text(
+                        state
+                            .memory_regions
+                            .get(self.selected_memory_region_index)
+                            .map(|r| r.name.as_str())
+                            .unwrap_or("Select region"),
+                    )
+                    .show_ui(ui, |ui| {
+                        for (idx, region) in state.memory_regions.iter().enumerate() {
+                            if ui
+                                .selectable_value(
+                                    &mut self.selected_memory_region_index,
+                                    idx,
+                                    &region.name,
+                                )
+                                .clicked()
+                            {
+                                // Reset view address to region start when changing regions
+                                self.memory_view_address = region.start;
                             }
-                        });
+                        }
+                    });
                 });
 
                 ui.separator();

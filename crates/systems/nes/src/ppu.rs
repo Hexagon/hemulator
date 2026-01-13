@@ -945,7 +945,7 @@ impl Ppu {
         let nt_x = ((v >> 10) & 0x0001) as u8; // Bit 10: nametable X
         let nt_y = ((v >> 11) & 0x0001) as u8; // Bit 11: nametable Y
         let fine_y = ((v >> 12) & 0x0007) as u8; // Bits 12-14: fine Y scroll (0-7)
-        
+
         // Debug: log v register for scanline 207
         if y == 207 {
             log(LogCategory::PPU, LogLevel::Debug, || {
@@ -1201,12 +1201,8 @@ impl Ppu {
                             });
                             sprite_0_logged = true;
                         }
-                        
-                        if bg_enabled
-                            && !self.sprite_0_hit.get()
-                            && bg_priority[x]
-                            && x < 255
-                        {
+
+                        if bg_enabled && !self.sprite_0_hit.get() && bg_priority[x] && x < 255 {
                             // Check left clipping - sprite 0 hit doesn't occur in clipped region
                             if show_bg_left && show_sprites_left || x >= 8 {
                                 log(LogCategory::PPU, LogLevel::Info, || {
