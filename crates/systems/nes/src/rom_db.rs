@@ -93,17 +93,14 @@ impl RomDbEntry {
 /// This is a static array to avoid heap allocations and enable compile-time verification.
 /// Entries are sorted by CRC32 for potential binary search optimization in the future.
 static ROM_DATABASE: &[RomDbEntry] = &[
-    // Example entries - these should be replaced with actual ROM data
-    // CRC32 values are placeholders and should be calculated from real ROMs
-
-    // Note: Add real entries here as they are discovered
-    // Format:
-    // RomDbEntry::new(
-    //     0x12345678, // CRC32
-    //     Some(4),    // Mapper override (MMC3)
-    //     Some(Mirroring::Horizontal), // Mirroring override
-    //     Some("TLSROM"), // Board name
-    // ),
+    // Bee 52 (USA) (Unl) - Header incorrectly specifies horizontal mirroring,
+    // but the game requires vertical mirroring for correct scrolling
+    RomDbEntry::new(
+        0xE19C2722,                   // CRC32 of full ROM file
+        None,                         // Use header mapper (71 - Camerica)
+        Some(Mirroring::Vertical),    // Override to vertical mirroring
+        None,                         // No specific board name
+    ),
 ];
 
 /// Calculate CRC32 checksum of ROM data.
