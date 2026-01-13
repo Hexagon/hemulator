@@ -1097,6 +1097,43 @@ impl Ppu {
                     current_nt_x ^= 1; // Flip nametable X
                 }
             }
+
+            // NES PPU hardware fetches 34 tiles per scanline (not just the 32 visible ones).
+            // The extra 2 tiles are needed to fill the PPU shift registers for horizontal scrolling.
+            // This is critical for games like Punch Out!! that use MMC2 mapper, which monitors
+            // CHR reads to trigger bank switches. Without these extra fetches, the mapper won't
+            // detect the reads and won't switch banks at the right time.
+            // Reference: https://www.nesdev.org/wiki/PPU_rendering
+            //
+            // Note: These tiles (33-34) are fetched by hardware but not displayed on screen since
+            // only 32 tiles fit in the visible 256-pixel scanline. Their pattern data is used to
+            // pre-fill the PPU's shift registers for the next scanline. We only invoke the CHR
+            // read callbacks for mapper compatibility - no rendering is performed.
+            for _ in 0..2 {
+                let nt = current_nt_x | (nt_y_adjusted << 1);
+                let tx = current_tile_x as usize;
+                let ty = tile_y_wrapped as usize;
+
+                let nt_addr = 0x2000u16 + (nt as u16) * 0x0400;
+                let tile_addr = nt_addr + (ty as u16) * 32 + (tx as u16);
+                let tile_index = self.vram[self.map_nametable_addr(tile_addr)];
+
+                let tile_chr_addr = bg_pattern_base + (tile_index as usize) * 16;
+
+                // Invoke CHR read callback for MMC2/MMC4 latch switching compatibility
+                // This is CRITICAL for Punch Out!! and other games using MMC2/MMC4 mappers
+                if let Some(cb) = &mut *self.chr_read_callback.borrow_mut() {
+                    cb((tile_chr_addr + fine_y_in_tile) as u16); // Low bitplane
+                    cb((tile_chr_addr + fine_y_in_tile + 8) as u16); // High bitplane
+                }
+
+                // Move to next tile
+                current_tile_x = current_tile_x.wrapping_add(1);
+                if current_tile_x >= 32 {
+                    current_tile_x = 0;
+                    current_nt_x ^= 1; // Flip nametable X
+                }
+            }
         } else {
             // Background disabled: fill this scanline with backdrop.
             let row_start = (y * width) as usize;
@@ -4045,5 +4082,79 @@ mod tests {
             ppu.sprite_overflow.get(),
             "Sprite overflow should be set with 9 sprites"
         );
+    }
+
+    #[test]
+    fn test_34th_tile_fetch() {
+        // Test that PPU fetches 34 tiles per scanline (not just the 32 visible ones)
+        // This is critical for games like Punch Out!! that use MMC2 mapper
+        // Reference: https://www.nesdev.org/wiki/PPU_rendering
+
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
+        ppu.clear_first_frame_lock();
+
+        // Track CHR reads via callback
+        let chr_reads = Rc::new(RefCell::new(Vec::new()));
+        let chr_reads_clone = chr_reads.clone();
+
+        ppu.set_chr_read_callback(Some(Box::new(move |addr| {
+            chr_reads_clone.borrow_mut().push(addr);
+        })));
+
+        // Enable rendering
+        ppu.mask = 0x18; // Show background and sprites
+        ppu.ctrl = 0x00; // Background pattern table at $0000
+
+        // Set up nametables with sequential but unique tile indices for both nametables
+        // Nametable 0: tiles 0-31 for first 32 tiles, tiles 32-33 for extra 2 tiles
+        // Nametable 1: tiles 64-95 so we can distinguish between nametables
+        for i in 0..64 {
+            let addr = 0x2000 + i;
+            let mapped_addr = ppu.map_nametable_addr(addr);
+            ppu.vram[mapped_addr] = i as u8;
+
+            // Also set up second nametable with different tiles
+            let addr2 = 0x2400 + i;
+            let mapped_addr2 = ppu.map_nametable_addr(addr2);
+            ppu.vram[mapped_addr2] = (i + 64) as u8;
+        }
+
+        // Clear the CHR reads
+        chr_reads.borrow_mut().clear();
+
+        // Render a scanline with no scrolling
+        let mut frame = Frame::new(256, 240);
+        ppu.render_scanline(0, &mut frame);
+
+        // Count how many CHR reads we got
+        let reads = chr_reads.borrow();
+
+        // With horizontal mirroring:
+        // - First 32 tiles come from nametable 0 (tiles 0-31)
+        // - Next 2 tiles come from nametable 1 (which with horizontal mirroring maps to nametable 0)
+        // Actually, let's just verify we got the right number of reads
+
+        // Each tile has 2 CHR reads (low and high bitplane)
+        // So we expect 34 * 2 = 68 CHR reads
+        assert_eq!(
+            reads.len(),
+            68,
+            "PPU should make exactly 68 CHR reads (34 tiles * 2 bitplanes), got {}",
+            reads.len()
+        );
+
+        // The reads should be in pairs (low bitplane + 8, high bitplane)
+        for i in (0..reads.len()).step_by(2) {
+            let low_addr = reads[i];
+            let high_addr = reads[i + 1];
+            assert_eq!(
+                high_addr,
+                low_addr + 8,
+                "CHR reads should be in low/high bitplane pairs"
+            );
+        }
     }
 }

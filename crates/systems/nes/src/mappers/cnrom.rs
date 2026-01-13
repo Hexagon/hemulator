@@ -96,7 +96,13 @@ mod tests {
         chr[0] = 0x11; // Bank 0 start
         chr[0x2000] = 0x22; // Bank 1 start
 
-        let cart = Cartridge::new_test(vec![0x42; 0x8000], chr, 3, Mirroring::Vertical, TimingMode::Ntsc);
+        let cart = Cartridge::new_test(
+            vec![0x42; 0x8000],
+            chr,
+            3,
+            Mirroring::Vertical,
+            TimingMode::Ntsc,
+        );
 
         let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut cnrom = Cnrom::new(cart, &mut ppu);
@@ -112,7 +118,13 @@ mod tests {
 
     #[test]
     fn cnrom_prg_rom_nrom_style() {
-        let cart = Cartridge::new_test(vec![0x42; 0x4000], vec![0; 0x2000], 3, Mirroring::Horizontal, TimingMode::Ntsc);
+        let cart = Cartridge::new_test(
+            vec![0x42; 0x4000],
+            vec![0; 0x2000],
+            3,
+            Mirroring::Horizontal,
+            TimingMode::Ntsc,
+        );
 
         let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let cnrom = Cnrom::new(cart, &mut ppu);
@@ -129,7 +141,13 @@ mod tests {
         prg[0] = 0x11;
         prg[0x4000] = 0x22;
 
-        let cart = Cartridge::new_test(prg, vec![0; 0x2000], 3, Mirroring::Horizontal, TimingMode::Ntsc);
+        let cart = Cartridge::new_test(
+            prg,
+            vec![0; 0x2000],
+            3,
+            Mirroring::Horizontal,
+            TimingMode::Ntsc,
+        );
 
         let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let cnrom = Cnrom::new(cart, &mut ppu);
@@ -148,7 +166,13 @@ mod tests {
         chr[0x4000] = 0x33; // Bank 2
         chr[0x6000] = 0x44; // Bank 3
 
-        let cart = Cartridge::new_test(vec![0; 0x8000], chr, 3, Mirroring::Horizontal, TimingMode::Ntsc);
+        let cart = Cartridge::new_test(
+            vec![0; 0x8000],
+            chr,
+            3,
+            Mirroring::Horizontal,
+            TimingMode::Ntsc,
+        );
 
         let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut cnrom = Cnrom::new(cart, &mut ppu);
@@ -167,7 +191,13 @@ mod tests {
         chr[0] = 0xAA;
         chr[0x2000] = 0xBB;
 
-        let cart = Cartridge::new_test(vec![0; 0x8000], chr, 3, Mirroring::Horizontal, TimingMode::Ntsc);
+        let cart = Cartridge::new_test(
+            vec![0; 0x8000],
+            chr,
+            3,
+            Mirroring::Horizontal,
+            TimingMode::Ntsc,
+        );
 
         let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut cnrom = Cnrom::new(cart, &mut ppu);
@@ -187,7 +217,13 @@ mod tests {
         chr[0] = 0x11;
         chr[0x2000] = 0x22;
 
-        let cart = Cartridge::new_test(vec![0; 0x8000], chr, 3, Mirroring::Horizontal, TimingMode::Ntsc);
+        let cart = Cartridge::new_test(
+            vec![0; 0x8000],
+            chr,
+            3,
+            Mirroring::Horizontal,
+            TimingMode::Ntsc,
+        );
 
         let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut cnrom = Cnrom::new(cart, &mut ppu);
@@ -211,7 +247,13 @@ mod tests {
             chr[i * 0x2000] = (0x10 + i) as u8;
         }
 
-        let cart = Cartridge::new_test(vec![0; 0x8000], chr, 3, Mirroring::Horizontal, TimingMode::Ntsc);
+        let cart = Cartridge::new_test(
+            vec![0; 0x8000],
+            chr,
+            3,
+            Mirroring::Horizontal,
+            TimingMode::Ntsc,
+        );
 
         let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut cnrom = Cnrom::new(cart, &mut ppu);

@@ -184,7 +184,13 @@ mod tests {
             prg[i * 0x2000] = (i + 1) as u8;
         }
 
-        let cart = Cartridge::new_test(prg, vec![0; 0x2000], 206, Mirroring::Vertical, TimingMode::Ntsc);
+        let cart = Cartridge::new_test(
+            prg,
+            vec![0; 0x2000],
+            206,
+            Mirroring::Vertical,
+            TimingMode::Ntsc,
+        );
 
         let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut n118 = Namco118::new(cart, &mut ppu);
@@ -209,7 +215,13 @@ mod tests {
             prg[i * 0x2000] = (i + 1) as u8;
         }
 
-        let cart = Cartridge::new_test(prg, vec![0; 0x2000], 206, Mirroring::Vertical, TimingMode::Ntsc);
+        let cart = Cartridge::new_test(
+            prg,
+            vec![0; 0x2000],
+            206,
+            Mirroring::Vertical,
+            TimingMode::Ntsc,
+        );
 
         let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut n118 = Namco118::new(cart, &mut ppu);
@@ -234,7 +246,13 @@ mod tests {
             chr[i * 0x400] = (i + 1) as u8;
         }
 
-        let cart = Cartridge::new_test(vec![0; 0x8000], chr, 206, Mirroring::Horizontal, TimingMode::Ntsc);
+        let cart = Cartridge::new_test(
+            vec![0; 0x8000],
+            chr,
+            206,
+            Mirroring::Horizontal,
+            TimingMode::Ntsc,
+        );
 
         let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut n118 = Namco118::new(cart, &mut ppu);
@@ -254,7 +272,13 @@ mod tests {
 
     #[test]
     fn namco118_mirroring() {
-        let cart = Cartridge::new_test(vec![0; 0x8000], vec![0; 0x2000], 206, Mirroring::Vertical, TimingMode::Ntsc);
+        let cart = Cartridge::new_test(
+            vec![0; 0x8000],
+            vec![0; 0x2000],
+            206,
+            Mirroring::Vertical,
+            TimingMode::Ntsc,
+        );
 
         let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut n118 = Namco118::new(cart, &mut ppu);
@@ -274,7 +298,13 @@ mod tests {
     #[test]
     fn namco118_bank_wrapping() {
         let prg = vec![0x42; 0x4000]; // 2 banks only
-        let cart = Cartridge::new_test(prg, vec![0; 0x2000], 206, Mirroring::Vertical, TimingMode::Ntsc);
+        let cart = Cartridge::new_test(
+            prg,
+            vec![0; 0x2000],
+            206,
+            Mirroring::Vertical,
+            TimingMode::Ntsc,
+        );
 
         let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut n118 = Namco118::new(cart, &mut ppu);

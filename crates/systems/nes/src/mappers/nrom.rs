@@ -42,7 +42,13 @@ mod tests {
     fn nrom_16kb_mirroring() {
         use crate::cartridge::Mirroring;
 
-        let cart = Cartridge::new_test(vec![0x42; 0x4000], vec![], 0, Mirroring::Horizontal, TimingMode::Ntsc);
+        let cart = Cartridge::new_test(
+            vec![0x42; 0x4000],
+            vec![],
+            0,
+            Mirroring::Horizontal,
+            TimingMode::Ntsc,
+        );
         let nrom = Nrom::new(cart);
 
         // 16KB ROM should mirror at 0x8000 and 0xC000
