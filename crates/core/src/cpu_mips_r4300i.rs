@@ -443,27 +443,34 @@ impl<M: MemoryMips> CpuMips<M> {
                 self.cycles += 1;
             }
             0x18 => {
-                // MULT - Multiply
+                // MULT - Multiply (signed 32x32 -> 64)
+                // Sign extension: Extend 32-bit values to 64-bit signed, then multiply
                 let a = self.gpr[rs] as i32 as i64;
                 let b = self.gpr[rt] as i32 as i64;
                 let result = a.wrapping_mul(b);
                 self.lo = result as u64;
+                // High word is sign-extended from i32 to maintain proper sign
                 self.hi = ((result >> 32) as i32) as u64;
                 self.cycles += 1;
             }
             0x19 => {
-                // MULTU - Multiply Unsigned
+                // MULTU - Multiply Unsigned (unsigned 32x32 -> 64)
+                // Zero extension: Treat 32-bit values as unsigned
                 let a = (self.gpr[rs] as u32) as u64;
                 let b = (self.gpr[rt] as u32) as u64;
                 let result = a.wrapping_mul(b);
+                // Both low and high results are sign-extended to match MIPS behavior
+                // This ensures the high 32 bits of the 64-bit register have proper sign
                 self.lo = (result as u32) as i32 as u64;
                 self.hi = ((result >> 32) as u32) as i32 as u64;
                 self.cycles += 1;
             }
             0x1A => {
-                // DIV - Divide
+                // DIV - Divide (signed 32-bit)
                 let dividend = self.gpr[rs] as i32;
                 let divisor = self.gpr[rt] as i32;
+                // Edge case: Division by zero is handled by skipping the operation
+                // MIPS spec: Division by zero produces unpredictable results (no trap)
                 if divisor != 0 {
                     self.lo = dividend.wrapping_div(divisor) as u64;
                     self.hi = dividend.wrapping_rem(divisor) as u64;
@@ -471,10 +478,12 @@ impl<M: MemoryMips> CpuMips<M> {
                 self.cycles += 1;
             }
             0x1B => {
-                // DIVU - Divide Unsigned
+                // DIVU - Divide Unsigned (unsigned 32-bit)
                 let dividend = self.gpr[rs] as u32;
                 let divisor = self.gpr[rt] as u32;
+                // Edge case: Division by zero handled same as DIV
                 if divisor != 0 {
+                    // Results are sign-extended to match MIPS behavior
                     self.lo = (dividend / divisor) as i32 as u64;
                     self.hi = (dividend % divisor) as i32 as u64;
                 }
@@ -520,28 +529,33 @@ impl<M: MemoryMips> CpuMips<M> {
             }
             0x20 => {
                 // ADD - Add (with overflow trap)
+                // NOTE: Should trap on overflow, but not implemented in this emulator
+                // Most N64 software doesn't rely on overflow traps
                 let a = self.gpr[rs] as i32;
                 let b = self.gpr[rt] as i32;
-                // For now, we don't implement traps, just perform the addition
+                // Result is sign-extended to 64 bits
                 self.gpr[rd] = a.wrapping_add(b) as u64;
                 self.cycles += 1;
             }
             0x21 => {
-                // ADDU - Add Unsigned
+                // ADDU - Add Unsigned (no overflow trap)
+                // Treat as 32-bit operation, sign-extend result to 64 bits
                 self.gpr[rd] =
                     (self.gpr[rs] as u32).wrapping_add(self.gpr[rt] as u32) as i32 as u64;
                 self.cycles += 1;
             }
             0x22 => {
                 // SUB - Subtract (with overflow trap)
+                // NOTE: Should trap on overflow, but not implemented
                 let a = self.gpr[rs] as i32;
                 let b = self.gpr[rt] as i32;
-                // For now, we don't implement traps, just perform the subtraction
+                // Result is sign-extended to 64 bits
                 self.gpr[rd] = a.wrapping_sub(b) as u64;
                 self.cycles += 1;
             }
             0x23 => {
-                // SUBU - Subtract Unsigned
+                // SUBU - Subtract Unsigned (no overflow trap)
+                // Treat as 32-bit operation, sign-extend result to 64 bits
                 self.gpr[rd] =
                     (self.gpr[rs] as u32).wrapping_sub(self.gpr[rt] as u32) as i32 as u64;
                 self.cycles += 1;
@@ -657,6 +671,9 @@ impl<M: MemoryMips> CpuMips<M> {
         let rt = ((instr >> 16) & 0x1F) as usize;
         let imm = instr & 0xFFFF;
 
+        // Sign extension pattern: Shift into upper 16 bits of 32-bit word,
+        // then sign-extend to 64 bits
+        // Example: LUI $t0, 0x1234 -> $t0 = 0xFFFFFFFF12340000 (if bit 15 was set)
         self.gpr[rt] = ((imm << 16) as i32) as u64;
         self.cycles += 1;
     }
@@ -669,7 +686,9 @@ impl<M: MemoryMips> CpuMips<M> {
 
         let addr = (self.gpr[rs] as i64).wrapping_add(offset as i64) as u32;
         let val = self.memory.read_word(addr);
-        self.gpr[rt] = val as i32 as u64; // Sign-extend to 64-bit
+        // Critical: Sign-extend 32-bit word to 64 bits
+        // Example: 0x80000000 becomes 0xFFFFFFFF80000000 (negative number)
+        self.gpr[rt] = val as i32 as u64;
         self.cycles += 1;
     }
 

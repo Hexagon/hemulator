@@ -284,6 +284,85 @@ When adding features to the N64 emulator:
 3. **Document limitations**: Update the User Manual when fixing issues
 4. **GPU optimization**: OpenGL renderer provides hardware-accelerated performance
 
+### Common Pitfalls and Edge Cases
+
+When working on the N64 emulator, be aware of these potential issues:
+
+#### Sign Extension (CRITICAL)
+The R4300i is a 64-bit CPU with many 32-bit operations. **Proper sign extension is essential**:
+
+```rust
+// ✅ Correct: Sign-extend 32-bit to 64-bit
+let result = value as i32 as u64;  // First cast to i32 (sign extends), then to u64
+
+// ❌ Incorrect: Zero-extends instead
+let result = value as u64;  // Only for unsigned operations (LWU, LBU, etc.)
+```
+
+**Key locations**:
+- Load Word (LW): Must sign-extend loaded value
+- 32-bit arithmetic (ADD, SUB, MULT): Results must be sign-extended
+- LUI instruction: Shifts into upper 16 bits, then sign-extends
+
+#### Division by Zero
+All division instructions **already handle division by zero correctly**:
+- DIV, DIVU, DDIV, DDIVU check `divisor != 0`
+- If divisor is 0, operation is skipped (HI/LO unchanged)
+- Matches MIPS behavior (no trap, unpredictable result)
+
+#### Overflow Traps (NOT IMPLEMENTED)
+Signed arithmetic instructions (ADD, ADDI, SUB, etc.) **should trap on overflow** per MIPS spec:
+- **Current behavior**: Uses `wrapping_add`/`wrapping_sub` (no trap)
+- **Rationale**: Most N64 software doesn't rely on overflow traps
+- **Unsigned variants** (ADDU, ADDIU, SUBU): Never trap (correct)
+
+#### Memory Alignment
+Load/store instructions have alignment requirements:
+- **LH/SH**: 2-byte aligned
+- **LW/SW**: 4-byte aligned
+- **LD/SD**: 8-byte aligned
+- **Current**: Not validated (most code is properly aligned)
+- **Unaligned access**: Use LWL/LWR/LDL/LDR instructions
+
+#### TLB Translation Edge Cases
+The TLB implementation includes robust edge case handling:
+- **Page mask overflow**: Limited to valid range (0x000-0xFFF)
+- **Physical address overflow**: Ensures result fits in 32 bits
+- **Invalid pages**: V=0 pages are skipped (TLB miss)
+- **ASID matching**: Properly handles global vs. per-process entries
+
+#### Register 0 Immutability
+GPR[0] is hardwired to zero and **automatically enforced**:
+- After every instruction: `self.gpr[0] = 0`
+- No special handling needed in individual instructions
+
+#### Shift Operations
+All shift operations are **safe against overflow**:
+- Uses Rust's `wrapping_shl`/`wrapping_shr`
+- 32-bit shifts: Masked to 5 bits (0-31)
+- 64-bit shifts: Masked to 6 bits (0-63)
+
+### Testing Edge Cases
+
+When adding new CPU instructions or memory operations:
+
+1. **Test sign extension**: Verify negative values extend correctly
+2. **Test division by zero**: Ensure safe handling
+3. **Test alignment**: Consider both aligned and unaligned access
+4. **Test TLB**: Verify page boundaries and ASID matching
+5. **Test Register 0**: Verify it stays zero after all operations
+
+Example test pattern:
+```rust
+#[test]
+fn test_sign_extension_lw() {
+    // Test that LW sign-extends negative values
+    let val: u32 = 0x80000000; // Negative in signed representation
+    let extended = val as i32 as u64;
+    assert_eq!(extended, 0xFFFFFFFF80000000); // Should be sign-extended
+}
+```
+
 ## References
 
 - **Project Documentation**: See [README.md](../../../README.md), [User Manual](https://hemulator.56k.guru/user/manual.html), and [AGENTS.md](../../../AGENTS.md)
