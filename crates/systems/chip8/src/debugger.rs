@@ -81,13 +81,7 @@ impl Debugger for Chip8System {
         state
     }
 
-    fn get_execution_history(&self) -> Vec<emu_core::debug::ExecutionTrace> {
-        self.instruction_tracer.get_history()
-    }
-
-    fn has_execution_history(&self) -> bool {
-        self.instruction_tracer.is_enabled()
-    }
+    emu_core::impl_debugger_execution_history!();
 }
 
 #[cfg(test)]

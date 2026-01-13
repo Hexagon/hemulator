@@ -5,9 +5,7 @@
 
 use crate::N64System;
 use emu_core::cpu_mips_r4300i::MemoryMips;
-use emu_core::debug::{
-    CpuRegister, CpuState, Debugger, DisassembledInstruction, ExecutionTrace, MemoryRegion,
-};
+use emu_core::debug::{CpuRegister, CpuState, Debugger, DisassembledInstruction, MemoryRegion};
 use emu_core::disasm_mips_r4300i;
 
 impl Debugger for N64System {
@@ -223,11 +221,5 @@ impl Debugger for N64System {
         state
     }
 
-    fn get_execution_history(&self) -> Vec<ExecutionTrace> {
-        self.instruction_tracer.get_history()
-    }
-
-    fn has_execution_history(&self) -> bool {
-        self.instruction_tracer.is_enabled()
-    }
+    emu_core::impl_debugger_execution_history!();
 }
