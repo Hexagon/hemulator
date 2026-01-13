@@ -1173,7 +1173,12 @@ impl Ppu {
         // This is critical for proper mid-frame scroll splits (e.g., SMB3 HUD).
         // When fine_y overflows from 7 to 0, coarse_y is incremented.
         // When coarse_y reaches 30, it wraps to 0 and nametable Y is toggled.
-        if rendering_enabled {
+        //
+        // IMPORTANT: Skip increment for scanline 0 to avoid double-initialization.
+        // At scanline 0, v was just initialized from t (lines 879-887), so we shouldn't
+        // increment it yet. This prevents the "off by one scanline" bug that causes
+        // 8-pixel vertical shifts and flickering.
+        if rendering_enabled && y != 0 {
             let mut v = self.vram_addr.get();
             let fine_y = (v >> 12) & 0x0007;
 
