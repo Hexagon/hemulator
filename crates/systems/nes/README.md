@@ -99,6 +99,21 @@ The 2C02 PPU implements:
   - 256-byte OAM (Object Attribute Memory)
   
 - **Timing Model**: Frame-based rendering with scanline support
+  - **NTSC**: 262 scanlines per frame (60.1 Hz refresh rate)
+    - 240 visible scanlines (0-239)
+    - Post-render scanline (240)
+    - 20 VBlank scanlines (241-260)
+    - Pre-render scanline (261)
+  - **PAL**: 312 scanlines per frame (50.0 Hz refresh rate)
+    - 240 visible scanlines (0-239)
+    - Post-render scanline (240)
+    - 70 VBlank scanlines (241-310) - 3.3x longer than NTSC
+    - Pre-render scanline (311)
+  - **VBlank**: Starts at scanline 241 for both NTSC and PAL
+  - **Timing Detection**: Automatic from iNES header (byte 9 for 1.0, byte 12 for 2.0)
+  - **Dynamic Switching**: Can change timing mode at runtime via `set_timing()`
+
+- **APU Timing**: Audio timing automatically adjusts to match ROM timing mode
   - Renders complete 256x240 frames on-demand
   - Scanline rendering for mid-frame register changes
   - Suitable for ~90%+ of games
