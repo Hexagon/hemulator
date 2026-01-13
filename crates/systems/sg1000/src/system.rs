@@ -46,9 +46,11 @@ pub struct Sg1000System {
     // Timing
     cycles: u64,
     cpu_cycles_per_frame: u32,
+    #[allow(dead_code)]
     scanline_cycles: u32,
 
     // Audio buffer
+    #[allow(dead_code)]
     audio_buffer: Vec<i16>,
 
     // Loaded media
@@ -119,7 +121,7 @@ impl System for Sg1000System {
         while cycles_this_frame < self.cpu_cycles_per_frame {
             // Execute one CPU instruction
             let cycles = self.cpu.step();
-            cycles_this_frame += cycles as u32;
+            cycles_this_frame += cycles;
             self.cycles += cycles as u64;
 
             // Check for VDP interrupt

@@ -35,6 +35,7 @@ impl Sg1000Psg {
     }
 
     /// Step the PSG by the given number of CPU cycles and collect audio samples
+    #[allow(dead_code)]
     pub fn step(&mut self, _cycles: u32) -> Vec<AudioSample> {
         // For now, generate based on a fixed sample rate
         const SAMPLE_HZ: f64 = 44_100.0;

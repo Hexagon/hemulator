@@ -173,6 +173,7 @@ impl Vdp {
     }
 
     /// Set current scanline (for cycle-accurate timing)
+    #[allow(dead_code)]
     pub fn set_scanline(&mut self, scanline: u16) {
         let old_scanline = self.scanline;
 
@@ -311,6 +312,7 @@ impl Vdp {
     }
 
     /// Render a single scanline
+    #[allow(dead_code)]
     fn render_scanline(&mut self, line: u8) {
         // Get graphics mode from registers
         let mode = self.get_graphics_mode();
@@ -338,6 +340,7 @@ impl Vdp {
     }
 
     /// Get current graphics mode from register bits
+    #[allow(dead_code)]
     fn get_graphics_mode(&self) -> u8 {
         let m1 = (self.registers[0] & 0x02) != 0;
         let m2 = (self.registers[1] & 0x08) != 0;
@@ -354,6 +357,7 @@ impl Vdp {
     }
 
     /// Render Graphics I mode
+    #[allow(dead_code)]
     fn render_graphics_i(&mut self, line: u8, line_offset: usize) {
         // Name table base address (register 2, bits 3-0)
         let name_table_base = ((self.registers[2] & 0x0F) as usize) << 10;
@@ -392,6 +396,7 @@ impl Vdp {
     }
 
     /// Render Text mode (40 column)
+    #[allow(dead_code)]
     fn render_text_mode(&mut self, line: u8, line_offset: usize) {
         // Name table base address
         let name_table_base = ((self.registers[2] & 0x0F) as usize) << 10;
@@ -431,6 +436,7 @@ impl Vdp {
     }
 
     /// Render Graphics II mode
+    #[allow(dead_code)]
     fn render_graphics_ii(&mut self, line: u8, line_offset: usize) {
         // Name table base address
         let name_table_base = ((self.registers[2] & 0x0F) as usize) << 10;
@@ -474,6 +480,7 @@ impl Vdp {
     }
 
     /// Render Multicolor mode
+    #[allow(dead_code)]
     fn render_multicolor_mode(&mut self, line: u8, line_offset: usize) {
         // Name table base address
         let name_table_base = ((self.registers[2] & 0x0F) as usize) << 10;
@@ -513,6 +520,7 @@ impl Vdp {
     }
 
     /// Render sprites
+    #[allow(dead_code)]
     fn render_sprites(&mut self, line: u8, line_offset: usize) {
         // Sprite attribute table base address (register 5, bits 6-0)
         let sprite_attr_base = ((self.registers[5] & 0x7F) as usize) << 7;

@@ -215,6 +215,9 @@ impl EmulatorSystem {
             EmulatorSystem::ColecoVision(sys) => sys
                 .mount(mount_point_id, data)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::SG1000(sys) => sys
+                .mount(mount_point_id, data)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         }
     }
 
@@ -262,6 +265,9 @@ impl EmulatorSystem {
                 .unmount(mount_point_id)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
             EmulatorSystem::ColecoVision(sys) => sys
+                .unmount(mount_point_id)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::SG1000(sys) => sys
                 .unmount(mount_point_id)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         }
@@ -513,6 +519,10 @@ impl EmulatorSystem {
                 // Z80 CPU - get PC from debugger
                 None // TODO: Implement when debugger provides PC
             }
+            EmulatorSystem::SG1000(_) => {
+                // Z80 CPU - get PC from debugger
+                None // TODO: Implement when debugger provides PC
+            }
         }
     }
 
@@ -528,7 +538,7 @@ impl EmulatorSystem {
             EmulatorSystem::SMS(_) => Some(3.58), // SMS Z80A (3.58 MHz NTSC)
             EmulatorSystem::Chip8(_) => Some(0.0007), // CHIP-8 runs at ~700 instructions/sec (~0.7 kHz)
             EmulatorSystem::ColecoVision(_) => Some(3.58), // ColecoVision Z80A (3.579545 MHz NTSC)
-            EmulatorSystem::SG1000(_) => Some(3.58), // SG-1000 Z80A (3.579545 MHz NTSC)
+            EmulatorSystem::SG1000(_) => Some(3.58),  // SG-1000 Z80A (3.579545 MHz NTSC)
         }
     }
 
@@ -566,6 +576,7 @@ impl EmulatorSystem {
             EmulatorSystem::SMS(_) => emu_core::apu::TimingMode::Ntsc,
             EmulatorSystem::Chip8(_) => emu_core::apu::TimingMode::Ntsc,
             EmulatorSystem::ColecoVision(_) => emu_core::apu::TimingMode::Ntsc,
+            EmulatorSystem::SG1000(_) => emu_core::apu::TimingMode::Ntsc,
         }
     }
 
@@ -580,7 +591,7 @@ impl EmulatorSystem {
             EmulatorSystem::Chip8(_) => vec![0; count], // TODO: Implement CHIP-8 audio (single beep tone)
             EmulatorSystem::SMS(sys) => sys.get_audio_samples(count),
             EmulatorSystem::ColecoVision(_) => vec![0; count], // TODO: Implement ColecoVision audio
-            EmulatorSystem::SG1000(_) => vec![0; count], // TODO: Implement SG-1000 audio
+            EmulatorSystem::SG1000(_) => vec![0; count],       // TODO: Implement SG-1000 audio
         }
     }
 
@@ -595,6 +606,7 @@ impl EmulatorSystem {
             EmulatorSystem::SMS(_) => (256, 192),
             EmulatorSystem::Chip8(_) => (64, 32),
             EmulatorSystem::ColecoVision(_) => (256, 192), // TMS9918A resolution
+            EmulatorSystem::SG1000(_) => (256, 192),       // TMS9918A resolution
         }
     }
 
@@ -625,6 +637,7 @@ impl EmulatorSystem {
             EmulatorSystem::SMS(_) => SystemType::SMS,
             EmulatorSystem::Chip8(_) => SystemType::Chip8,
             EmulatorSystem::ColecoVision(_) => SystemType::ColecoVision,
+            EmulatorSystem::SG1000(_) => SystemType::SG1000,
         }
     }
 
@@ -720,6 +733,7 @@ impl EmulatorSystem {
             EmulatorSystem::SMS(_) => vec!["Software".to_string()],
             EmulatorSystem::Chip8(_) => vec!["Software".to_string()],
             EmulatorSystem::ColecoVision(_) => vec!["Software".to_string()],
+            EmulatorSystem::SG1000(_) => vec!["Software".to_string()],
         }
     }
 
@@ -736,6 +750,7 @@ impl EmulatorSystem {
             EmulatorSystem::SMS(_) => None,
             EmulatorSystem::Chip8(_) => None,
             EmulatorSystem::ColecoVision(_) => None,
+            EmulatorSystem::SG1000(_) => None,
         }
     }
 
@@ -751,6 +766,7 @@ impl EmulatorSystem {
             EmulatorSystem::SMS(sys) => Some(sys.get_instruction_tracer()),
             EmulatorSystem::Chip8(sys) => Some(sys.get_instruction_tracer()),
             EmulatorSystem::ColecoVision(sys) => Some(&sys.instruction_tracer),
+            EmulatorSystem::SG1000(sys) => Some(&sys.instruction_tracer),
         }
     }
 }
@@ -1715,6 +1731,7 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
             EmulatorSystem::N64(s) => s.set_instruction_tracing(true),
             EmulatorSystem::PC(s) => s.set_instruction_tracing(true),
             EmulatorSystem::ColecoVision(s) => s.instruction_tracer.set_enabled(true),
+            EmulatorSystem::SG1000(s) => s.instruction_tracer.set_enabled(true),
         }
     }
 
@@ -3947,19 +3964,32 @@ fn main() {
                                         rom_hash = Some(GameSaves::rom_hash(&data));
                                         let mut sg1000_sys = emu_sg1000::Sg1000System::new();
                                         if let Err(e) = sg1000_sys.mount("Cartridge", &data) {
-                                            egui_app.status_bar.set_message(format!("Error: {}", e));
+                                            egui_app
+                                                .status_bar
+                                                .set_message(format!("Error: {}", e));
                                             rom_hash = None;
                                         } else {
                                             rom_loaded = true;
                                             sys = EmulatorSystem::SG1000(Box::new(sg1000_sys));
-                                            egui_app.property_pane.system_name = "SG-1000".to_string();
-                                            runtime_state.set_mount("Cartridge".to_string(), path_str.clone());
+                                            egui_app.property_pane.system_name =
+                                                "SG-1000".to_string();
+                                            runtime_state.set_mount(
+                                                "Cartridge".to_string(),
+                                                path_str.clone(),
+                                            );
                                             settings.add_recent_file(path_str.clone());
                                             if let Err(e) = settings.save() {
-                                                eprintln!("Warning: Failed to save settings: {}", e);
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
                                             }
-                                            egui_app.update_recent_files(settings.get_recent_files().to_vec());
-                                            egui_app.status_bar.set_message("SG-1000 cartridge loaded".to_string());
+                                            egui_app.update_recent_files(
+                                                settings.get_recent_files().to_vec(),
+                                            );
+                                            egui_app.status_bar.set_message(
+                                                "SG-1000 cartridge loaded".to_string(),
+                                            );
                                             let _ = sys.resolution();
                                             if let Some(ref hash) = rom_hash {
                                                 _game_saves = GameSaves::load(hash);
@@ -4557,21 +4587,36 @@ fn main() {
                                         rom_hash = Some(GameSaves::rom_hash(&data));
                                         let mut sg1000_sys = emu_sg1000::Sg1000System::new();
                                         if let Err(e) = sg1000_sys.mount("Cartridge", &data) {
-                                            egui_app.status_bar.set_message(format!("Error: {}", e));
+                                            egui_app
+                                                .status_bar
+                                                .set_message(format!("Error: {}", e));
                                             rom_hash = None;
                                         } else {
                                             rom_loaded = true;
                                             sys = EmulatorSystem::SG1000(Box::new(sg1000_sys));
-                                            egui_app.property_pane.system_name = "SG-1000".to_string();
-                                            egui_app.property_pane.rendering_backend = sys.get_current_renderer_name();
-                                            egui_app.property_pane.available_renderers = sys.get_available_renderers();
-                                            runtime_state.set_mount("Cartridge".to_string(), file_path.clone());
+                                            egui_app.property_pane.system_name =
+                                                "SG-1000".to_string();
+                                            egui_app.property_pane.rendering_backend =
+                                                sys.get_current_renderer_name();
+                                            egui_app.property_pane.available_renderers =
+                                                sys.get_available_renderers();
+                                            runtime_state.set_mount(
+                                                "Cartridge".to_string(),
+                                                file_path.clone(),
+                                            );
                                             settings.add_recent_file(file_path.clone());
                                             if let Err(e) = settings.save() {
-                                                eprintln!("Warning: Failed to save settings: {}", e);
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
                                             }
-                                            egui_app.update_recent_files(settings.get_recent_files().to_vec());
-                                            egui_app.status_bar.set_message("SG-1000 cartridge loaded".to_string());
+                                            egui_app.update_recent_files(
+                                                settings.get_recent_files().to_vec(),
+                                            );
+                                            egui_app.status_bar.set_message(
+                                                "SG-1000 cartridge loaded".to_string(),
+                                            );
                                             let _ = sys.resolution();
                                             if let Some(ref hash) = rom_hash {
                                                 _game_saves = GameSaves::load(hash);
