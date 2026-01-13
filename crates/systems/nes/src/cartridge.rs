@@ -146,18 +146,18 @@ impl Cartridge {
         let (mut final_mapper, mut final_mirroring) = (mapper, mirroring);
 
         if let Some(db_entry) = crate::rom_db::lookup_rom(crc32) {
+            // Helper to format board name for logging
+            let board_info = db_entry
+                .board
+                .map(|b| format!(" ({})", b))
+                .unwrap_or_default();
+
             // Apply mapper override if present
             if let Some(db_mapper) = db_entry.mapper {
                 log(LogCategory::Bus, LogLevel::Info, || {
                     format!(
                         "NES ROM DB: Overriding mapper {} -> {} for CRC32 0x{:08X}{}",
-                        mapper,
-                        db_mapper,
-                        crc32,
-                        db_entry
-                            .board
-                            .map(|b| format!(" ({})", b))
-                            .unwrap_or_default()
+                        mapper, db_mapper, crc32, board_info
                     )
                 });
                 final_mapper = db_mapper;
@@ -168,13 +168,7 @@ impl Cartridge {
                 log(LogCategory::Bus, LogLevel::Info, || {
                     format!(
                         "NES ROM DB: Overriding mirroring {:?} -> {:?} for CRC32 0x{:08X}{}",
-                        mirroring,
-                        db_mirroring,
-                        crc32,
-                        db_entry
-                            .board
-                            .map(|b| format!(" ({})", b))
-                            .unwrap_or_default()
+                        mirroring, db_mirroring, crc32, board_info
                     )
                 });
                 final_mirroring = db_mirroring;

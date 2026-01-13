@@ -58,7 +58,21 @@ pub struct RomDbEntry {
 
 impl RomDbEntry {
     /// Create a new database entry with all fields
-    #[allow(dead_code)]
+    ///
+    /// This method is used when populating the ROM database with known ROMs.
+    /// It's currently unused because the database is empty, but will be needed
+    /// when adding actual ROM entries.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// RomDbEntry::new(
+    ///     0x12345678,                      // CRC32 of full ROM file
+    ///     Some(4),                          // Override to mapper 4 (MMC3)
+    ///     Some(Mirroring::Horizontal),      // Override to horizontal mirroring
+    ///     Some("TLSROM"),                   // Board type (optional)
+    /// )
+    /// ```
     pub const fn new(
         crc32: u32,
         mapper: Option<u8>,
