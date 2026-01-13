@@ -337,6 +337,14 @@ impl TabManager {
         self.active_tab = Tab::NewProject;
     }
 
+    pub fn close_new_project_tab(&mut self) {
+        self.new_project_visible = false;
+        // If currently viewing the New Project tab, switch to Emulator tab
+        if self.active_tab == Tab::NewProject {
+            self.active_tab = Tab::Emulator;
+        }
+    }
+
     pub fn update_debug_info(&mut self, info: SystemDebugInfo) {
         self.debug_info = Some(info);
     }

@@ -3594,6 +3594,8 @@ fn main() {
                     egui_app.tab_manager.show_new_project_tab();
                 }
                 MenuAction::OpenRom => {
+                    // Track whether a ROM was successfully loaded in this handler
+                    let rom_loaded_before = rom_loaded;
                     // Open ROM file dialog
                     if let Some(path) = rfd::FileDialog::new()
                         .add_filter(
@@ -3661,6 +3663,8 @@ fn main() {
                                             egui_app.status_bar.set_success(
                                                 "NES ROM loaded successfully".to_string(),
                                             );
+                                            // Close the system selector since a ROM is now loaded
+                                            egui_app.tab_manager.close_new_project_tab();
                                             // Update resolution
                                             let _ = sys.resolution();
                                             // Load save states for this ROM
@@ -4064,8 +4068,14 @@ fn main() {
                             }
                         }
                     }
+                    // Close the system selector if a ROM was successfully loaded
+                    if !rom_loaded_before && rom_loaded {
+                        egui_app.tab_manager.close_new_project_tab();
+                    }
                 }
                 MenuAction::OpenRecentFile(file_path) => {
+                    // Track whether a ROM/project was successfully loaded in this handler
+                    let rom_loaded_before = rom_loaded;
                     // Determine if this is a .hemu project or a ROM file
                     let path = PathBuf::from(&file_path);
 
@@ -4691,6 +4701,10 @@ fn main() {
                             }
                         }
                     }
+                    // Close the system selector if a ROM was successfully loaded
+                    if !rom_loaded_before && rom_loaded {
+                        egui_app.tab_manager.close_new_project_tab();
+                    }
                 }
                 MenuAction::ClearRecentFiles => {
                     settings.clear_recent_files();
@@ -4833,6 +4847,8 @@ fn main() {
                     egui_app.status_bar.set_message(msg.to_string());
                 }
                 MenuAction::OpenProject => {
+                    // Track whether a project was successfully loaded in this handler
+                    let rom_loaded_before = rom_loaded;
                     // Open .hemu project file dialog
                     if let Some(path) = rfd::FileDialog::new()
                         .add_filter("Hemulator Project", &["hemu"])
@@ -4997,6 +5013,10 @@ fn main() {
                                     .set_message(format!("Failed to load project: {}", e));
                             }
                         }
+                    }
+                    // Close the system selector if a project was successfully loaded
+                    if !rom_loaded_before && rom_loaded {
+                        egui_app.tab_manager.close_new_project_tab();
                     }
                 }
                 MenuAction::SaveProject => {
