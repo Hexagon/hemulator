@@ -905,7 +905,7 @@ impl Ppu {
 
         // Note: In production (cycle-accurate mode with tick()), v register initialization
         // and increment happen in tick() at specific dots:
-        // - Pre-render scanline (261) dot 280: vertical bits copied from t to v
+        // - Pre-render scanline (261) dots 280-304: vertical bits copied from t to v
         // - All visible scanlines dot 256: v register incremented
         // - All scanlines dot 257: horizontal bits copied from t to v
         //
