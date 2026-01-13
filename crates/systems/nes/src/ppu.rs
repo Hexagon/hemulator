@@ -829,11 +829,11 @@ impl Ppu {
             new_v = (new_v & !0x041F) | (t & 0x041F); // Horizontal bits
             self.vram_addr.set(new_v);
         }
-        
+
         let mut frame = Frame::new(256, 240);
         for scanline in 0..240 {
             self.render_scanline(scanline, &mut frame);
-            
+
             // Simulate tick()'s dot 256 v register increment (for scanlines 0-238)
             // This would normally happen in tick() but tests don't call tick()
             if rendering_enabled && scanline < 239 {
