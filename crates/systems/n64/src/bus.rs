@@ -472,4 +472,102 @@ impl MemoryMips for N64Bus {
         self.write_word(addr, hi);
         self.write_word(addr + 4, lo);
     }
+
+    // TLB operations for CP0 instructions
+
+    fn tlb_write_indexed(&mut self, index: usize, entry: emu_core::cpu_mips_r4300i::TlbEntryData) {
+        // Convert TlbEntryData to TlbEntry
+        let tlb_entry = crate::tlb::TlbEntry {
+            vpn2: entry.vpn2,
+            asid: entry.asid,
+            global: entry.global,
+            page_mask: entry.page_mask,
+            pfn0: entry.pfn0,
+            c0: entry.c0,
+            d0: entry.d0,
+            v0: entry.v0,
+            pfn1: entry.pfn1,
+            c1: entry.c1,
+            d1: entry.d1,
+            v1: entry.v1,
+        };
+
+        self.tlb.write_entry(index, tlb_entry);
+
+        log(LogCategory::Bus, LogLevel::Debug, || {
+            format!(
+                "N64 TLB: Write entry at index {} - VPN2=0x{:07X}, ASID=0x{:02X}",
+                index, entry.vpn2, entry.asid
+            )
+        });
+    }
+
+    fn tlb_write_random(&mut self, entry: emu_core::cpu_mips_r4300i::TlbEntryData) {
+        // For random writes, use a simple pseudo-random index based on cycle count
+        // Real hardware uses a random register that decrements, but this is simpler
+        // Use index 8-31 (0-7 are typically wired entries)
+        let random_index = 8
+            + (std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+                % 24) as usize;
+
+        self.tlb_write_indexed(random_index, entry);
+
+        log(LogCategory::Bus, LogLevel::Debug, || {
+            format!(
+                "N64 TLB: Write entry at random index {} - VPN2=0x{:07X}, ASID=0x{:02X}",
+                random_index, entry.vpn2, entry.asid
+            )
+        });
+    }
+
+    fn tlb_read_indexed(&self, index: usize) -> Option<emu_core::cpu_mips_r4300i::TlbEntryData> {
+        self.tlb
+            .read_entry(index)
+            .map(|entry| emu_core::cpu_mips_r4300i::TlbEntryData {
+                vpn2: entry.vpn2,
+                asid: entry.asid,
+                global: entry.global,
+                page_mask: entry.page_mask,
+                pfn0: entry.pfn0,
+                c0: entry.c0,
+                d0: entry.d0,
+                v0: entry.v0,
+                pfn1: entry.pfn1,
+                c1: entry.c1,
+                d1: entry.d1,
+                v1: entry.v1,
+            })
+    }
+
+    fn tlb_probe(&self, vpn2: u64, asid: u8) -> Option<usize> {
+        // Probe TLB for matching entry
+        // VPN2 is bits 39-13 of the virtual address
+        // We need to check each entry manually since we can't modify self
+        for (i, entry) in self.tlb.entries.iter().enumerate() {
+            let mask = (entry.page_mask as u64) << 12;
+            let vpn_mask = !mask;
+            if (entry.vpn2 & vpn_mask) == (vpn2 & vpn_mask) && (entry.global || entry.asid == asid)
+            {
+                log(LogCategory::Bus, LogLevel::Debug, || {
+                    format!(
+                        "N64 TLB: Probe found match at index {} for VPN2=0x{:07X}, ASID=0x{:02X}",
+                        i, vpn2, asid
+                    )
+                });
+                return Some(i);
+            }
+        }
+
+        log(LogCategory::Bus, LogLevel::Debug, || {
+            format!(
+                "N64 TLB: Probe found no match for VPN2=0x{:07X}, ASID=0x{:02X}",
+                vpn2, asid
+            )
+        });
+
+        None
+    }
 }

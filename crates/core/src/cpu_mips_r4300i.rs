@@ -68,6 +68,36 @@
 //! - **64-bit shifts**: Shift amount masked to 6 bits (0-63)
 //! - Safe against overflow/underflow
 
+/// TLB entry data structure for CP0 TLB instructions
+/// This is a simplified representation that matches CP0 register format
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TlbEntryData {
+    /// Virtual Page Number / 2 (from CP0 EntryHi)
+    pub vpn2: u64,
+    /// Address Space ID (from CP0 EntryHi)
+    pub asid: u8,
+    /// Global bit
+    pub global: bool,
+    /// Page mask (from CP0 PageMask)
+    pub page_mask: u32,
+    /// Even page physical frame number (from CP0 EntryLo0)
+    pub pfn0: u32,
+    /// Even page cache coherency
+    pub c0: u8,
+    /// Even page dirty bit
+    pub d0: bool,
+    /// Even page valid bit
+    pub v0: bool,
+    /// Odd page physical frame number (from CP0 EntryLo1)
+    pub pfn1: u32,
+    /// Odd page cache coherency
+    pub c1: u8,
+    /// Odd page dirty bit
+    pub d1: bool,
+    /// Odd page valid bit
+    pub v1: bool,
+}
+
 /// Memory interface trait for the MIPS R4300i CPU
 ///
 /// Systems using the R4300i must implement this trait to provide memory access.
@@ -95,6 +125,32 @@ pub trait MemoryMips {
 
     /// Write a doubleword (64-bit) to memory at the given address
     fn write_doubleword(&mut self, addr: u32, val: u64);
+
+    /// TLB operations for CP0 instructions (optional - default no-op)
+    /// These are only needed for systems with TLB support (N64)
+    ///
+    /// Write TLB entry at specified index (TLBWI)
+    fn tlb_write_indexed(&mut self, _index: usize, _entry: TlbEntryData) {
+        // Default: no-op for systems without TLB
+    }
+
+    /// Write TLB entry at random index (TLBWR)
+    fn tlb_write_random(&mut self, _entry: TlbEntryData) {
+        // Default: no-op for systems without TLB
+    }
+
+    /// Read TLB entry at specified index (TLBR)
+    fn tlb_read_indexed(&self, _index: usize) -> Option<TlbEntryData> {
+        // Default: no-op for systems without TLB
+        None
+    }
+
+    /// Probe TLB for matching entry (TLBP)
+    /// Returns index of matching entry, or None if no match
+    fn tlb_probe(&self, _vpn2: u64, _asid: u8) -> Option<usize> {
+        // Default: no-op for systems without TLB
+        None
+    }
 }
 
 /// MIPS R4300i CPU state and execution engine
@@ -1265,20 +1321,20 @@ impl<M: MemoryMips> CpuMips<M> {
                 let funct = instr & 0x3F;
                 match funct {
                     0x01 => {
-                        // TLBR - Read Indexed TLB Entry (NOP for now)
-                        self.cycles += 1;
+                        // TLBR - Read Indexed TLB Entry
+                        self.execute_tlbr();
                     }
                     0x02 => {
-                        // TLBWI - Write Indexed TLB Entry (NOP for now)
-                        self.cycles += 1;
+                        // TLBWI - Write Indexed TLB Entry
+                        self.execute_tlbwi();
                     }
                     0x06 => {
-                        // TLBWR - Write Random TLB Entry (NOP for now)
-                        self.cycles += 1;
+                        // TLBWR - Write Random TLB Entry
+                        self.execute_tlbwr();
                     }
                     0x08 => {
-                        // TLBP - Probe TLB for Matching Entry (NOP for now)
-                        self.cycles += 1;
+                        // TLBP - Probe TLB for Matching Entry
+                        self.execute_tlbp();
                     }
                     0x18 => {
                         // ERET - Exception Return (basic implementation)
@@ -1448,6 +1504,119 @@ impl<M: MemoryMips> CpuMips<M> {
             _ => {
                 self.cycles += 1;
             }
+        }
+    }
+
+    // ============================================================================
+    // TLB Instructions (CP0)
+    // ============================================================================
+
+    /// Execute TLBR - Read Indexed TLB Entry
+    /// Reads TLB entry at index specified by CP0 Index register
+    /// and loads it into CP0 EntryHi, EntryLo0, EntryLo1, PageMask
+    fn execute_tlbr(&mut self) {
+        let index = (self.cp0[CP0_INDEX] & 0x1F) as usize; // Bottom 5 bits
+
+        if let Some(entry) = self.memory.tlb_read_indexed(index) {
+            // Write to CP0 registers
+            // EntryHi: VPN2 (bits 39-13) and ASID (bits 7-0)
+            self.cp0[CP0_ENTRYHI] = (entry.vpn2 << 13) | (entry.asid as u64);
+
+            // EntryLo0: Even page (PFN, C, D, V, G)
+            self.cp0[CP0_ENTRYLO0] = ((entry.pfn0 as u64) << 6)
+                | ((entry.c0 as u64) << 3)
+                | ((entry.d0 as u64) << 2)
+                | ((entry.v0 as u64) << 1)
+                | (entry.global as u64);
+
+            // EntryLo1: Odd page (PFN, C, D, V, G)
+            self.cp0[CP0_ENTRYLO1] = ((entry.pfn1 as u64) << 6)
+                | ((entry.c1 as u64) << 3)
+                | ((entry.d1 as u64) << 2)
+                | ((entry.v1 as u64) << 1)
+                | (entry.global as u64);
+
+            // PageMask
+            self.cp0[CP0_PAGEMASK] = entry.page_mask as u64;
+        }
+
+        self.cycles += 1;
+    }
+
+    /// Execute TLBWI - Write Indexed TLB Entry
+    /// Writes TLB entry from CP0 registers to index specified by CP0 Index register
+    fn execute_tlbwi(&mut self) {
+        let index = (self.cp0[CP0_INDEX] & 0x1F) as usize; // Bottom 5 bits
+        let entry = self.cp0_to_tlb_entry();
+        self.memory.tlb_write_indexed(index, entry);
+        self.cycles += 1;
+    }
+
+    /// Execute TLBWR - Write Random TLB Entry
+    /// Writes TLB entry from CP0 registers to random index
+    fn execute_tlbwr(&mut self) {
+        let entry = self.cp0_to_tlb_entry();
+        self.memory.tlb_write_random(entry);
+        self.cycles += 1;
+    }
+
+    /// Execute TLBP - Probe TLB for Matching Entry
+    /// Searches TLB for entry matching CP0 EntryHi
+    /// Sets CP0 Index to matching entry index, or sets bit 31 if no match
+    fn execute_tlbp(&mut self) {
+        let vpn2 = (self.cp0[CP0_ENTRYHI] >> 13) & 0x07FFFFFF;
+        let asid = (self.cp0[CP0_ENTRYHI] & 0xFF) as u8;
+
+        if let Some(index) = self.memory.tlb_probe(vpn2, asid) {
+            // Found matching entry - set Index register
+            self.cp0[CP0_INDEX] = index as u64;
+        } else {
+            // No match - set bit 31 (probe failure)
+            self.cp0[CP0_INDEX] = 0x8000_0000;
+        }
+
+        self.cycles += 1;
+    }
+
+    /// Convert CP0 registers to TLB entry data
+    fn cp0_to_tlb_entry(&self) -> TlbEntryData {
+        // Extract from CP0 EntryHi
+        let vpn2 = (self.cp0[CP0_ENTRYHI] >> 13) & 0x07FFFFFF;
+        let asid = (self.cp0[CP0_ENTRYHI] & 0xFF) as u8;
+
+        // Extract from CP0 EntryLo0 (even page)
+        let pfn0 = ((self.cp0[CP0_ENTRYLO0] >> 6) & 0x00FFFFFF) as u32;
+        let c0 = ((self.cp0[CP0_ENTRYLO0] >> 3) & 0x7) as u8;
+        let d0 = ((self.cp0[CP0_ENTRYLO0] >> 2) & 0x1) != 0;
+        let v0 = ((self.cp0[CP0_ENTRYLO0] >> 1) & 0x1) != 0;
+        let g0 = (self.cp0[CP0_ENTRYLO0] & 0x1) != 0;
+
+        // Extract from CP0 EntryLo1 (odd page)
+        let pfn1 = ((self.cp0[CP0_ENTRYLO1] >> 6) & 0x00FFFFFF) as u32;
+        let c1 = ((self.cp0[CP0_ENTRYLO1] >> 3) & 0x7) as u8;
+        let d1 = ((self.cp0[CP0_ENTRYLO1] >> 2) & 0x1) != 0;
+        let v1 = ((self.cp0[CP0_ENTRYLO1] >> 1) & 0x1) != 0;
+        let g1 = (self.cp0[CP0_ENTRYLO1] & 0x1) != 0;
+
+        // Global bit is set if both pages have G=1
+        let global = g0 && g1;
+
+        // Extract from CP0 PageMask
+        let page_mask = (self.cp0[CP0_PAGEMASK] & 0x01FFE000) as u32;
+
+        TlbEntryData {
+            vpn2,
+            asid,
+            global,
+            page_mask,
+            pfn0,
+            c0,
+            d0,
+            v0,
+            pfn1,
+            c1,
+            d1,
+            v1,
         }
     }
 }
