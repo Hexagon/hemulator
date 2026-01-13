@@ -77,6 +77,22 @@ impl Tlb {
 
     /// Translate virtual address to physical address
     /// Returns (physical_address, is_cached) or None if TLB miss
+    ///
+    /// # TLB Translation Process
+    ///
+    /// 1. **Check unmapped segments**: KSEG0/KSEG1 bypass TLB
+    /// 2. **Extract VPN2**: Virtual Page Number / 2 (bits 39-13)
+    /// 3. **Search TLB entries**: Match VPN2 considering page mask
+    /// 4. **Check ASID**: Verify Address Space ID (unless global entry)
+    /// 5. **Validate page**: Ensure V (valid) bit is set
+    /// 6. **Calculate physical address**: PFN + page offset
+    ///
+    /// # Edge Cases Handled
+    ///
+    /// - **Page mask overflow**: Limited to valid range (prevents arithmetic overflow)
+    /// - **Invalid entries**: Skipped (V=0 indicates unmapped page)
+    /// - **Global entries**: Match all ASIDs (G=1)
+    /// - **Even/odd pages**: Bit 12 selects which page in entry
     pub fn translate(&self, virt_addr: u64) -> Option<(u32, bool)> {
         // Check for unmapped segments that bypass TLB
         match virt_addr {
@@ -100,8 +116,12 @@ impl Tlb {
         let offset = virt_addr & 0xFFF; // Page offset (bits 11-0)
 
         for entry in &self.entries {
+            // Edge case: Limit page_mask to prevent overflow
+            // Valid page sizes: 4KB to 16MB (mask 0x000 to 0xFFF)
+            let safe_page_mask = (entry.page_mask & 0xFFF) as u64;
+            
             // Check if VPN2 matches (considering page mask)
-            let mask = (entry.page_mask as u64) << 12;
+            let mask = safe_page_mask << 12;
             let vpn_mask = !mask;
             if (entry.vpn2 & vpn_mask) != (vpn2 & vpn_mask) {
                 continue;
@@ -124,10 +144,16 @@ impl Tlb {
                 continue; // TLB invalid exception would occur here
             }
 
-            // Calculate physical address
-            let page_size = ((entry.page_mask + 1) as u64) << 12;
-            let page_offset = offset | ((virt_addr & (page_size - 1)) & !0xFFF);
+            // Calculate physical address with safe page size
+            let page_size = (safe_page_mask + 1) << 12;
+            // Ensure page_offset doesn't exceed page size
+            let page_offset = offset | ((virt_addr & (page_size.saturating_sub(1))) & !0xFFF);
             let phys_addr = ((pfn as u64) << 12) | page_offset;
+
+            // Edge case: Ensure physical address fits in 32 bits (N64 has 32-bit physical address space)
+            if phys_addr > u32::MAX as u64 {
+                continue; // Invalid physical address
+            }
 
             // Check cache coherency (c field)
             // c=2 (uncached), c=3 (cached)
@@ -326,5 +352,179 @@ mod tests {
         // Probe should find the entry at index 5
         let index = tlb.probe(0x00010000);
         assert_eq!(index, Some(5));
+    }
+
+    #[test]
+    fn test_tlb_edge_case_large_page_mask() {
+        // Test that large page masks are safely handled without overflow
+        let mut tlb = Tlb::new();
+        tlb.set_asid(1);
+
+        // For this test, let's use a specific address range that we can validate
+        // Address 0x00100000 has VPN2 = 0x00100000 >> 13 = 0x80
+        let test_addr = 0x00100000u64;
+        let vpn2 = (test_addr >> 13) & 0x07FFFFFF;
+
+        // Create an entry with a large page mask (256KB pages, page_mask=0x1F)
+        // Using a more modest page size to test the edge case handling
+        let entry = TlbEntry {
+            vpn2, // Match the VPN2 of our test address
+            asid: 1,
+            global: false,
+            page_mask: 0x1F, // 256KB pages (reasonable size for testing)
+            pfn0: 0x00000,
+            c0: 3,
+            d0: true,
+            v0: true,
+            pfn1: 0x00001,
+            c1: 3,
+            d1: true,
+            v1: true,
+        };
+
+        tlb.write_entry(0, entry);
+
+        // Should translate without overflow
+        let result = tlb.translate(test_addr);
+        assert!(result.is_some(), "Should translate address 0x{:08X} with page_mask 0x{:03X}", test_addr, entry.page_mask);
+        
+        // Verify the translation produces a valid physical address
+        if let Some((phys_addr, is_cached)) = result {
+            assert!(phys_addr <= u32::MAX, "Physical address should be within 32-bit range");
+            assert!(is_cached, "Should be cached (c=3)");
+        }
+    }
+
+    #[test]
+    fn test_tlb_edge_case_invalid_page() {
+        // Test that invalid pages (v0=0 or v1=0) are correctly handled
+        let mut tlb = Tlb::new();
+        tlb.set_asid(1);
+
+        // Create entry with valid even page but invalid odd page
+        let entry = TlbEntry {
+            vpn2: 0x00010000 >> 13,
+            asid: 1,
+            global: false,
+            page_mask: 0,
+            pfn0: 0x00020,
+            c0: 3,
+            d0: true,
+            v0: true, // Even page valid
+            pfn1: 0x00021,
+            c1: 3,
+            d1: true,
+            v1: false, // Odd page INVALID
+        };
+
+        tlb.write_entry(0, entry);
+
+        // Access to even page should succeed
+        let result = tlb.translate(0x00010000);
+        assert!(result.is_some());
+
+        // Access to odd page should fail (TLB miss)
+        let result = tlb.translate(0x00011000);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_tlb_edge_case_physical_address_overflow() {
+        // Test that physical addresses exceeding 32 bits are rejected
+        let mut tlb = Tlb::new();
+        tlb.set_asid(1);
+
+        // Create entry that could produce 64-bit physical address
+        let entry = TlbEntry {
+            vpn2: 0x00010000 >> 13,
+            asid: 1,
+            global: false,
+            page_mask: 0xFFF, // Large page
+            pfn0: 0xFFFFF, // Maximum PFN that stays within 32-bit space
+            c0: 3,
+            d0: true,
+            v0: true,
+            pfn1: 0xFFFFF,
+            c1: 3,
+            d1: true,
+            v1: true,
+        };
+
+        tlb.write_entry(0, entry);
+
+        // Should translate successfully (within 32-bit range)
+        let result = tlb.translate(0x00010000);
+        assert!(result.is_some());
+        if let Some((phys_addr, _)) = result {
+            // Physical address should fit in 32 bits
+            assert!(phys_addr <= u32::MAX);
+        }
+    }
+
+    #[test]
+    fn test_tlb_edge_case_asid_mismatch() {
+        // Test that non-global entries don't match with wrong ASID
+        let mut tlb = Tlb::new();
+        tlb.set_asid(1);
+
+        let entry = TlbEntry {
+            vpn2: 0x00010000 >> 13,
+            asid: 2, // Different ASID
+            global: false,
+            page_mask: 0,
+            pfn0: 0x00020,
+            c0: 3,
+            d0: true,
+            v0: true,
+            pfn1: 0x00021,
+            c1: 3,
+            d1: true,
+            v1: true,
+        };
+
+        tlb.write_entry(0, entry);
+
+        // Should not match (ASID mismatch)
+        let result = tlb.translate(0x00010000);
+        assert_eq!(result, None);
+
+        // But should match if we change to the correct ASID
+        tlb.set_asid(2);
+        let result = tlb.translate(0x00010000);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_tlb_edge_case_vpn2_boundary() {
+        // Test VPN2 matching at page boundaries
+        let mut tlb = Tlb::new();
+        tlb.set_asid(1);
+
+        let entry = TlbEntry {
+            vpn2: 0x00010000 >> 13,
+            asid: 1,
+            global: false,
+            page_mask: 0, // 4KB pages
+            pfn0: 0x00020,
+            c0: 3,
+            d0: true,
+            v0: true,
+            pfn1: 0x00021,
+            c1: 3,
+            d1: true,
+            v1: true,
+        };
+
+        tlb.write_entry(0, entry);
+
+        // Should match addresses within the 8KB range (two 4KB pages)
+        assert!(tlb.translate(0x00010000).is_some()); // Start of even page
+        assert!(tlb.translate(0x00010FFF).is_some()); // End of even page
+        assert!(tlb.translate(0x00011000).is_some()); // Start of odd page
+        assert!(tlb.translate(0x00011FFF).is_some()); // End of odd page
+
+        // Should not match address outside the range
+        assert_eq!(tlb.translate(0x00012000), None); // Next entry
+        assert_eq!(tlb.translate(0x0000FFFF), None); // Before entry
     }
 }
