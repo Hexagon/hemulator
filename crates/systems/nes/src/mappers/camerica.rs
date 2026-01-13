@@ -118,13 +118,7 @@ mod tests {
         prg[0] = 0x11; // Bank 0 start
         prg[0x4000] = 0x22; // Bank 1 start
 
-        let cart = Cartridge {
-            prg_rom: prg,
-            chr_rom: vec![],
-            mapper: 71,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Vertical,
-        };
+        let cart = Cartridge::new_test(prg, vec![], 71, Mirroring::Vertical, TimingMode::Ntsc);
 
         let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut camerica = Camerica::new(cart, &mut ppu);
@@ -146,13 +140,7 @@ mod tests {
         prg[0x4000] = 0x22;
         prg[0x8000] = 0x33;
 
-        let cart = Cartridge {
-            prg_rom: prg,
-            chr_rom: vec![],
-            mapper: 71,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Horizontal,
-        };
+        let cart = Cartridge::new_test(prg, vec![], 71, Mirroring::Horizontal, TimingMode::Ntsc);
 
         let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let camerica = Camerica::new(cart, &mut ppu);
@@ -167,13 +155,7 @@ mod tests {
         prg[0] = 0x11;
         prg[0x4000] = 0x22;
 
-        let cart = Cartridge {
-            prg_rom: prg,
-            chr_rom: vec![],
-            mapper: 71,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Vertical,
-        };
+        let cart = Cartridge::new_test(prg, vec![], 71, Mirroring::Vertical, TimingMode::Ntsc);
 
         let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut camerica = Camerica::new(cart, &mut ppu);
@@ -191,13 +173,7 @@ mod tests {
             prg[i * 0x4000] = 0x11 * (i as u8 + 1);
         }
 
-        let cart = Cartridge {
-            prg_rom: prg,
-            chr_rom: vec![],
-            mapper: 71,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Horizontal,
-        };
+        let cart = Cartridge::new_test(prg, vec![], 71, Mirroring::Horizontal, TimingMode::Ntsc);
 
         let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut camerica = Camerica::new(cart, &mut ppu);
@@ -217,13 +193,7 @@ mod tests {
     fn camerica_mirroring_control() {
         let prg = vec![0; 0x8000]; // 2 banks
 
-        let cart = Cartridge {
-            prg_rom: prg,
-            chr_rom: vec![],
-            mapper: 71,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Vertical, // Initial mirroring from header
-        };
+        let cart = Cartridge::new_test(prg, vec![], 71, Mirroring::Vertical, TimingMode::Ntsc);
 
         let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut camerica = Camerica::new(cart, &mut ppu);
@@ -263,13 +233,7 @@ mod tests {
         // in its ROM header. Games can optionally override to single-screen via $9000 writes.
         let prg = vec![0; 0x8000]; // 2 banks
 
-        let cart = Cartridge {
-            prg_rom: prg,
-            chr_rom: vec![],
-            mapper: 71,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Horizontal, // Header says Horizontal (respected for hard-wired PCB)
-        };
+        let cart = Cartridge::new_test(prg, vec![], 71, Mirroring::Horizontal, TimingMode::Ntsc);
 
         let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc); // Initialized with Horizontal
         let mut camerica = Camerica::new(cart, &mut ppu);
@@ -300,13 +264,7 @@ mod tests {
         // All four nametables should map to the same physical RAM
         let prg = vec![0; 0x8000];
 
-        let cart = Cartridge {
-            prg_rom: prg,
-            chr_rom: vec![],
-            mapper: 71,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Vertical, // Initial
-        };
+        let cart = Cartridge::new_test(prg, vec![], 71, Mirroring::Vertical, TimingMode::Ntsc);
 
         let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         ppu.clear_first_frame_lock();
@@ -354,13 +312,7 @@ mod tests {
         // Test that single-screen upper mirroring works correctly for nametable access
         let prg = vec![0; 0x8000];
 
-        let cart = Cartridge {
-            prg_rom: prg,
-            chr_rom: vec![],
-            mapper: 71,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Vertical,
-        };
+        let cart = Cartridge::new_test(prg, vec![], 71, Mirroring::Vertical, TimingMode::Ntsc);
 
         let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         ppu.clear_first_frame_lock();
@@ -406,13 +358,7 @@ mod tests {
         // This is important for games like Fire Hawk that use dynamic mirroring
         let prg = vec![0; 0x8000];
 
-        let cart = Cartridge {
-            prg_rom: prg,
-            chr_rom: vec![],
-            mapper: 71,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Vertical,
-        };
+        let cart = Cartridge::new_test(prg, vec![], 71, Mirroring::Vertical, TimingMode::Ntsc);
 
         let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         ppu.clear_first_frame_lock();
@@ -450,13 +396,7 @@ mod tests {
         // Test that attribute tables work correctly with single-screen mirroring
         let prg = vec![0; 0x8000];
 
-        let cart = Cartridge {
-            prg_rom: prg,
-            chr_rom: vec![],
-            mapper: 71,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Vertical,
-        };
+        let cart = Cartridge::new_test(prg, vec![], 71, Mirroring::Vertical, TimingMode::Ntsc);
 
         let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         ppu.clear_first_frame_lock();

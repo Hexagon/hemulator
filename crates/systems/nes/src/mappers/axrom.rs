@@ -63,13 +63,7 @@ mod tests {
 
     #[test]
     fn axrom_32kb_single_bank() {
-        let cart = Cartridge {
-            prg_rom: vec![0x42; 0x8000], // Single 32KB bank
-            chr_rom: vec![],
-            mapper: 7,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Vertical, // Will be overridden by mapper
-        };
+        let cart = Cartridge::new_test(vec![0x42; 0x8000], vec![], 7, Mirroring::Vertical, TimingMode::Ntsc);
 
         let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let axrom = Axrom::new(cart, &mut ppu);
@@ -89,13 +83,7 @@ mod tests {
         prg[0x10000] = 0x33; // Bank 2 start
         prg[0x18000] = 0x44; // Bank 3 start
 
-        let cart = Cartridge {
-            prg_rom: prg,
-            chr_rom: vec![],
-            mapper: 7,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Horizontal,
-        };
+        let cart = Cartridge::new_test(prg, vec![], 7, Mirroring::Horizontal, TimingMode::Ntsc);
 
         let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut axrom = Axrom::new(cart, &mut ppu);
@@ -118,13 +106,7 @@ mod tests {
 
     #[test]
     fn axrom_single_screen_mirroring() {
-        let cart = Cartridge {
-            prg_rom: vec![0; 0x8000],
-            chr_rom: vec![],
-            mapper: 7,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Horizontal,
-        };
+        let cart = Cartridge::new_test(vec![0; 0x8000], vec![], 7, Mirroring::Horizontal, TimingMode::Ntsc);
 
         let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut axrom = Axrom::new(cart, &mut ppu);
@@ -150,13 +132,7 @@ mod tests {
         prg[0] = 0x11;
         prg[0x8000] = 0x22;
 
-        let cart = Cartridge {
-            prg_rom: prg,
-            chr_rom: vec![],
-            mapper: 7,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Horizontal,
-        };
+        let cart = Cartridge::new_test(prg, vec![], 7, Mirroring::Horizontal, TimingMode::Ntsc);
 
         let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut axrom = Axrom::new(cart, &mut ppu);
@@ -184,13 +160,7 @@ mod tests {
         prg[0] = 0x11;
         prg[0x8000] = 0x22;
 
-        let cart = Cartridge {
-            prg_rom: prg,
-            chr_rom: vec![],
-            mapper: 7,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Horizontal,
-        };
+        let cart = Cartridge::new_test(prg, vec![], 7, Mirroring::Horizontal, TimingMode::Ntsc);
 
         let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut axrom = Axrom::new(cart, &mut ppu);
@@ -215,13 +185,7 @@ mod tests {
         prg[0] = 0x11;
         prg[0x8000] = 0x22;
 
-        let cart = Cartridge {
-            prg_rom: prg,
-            chr_rom: vec![],
-            mapper: 7,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Horizontal,
-        };
+        let cart = Cartridge::new_test(prg, vec![], 7, Mirroring::Horizontal, TimingMode::Ntsc);
 
         let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut axrom = Axrom::new(cart, &mut ppu);
@@ -239,13 +203,7 @@ mod tests {
 
     #[test]
     fn axrom_mirroring_independent_of_banking() {
-        let cart = Cartridge {
-            prg_rom: vec![0; 0x8000],
-            chr_rom: vec![],
-            mapper: 7,
-            timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Horizontal,
-        };
+        let cart = Cartridge::new_test(vec![0; 0x8000], vec![], 7, Mirroring::Horizontal, TimingMode::Ntsc);
 
         let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut axrom = Axrom::new(cart, &mut ppu);

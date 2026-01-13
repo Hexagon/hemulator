@@ -408,13 +408,7 @@ mod tests {
     use emu_core::apu::TimingMode;
 
     fn create_test_cart(prg_size: usize, chr_size: usize) -> Cartridge {
-        Cartridge {
-            prg_rom: vec![0; prg_size],
-            chr_rom: vec![0; chr_size],
-            mapper: 5,
-            mirroring: Mirroring::Horizontal,
-            timing: TimingMode::Ntsc,
-        }
+        Cartridge::new_test(vec![0; prg_size], vec![0; chr_size], 5, Mirroring::Horizontal, TimingMode::Ntsc)
     }
 
     #[test]
