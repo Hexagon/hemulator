@@ -146,7 +146,13 @@ impl Tlb {
 
             // Calculate physical address with safe page size
             let page_size = (safe_page_mask + 1) << 12;
-            // Ensure page_offset doesn't exceed page size
+            // Page offset calculation:
+            // 1. offset (bits 11-0) provides the base page offset
+            // 2. For pages larger than 4KB, we need additional bits from virt_addr
+            // 3. (virt_addr & (page_size - 1)) gets all bits within the page
+            // 4. & !0xFFF masks out the low 12 bits (already in offset)
+            // 5. | combines the offset with the additional page bits
+            // Example: For 16KB pages, this includes bits 13-12 from virt_addr
             let page_offset = offset | ((virt_addr & (page_size.saturating_sub(1))) & !0xFFF);
             let phys_addr = ((pfn as u64) << 12) | page_offset;
 

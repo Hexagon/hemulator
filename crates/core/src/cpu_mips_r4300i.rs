@@ -672,8 +672,10 @@ impl<M: MemoryMips> CpuMips<M> {
         let imm = instr & 0xFFFF;
 
         // Sign extension pattern: Shift into upper 16 bits of 32-bit word,
-        // then sign-extend to 64 bits
-        // Example: LUI $t0, 0x1234 -> $t0 = 0xFFFFFFFF12340000 (if bit 15 was set)
+        // then sign-extend to 64 bits based on bit 31
+        // Examples:
+        //   LUI $t0, 0x1234 -> $t0 = 0x0000000012340000 (bit 31=0, zero-extends)
+        //   LUI $t0, 0x8000 -> $t0 = 0xFFFFFFFF80000000 (bit 31=1, sign-extends)
         self.gpr[rt] = ((imm << 16) as i32) as u64;
         self.cycles += 1;
     }
