@@ -162,7 +162,7 @@ impl N64Bus {
         &self.ai
     }
 
-    #[allow(dead_code)] // Reserved for audio output integration
+    /// Get mutable reference to Audio Interface for audio output
     pub fn ai_mut(&mut self) -> &mut AudioInterface {
         &mut self.ai
     }

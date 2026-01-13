@@ -587,7 +587,7 @@ impl EmulatorSystem {
             EmulatorSystem::Atari2600(sys) => sys.get_audio_samples(count),
             EmulatorSystem::PC(_) => vec![0; count], // TODO: Implement audio for PC
             EmulatorSystem::SNES(_) => vec![0; count], // TODO: Implement audio for SNES
-            EmulatorSystem::N64(_) => vec![0; count], // TODO: Implement audio for N64
+            EmulatorSystem::N64(sys) => sys.get_audio_samples(count),
             EmulatorSystem::Chip8(_) => vec![0; count], // TODO: Implement CHIP-8 audio (single beep tone)
             EmulatorSystem::SMS(sys) => sys.get_audio_samples(count),
             EmulatorSystem::ColecoVision(_) => vec![0; count], // TODO: Implement ColecoVision audio
