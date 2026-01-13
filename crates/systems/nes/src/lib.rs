@@ -90,7 +90,7 @@ mod ppu;
 pub mod ppu_renderer;
 #[cfg(feature = "opengl")]
 pub mod ppu_renderer_opengl;
-mod rom_db;
+pub mod rom_db;
 
 use crate::bus::Bus;
 use crate::cartridge::Mirroring;

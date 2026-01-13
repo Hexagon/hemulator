@@ -25,6 +25,16 @@
 //! 2. Determine the correct mapper and mirroring from hardware documentation
 //! 3. Add an entry to the `ROM_DATABASE` array
 //!
+//! Example:
+//! ```rust,ignore
+//! RomDbEntry::new(
+//!     0x12345678,                      // CRC32 of full ROM file
+//!     Some(4),                          // Override to mapper 4 (MMC3)
+//!     Some(Mirroring::Horizontal),      // Override to horizontal mirroring
+//!     Some("TLSROM"),                   // Board type (optional, for documentation)
+//! ),
+//! ```
+//!
 //! ## References
 //!
 //! - NESdev Wiki: https://www.nesdev.org/wiki/NES_2.0
