@@ -161,6 +161,8 @@ pub struct Ppu {
     /// Cycle-accurate timing: odd frame flag for skipping cycle on scanline 0
     /// On odd frames, dot 0 of scanline 0 is skipped (goes directly from -1,340 to 0,1)
     odd_frame: Cell<bool>,
+    /// Monotonic frame counter (increments when scanline wraps 261 -> 0).
+    frame_counter: Cell<u64>,
 }
 
 impl fmt::Debug for Ppu {
@@ -214,6 +216,7 @@ impl Ppu {
             scanline: Cell::new(261),
             dot: Cell::new(0),
             odd_frame: Cell::new(false),
+            frame_counter: Cell::new(0),
         }
     }
 
@@ -873,7 +876,7 @@ impl Ppu {
         // Debug: log scroll and mirroring for first few scanlines
         if y < 3 {
             use emu_core::logging::{log, LogCategory, LogLevel};
-            log(LogCategory::PPU, LogLevel::Info, || {
+            log(LogCategory::PPU, LogLevel::Debug, || {
                 format!(
                     "Scanline {}: scroll=({},{}), ctrl=0x{:02X}, mirroring={:?}",
                     y,
@@ -1212,6 +1215,7 @@ impl Ppu {
         let scanline = self.scanline.get();
         let dot = self.dot.get();
         let mut nmi_triggered = false;
+        let mut ended_frame_number: Option<u64> = None;
 
         // Handle cycle-accurate events at specific scanline/dot positions
         match (scanline, dot) {
@@ -1350,6 +1354,10 @@ impl Ppu {
                 next_scanline = 0;
                 // Toggle odd frame flag
                 self.odd_frame.set(!self.odd_frame.get());
+
+                let frame_number = self.frame_counter.get() + 1;
+                self.frame_counter.set(frame_number);
+                ended_frame_number = Some(frame_number);
             }
         }
 
@@ -1361,6 +1369,20 @@ impl Ppu {
                 next_dot = 1;
                 log(LogCategory::PPU, LogLevel::Trace, || {
                     "PPU: Odd frame cycle skip (0,0 -> 0,1)".to_string()
+                });
+            }
+        }
+
+        if let Some(frame_number) = ended_frame_number {
+            if frame_number % 60 == 0 {
+                let v = self.vram_addr.get();
+                let t = self.temp_vram_addr.get();
+                let x = self.fine_x.get();
+                let w = self.addr_latch.get();
+                log(LogCategory::PPU, LogLevel::Info, move || {
+                    format!(
+                        "PPU: Frame {frame_number}: loopy v=${v:04X} t=${t:04X} x={x} w={w} (next {next_scanline},{next_dot})"
+                    )
                 });
             }
         }
@@ -1379,6 +1401,13 @@ impl Ppu {
     /// Get current dot within scanline (0-340)
     pub fn get_dot(&self) -> u16 {
         self.dot.get()
+    }
+
+    /// Get the monotonic PPU frame counter.
+    ///
+    /// This increments when the PPU wraps from scanline 261 back to scanline 0.
+    pub fn get_frame_counter(&self) -> u64 {
+        self.frame_counter.get()
     }
 
     /// Check if currently in VBlank region (scanlines 241-260)
