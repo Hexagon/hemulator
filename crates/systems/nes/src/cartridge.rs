@@ -541,7 +541,7 @@ mod tests {
             0x01, 0x01, // 16KB PRG, 8KB CHR
             0x00, // Flags 6: Mapper bits 0-3 = 0
             0x08, // Flags 7: NES 2.0 format (bits 2-3 = 10), mapper bits 4-7 = 0
-            0x01, // Byte 8: Mapper bits 8-11 = 0, submapper = 0
+            0x01, // Byte 8: Mapper bits 8-11 = 1 (bits 0-3), submapper = 0 (bits 4-7)
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ];
         data.extend(vec![0; 16 * 1024 + 8 * 1024]);
@@ -560,7 +560,7 @@ mod tests {
             0x01, 0x01, // 16KB PRG, 8KB CHR
             0x10, // Flags 6: Mapper bits 0-3 = 1
             0x08, // Flags 7: NES 2.0 format (bits 2-3 = 10), mapper bits 4-7 = 0
-            0x50, // Byte 8: Mapper bits 8-11 = 0, submapper = 5
+            0x50, // Byte 8: Mapper bits 8-11 = 0 (bits 0-3), submapper = 5 (bits 4-7)
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ];
         data.extend(vec![0; 16 * 1024 + 8 * 1024]);
