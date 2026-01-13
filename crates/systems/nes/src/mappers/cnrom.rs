@@ -104,7 +104,7 @@ mod tests {
             mirroring: Mirroring::Vertical,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut cnrom = Cnrom::new(cart, &mut ppu);
 
         // Initially bank 0 should be selected
@@ -126,7 +126,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let cnrom = Cnrom::new(cart, &mut ppu);
 
         // 16KB PRG should mirror at both halves
@@ -149,7 +149,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let cnrom = Cnrom::new(cart, &mut ppu);
 
         // 32KB should not mirror
@@ -174,7 +174,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut cnrom = Cnrom::new(cart, &mut ppu);
 
         // Test all 4 banks
@@ -199,7 +199,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut cnrom = Cnrom::new(cart, &mut ppu);
 
         // Select bank 5 (should wrap to 5 % 2 = 1)
@@ -225,7 +225,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut cnrom = Cnrom::new(cart, &mut ppu);
 
         // CNROM responds to writes anywhere in $8000-$FFFF
@@ -255,7 +255,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut cnrom = Cnrom::new(cart, &mut ppu);
 
         // Test selecting high bank numbers

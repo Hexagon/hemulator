@@ -322,7 +322,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Default: bank6=0, bank7=0, second_last=6, last=7
@@ -347,7 +347,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Set IRQ latch to 2
@@ -386,7 +386,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Switch to vertical mirroring
@@ -408,7 +408,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Set IRQ latch to 0
@@ -448,7 +448,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Set IRQ latch to 1
@@ -482,7 +482,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Set IRQ latch to 1
@@ -532,7 +532,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Set R0 to an odd value - should be masked to even
@@ -569,7 +569,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Set R0 to 6 (even) - R0+1 would be 7, which is the last valid bank
@@ -601,7 +601,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Set R6 to bank 1, R7 to bank 2
@@ -641,7 +641,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Set bank registers
@@ -678,7 +678,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Set IRQ latch and reload
@@ -725,7 +725,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Set IRQ latch to 3
@@ -767,7 +767,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Bank select register should only use lower 3 bits (0-7)
@@ -793,7 +793,7 @@ mod tests {
             mirroring: Mirroring::Horizontal, // Start with horizontal
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let initial_mirroring = ppu.get_mirroring();
         assert_eq!(initial_mirroring, Mirroring::Horizontal);
 
@@ -826,7 +826,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Set latch to 5
@@ -875,7 +875,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Try to set R6 to bank 10 (should wrap to bank 2)
@@ -896,7 +896,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Write to all 8 bank registers in sequence
@@ -928,7 +928,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // chr_count should be 7
@@ -983,7 +983,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Set R6=2, R7=3
@@ -1035,7 +1035,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Set R6=2, R7=3
@@ -1083,7 +1083,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mmc3 = Mmc3::new(cart, &mut ppu);
 
         let (enabled, writable) = mmc3.wram_access();
@@ -1103,7 +1103,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Disable chip (bit 7 = 0)
@@ -1137,7 +1137,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock();
         let _mmc3 = Mmc3::new(cart, &mut ppu);
 
@@ -1208,7 +1208,7 @@ mod tests {
             mirroring: Mirroring::Vertical,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         ppu.clear_first_frame_lock();
         let _mmc3 = Mmc3::new(cart, &mut ppu);
 
@@ -1276,7 +1276,7 @@ mod tests {
             mirroring: Mirroring::FourScreen,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::FourScreen);
+        let mut ppu = Ppu::new(vec![], Mirroring::FourScreen, TimingMode::Ntsc);
         ppu.clear_first_frame_lock();
         let _mmc3 = Mmc3::new(cart, &mut ppu);
 
@@ -1351,7 +1351,7 @@ mod tests {
             mirroring: Mirroring::Horizontal, // Initial from header
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock();
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
@@ -1400,7 +1400,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock();
         let _mmc3 = Mmc3::new(cart, &mut ppu);
 
@@ -1433,7 +1433,7 @@ mod tests {
             mirroring: Mirroring::FourScreen, // Hardware 4-screen VRAM
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::FourScreen);
+        let mut ppu = Ppu::new(vec![], Mirroring::FourScreen, TimingMode::Ntsc);
         ppu.clear_first_frame_lock();
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
@@ -1515,7 +1515,7 @@ mod tests {
             mirroring: Mirroring::FourScreen,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::FourScreen);
+        let mut ppu = Ppu::new(vec![], Mirroring::FourScreen, TimingMode::Ntsc);
         ppu.clear_first_frame_lock();
         let _mmc3 = Mmc3::new(cart, &mut ppu);
 
@@ -1597,7 +1597,7 @@ mod tests {
             mirroring: Mirroring::Horizontal, // No 4-screen VRAM, uses 2KB VRAM
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock();
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 

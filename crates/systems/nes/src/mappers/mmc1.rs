@@ -193,7 +193,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc1 = Mmc1::new(cart, &mut ppu);
 
         // Write 5 bits to control register (address $8000-9FFF)
@@ -218,7 +218,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc1 = Mmc1::new(cart, &mut ppu);
 
         // Start a write sequence
@@ -249,7 +249,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mmc1 = Mmc1::new(cart, &mut ppu);
 
         // Default mode (3): swap lower bank, fix last
@@ -268,7 +268,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc1 = Mmc1::new(cart, &mut ppu);
 
         // Write only 3 bits (incomplete sequence)
@@ -299,7 +299,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc1 = Mmc1::new(cart, &mut ppu);
 
         // Switch to 32KB mode (control bits [3:2] = 00 or 01)
@@ -334,7 +334,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc1 = Mmc1::new(cart, &mut ppu);
 
         // Switch to "fix first" mode (control bits [3:2] = 10)
@@ -373,7 +373,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc1 = Mmc1::new(cart, &mut ppu);
 
         // Switch to 4KB CHR mode (control bit 4 = 1)
@@ -413,7 +413,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc1 = Mmc1::new(cart, &mut ppu);
 
         // Default is 8KB CHR mode (control bit 4 = 0)
@@ -437,7 +437,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc1 = Mmc1::new(cart, &mut ppu);
 
         // Test single-screen lower (control & 0x03 = 0)
@@ -479,7 +479,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc1 = Mmc1::new(cart, &mut ppu);
 
         // Try to select bank 10 (should wrap to 10 % 2 = 0)
@@ -504,7 +504,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc1 = Mmc1::new(cart, &mut ppu);
 
         // Switch to 4KB CHR mode

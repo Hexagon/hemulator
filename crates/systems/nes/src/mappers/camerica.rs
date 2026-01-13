@@ -126,7 +126,7 @@ mod tests {
             mirroring: Mirroring::Vertical,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut camerica = Camerica::new(cart, &mut ppu);
 
         // Initially bank 0 at $8000, bank 1 (last) at $C000
@@ -154,7 +154,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let camerica = Camerica::new(cart, &mut ppu);
 
         // Last bank (2) should always be at $C000
@@ -175,7 +175,7 @@ mod tests {
             mirroring: Mirroring::Vertical,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut camerica = Camerica::new(cart, &mut ppu);
 
         // Write 0x12 (bank 2, but only 4 bits used, so wraps)
@@ -199,7 +199,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut camerica = Camerica::new(cart, &mut ppu);
 
         // Last bank should be bank 7
@@ -225,7 +225,7 @@ mod tests {
             mirroring: Mirroring::Vertical, // Initial mirroring from header
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut camerica = Camerica::new(cart, &mut ppu);
 
         // Write to $8000: should NOT change mirroring (only bank select)
@@ -271,7 +271,7 @@ mod tests {
             mirroring: Mirroring::Horizontal, // Header says Horizontal (respected for hard-wired PCB)
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal); // Initialized with Horizontal
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc); // Initialized with Horizontal
         let mut camerica = Camerica::new(cart, &mut ppu);
 
         // Should initialize with Horizontal mirroring (respecting ROM header for hard-wired PCB)
@@ -308,7 +308,7 @@ mod tests {
             mirroring: Mirroring::Vertical, // Initial
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         ppu.clear_first_frame_lock();
         let mut camerica = Camerica::new(cart, &mut ppu);
 
@@ -362,7 +362,7 @@ mod tests {
             mirroring: Mirroring::Vertical,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         ppu.clear_first_frame_lock();
         let mut camerica = Camerica::new(cart, &mut ppu);
 
@@ -414,7 +414,7 @@ mod tests {
             mirroring: Mirroring::Vertical,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         ppu.clear_first_frame_lock();
         let mut camerica = Camerica::new(cart, &mut ppu);
 
@@ -458,7 +458,7 @@ mod tests {
             mirroring: Mirroring::Vertical,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         ppu.clear_first_frame_lock();
         let mut camerica = Camerica::new(cart, &mut ppu);
 
