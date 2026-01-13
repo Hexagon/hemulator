@@ -1038,8 +1038,11 @@ impl Ppu {
 
                 // Invoke CHR read callback for MMC2/MMC4 latch switching compatibility
                 // This is done once per tile instead of per pixel for performance
+                // CRITICAL: Must invoke for BOTH low and high bitplane reads
+                // MMC2 latch triggers are on the high bitplane addresses (e.g., $0FD8, $0FE8)
                 if let Some(cb) = &mut *self.chr_read_callback.borrow_mut() {
-                    cb((tile_chr_addr + fine_y_in_tile) as u16);
+                    cb((tile_chr_addr + fine_y_in_tile) as u16); // Low bitplane
+                    cb((tile_chr_addr + fine_y_in_tile + 8) as u16); // High bitplane
                 }
 
                 // Render 8 pixels from this tile (or remaining pixels if less than 8)
@@ -1176,8 +1179,11 @@ impl Ppu {
                 let hi = self.chr_fetch_fast(addr + fine_y + 8);
 
                 // Invoke CHR read callback for MMC2/MMC4 latch switching compatibility
+                // CRITICAL: Must invoke for BOTH low and high bitplane reads
+                // MMC2 latch triggers are on the high bitplane addresses (e.g., $0FD8, $0FE8)
                 if let Some(cb) = &mut *self.chr_read_callback.borrow_mut() {
-                    cb((addr + fine_y) as u16);
+                    cb((addr + fine_y) as u16); // Low bitplane
+                    cb((addr + fine_y + 8) as u16); // High bitplane
                 }
 
                 for col in 0..8 {
