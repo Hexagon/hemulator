@@ -1105,7 +1105,10 @@ impl Ppu {
             // detect the reads and won't switch banks at the right time.
             // Reference: https://www.nesdev.org/wiki/PPU_rendering
             //
-            // Note: We only need to invoke the CHR read callbacks for these tiles, not render them.
+            // Note: These tiles (33-34) are fetched by hardware but not displayed on screen since
+            // only 32 tiles fit in the visible 256-pixel scanline. Their pattern data is used to
+            // pre-fill the PPU's shift registers for the next scanline. We only invoke the CHR
+            // read callbacks for mapper compatibility - no rendering is performed.
             for _ in 0..2 {
                 let nt = current_nt_x | (nt_y_adjusted << 1);
                 let tx = current_tile_x as usize;
