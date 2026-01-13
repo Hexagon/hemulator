@@ -20,13 +20,16 @@
 //! - Layer enable/disable via $212C (main screen designation)
 //! - Status registers: $213F (STAT78), $4212 (HVBJOY)
 //!
+//! **Implemented Advanced Features**:
+//! - Mode 7 rotation/scaling matrix transformation (M7A-M7D, M7X, M7Y, M7SEL registers)
+//! - Offset-per-tile scrolling for Modes 2, 4, 6
+//! - True hi-res 512px rendering for Modes 5-6
+//!
 //! **NOT Implemented** (future enhancements):
-//! - Mode 7 rotation/scaling matrix (M7A-M7D registers)
 //! - Windows and color windows ($2123-$212B)
 //! - Mosaic effects ($2106)
 //! - Color math ($2130-$2132)
 //! - Sub-screen support ($212D)
-//! - True hi-res (512px) for Modes 5-6
 
 use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::types::Frame;
@@ -170,6 +173,8 @@ pub struct Ppu {
     /// Mode 7 center Y ($2120) - 13-bit signed value
     m7y: i16,
     /// Previous write for Mode 7 double-write registers
+    /// Note: According to hardware documentation, all Mode 7 write-twice registers
+    /// share the same previous-write latch (M7OLD)
     m7_prev: u8,
 }
 
