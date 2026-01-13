@@ -38,7 +38,8 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
 - ✅ **Cartridge Loading** - LoROM, HiROM, and ExHiROM with auto-detection
   - LoROM: 32KB banks at $8000-$FFFF per bank (up to 4MB)
   - HiROM: Full 64KB banks with linear addressing (up to 4MB)
-  - ExHiROM: Extended HiROM for larger ROMs (up to 8MB)
+  - ExHiROM: Extended HiROM for larger ROMs (up to 8MB, e.g., Tales of Phantasia)
+  - Header detection via map mode bytes ($20/$30=LoROM, $21/$31=HiROM, $25/$35=ExHiROM)
   - SMC header detection and removal
   - SRAM support for all mapping modes
   - Reference: [ROM File Formats](https://snes.nesdev.org/wiki/ROM_file_formats)
@@ -287,8 +288,10 @@ Games known to work:
 - ✅ **Super Mario World** - Full support with Mode 1, sprites, scrolling (no audio)
 - ✅ **F-Zero** - Now works with Mode 7 rotation/scaling
 - ⚠️ **Donkey Kong Country** - Graphics work (no audio)
+- 🔧 **Tales of Phantasia** - ExHiROM support implemented, should work (not tested)
 - ❌ **Super Mario RPG** - Requires SA-1 chip
 - ❌ **Star Fox** - Requires SuperFX chip
+- ❌ **Star Ocean** - Requires SDD-1 chip (different from ExHiROM)
 
 ## Development
 
