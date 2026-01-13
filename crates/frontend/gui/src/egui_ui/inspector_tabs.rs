@@ -1,6 +1,6 @@
 //! System-specific Inspector tabs
 
-use super::tabs::TabManager;
+use super::tabs::{SystemTileData, TabManager};
 use crate::rom_detect::SystemType;
 use egui::Ui;
 
@@ -24,6 +24,10 @@ pub enum InspectorTab {
 
     SmsTiles,
     SmsPalettes,
+
+    ColecoVisionTiles,
+    ColecoVisionPalettes,
+    ColecoVisionVdp, // VDP registers and state
 
     SnesTiles,
     SnesPalettes,
@@ -56,6 +60,9 @@ impl InspectorTab {
             InspectorTab::GbTilemaps => "🗺️ Tilemaps",
             InspectorTab::SmsTiles => "🎨 Tiles",
             InspectorTab::SmsPalettes => "🎨 Palettes",
+            InspectorTab::ColecoVisionTiles => "🎨 Tiles",
+            InspectorTab::ColecoVisionPalettes => "🎨 Palettes",
+            InspectorTab::ColecoVisionVdp => "📺 VDP",
             InspectorTab::SnesTiles => "🎨 Tiles",
             InspectorTab::SnesPalettes => "🎨 Palettes",
             InspectorTab::SnesLayers => "📐 Layers",
@@ -106,6 +113,13 @@ pub fn get_tabs_for_system(system_type: Option<&SystemType>) -> Vec<InspectorTab
             SystemType::SMS => {
                 tabs.extend_from_slice(&[InspectorTab::SmsTiles, InspectorTab::SmsPalettes]);
             }
+            SystemType::ColecoVision => {
+                tabs.extend_from_slice(&[
+                    InspectorTab::ColecoVisionTiles,
+                    InspectorTab::ColecoVisionPalettes,
+                    InspectorTab::ColecoVisionVdp,
+                ]);
+            }
             SystemType::SNES => {
                 tabs.extend_from_slice(&[
                     InspectorTab::SnesTiles,
@@ -152,14 +166,19 @@ pub fn render_inspector_tab(tab: &InspectorTab, ui: &mut Ui, tab_manager: &mut T
         InspectorTab::NesTiles
         | InspectorTab::GbTiles
         | InspectorTab::SmsTiles
+        | InspectorTab::ColecoVisionTiles
         | InspectorTab::SnesTiles => {
             tab_manager.render_tiles_tab(ui);
         }
         InspectorTab::NesPalettes
         | InspectorTab::GbPalettes
         | InspectorTab::SmsPalettes
+        | InspectorTab::ColecoVisionPalettes
         | InspectorTab::SnesPalettes => {
             render_palettes_tab(ui, tab_manager);
+        }
+        InspectorTab::ColecoVisionVdp => {
+            render_colecovision_vdp_tab(ui, tab_manager);
         }
         InspectorTab::NesNametables | InspectorTab::GbTilemaps => {
             tab_manager.render_tilemaps_tab(ui);
@@ -1010,6 +1029,115 @@ fn render_pc_bda_tab(ui: &mut Ui, tab_manager: &mut TabManager) {
                     ui.heading("No BDA Data Available");
                     ui.add_space(10.0);
                     ui.label("Load a PC system to see BIOS Data Area information");
+                });
+            }
+        });
+}
+
+/// Render the ColecoVision VDP tab
+fn render_colecovision_vdp_tab(ui: &mut Ui, tab_manager: &mut TabManager) {
+    egui::ScrollArea::vertical()
+        .auto_shrink([false; 2])
+        .show(ui, |ui| {
+            if let Some(ref sys_data) = tab_manager.system_tile_data {
+                if let SystemTileData::ColecoVision(colecovision_data) = sys_data {
+                    ui.heading("TMS9918A VDP Registers");
+                    ui.add_space(10.0);
+
+                    egui::Grid::new("colecovision_vdp_registers")
+                        .num_columns(2)
+                        .striped(true)
+                        .show(ui, |ui| {
+                            for (i, &reg) in colecovision_data.registers.iter().enumerate() {
+                                ui.monospace(format!("R{}", i));
+                                ui.monospace(format!("${:02X} ({})", reg, reg));
+                                ui.end_row();
+                            }
+                        });
+
+                    ui.add_space(20.0);
+                    ui.heading("Graphics Mode");
+                    ui.add_space(5.0);
+
+                    // Decode graphics mode from registers
+                    let reg0 = colecovision_data.registers.first().copied().unwrap_or(0);
+                    let reg1 = colecovision_data.registers.get(1).copied().unwrap_or(0);
+
+                    let m1 = (reg0 & 0x02) != 0;
+                    let m2 = (reg1 & 0x08) != 0;
+                    let m3 = (reg1 & 0x10) != 0;
+
+                    let mode_name = match (m3, m2, m1) {
+                        (false, false, false) => "Graphics I",
+                        (false, false, true) => "Text",
+                        (false, true, false) => "Graphics II",
+                        (true, false, false) => "Multicolor",
+                        _ => "Invalid",
+                    };
+
+                    ui.label(format!("Mode: {}", mode_name));
+                    ui.label(format!("M1: {}, M2: {}, M3: {}", m1, m2, m3));
+
+                    ui.add_space(10.0);
+
+                    // Display enable flags
+                    ui.heading("Display Settings");
+                    ui.add_space(5.0);
+
+                    egui::Grid::new("colecovision_vdp_settings")
+                        .num_columns(2)
+                        .striped(true)
+                        .show(ui, |ui| {
+                            ui.label("Blank");
+                            ui.label(if (reg1 & 0x40) != 0 {
+                                "Enabled"
+                            } else {
+                                "Disabled"
+                            });
+                            ui.end_row();
+
+                            ui.label("Frame Interrupt");
+                            ui.label(if (reg1 & 0x20) != 0 {
+                                "Enabled"
+                            } else {
+                                "Disabled"
+                            });
+                            ui.end_row();
+
+                            ui.label("Sprites");
+                            ui.label(if (reg1 & 0x02) != 0 {
+                                "Enabled"
+                            } else {
+                                "Disabled"
+                            });
+                            ui.end_row();
+
+                            ui.label("Sprite Size");
+                            ui.label(if (reg1 & 0x02) != 0 { "16x16" } else { "8x8" });
+                            ui.end_row();
+
+                            ui.label("Sprite Magnification");
+                            ui.label(if (reg1 & 0x01) != 0 { "2x" } else { "1x" });
+                            ui.end_row();
+                        });
+                } else {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(40.0);
+                        ui.label(egui::RichText::new("📺").size(48.0));
+                        ui.add_space(10.0);
+                        ui.heading("No VDP Data Available");
+                        ui.add_space(10.0);
+                        ui.label("Load a ColecoVision game to see VDP information");
+                    });
+                }
+            } else {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(40.0);
+                    ui.label(egui::RichText::new("📺").size(48.0));
+                    ui.add_space(10.0);
+                    ui.heading("No VDP Data Available");
+                    ui.add_space(10.0);
+                    ui.label("Load a ColecoVision game to see VDP information");
                 });
             }
         });

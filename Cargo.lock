@@ -848,6 +848,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "emu_colecovision"
+version = "0.1.0"
+dependencies = [
+ "emu_core",
+ "glow 0.13.1",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "emu_core"
 version = "0.1.0"
 dependencies = [
@@ -882,11 +893,13 @@ dependencies = [
  "egui_sdl2_gl",
  "emu_atari2600",
  "emu_chip8",
+ "emu_colecovision",
  "emu_core",
  "emu_gb",
  "emu_n64",
  "emu_nes",
  "emu_pc",
+ "emu_sg1000",
  "emu_sms",
  "emu_snes",
  "env_logger",
@@ -934,6 +947,15 @@ version = "0.1.0"
 dependencies = [
  "emu_core",
  "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "emu_sg1000"
+version = "0.1.0"
+dependencies = [
+ "emu_core",
  "serde_json",
  "thiserror",
 ]
