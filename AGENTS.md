@@ -13,6 +13,7 @@
 - **[Atari 2600](crates/systems/atari2600/README.md)**: Atari 2600
 - **[CHIP-8](crates/systems/chip8/README.md)**: CHIP-8 / Super-CHIP / XO-CHIP / Mega-CHIP
 - **[SMS](crates/systems/sms/README.md)**: Sega Master System
+- **[ColecoVision](crates/systems/colecovision/README.md)**: ColecoVision
 - **[SNES](crates/systems/snes/README.md)**: Super Nintendo Entertainment System
 - **[N64](crates/systems/n64/README.md)**: Nintendo 64
 - **[PC](crates/systems/pc/README.md)**: IBM PC/XT
