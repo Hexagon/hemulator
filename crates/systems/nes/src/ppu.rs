@@ -813,6 +813,20 @@ impl Ppu {
     pub fn render_frame(&self) -> Frame {
         // TEST-ONLY: Helper that renders using scanline-based rendering.
         // This ensures tests use the same rendering path as production code.
+        //
+        // Since tests don't call tick(), we need to manually initialize the v register
+        // from t before rendering, simulating what tick() would do at pre-render
+        // scanline dot 280 and dot 257.
+        let rendering_enabled = (self.mask & 0x18) != 0;
+        if rendering_enabled {
+            let t = self.temp_vram_addr.get();
+            let v = self.vram_addr.get();
+            // Copy both vertical and horizontal bits from t to v
+            let mut new_v = (v & !0x7BE0) | (t & 0x7BE0); // Vertical bits
+            new_v = (new_v & !0x041F) | (t & 0x041F); // Horizontal bits
+            self.vram_addr.set(new_v);
+        }
+        
         let mut frame = Frame::new(256, 240);
         for scanline in 0..240 {
             self.render_scanline(scanline, &mut frame);
@@ -865,30 +879,16 @@ impl Ppu {
         // Track if rendering is enabled for v register logic
         let rendering_enabled = bg_enabled || sprites_enabled;
 
-        // Note: Horizontal bit copy from t to v happens in tick() at dot 257 of each
-        // visible scanline for cycle-accurate timing. This ensures mid-frame scroll
-        // register changes take effect at the correct point.
+        // Note: In production (cycle-accurate mode with tick()), v register initialization
+        // happens in tick() at specific dots:
+        // - Pre-render scanline (261) dot 280: vertical bits copied from t to v
+        // - All scanlines dot 257: horizontal bits copied from t to v
         //
-        // Vertical bit copy from t to v happens in tick() at dots 280-304 of the
-        // pre-render scanline (261) for proper frame initialization.
+        // This render_scanline() function should NOT modify the v register except for
+        // the increment at the end (which simulates dot 256 behavior).
         //
-        // These hardware behaviors are critical for split-screen effects like SMB3's HUD.
-        //
-        // For test compatibility (when render_scanline is called without tick()),
-        // we simulate the v register initialization at scanline 0.
-        // In production (with tick()), vertical bits are copied at pre-render dot 280,
-        // and horizontal bits are copied at dot 257 of each scanline.
-        // For tests without tick(), we do both here at scanline 0.
-        if rendering_enabled && y == 0 {
-            let t = self.temp_vram_addr.get();
-            let v = self.vram_addr.get();
-            // Copy both vertical and horizontal bits from t to v at scanline 0
-            // This simulates the pre-render scanline initialization that would have
-            // occurred before scanline 0 in real hardware
-            let mut new_v = (v & !0x7BE0) | (t & 0x7BE0); // Vertical bits
-            new_v = (new_v & !0x041F) | (t & 0x041F); // Horizontal bits (for test compat)
-            self.vram_addr.set(new_v);
-        }
+        // The v register state at the time render_scanline() is called should already
+        // be correct from the tick() updates.
 
         // Note: Sprite evaluation for overflow detection is now done in tick() at dot 192
         // for cycle-accurate timing. Games like Bee 52 rely on polling PPUSTATUS bit 5.
