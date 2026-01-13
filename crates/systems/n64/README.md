@@ -9,7 +9,20 @@ The N64 emulator is a **basic implementation** with functional RDP graphics proc
 ### What Works
 
 - ✅ **MIPS R4300i CPU** - Complete instruction set implementation
+  - All base instructions (load/store, arithmetic, branch, etc.)
+  - CP0 coprocessor with TLB support
+  - **TLB/MMU** - Full TLB implementation with CP0 integration
+    - TLBWI (Write Indexed), TLBWR (Write Random)
+    - TLBR (Read), TLBP (Probe)
+    - 32-entry TLB with ASID support
+    - Page sizes from 4KB to 16MB
 - ✅ **Memory Bus** - 4MB RDRAM, PIF boot, SP memory, cartridge ROM
+- ✅ **Audio Output** - AI (Audio Interface) with frontend integration
+  - DMA transfer from RDRAM to audio buffer
+  - 16-bit stereo PCM output at configurable sample rate
+  - AI interrupt generation on DMA completion
+  - Integrated with rodio audio backend
+  - Sample rate control via AI_DACRATE register
 - ✅ **RDP (Reality Display Processor)** - OpenGL hardware-accelerated graphics rendering
   - GPU-accelerated using OpenGL 3.3 Core Profile
   - 3D triangle rasterization (flat, Gouraud shading, textured triangles)
@@ -47,14 +60,24 @@ The N64 emulator is a **basic implementation** with functional RDP graphics proc
 
 ### What's Missing for Full Compatibility
 
-- ⏳ **Audio Output Integration** - AI hardware module implemented (DMA transfer, sample rate control, interrupts, 16-bit stereo PCM), but connection to the frontend audio backend is still pending
-- ⏳ **Memory Management** - TLB implemented (32-entry, ASID-aware), but CPU cache is still direct-mapped and CP0 TLB instructions/MMU behavior are not fully integrated
-- ⏳ **Cycle Accuracy** - Uses reduced cycle count (50,000 cycles/frame instead of hardware-accurate 1,562,500) for performance; frame-based timing, not cycle-accurate
+- ⏳ **Cycle Accuracy** - Uses reduced cycle count (50,000 cycles/frame instead of hardware-accurate 1,562,500) for performance; frame-based timing, not cycle-accurate (configurable via `set_frame_cycles()`)
 - ⏳ **Some RDP Commands** - Missing some advanced blend/combine modes
 - ⏳ **RSP Microcode** - Only common F3DEX/F3DEX2 commands implemented (some games may use less common commands)
 
 ### Recent Improvements (January 2026)
 
+- ✅ **TLB/MMU Integration** (January 13, 2026) - CP0 TLB instructions fully implemented and operational
+  - **TLBWI** (TLB Write Indexed) - Write TLB entries at specific index
+  - **TLBWR** (TLB Write Random) - Write TLB entries at random index  
+  - **TLBR** (TLB Read) - Read TLB entries into CP0 registers
+  - **TLBP** (TLB Probe) - Search TLB for matching entries
+  - Full CP0 register integration (EntryHi, EntryLo0, EntryLo1, PageMask, Index)
+  - Comprehensive logging for TLB operations
+- ✅ **Audio Output Integration** (January 13, 2026) - AI module now connected to frontend audio backend
+  - Audio samples stream from AI buffer to rodio audio output
+  - 16-bit stereo PCM at configurable sample rate (typically 44.1kHz)
+  - DMA-based audio transfer from RDRAM fully functional
+  - AI interrupts integrated with MI (MIPS Interface)
 - ✅ **Performance Optimization** (January 9, 2026) - Reduced frame cycles from 1,562,500 to 50,000 for ~30x better performance (~1fps → ~30-60fps)
   - **Additional optimizations**: Moved interrupt checking from per-instruction to per-scanline (~190x fewer checks)
   - **Configurable cycles**: Added `set_frame_cycles()` method for runtime performance tuning
@@ -249,18 +272,16 @@ n64.set_frame_cycles(100000); // Increase for better accuracy
 See [User Manual](https://hemulator.56k.guru/user/manual.html#n64-nintendo-64) for the complete list of user-facing limitations.
 
 **Main limitations preventing full game compatibility**:
-1. **Audio Output** - AI hardware implemented but frontend audio output integration pending
-2. **Memory Management** - TLB implemented but cache is direct-mapped and CP0 TLB/MMU integration incomplete
-3. **Cycle Accuracy** - Uses 50,000 cycles/frame (vs hardware's 1,562,500) for performance; may cause issues with precise timing-dependent games
-4. **Missing RDP Commands** - Some advanced blend/combine modes not implemented
-5. **RSP Coverage** - HLE works for common F3DEX commands but may not cover all microcode variants
+1. **Cycle Accuracy** - Uses 50,000 cycles/frame (vs hardware's 1,562,500) for performance; may cause issues with precise timing-dependent games (configurable via `set_frame_cycles()`)
+2. **Missing RDP Commands** - Some advanced blend/combine modes not implemented
+3. **RSP Coverage** - HLE works for common F3DEX commands but may not cover all microcode variants
+4. **CPU Cache** - Cache is direct-mapped; full cache coherency not implemented
 
 ## Future Development
 
 ### Critical for Commercial Games
-1. **Audio Output Integration** - Connect AI module to frontend audio backend (SDL2/rodio)
-2. **CP0 TLB/MMU Integration** - Wire TLB instructions (TLBWI, TLBWR, TLBR, TLBP) to CPU
-3. **Cycle-Accurate Timing** - Improve timing precision for games that depend on it
+1. **Cycle-Accurate Timing** - Improve timing precision for games that depend on it (optional enhancement - configurable system already in place)
+2. **RSP Microcode Coverage** - Expand HLE to support more microcode variants
 
 ### Nice to Have
 1. Additional RDP blend/combine modes for advanced graphics effects
