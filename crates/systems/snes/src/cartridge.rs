@@ -307,7 +307,8 @@ impl Cartridge {
                 } else if offset >= 0x8000 {
                     // ROM (mirrors $00-$3F behavior, which maps to $40-$7F ROM area)
                     // Formula: ((Bank - $80 + $40) * $10000) + (Address - $8000)
-                    let rom_offset = ((bank as usize - 0x80 + 0x40) << 16) | (offset as usize - 0x8000);
+                    let rom_offset =
+                        ((bank as usize - 0x80 + 0x40) << 16) | (offset as usize - 0x8000);
                     self.read_rom_mirrored(rom_offset)
                 } else {
                     0
