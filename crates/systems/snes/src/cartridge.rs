@@ -275,7 +275,8 @@ impl Cartridge {
         let offset = (addr & 0xFFFF) as u16;
 
         // ExHiROM mapping: Extended HiROM for ROMs up to 8MB
-        // Similar to HiROM but with extended ROM area in banks $40-$7D and $C0-$FF
+        // Banks $00-$3F:$8000-$FFFF mirror $40-$7F:$0000-$FFFF (first 4MB)
+        // Banks $C0-$FF:$0000-$FFFF contain second 4MB
         match bank {
             // Banks $00-$3F: SRAM at $6000-$7FFF, ROM at $8000-$FFFF
             0x00..=0x3F => {
@@ -284,8 +285,9 @@ impl Cartridge {
                     let sram_offset = (offset - 0x6000) as usize;
                     *self.ram.get(sram_offset).unwrap_or(&0)
                 } else if offset >= 0x8000 {
-                    // ROM (maps to second half of 8MB space, banks $C0-$FF equivalent)
-                    let rom_offset = (((bank + 0xC0) as usize) << 16) | (offset as usize);
+                    // ROM (mirrors $40-$7F area)
+                    // Formula: ((Bank + $40) * $10000) + (Address - $8000)
+                    let rom_offset = ((bank as usize + 0x40) << 16) | (offset as usize - 0x8000);
                     self.read_rom_mirrored(rom_offset)
                 } else {
                     0
@@ -303,8 +305,9 @@ impl Cartridge {
                     let sram_offset = (offset - 0x6000) as usize;
                     *self.ram.get(sram_offset).unwrap_or(&0)
                 } else if offset >= 0x8000 {
-                    // ROM (maps to second half, same as $00-$3F)
-                    let rom_offset = (((bank - 0x80 + 0xC0) as usize) << 16) | (offset as usize);
+                    // ROM (mirrors $C0-$FF area, same as $00-$3F mirrors $40-$7F)
+                    // Formula: ((Bank - $80 + $40) * $10000) + (Address - $8000)
+                    let rom_offset = ((bank as usize - 0x80 + 0x40) << 16) | (offset as usize - 0x8000);
                     self.read_rom_mirrored(rom_offset)
                 } else {
                     0
@@ -592,22 +595,29 @@ mod tests {
     #[test]
     fn test_exhirom_read_banks_00_3f() {
         // Create an ExHiROM ROM
-        let mut data = vec![0; 0x10000];
+        let mut data = vec![0; 0x800000]; // 8MB ROM for proper testing
 
         // Set up ExHiROM header at $FFC0
         let header_offset = 0xFFC0;
         data[header_offset + 0x15] = 0x25; // ExHiROM
-        data[header_offset + 0x17] = 0x0A; // ROM size
+        data[header_offset + 0x17] = 0x0C; // ROM size (8MB)
+        data[header_offset + 0x1C] = 0x00; // Checksum complement
+        data[header_offset + 0x1D] = 0x00;
+        data[header_offset + 0x1E] = 0xFF; // Checksum
+        data[header_offset + 0x1F] = 0xFF;
+        data[header_offset + 0x3C] = 0x00; // Reset vector
+        data[header_offset + 0x3D] = 0x80;
 
-        // Put test data at specific locations
-        data[0xC000] = 0xAB; // Will be read from bank $00:$8000 in ExHiROM
+        // Put test data in bank $40 area (which will be mirrored by $00:$8000)
+        // Bank $00:$8000 mirrors Bank $40:$0000
+        data[0x400000] = 0xAB; // Bank $40:$0000 = SNES $00:$8000
+        data[0x408000] = 0xCD; // Bank $40:$8000 = SNES $00:$10000 (wraps) or $01:$8000
 
         let cart = Cartridge::load(&data).unwrap();
         assert!(cart.is_exhirom());
 
-        // Bank $00:$8000 should map to bank $C0:$0000 equivalent
-        // In ExHiROM, banks $00-$3F at $8000-$FFFF map to $C0-$FF ROM area
-        assert_eq!(cart.read(0x00C000), 0xAB);
+        // Bank $00:$8000 should map to ROM offset $400000 (Bank $40:$0000)
+        assert_eq!(cart.read(0x008000), 0xAB);
     }
 
     #[test]
@@ -692,20 +702,27 @@ mod tests {
     #[test]
     fn test_exhirom_mirror_banks_80_bf() {
         // Create an ExHiROM ROM
-        let mut data = vec![0; 0x10000];
+        let mut data = vec![0; 0x800000]; // 8MB ROM
 
         // Set up ExHiROM header at $FFC0
         let header_offset = 0xFFC0;
         data[header_offset + 0x15] = 0x25; // ExHiROM
-        data[header_offset + 0x17] = 0x0A; // ROM size
+        data[header_offset + 0x17] = 0x0C; // ROM size (8MB)
+        data[header_offset + 0x1C] = 0x00; // Checksum complement
+        data[header_offset + 0x1D] = 0x00;
+        data[header_offset + 0x1E] = 0xFF; // Checksum
+        data[header_offset + 0x1F] = 0xFF;
+        data[header_offset + 0x3C] = 0x00; // Reset vector
+        data[header_offset + 0x3D] = 0x80;
 
-        data[0xC000] = 0x99; // Will be mirrored
+        data[0x400000] = 0x99; // Bank $40:$0000
 
         let cart = Cartridge::load(&data).unwrap();
 
         // Banks $80-$BF at $8000-$FFFF should mirror $00-$3F behavior
-        // which maps to $C0-$FF ROM area
-        assert_eq!(cart.read(0x80C000), 0x99);
-        assert_eq!(cart.read(0x00C000), 0x99);
+        // which maps to bank $40-$7F ROM area
+        // So $80:$8000 should read same as $00:$8000 which maps to $400000
+        assert_eq!(cart.read(0x808000), 0x99);
+        assert_eq!(cart.read(0x008000), 0x99);
     }
 }
