@@ -312,6 +312,10 @@ impl Vdp {
 
     /// Render a single scanline
     fn render_scanline(&mut self, line: u8) {
+        // Check blank bit (register 1, bit 6)
+        // When 0, display is blanked to backdrop color
+        let display_enabled = (self.registers[1] & 0x40) != 0;
+
         // Get graphics mode from registers
         let mode = self.get_graphics_mode();
 
@@ -320,6 +324,11 @@ impl Vdp {
         let line_offset = (line as usize) * 256;
         for x in 0..256 {
             self.frame.pixels[line_offset + x] = backdrop_color;
+        }
+
+        // Only render if display is enabled
+        if !display_enabled {
+            return;
         }
 
         // Render based on graphics mode

@@ -2676,11 +2676,52 @@ fn main() {
                         Ok(SystemType::ColecoVision) => {
                             rom_hash = Some(GameSaves::rom_hash(&data));
                             let mut coleco_sys = emu_colecovision::ColecoVisionSystem::new();
-                            // ColecoVision requires BIOS - for now, just try loading cartridge
+                            
+                            // ColecoVision requires BIOS - try to find it automatically
+                            let bios_loaded = if let Ok(rom_path) = std::path::Path::new(&p).canonicalize() {
+                                if let Some(parent_dir) = rom_path.parent() {
+                                    // Try common BIOS filenames
+                                    let bios_candidates = [
+                                        "ColecoVision BIOS (1982).col",
+                                        "coleco.rom",
+                                        "coleco.bin",
+                                        "bios.rom",
+                                        "bios.bin",
+                                    ];
+                                    
+                                    let mut loaded = false;
+                                    for candidate in &bios_candidates {
+                                        let bios_path = parent_dir.join(candidate);
+                                        if bios_path.exists() {
+                                            if let Ok(bios_data) = std::fs::read(&bios_path) {
+                                                if bios_data.len() == 8192 {  // Verify BIOS is 8KB
+                                                    if coleco_sys.mount("BIOS", &bios_data).is_ok() {
+                                                        println!("Loaded ColecoVision BIOS from: {}", bios_path.display());
+                                                        runtime_state.set_mount("BIOS".to_string(), bios_path.to_string_lossy().to_string());
+                                                        loaded = true;
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    loaded
+                                } else {
+                                    false
+                                }
+                            } else {
+                                false
+                            };
+                            
+                            if !bios_loaded {
+                                eprintln!("Warning: ColecoVision BIOS not found. System will not boot properly.");
+                                status_message = "ColecoVision BIOS not found. Place BIOS file (8KB) in ROM directory.".to_string();
+                            }
+                            
+                            // Load the cartridge
                             if let Err(e) = coleco_sys.mount("Cartridge", &data) {
                                 eprintln!("Failed to load ColecoVision ROM: {}", e);
-                                status_message =
-                                    format!("Error: {} (Note: ColecoVision requires BIOS)", e);
+                                status_message = format!("Error: {}", e);
                                 rom_hash = None;
                             } else {
                                 rom_loaded = true;
@@ -2689,9 +2730,13 @@ fn main() {
                                 if let Err(e) = settings.save() {
                                     eprintln!("Warning: Failed to save settings: {}", e);
                                 }
-                                status_message =
-                                    "ColecoVision cartridge loaded (BIOS required)".to_string();
-                                println!("Loaded ColecoVision cartridge: {}", p);
+                                if bios_loaded {
+                                    status_message = "ColecoVision cartridge loaded".to_string();
+                                    println!("Loaded ColecoVision cartridge: {}", p);
+                                } else {
+                                    status_message = "ColecoVision cartridge loaded (BIOS missing - will not boot)".to_string();
+                                    println!("Loaded ColecoVision cartridge: {} (BIOS missing)", p);
+                                }
                             }
                         }
                         Ok(SystemType::SG1000) => {
