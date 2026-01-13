@@ -194,7 +194,7 @@ impl Mapper {
     }
 
     /// Get mapper number
-    pub fn mapper_number(&self) -> u8 {
+    pub fn mapper_number(&self) -> u16 {
         match self {
             Mapper::Nrom(_) => 0,
             Mapper::Mmc1(_) => 1,
