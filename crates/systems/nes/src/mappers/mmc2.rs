@@ -17,6 +17,23 @@ use emu_core::apu::TimingMode;
 ///   * $1FD8-$1FDF: Sets latch 1 to $FD (affects $1000-$1FFF) - 8-BYTE RANGE
 ///   * $1FE8-$1FEF: Sets latch 1 to $FE (affects $1000-$1FFF) - 8-BYTE RANGE
 ///
+/// # The "34th Tile" Snooping Mechanism
+///
+/// The latch triggers correspond to specific tiles in the pattern tables:
+/// - **Tile $FD (253)**: Reading this tile triggers latch to $FD state
+///   - Address $0FD8 = tile $FD, row 0, high bitplane (byte 8 of tile data)
+/// - **Tile $FE (254)**: Reading this tile triggers latch to $FE state
+///   - Address $0FE8 = tile $FE, row 0, high bitplane (byte 8 of tile data)
+///
+/// In Punch-Out!!, these tiles are used in sprites to dynamically switch CHR banks
+/// during rendering. When the PPU fetches sprite graphics using tile $FD or $FE,
+/// it automatically switches the active CHR bank for subsequent tiles. This is often
+/// called the "34th tile" mechanism because these special tiles act as signals.
+///
+/// **Critical Implementation Detail**: The PPU must invoke the CHR read callback for
+/// BOTH the low bitplane (byte 0-7) and high bitplane (byte 8-15) of each tile.
+/// The latch triggers are specifically on the HIGH bitplane addresses.
+///
 /// # Implementation
 /// Latch switching is now fully implemented via CHR read callbacks. When the PPU
 /// reads from latch trigger addresses during rendering, the mapper tracks latch
@@ -420,18 +437,12 @@ mod tests {
         // Test middle of FD range
         mmc2.notify_chr_read(0x1FDC);
         mmc2.apply_chr_update(&mut ppu);
-        assert_eq!(
-            ppu.chr[0x1000], 0x44,
-            "Right latch should stay FD at $1FDC"
-        );
+        assert_eq!(ppu.chr[0x1000], 0x44, "Right latch should stay FD at $1FDC");
 
         // Test end of FD range
         mmc2.notify_chr_read(0x1FDF);
         mmc2.apply_chr_update(&mut ppu);
-        assert_eq!(
-            ppu.chr[0x1000], 0x44,
-            "Right latch should stay FD at $1FDF"
-        );
+        assert_eq!(ppu.chr[0x1000], 0x44, "Right latch should stay FD at $1FDF");
 
         // Trigger FE latch for right pattern table (range $1FE8-$1FEF)
         mmc2.notify_chr_read(0x1FE8);
@@ -444,9 +455,6 @@ mod tests {
         // Test end of FE range
         mmc2.notify_chr_read(0x1FEF);
         mmc2.apply_chr_update(&mut ppu);
-        assert_eq!(
-            ppu.chr[0x1000], 0x22,
-            "Right latch should stay FE at $1FEF"
-        );
+        assert_eq!(ppu.chr[0x1000], 0x22, "Right latch should stay FE at $1FEF");
     }
 }
