@@ -876,14 +876,17 @@ impl Ppu {
         //
         // For test compatibility (when render_scanline is called without tick()),
         // we simulate the v register initialization at scanline 0.
+        // In production (with tick()), vertical bits are copied at pre-render dot 280,
+        // and horizontal bits are copied at dot 257 of each scanline.
+        // For tests without tick(), we do both here at scanline 0.
         if rendering_enabled && y == 0 {
             let t = self.temp_vram_addr.get();
             let v = self.vram_addr.get();
-            // Copy both horizontal and vertical bits from t to v at scanline 0
-            // This simulates the pre-render scanline dot 280-304 + dot 257 behavior
-            // that would have occurred before scanline 0 in real hardware
+            // Copy both vertical and horizontal bits from t to v at scanline 0
+            // This simulates the pre-render scanline initialization that would have
+            // occurred before scanline 0 in real hardware
             let mut new_v = (v & !0x7BE0) | (t & 0x7BE0); // Vertical bits
-            new_v = (new_v & !0x041F) | (t & 0x041F); // Horizontal bits
+            new_v = (new_v & !0x041F) | (t & 0x041F); // Horizontal bits (for test compat)
             self.vram_addr.set(new_v);
         }
 
@@ -1174,11 +1177,12 @@ impl Ppu {
         // When fine_y overflows from 7 to 0, coarse_y is incremented.
         // When coarse_y reaches 30, it wraps to 0 and nametable Y is toggled.
         //
-        // IMPORTANT: Skip increment for scanline 0 to avoid double-initialization.
-        // At scanline 0, v was just initialized from t (lines 879-887), so we shouldn't
-        // increment it yet. This prevents the "off by one scanline" bug that causes
-        // 8-pixel vertical shifts and flickering.
-        if rendering_enabled && y != 0 {
+        // IMPORTANT: Skip increment for the last visible scanline (239).
+        // We want scanlines 0–238 to increment v after rendering so that the NEXT
+        // scanline sees the correct fine_y. On scanline 239, we leave v as-is and
+        // rely on the pre-render scanline's v←t copy to reinitialize the vertical
+        // scroll state, avoiding an off-by-one fine_y error for the next frame.
+        if rendering_enabled && y != 239 {
             let mut v = self.vram_addr.get();
             let fine_y = (v >> 12) & 0x0007;
 
@@ -1263,11 +1267,13 @@ impl Ppu {
                 }
             }
 
-            // Pre-render scanline (261), dots 280-304: Copy vertical bits from t to v
-            // This is the ONLY time vertical scroll position is reset from t register.
+            // Pre-render scanline (261), dot 280: Copy vertical bits from t to v
+            // In the hardware-accurate / cycle-accurate tick() path, this is the only time
+            // the vertical scroll position is reset from the t register. (render_scanline()
+            // also copies these bits for compatibility when called without tick().)
             // Critical for games with vertical scrolling and split-screen effects.
             // Reference: https://www.nesdev.org/wiki/PPU_scrolling
-            (261, dot) if dot >= 280 && dot <= 304 => {
+            (261, 280) => {
                 let rendering_enabled = (self.mask & 0x18) != 0;
                 if rendering_enabled {
                     let t = self.temp_vram_addr.get();
