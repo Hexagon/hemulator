@@ -174,11 +174,15 @@ mod tests {
     #[test]
     fn test_lookup_rom_found() {
         // If we add an entry to the database, it should be found
-        // This test is a placeholder - it will pass as long as the database is empty
-        // Once real entries are added, update this test
+        // The database currently has at least one entry (Bee 52)
+        assert!(!ROM_DATABASE.is_empty());
 
-        // For now, verify the database is accessible
-        assert_eq!(ROM_DATABASE.len(), 0);
+        // Look up the Bee 52 ROM entry
+        let bee52_entry = lookup_rom(0xE19C2722);
+        assert!(bee52_entry.is_some());
+        let entry = bee52_entry.unwrap();
+        assert_eq!(entry.crc32, 0xE19C2722);
+        assert_eq!(entry.mirroring, Some(Mirroring::Vertical));
     }
 
     #[test]

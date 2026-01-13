@@ -29,6 +29,35 @@ pub enum SystemTileData {
     Chip8(Chip8TileData),
 }
 
+/// NES cartridge information data
+#[derive(Clone)]
+pub struct NesCartridgeData {
+    /// Mapper number being used
+    pub mapper: u8,
+    /// Human-readable mapper name
+    pub mapper_name: String,
+    /// Mirroring mode being used
+    pub mirroring: String,
+    /// Timing mode (NTSC or PAL)
+    pub timing: String,
+    /// CRC32 checksum
+    pub crc32: u32,
+    /// PRG ROM size
+    pub prg_size: usize,
+    /// CHR ROM size (0 for CHR-RAM)
+    pub chr_size: usize,
+    /// Mapper from iNES header
+    pub header_mapper: u8,
+    /// Mirroring from iNES header
+    pub header_mirroring: String,
+    /// DB mapper override flag
+    pub db_mapper_override: bool,
+    /// DB mirroring override flag
+    pub db_mirroring_override: bool,
+    /// Board name from DB
+    pub board_name: Option<String>,
+}
+
 /// NES tile viewer data
 #[derive(Clone)]
 pub struct NesTileData {
@@ -261,6 +290,7 @@ pub struct TabManager {
     pub enhanced_debug_state: Option<EnhancedDebugState>,
     pub system_tile_data: Option<SystemTileData>,
     pub pc_bda_data: Option<PcBdaData>,
+    pub nes_cartridge_data: Option<NesCartridgeData>,
     pub mount_info: Vec<MountInfo>,
     pub new_project_visible: bool,
     pub selected_system: String,
@@ -288,6 +318,7 @@ impl TabManager {
             enhanced_debug_state: None,
             system_tile_data: None,
             pc_bda_data: None,
+            nes_cartridge_data: None,
             mount_info: Vec::new(),
             new_project_visible: false,
             selected_system: "NES".to_string(),
@@ -316,6 +347,10 @@ impl TabManager {
 
     pub fn update_pc_bda_data(&mut self, data: PcBdaData) {
         self.pc_bda_data = Some(data);
+    }
+
+    pub fn update_nes_cartridge_data(&mut self, data: NesCartridgeData) {
+        self.nes_cartridge_data = Some(data);
     }
 
     pub fn update_mount_info(&mut self, mounts: Vec<MountInfo>) {

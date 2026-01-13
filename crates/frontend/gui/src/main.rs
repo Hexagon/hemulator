@@ -3427,6 +3427,25 @@ fn main() {
                         mirroring: nes_data.mirroring,
                     });
                     egui_app.tab_manager.update_system_tile_data(tile_data);
+
+                    // Update cartridge info
+                    if let Some(cart_info) = s.get_cartridge_info() {
+                        let cart_data = egui_ui::NesCartridgeData {
+                            mapper: cart_info.mapper,
+                            mapper_name: cart_info.mapper_name,
+                            mirroring: cart_info.mirroring,
+                            timing: format!("{:?}", cart_info.timing),
+                            crc32: cart_info.crc32,
+                            prg_size: cart_info.prg_size,
+                            chr_size: cart_info.chr_size,
+                            header_mapper: cart_info.header_mapper,
+                            header_mirroring: cart_info.header_mirroring,
+                            db_mapper_override: cart_info.db_mapper_override,
+                            db_mirroring_override: cart_info.db_mirroring_override,
+                            board_name: cart_info.board_name,
+                        };
+                        egui_app.tab_manager.update_nes_cartridge_data(cart_data);
+                    }
                 }
                 EmulatorSystem::GameBoy(s) => {
                     let gb_data = s.get_tile_viewer_data();
