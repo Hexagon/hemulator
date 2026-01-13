@@ -478,32 +478,30 @@ impl System for NesSystem {
     }
 
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
-        // Run CPU cycles for one frame.
-        // NTSC: ~29780 CPU cycles, PAL: ~33247 CPU cycles
-        // Model VBlank as the *tail* of the frame and trigger NMI at VBlank start.
-        // IMPORTANT: render at the end of the *visible* portion (right before VBlank)
-        // so we don't sample while games temporarily disable PPUMASK during their NMI.
-
-        let (cycles_per_frame, vblank_cycles) = match self.timing {
-            TimingMode::Ntsc => (29780u32, 2500u32),
-            TimingMode::Pal => (33247u32, 2798u32), // PAL has more cycles per frame
-        };
-        let visible_cycles = cycles_per_frame - vblank_cycles;
-
-        // Approximate PPU scanline timing so mappers like MMC3 can clock their IRQ counter.
-        // The NES PPU runs at 3x the CPU clock and has 341 PPU cycles per scanline.
-        // In this frame-based renderer we synthesize one A12 rising edge per scanline.
-        let mut ppu_cycles_accum: u32 = 0;
-        let ppu_cycles_per_scanline: u32 = 341;
-
         self.frame_index = self.frame_index.wrapping_add(1);
+        let debug_scanline_drift = (self.frame_index % 60) == 0;
+
+        // Drive the frame boundary from the PPU itself.
+        //
+        // Rationale:
+        // - NTSC has an odd-frame cycle skip when rendering is enabled, so "CPU cycles per frame"
+        //   is not an integer constant.
+        // - Using fixed CPU-cycle budgets causes the PPU (scanline/dot) phase to drift across
+        //   frames, which shows up as rolling / HUD drift in scanline-based rendering.
+        //
+        // So we run until the PPU reports it completed one full frame.
+        let start_ppu_frame = self
+            .cpu
+            .bus()
+            .map(|b| b.ppu.get_frame_counter())
+            .unwrap_or(0);
+        let target_ppu_frame = start_ppu_frame.wrapping_add(1);
 
         let mut cpu_steps: u32 = 0;
         let mut cpu_cycles_used: u32 = 0;
         let mut irqs: u32 = 0;
         let mut nmis: u32 = 0;
         let mut mmc3_a12_edges: u32 = 0;
-        let mut rendering_happened: bool = false;
 
         // Track PC histogram for trace logging
         let mut pc_hist: Option<HashMap<u16, u16>> = Some(HashMap::with_capacity(1024));
@@ -514,9 +512,12 @@ impl System for NesSystem {
         // NOTE: VBlank clearing is now handled by PPU.tick() at scanline 261, dot 1
         // No need to manually call set_vblank(false) here
 
-        let mut cycles = 0u32;
-
-        while cycles < visible_cycles {
+        while self
+            .cpu
+            .bus()
+            .map(|b| b.ppu.get_frame_counter() != target_ppu_frame)
+            .unwrap_or(false)
+        {
             // Declare interrupt flags for this iteration
             let mut irq_to_fire = false;
             let mut nmi_to_fire = false;
@@ -531,18 +532,65 @@ impl System for NesSystem {
             let used = self.cpu.step();
             cpu_steps = cpu_steps.wrapping_add(1);
             cpu_cycles_used = cpu_cycles_used.wrapping_add(used);
-            cycles = cycles.wrapping_add(used);
 
             // CYCLE-ACCURATE PPU EXECUTION
             // Tick the PPU 3 times for each CPU cycle (PPU runs at 3x CPU clock)
-            // This provides cycle-accurate VBlank/NMI timing
+            // This provides cycle-accurate VBlank/NMI timing.
+            //
+            // IMPORTANT: Drive scanline rendering from the PPU's actual scanline boundaries
+            // (dot 340 -> 0/1) rather than a synthesized 341-cycle counter. The synthesized
+            // approach can miss late visible scanlines when PPUMASK changes during vblank,
+            // causing "rolling" artifacts.
             if let Some(b) = self.cpu.bus_mut() {
                 for _ in 0..used {
-                    // Tick PPU 3 times (3 PPU cycles per CPU cycle)
                     for _ in 0..3 {
+                        let dot_before = b.ppu.get_dot();
                         let nmi_triggered = b.ppu.tick();
                         if nmi_triggered {
                             nmi_to_fire = true;
+                        }
+
+                        // End-of-scanline boundary: dot 340 -> next scanline.
+                        if dot_before == 340 {
+                            let scanline_now = b.ppu.get_scanline();
+                            let completed_scanline = if scanline_now == 0 {
+                                261
+                            } else {
+                                scanline_now.saturating_sub(1)
+                            };
+
+                            if completed_scanline < 240 {
+                                // Keep rendered_scanlines in sync with the PPU.
+                                rendered_scanlines = completed_scanline as u32;
+
+                                if debug_scanline_drift
+                                    && (rendered_scanlines < 3 || rendered_scanlines >= 237)
+                                {
+                                    let ppu_dot = b.ppu.get_dot();
+                                    let ppu_mask = b.ppu.mask();
+                                    log(LogCategory::PPU, LogLevel::Info, || {
+                                        format!(
+                                            "NES: frame={} render_scanline={} ppu=({}, {}) mask=0x{:02X}",
+                                            self.frame_index, rendered_scanlines, scanline_now, ppu_dot, ppu_mask
+                                        )
+                                    });
+                                }
+
+                                self.renderer
+                                    .render_scanline(&mut b.ppu, rendered_scanlines);
+                                rendered_scanlines += 1;
+
+                                // Approximate MMC3 scanline IRQ clocking once per visible scanline.
+                                // Gate it by rendering enabled (BG or sprites), matching common emulator behavior.
+                                let rendering_enabled = (b.ppu.mask() & 0x18) != 0;
+                                if rendering_enabled {
+                                    b.clock_mapper_a12_rising_edge();
+                                    mmc3_a12_edges = mmc3_a12_edges.wrapping_add(1);
+                                    if b.take_irq_pending() {
+                                        irq_to_fire = true;
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -579,38 +627,11 @@ impl System for NesSystem {
                 }
             }
 
-            // Synthesize scanline edges for mapper IRQs during visible time.
-            // Only do this when rendering is enabled (background or sprites).
+            // Also check for any mapper IRQs and pending NMI.
             if let Some(b) = self.cpu.bus_mut() {
-                let rendering_enabled = (b.ppu.mask() & 0x18) != 0;
-                if rendering_enabled {
-                    rendering_happened = true;
-                    ppu_cycles_accum = ppu_cycles_accum.saturating_add(used.saturating_mul(3));
-                    while ppu_cycles_accum >= ppu_cycles_per_scanline {
-                        ppu_cycles_accum -= ppu_cycles_per_scanline;
-
-                        // Render the scanline that just completed using the state that was in
-                        // effect during that scanline. MMC3 IRQ-triggered bank changes typically
-                        // affect the *next* scanline.
-                        if rendered_scanlines < 240 {
-                            self.renderer
-                                .render_scanline(&mut b.ppu, rendered_scanlines);
-                            rendered_scanlines += 1;
-                        }
-
-                        b.clock_mapper_a12_rising_edge();
-                        mmc3_a12_edges = mmc3_a12_edges.wrapping_add(1);
-                        if b.take_irq_pending() {
-                            irq_to_fire = true;
-                        }
-                    }
-                }
-
-                // Also check for any mapper IRQs not driven by the synthesized scanline clock.
                 if b.take_irq_pending() {
                     irq_to_fire = true;
                 }
-
                 if b.ppu.take_nmi_pending() {
                     nmi_to_fire = true;
                 }
@@ -632,124 +653,22 @@ impl System for NesSystem {
             }
         }
 
-        // If we didn't reach exactly 240 synthesized scanlines (e.g., timing edge cases),
-        // render any remaining scanlines using the final visible-state.
-        if rendered_scanlines < 240 {
-            if let Some(b) = self.cpu.bus_mut() {
-                while rendered_scanlines < 240 {
-                    self.renderer
-                        .render_scanline(&mut b.ppu, rendered_scanlines);
-                    rendered_scanlines += 1;
-                }
-            }
-        }
-
         // Apply any pending CHR updates from MMC2/MMC4 latch switching during rendering.
         if let Some(b) = self.cpu.bus_mut() {
             b.apply_mapper_chr_update();
         }
 
-        // VBlank start - NOTE: With cycle-accurate PPU, this is now handled by PPU.tick()
-        // Remove the manual set_vblank(true) call as it's done automatically at scanline 241, dot 1
-        // if let Some(b) = self.cpu.bus_mut() {
-        //     b.ppu.set_vblank(true);
-        // }
-
-        // Run the rest of the frame (VBlank time).
-        while cycles < cycles_per_frame {
-            // Declare interrupt flags for this iteration
-            let mut irq_to_fire = false;
-            let mut nmi_to_fire = false;
-
-            if let Some(h) = pc_hist.as_mut() {
-                let pc = self.cpu.pc();
-                let e = h.entry(pc).or_insert(0);
-                *e = e.saturating_add(1);
-            }
-
-            let pc_before = self.cpu.pc();
-            let used = self.cpu.step();
-            cpu_steps = cpu_steps.wrapping_add(1);
-            cpu_cycles_used = cpu_cycles_used.wrapping_add(used);
-            cycles = cycles.wrapping_add(used);
-
-            // CYCLE-ACCURATE PPU EXECUTION (VBlank portion)
-            // Tick the PPU 3 times for each CPU cycle
-            if let Some(b) = self.cpu.bus_mut() {
-                for _ in 0..used {
-                    // Tick PPU 3 times (3 PPU cycles per CPU cycle)
-                    for _ in 0..3 {
-                        let nmi_triggered = b.ppu.tick();
-                        if nmi_triggered {
-                            nmi_to_fire = true;
-                        }
-                    }
-                }
-            }
-
-            // Record instruction if tracing is enabled
-            if self.instruction_tracer.is_enabled() {
-                if let Some(instr) = self.disassemble_instruction(pc_before as u32) {
-                    let cpu_state = self.get_cpu_state();
-                    self.instruction_tracer.trace(instr, cpu_state);
-                }
-            }
-
-            // Update bus cycle counter for mapper timing
-            if let Some(b) = self.cpu.bus_mut() {
-                b.add_cycles(used);
-            }
-
-            // Clock APU IRQ counter during VBlank too
-            if let Some(b) = self.cpu.bus_mut() {
-                b.apu.clock_irq(used);
-            }
-
-            // Clock DMC channel during VBlank
-            if let Some(b) = self.cpu.bus_mut() {
-                for _ in 0..used {
-                    if let Some(addr) = b.apu.clock_dmc() {
-                        // Use the Bus::read trait method to properly access memory
-                        let byte = b.read(addr);
-                        b.apu.load_dmc_sample(byte);
-                    }
-                }
-            }
-
-            // Check for mapper IRQs during VBlank as well.
-            if let Some(b) = self.cpu.bus_mut() {
-                if b.take_irq_pending() {
-                    irq_to_fire = true;
-                }
-                if b.ppu.take_nmi_pending() {
-                    nmi_to_fire = true;
-                }
-            }
-            if irq_to_fire {
-                self.cpu.trigger_irq();
-                irqs = irqs.wrapping_add(1);
-            }
-            if nmi_to_fire {
-                self.cpu.trigger_nmi();
-                nmis = nmis.wrapping_add(1);
-            }
-        }
-
-        // VBlank end / Pre-render scanline start
-        // Clear sprite flags (sprite 0 hit and sprite overflow) at start of pre-render scanline
-        if let Some(b) = self.cpu.bus_mut() {
-            b.ppu.clear_sprite_flags();
-            b.ppu.set_vblank(false);
-        }
-
-        // Many MMC3 games clock the IRQ counter 241 times per frame (one per visible scanline plus
-        // an additional clock during the pre-render scanline). Our frame model naturally produces
-        // 240 clocks during the 240 visible scanlines, so add one extra "pre-render" clock when
-        // rendering was enabled at any point during the frame.
-        if rendering_happened {
-            if let Some(b) = self.cpu.bus_mut() {
-                b.clock_mapper_a12_rising_edge();
-                mmc3_a12_edges = mmc3_a12_edges.wrapping_add(1);
+        if debug_scanline_drift {
+            if let Some(b) = self.cpu.bus() {
+                let ppu_sl = b.ppu.get_scanline();
+                let ppu_dot = b.ppu.get_dot();
+                let ppu_mask = b.ppu.mask();
+                log(LogCategory::PPU, LogLevel::Info, || {
+                    format!(
+                        "NES: frame={} end_frame rendered_scanlines={} ppu=({}, {}) mask=0x{:02X}",
+                        self.frame_index, rendered_scanlines, ppu_sl, ppu_dot, ppu_mask
+                    )
+                });
             }
         }
 
