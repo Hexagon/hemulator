@@ -4736,16 +4736,28 @@ fn main() {
                         .set_message("Recent files cleared".to_string());
                 }
                 MenuAction::Reset => {
-                    sys.reset();
-                    egui_app.status_bar.set_message("System reset".to_string());
+                    if rom_loaded {
+                        sys.reset();
+                        egui_app.status_bar.set_message("System reset".to_string());
+                    } else {
+                        egui_app.status_bar.set_message("No ROM loaded".to_string());
+                    }
                 }
                 MenuAction::Pause => {
-                    settings.emulation_speed = 0.0;
-                    egui_app.status_bar.set_message("Paused".to_string());
+                    if rom_loaded {
+                        settings.emulation_speed = 0.0;
+                        egui_app.status_bar.set_message("Paused".to_string());
+                    } else {
+                        egui_app.status_bar.set_message("No ROM loaded".to_string());
+                    }
                 }
                 MenuAction::Resume => {
-                    settings.emulation_speed = 1.0;
-                    egui_app.status_bar.set_message("Resumed".to_string());
+                    if rom_loaded {
+                        settings.emulation_speed = 1.0;
+                        egui_app.status_bar.set_message("Resumed".to_string());
+                    } else {
+                        egui_app.status_bar.set_message("No ROM loaded".to_string());
+                    }
                 }
                 MenuAction::Step => {
                     // Step one frame when paused
@@ -5559,12 +5571,20 @@ fn main() {
             use egui_ui::DebugAction;
             match debug_action {
                 DebugAction::Pause => {
-                    settings.emulation_speed = 0.0;
-                    egui_app.status_bar.set_message("Paused".to_string());
+                    if rom_loaded {
+                        settings.emulation_speed = 0.0;
+                        egui_app.status_bar.set_message("Paused".to_string());
+                    } else {
+                        egui_app.status_bar.set_message("No ROM loaded".to_string());
+                    }
                 }
                 DebugAction::Resume => {
-                    settings.emulation_speed = 1.0;
-                    egui_app.status_bar.set_message("Resumed".to_string());
+                    if rom_loaded {
+                        settings.emulation_speed = 1.0;
+                        egui_app.status_bar.set_message("Resumed".to_string());
+                    } else {
+                        egui_app.status_bar.set_message("No ROM loaded".to_string());
+                    }
                 }
                 DebugAction::Step => {
                     // Step one frame when paused
