@@ -1253,13 +1253,13 @@ impl Ppu {
                 }
             }
 
-            // Pre-render scanline (261), dot 280: Copy vertical bits from t to v
-            // In the hardware-accurate / cycle-accurate tick() path, this is the only time
-            // the vertical scroll position is reset from the t register. (render_scanline()
-            // also copies these bits for compatibility when called without tick().)
+            // Pre-render scanline (261), dots 280-304: Copy vertical bits from t to v
+            // In the hardware-accurate / cycle-accurate tick() path, vertical bits are
+            // copied repeatedly during dots 280-304 of the pre-render scanline.
+            // (render_scanline() also copies these bits for compatibility when called without tick().)
             // Critical for games with vertical scrolling and split-screen effects.
             // Reference: https://www.nesdev.org/wiki/PPU_scrolling
-            (261, 280) => {
+            (261, dot) if dot >= 280 && dot <= 304 => {
                 let rendering_enabled = (self.mask & 0x18) != 0;
                 if rendering_enabled {
                     let t = self.temp_vram_addr.get();
