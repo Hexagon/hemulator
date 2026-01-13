@@ -830,6 +830,30 @@ impl Ppu {
         let mut frame = Frame::new(256, 240);
         for scanline in 0..240 {
             self.render_scanline(scanline, &mut frame);
+            
+            // Simulate tick()'s dot 256 v register increment (for scanlines 0-238)
+            // This would normally happen in tick() but tests don't call tick()
+            if rendering_enabled && scanline < 239 {
+                let mut v = self.vram_addr.get();
+                let fine_y = (v >> 12) & 0x0007;
+
+                if fine_y < 7 {
+                    v = (v & !0x7000) | ((fine_y + 1) << 12);
+                } else {
+                    v &= !0x7000;
+                    let coarse_y = (v >> 5) & 0x001F;
+                    let new_coarse_y = if coarse_y == 29 {
+                        v ^= 0x0800;
+                        0
+                    } else if coarse_y == 31 {
+                        0
+                    } else {
+                        coarse_y + 1
+                    };
+                    v = (v & !0x03E0) | (new_coarse_y << 5);
+                }
+                self.vram_addr.set(v);
+            }
         }
         frame
     }
@@ -876,17 +900,13 @@ impl Ppu {
         let show_bg_left = (self.mask & 0x02) != 0; // PPUMASK bit 1: show background in leftmost 8 pixels
         let show_sprites_left = (self.mask & 0x04) != 0; // PPUMASK bit 2: show sprites in leftmost 8 pixels
 
-        // Track if rendering is enabled for v register logic
-        let rendering_enabled = bg_enabled || sprites_enabled;
-
         // Note: In production (cycle-accurate mode with tick()), v register initialization
-        // happens in tick() at specific dots:
+        // and increment happen in tick() at specific dots:
         // - Pre-render scanline (261) dot 280: vertical bits copied from t to v
+        // - All visible scanlines dot 256: v register incremented
         // - All scanlines dot 257: horizontal bits copied from t to v
         //
-        // This render_scanline() function should NOT modify the v register except for
-        // the increment at the end (which simulates dot 256 behavior).
-        //
+        // This render_scanline() function should NOT modify the v register.
         // The v register state at the time render_scanline() is called should already
         // be correct from the tick() updates.
 
@@ -1172,43 +1192,9 @@ impl Ppu {
             }
         }
 
-        // Increment v register's fine_y after rendering this scanline (simulates dot 256).
-        // This is critical for proper mid-frame scroll splits (e.g., SMB3 HUD).
-        // When fine_y overflows from 7 to 0, coarse_y is incremented.
-        // When coarse_y reaches 30, it wraps to 0 and nametable Y is toggled.
-        //
-        // IMPORTANT: Skip increment for the last visible scanline (239).
-        // We want scanlines 0–238 to increment v after rendering so that the NEXT
-        // scanline sees the correct fine_y. On scanline 239, we leave v as-is and
-        // rely on the pre-render scanline's v←t copy to reinitialize the vertical
-        // scroll state, avoiding an off-by-one fine_y error for the next frame.
-        if rendering_enabled && y != 239 {
-            let mut v = self.vram_addr.get();
-            let fine_y = (v >> 12) & 0x0007;
-
-            if fine_y < 7 {
-                // Simple case: just increment fine_y
-                v = (v & !0x7000) | ((fine_y + 1) << 12);
-            } else {
-                // fine_y was 7, now wraps to 0
-                v &= !0x7000; // Clear fine_y bits
-
-                let coarse_y = (v >> 5) & 0x001F;
-                let new_coarse_y = if coarse_y == 29 {
-                    // Wrap at row 30 (NES quirk: attribute table is at rows 30-31)
-                    v ^= 0x0800; // Toggle nametable Y bit
-                    0
-                } else if coarse_y == 31 {
-                    // Edge case: if coarse_y is already 31, just wrap to 0 without toggling
-                    0
-                } else {
-                    coarse_y + 1
-                };
-                v = (v & !0x03E0) | (new_coarse_y << 5);
-            }
-
-            self.vram_addr.set(v);
-        }
+        // NOTE: v register increment now happens in tick() at dot 256 of each visible scanline.
+        // render_scanline() should NOT modify the v register - it only renders based on current state.
+        // This ensures proper cycle-accurate timing and prevents drift issues.
 
         self.suppress_a12.set(prev_suppress);
     }
@@ -1300,6 +1286,41 @@ impl Ppu {
                 // Bits 0-4 (coarse X), bit 10 (nametable X)
                 let new_v = (v & !0x041F) | (t & 0x041F);
                 self.vram_addr.set(new_v);
+            }
+        }
+
+        // Visible scanlines, dot 256: Increment v register's vertical position
+        // This prepares the address for the next scanline's background fetches.
+        // Reference: https://www.nesdev.org/wiki/PPU_scrolling
+        // Skip increment for scanline 239 to allow clean reinitialization at pre-render.
+        if scanline < 239 && dot == 256 {
+            let rendering_enabled = (self.mask & 0x18) != 0;
+            if rendering_enabled {
+                let mut v = self.vram_addr.get();
+                let fine_y = (v >> 12) & 0x0007;
+
+                if fine_y < 7 {
+                    // Simple case: just increment fine_y
+                    v = (v & !0x7000) | ((fine_y + 1) << 12);
+                } else {
+                    // fine_y was 7, now wraps to 0
+                    v &= !0x7000; // Clear fine_y bits
+
+                    let coarse_y = (v >> 5) & 0x001F;
+                    let new_coarse_y = if coarse_y == 29 {
+                        // Wrap at row 30 (NES quirk: attribute table is at rows 30-31)
+                        v ^= 0x0800; // Toggle nametable Y bit
+                        0
+                    } else if coarse_y == 31 {
+                        // Edge case: if coarse_y is already 31, just wrap to 0 without toggling
+                        0
+                    } else {
+                        coarse_y + 1
+                    };
+                    v = (v & !0x03E0) | (new_coarse_y << 5);
+                }
+
+                self.vram_addr.set(v);
             }
         }
 
