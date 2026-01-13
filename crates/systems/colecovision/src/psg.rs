@@ -67,6 +67,12 @@ impl ColecoVisionPsg {
         samples
     }
 
+    /// Reset the PSG to power-on state
+    pub fn reset(&mut self) {
+        self.psg.reset();
+        self.cycle_accum = 0.0;
+    }
+
     /// Get PSG state for save state
     pub fn get_state(&self) -> serde_json::Value {
         serde_json::json!({
