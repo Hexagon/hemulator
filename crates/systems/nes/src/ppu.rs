@@ -1309,7 +1309,7 @@ impl Ppu {
             self.sprite_overflow.set(false);
 
             log(LogCategory::PPU, LogLevel::Trace, || {
-                format!("PPU: Pre-render scanline {}, dot 1: cleared VBlank and sprite flags", pre_render_scanline)
+                "PPU: Pre-render scanline, dot 1: cleared VBlank and sprite flags".to_string()
             });
 
             // Release register lock after first frame
