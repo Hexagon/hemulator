@@ -22,6 +22,8 @@ pub enum SystemTileData {
     NES(NesTileData),
     GameBoy(GbTileData),
     SMS(SmsTileData),
+    ColecoVision(ColecoVisionTileData),
+    SG1000(Sg1000TileData),
     SNES(SnesTileData),
     Atari2600(Atari2600TileData),
     Chip8(Chip8TileData),
@@ -74,6 +76,22 @@ pub struct GbTileData {
 pub struct SmsTileData {
     pub vram: Vec<u8>,
     pub cram: Vec<u8>,
+    pub palette: Vec<u32>,
+    pub registers: Vec<u8>,
+}
+
+/// ColecoVision tile viewer data
+#[derive(Clone)]
+pub struct ColecoVisionTileData {
+    pub vram: Vec<u8>,
+    pub palette: Vec<u32>,
+    pub registers: Vec<u8>,
+}
+
+/// SG-1000 tile viewer data (TMS9918A VDP - same as ColecoVision)
+#[derive(Clone)]
+pub struct Sg1000TileData {
+    pub vram: Vec<u8>,
     pub palette: Vec<u32>,
     pub registers: Vec<u8>,
 }
@@ -1812,6 +1830,24 @@ impl TabManager {
                             ui.heading("📺 CHIP-8 Inspector");
                             ui.separator();
                             ui.label("CHIP-8 doesn't use tiles. See Display and Registers tabs for debugging info.");
+                        }
+                        SystemTileData::ColecoVision(coleco_data) => {
+                            ui.heading("🎨 ColecoVision Tile Viewer");
+                            ui.separator();
+                            ui.label(format!("VRAM: {} bytes", coleco_data.vram.len()));
+                            ui.label(format!("Palette: {} colors", coleco_data.palette.len()));
+                            ui.label(format!("VDP Registers: {}", coleco_data.registers.len()));
+                            ui.add_space(5.0);
+                            ui.label("See VDP tab for detailed register information");
+                        }
+                        SystemTileData::SG1000(sg1000_data) => {
+                            ui.heading("🎨 SG-1000 Tile Viewer");
+                            ui.separator();
+                            ui.label(format!("VRAM: {} bytes", sg1000_data.vram.len()));
+                            ui.label(format!("Palette: {} colors", sg1000_data.palette.len()));
+                            ui.label(format!("VDP Registers: {}", sg1000_data.registers.len()));
+                            ui.add_space(5.0);
+                            ui.label("See VDP tab for detailed register information");
                         }
                     }
                 } else {

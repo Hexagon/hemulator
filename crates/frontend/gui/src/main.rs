@@ -95,6 +95,8 @@ enum EmulatorSystem {
     N64(Box<emu_n64::N64System>),
     SMS(Box<emu_sms::SmsSystem>),
     Chip8(Box<emu_chip8::Chip8System>),
+    ColecoVision(Box<emu_colecovision::ColecoVisionSystem>),
+    SG1000(Box<emu_sg1000::Sg1000System>),
 }
 
 #[allow(dead_code)]
@@ -125,6 +127,12 @@ impl EmulatorSystem {
             EmulatorSystem::Chip8(sys) => sys
                 .step_frame()
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::ColecoVision(sys) => sys
+                .step_frame()
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::SG1000(sys) => sys
+                .step_frame()
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         }
     }
 
@@ -138,6 +146,8 @@ impl EmulatorSystem {
             EmulatorSystem::N64(sys) => sys.reset(),
             EmulatorSystem::SMS(sys) => sys.reset(),
             EmulatorSystem::Chip8(sys) => sys.reset(),
+            EmulatorSystem::ColecoVision(sys) => sys.reset(),
+            EmulatorSystem::SG1000(sys) => sys.reset(),
         }
     }
 
@@ -151,6 +161,8 @@ impl EmulatorSystem {
             EmulatorSystem::N64(sys) => sys.debugger(),
             EmulatorSystem::SMS(sys) => sys.debugger(),
             EmulatorSystem::Chip8(sys) => sys.debugger(),
+            EmulatorSystem::ColecoVision(sys) => sys.debugger(),
+            EmulatorSystem::SG1000(sys) => sys.debugger(),
         }
     }
 
@@ -164,6 +176,8 @@ impl EmulatorSystem {
             EmulatorSystem::N64(sys) => sys.get_total_cycles(),
             EmulatorSystem::SMS(sys) => sys.get_total_cycles(),
             EmulatorSystem::Chip8(sys) => sys.get_total_cycles(),
+            EmulatorSystem::ColecoVision(sys) => sys.get_total_cycles(),
+            EmulatorSystem::SG1000(sys) => sys.get_total_cycles(),
         }
     }
 
@@ -198,6 +212,12 @@ impl EmulatorSystem {
             EmulatorSystem::Chip8(sys) => sys
                 .mount(mount_point_id, data)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::ColecoVision(sys) => sys
+                .mount(mount_point_id, data)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::SG1000(sys) => sys
+                .mount(mount_point_id, data)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         }
     }
 
@@ -212,6 +232,8 @@ impl EmulatorSystem {
             EmulatorSystem::N64(sys) => sys.mount_points(),
             EmulatorSystem::SMS(sys) => sys.mount_points(),
             EmulatorSystem::Chip8(sys) => sys.mount_points(),
+            EmulatorSystem::ColecoVision(sys) => sys.mount_points(),
+            EmulatorSystem::SG1000(sys) => sys.mount_points(),
         }
     }
 
@@ -242,6 +264,12 @@ impl EmulatorSystem {
             EmulatorSystem::Chip8(sys) => sys
                 .unmount(mount_point_id)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::ColecoVision(sys) => sys
+                .unmount(mount_point_id)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::SG1000(sys) => sys
+                .unmount(mount_point_id)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         }
     }
 
@@ -256,6 +284,8 @@ impl EmulatorSystem {
             EmulatorSystem::N64(sys) => sys.is_mounted(mount_point_id),
             EmulatorSystem::SMS(sys) => sys.is_mounted(mount_point_id),
             EmulatorSystem::Chip8(sys) => sys.is_mounted(mount_point_id),
+            EmulatorSystem::ColecoVision(sys) => sys.is_mounted(mount_point_id),
+            EmulatorSystem::SG1000(sys) => sys.is_mounted(mount_point_id),
         }
     }
 
@@ -269,6 +299,8 @@ impl EmulatorSystem {
             EmulatorSystem::N64(sys) => sys.supports_save_states(),
             EmulatorSystem::SMS(sys) => sys.supports_save_states(),
             EmulatorSystem::Chip8(sys) => sys.supports_save_states(),
+            EmulatorSystem::ColecoVision(sys) => sys.supports_save_states(),
+            EmulatorSystem::SG1000(sys) => sys.supports_save_states(),
         }
     }
 
@@ -282,6 +314,8 @@ impl EmulatorSystem {
             EmulatorSystem::N64(sys) => sys.save_state(),
             EmulatorSystem::SMS(sys) => sys.save_state(),
             EmulatorSystem::Chip8(sys) => sys.save_state(),
+            EmulatorSystem::ColecoVision(sys) => sys.save_state(),
+            EmulatorSystem::SG1000(sys) => sys.save_state(),
         }
     }
 
@@ -295,6 +329,8 @@ impl EmulatorSystem {
             EmulatorSystem::N64(sys) => sys.load_state(state),
             EmulatorSystem::SMS(sys) => sys.load_state(state),
             EmulatorSystem::Chip8(sys) => sys.load_state(state),
+            EmulatorSystem::ColecoVision(sys) => sys.load_state(state),
+            EmulatorSystem::SG1000(sys) => sys.load_state(state),
         }
     }
 
@@ -367,6 +403,22 @@ impl EmulatorSystem {
             EmulatorSystem::Chip8(_) => {
                 // Chip8 uses 16-bit controller state via set_controller_16
                 // This 8-bit set_controller is not used for Chip8
+            }
+            EmulatorSystem::ColecoVision(sys) => {
+                // ColecoVision has 2 controller ports
+                if port == 0 {
+                    sys.set_controller(1, state);
+                } else if port == 1 {
+                    sys.set_controller(2, state);
+                }
+            }
+            EmulatorSystem::SG1000(sys) => {
+                // SG-1000 has 2 controller ports
+                if port == 0 {
+                    sys.set_controller(1, state);
+                } else if port == 1 {
+                    sys.set_controller(2, state);
+                }
             }
         }
     }
@@ -463,6 +515,14 @@ impl EmulatorSystem {
                 let debug = sys.debug_info();
                 Some(debug.pc as u32)
             }
+            EmulatorSystem::ColecoVision(_) => {
+                // Z80 CPU - get PC from debugger
+                None // TODO: Implement when debugger provides PC
+            }
+            EmulatorSystem::SG1000(_) => {
+                // Z80 CPU - get PC from debugger
+                None // TODO: Implement when debugger provides PC
+            }
         }
     }
 
@@ -477,6 +537,8 @@ impl EmulatorSystem {
             EmulatorSystem::N64(_) => Some(93.75), // N64 R4300i (93.75 MHz)
             EmulatorSystem::SMS(_) => Some(3.58), // SMS Z80A (3.58 MHz NTSC)
             EmulatorSystem::Chip8(_) => Some(0.0007), // CHIP-8 runs at ~700 instructions/sec (~0.7 kHz)
+            EmulatorSystem::ColecoVision(_) => Some(3.58), // ColecoVision Z80A (3.579545 MHz NTSC)
+            EmulatorSystem::SG1000(_) => Some(3.58),  // SG-1000 Z80A (3.579545 MHz NTSC)
         }
     }
 
@@ -498,6 +560,8 @@ impl EmulatorSystem {
             EmulatorSystem::N64(_) => emu_nes::RuntimeStats::default(),
             EmulatorSystem::SMS(_) => emu_nes::RuntimeStats::default(),
             EmulatorSystem::Chip8(_) => emu_nes::RuntimeStats::default(),
+            EmulatorSystem::ColecoVision(_) => emu_nes::RuntimeStats::default(),
+            EmulatorSystem::SG1000(_) => emu_nes::RuntimeStats::default(),
         }
     }
 
@@ -511,6 +575,8 @@ impl EmulatorSystem {
             EmulatorSystem::N64(_) => emu_core::apu::TimingMode::Ntsc,
             EmulatorSystem::SMS(_) => emu_core::apu::TimingMode::Ntsc,
             EmulatorSystem::Chip8(_) => emu_core::apu::TimingMode::Ntsc,
+            EmulatorSystem::ColecoVision(_) => emu_core::apu::TimingMode::Ntsc,
+            EmulatorSystem::SG1000(_) => emu_core::apu::TimingMode::Ntsc,
         }
     }
 
@@ -524,6 +590,8 @@ impl EmulatorSystem {
             EmulatorSystem::N64(_) => vec![0; count], // TODO: Implement audio for N64
             EmulatorSystem::Chip8(_) => vec![0; count], // TODO: Implement CHIP-8 audio (single beep tone)
             EmulatorSystem::SMS(sys) => sys.get_audio_samples(count),
+            EmulatorSystem::ColecoVision(_) => vec![0; count], // TODO: Implement ColecoVision audio
+            EmulatorSystem::SG1000(_) => vec![0; count],       // TODO: Implement SG-1000 audio
         }
     }
 
@@ -537,6 +605,8 @@ impl EmulatorSystem {
             EmulatorSystem::N64(_) => (320, 240),
             EmulatorSystem::SMS(_) => (256, 192),
             EmulatorSystem::Chip8(_) => (64, 32),
+            EmulatorSystem::ColecoVision(_) => (256, 192), // TMS9918A resolution
+            EmulatorSystem::SG1000(_) => (256, 192),       // TMS9918A resolution
         }
     }
 
@@ -550,6 +620,8 @@ impl EmulatorSystem {
             EmulatorSystem::N64(_) => "n64",
             EmulatorSystem::SMS(_) => "sms",
             EmulatorSystem::Chip8(_) => "chip8",
+            EmulatorSystem::ColecoVision(_) => "colecovision",
+            EmulatorSystem::SG1000(_) => "sg1000",
         }
     }
 
@@ -564,6 +636,8 @@ impl EmulatorSystem {
             EmulatorSystem::N64(_) => SystemType::N64,
             EmulatorSystem::SMS(_) => SystemType::SMS,
             EmulatorSystem::Chip8(_) => SystemType::Chip8,
+            EmulatorSystem::ColecoVision(_) => SystemType::ColecoVision,
+            EmulatorSystem::SG1000(_) => SystemType::SG1000,
         }
     }
 
@@ -625,6 +699,8 @@ impl EmulatorSystem {
             }
             EmulatorSystem::SMS(_) => "Software".to_string(),
             EmulatorSystem::Chip8(_) => "Software".to_string(),
+            EmulatorSystem::ColecoVision(_) => "Software".to_string(),
+            EmulatorSystem::SG1000(_) => "Software".to_string(),
         }
     }
 
@@ -656,6 +732,8 @@ impl EmulatorSystem {
             }
             EmulatorSystem::SMS(_) => vec!["Software".to_string()],
             EmulatorSystem::Chip8(_) => vec!["Software".to_string()],
+            EmulatorSystem::ColecoVision(_) => vec!["Software".to_string()],
+            EmulatorSystem::SG1000(_) => vec!["Software".to_string()],
         }
     }
 
@@ -671,6 +749,8 @@ impl EmulatorSystem {
             EmulatorSystem::N64(_) => None,
             EmulatorSystem::SMS(_) => None,
             EmulatorSystem::Chip8(_) => None,
+            EmulatorSystem::ColecoVision(_) => None,
+            EmulatorSystem::SG1000(_) => None,
         }
     }
 
@@ -685,6 +765,8 @@ impl EmulatorSystem {
             EmulatorSystem::N64(sys) => Some(sys.get_instruction_tracer()),
             EmulatorSystem::SMS(sys) => Some(sys.get_instruction_tracer()),
             EmulatorSystem::Chip8(sys) => Some(sys.get_instruction_tracer()),
+            EmulatorSystem::ColecoVision(sys) => Some(&sys.instruction_tracer),
+            EmulatorSystem::SG1000(sys) => Some(&sys.instruction_tracer),
         }
     }
 }
@@ -1648,6 +1730,8 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
             EmulatorSystem::SNES(s) => s.set_instruction_tracing(true),
             EmulatorSystem::N64(s) => s.set_instruction_tracing(true),
             EmulatorSystem::PC(s) => s.set_instruction_tracing(true),
+            EmulatorSystem::ColecoVision(s) => s.instruction_tracer.set_enabled(true),
+            EmulatorSystem::SG1000(s) => s.instruction_tracer.set_enabled(true),
         }
     }
 
@@ -1662,6 +1746,8 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
             EmulatorSystem::SNES(s) => s.add_breakpoint(addr),
             EmulatorSystem::N64(s) => s.add_breakpoint(addr),
             EmulatorSystem::PC(s) => s.add_breakpoint(addr),
+            EmulatorSystem::ColecoVision(s) => s.breakpoint_manager.add_execute(addr),
+            EmulatorSystem::SG1000(s) => s.breakpoint_manager.add_execute(addr),
         }
     }
 }
@@ -2587,6 +2673,99 @@ fn main() {
                                 println!("Loaded CHIP-8 program: {}", p);
                             }
                         }
+                        Ok(SystemType::ColecoVision) => {
+                            rom_hash = Some(GameSaves::rom_hash(&data));
+                            let mut coleco_sys = emu_colecovision::ColecoVisionSystem::new();
+
+                            // ColecoVision requires BIOS - try to find it automatically
+                            let bios_loaded = if let Ok(rom_path) =
+                                std::path::Path::new(&p).canonicalize()
+                            {
+                                if let Some(parent_dir) = rom_path.parent() {
+                                    // Try common BIOS filenames
+                                    let bios_candidates = [
+                                        "ColecoVision BIOS (1982).col",
+                                        "coleco.rom",
+                                        "coleco.bin",
+                                        "bios.rom",
+                                        "bios.bin",
+                                    ];
+
+                                    let mut loaded = false;
+                                    for candidate in &bios_candidates {
+                                        let bios_path = parent_dir.join(candidate);
+                                        if bios_path.exists() {
+                                            if let Ok(bios_data) = std::fs::read(&bios_path) {
+                                                if bios_data.len() == 8192 {
+                                                    // Verify BIOS is 8KB
+                                                    if coleco_sys.mount("BIOS", &bios_data).is_ok()
+                                                    {
+                                                        println!(
+                                                            "Loaded ColecoVision BIOS from: {}",
+                                                            bios_path.display()
+                                                        );
+                                                        runtime_state.set_mount(
+                                                            "BIOS".to_string(),
+                                                            bios_path.to_string_lossy().to_string(),
+                                                        );
+                                                        loaded = true;
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    loaded
+                                } else {
+                                    false
+                                }
+                            } else {
+                                false
+                            };
+
+                            if !bios_loaded {
+                                eprintln!("Warning: ColecoVision BIOS not found. System will not boot properly.");
+                            }
+
+                            // Load the cartridge
+                            if let Err(e) = coleco_sys.mount("Cartridge", &data) {
+                                eprintln!("Failed to load ColecoVision ROM: {}", e);
+                                status_message = format!("Error: {}", e);
+                                rom_hash = None;
+                            } else {
+                                rom_loaded = true;
+                                sys = EmulatorSystem::ColecoVision(Box::new(coleco_sys));
+                                runtime_state.set_mount("Cartridge".to_string(), p.clone());
+                                if let Err(e) = settings.save() {
+                                    eprintln!("Warning: Failed to save settings: {}", e);
+                                }
+                                if bios_loaded {
+                                    status_message = "ColecoVision cartridge loaded".to_string();
+                                    println!("Loaded ColecoVision cartridge: {}", p);
+                                } else {
+                                    status_message = "ColecoVision cartridge loaded (BIOS missing - will not boot)".to_string();
+                                    println!("Loaded ColecoVision cartridge: {} (BIOS missing)", p);
+                                }
+                            }
+                        }
+                        Ok(SystemType::SG1000) => {
+                            rom_hash = Some(GameSaves::rom_hash(&data));
+                            let mut sg1000_sys = emu_sg1000::Sg1000System::new();
+                            if let Err(e) = sg1000_sys.mount("Cartridge", &data) {
+                                eprintln!("Failed to load SG-1000 ROM: {}", e);
+                                status_message = format!("Error: {}", e);
+                                rom_hash = None;
+                            } else {
+                                rom_loaded = true;
+                                sys = EmulatorSystem::SG1000(Box::new(sg1000_sys));
+                                runtime_state.set_mount("Cartridge".to_string(), p.clone());
+                                if let Err(e) = settings.save() {
+                                    eprintln!("Warning: Failed to save settings: {}", e);
+                                }
+                                status_message = "SG-1000 cartridge loaded".to_string();
+                                println!("Loaded SG-1000 cartridge: {}", p);
+                            }
+                        }
                         Err(e) => {
                             eprintln!("Unsupported ROM: {}", e);
                             status_message = format!("Unsupported ROM: {}", e);
@@ -3168,6 +3347,20 @@ fn main() {
                     }
                 }
                 EmulatorSystem::Chip8(s) => SystemDebugInfo::from_chip8(&s.debug_info()),
+                EmulatorSystem::ColecoVision(s) => {
+                    if let Some(debugger) = s.debugger() {
+                        SystemDebugInfo::from_debugger("ColecoVision", debugger)
+                    } else {
+                        SystemDebugInfo::new("ColecoVision".to_string())
+                    }
+                }
+                EmulatorSystem::SG1000(s) => {
+                    if let Some(debugger) = s.debugger() {
+                        SystemDebugInfo::from_debugger("SG-1000", debugger)
+                    } else {
+                        SystemDebugInfo::new("SG-1000".to_string())
+                    }
+                }
             };
             egui_app.tab_manager.update_debug_info(debug_info);
 
@@ -3260,6 +3453,16 @@ fn main() {
                         palette: sms_data.palette,
                         registers: sms_data.registers,
                     });
+                    egui_app.tab_manager.update_system_tile_data(tile_data);
+                }
+                EmulatorSystem::ColecoVision(s) => {
+                    let coleco_data = s.get_tile_viewer_data();
+                    let tile_data =
+                        egui_ui::SystemTileData::ColecoVision(egui_ui::ColecoVisionTileData {
+                            vram: coleco_data.vram,
+                            palette: coleco_data.palette,
+                            registers: coleco_data.registers,
+                        });
                     egui_app.tab_manager.update_system_tile_data(tile_data);
                 }
                 EmulatorSystem::SNES(s) => {
@@ -3766,6 +3969,82 @@ fn main() {
                                                 .set_message("CHIP-8 program loaded".to_string());
                                             let _ = sys.resolution();
                                             // Load save states for this ROM
+                                            if let Some(ref hash) = rom_hash {
+                                                _game_saves = GameSaves::load(hash);
+                                            }
+                                        }
+                                    }
+                                    Ok(SystemType::ColecoVision) => {
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        let mut coleco_sys =
+                                            emu_colecovision::ColecoVisionSystem::new();
+                                        if let Err(e) = coleco_sys.mount("Cartridge", &data) {
+                                            egui_app.status_bar.set_message(format!(
+                                                "Error: {} (Note: ColecoVision requires BIOS)",
+                                                e
+                                            ));
+                                            rom_hash = None;
+                                        } else {
+                                            rom_loaded = true;
+                                            sys =
+                                                EmulatorSystem::ColecoVision(Box::new(coleco_sys));
+                                            egui_app.property_pane.system_name =
+                                                "ColecoVision".to_string();
+                                            runtime_state.set_mount(
+                                                "Cartridge".to_string(),
+                                                path_str.clone(),
+                                            );
+                                            settings.add_recent_file(path_str.clone());
+                                            if let Err(e) = settings.save() {
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
+                                            }
+                                            egui_app.update_recent_files(
+                                                settings.get_recent_files().to_vec(),
+                                            );
+                                            egui_app.status_bar.set_message(
+                                                "ColecoVision cartridge loaded (BIOS required)"
+                                                    .to_string(),
+                                            );
+                                            let _ = sys.resolution();
+                                            if let Some(ref hash) = rom_hash {
+                                                _game_saves = GameSaves::load(hash);
+                                            }
+                                        }
+                                    }
+                                    Ok(SystemType::SG1000) => {
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        let mut sg1000_sys = emu_sg1000::Sg1000System::new();
+                                        if let Err(e) = sg1000_sys.mount("Cartridge", &data) {
+                                            egui_app
+                                                .status_bar
+                                                .set_message(format!("Error: {}", e));
+                                            rom_hash = None;
+                                        } else {
+                                            rom_loaded = true;
+                                            sys = EmulatorSystem::SG1000(Box::new(sg1000_sys));
+                                            egui_app.property_pane.system_name =
+                                                "SG-1000".to_string();
+                                            runtime_state.set_mount(
+                                                "Cartridge".to_string(),
+                                                path_str.clone(),
+                                            );
+                                            settings.add_recent_file(path_str.clone());
+                                            if let Err(e) = settings.save() {
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
+                                            }
+                                            egui_app.update_recent_files(
+                                                settings.get_recent_files().to_vec(),
+                                            );
+                                            egui_app.status_bar.set_message(
+                                                "SG-1000 cartridge loaded".to_string(),
+                                            );
+                                            let _ = sys.resolution();
                                             if let Some(ref hash) = rom_hash {
                                                 _game_saves = GameSaves::load(hash);
                                             }
@@ -4308,6 +4587,90 @@ fn main() {
                                             egui_app
                                                 .status_bar
                                                 .set_message("CHIP-8 program loaded".to_string());
+                                            let _ = sys.resolution();
+                                            if let Some(ref hash) = rom_hash {
+                                                _game_saves = GameSaves::load(hash);
+                                            }
+                                        }
+                                    }
+                                    Ok(SystemType::ColecoVision) => {
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        let mut coleco_sys =
+                                            emu_colecovision::ColecoVisionSystem::new();
+                                        if let Err(e) = coleco_sys.mount("Cartridge", &data) {
+                                            egui_app.status_bar.set_message(format!(
+                                                "Error: {} (Note: ColecoVision requires BIOS)",
+                                                e
+                                            ));
+                                            rom_hash = None;
+                                        } else {
+                                            rom_loaded = true;
+                                            sys =
+                                                EmulatorSystem::ColecoVision(Box::new(coleco_sys));
+                                            egui_app.property_pane.system_name =
+                                                "ColecoVision".to_string();
+                                            egui_app.property_pane.rendering_backend =
+                                                sys.get_current_renderer_name();
+                                            egui_app.property_pane.available_renderers =
+                                                sys.get_available_renderers();
+                                            runtime_state.set_mount(
+                                                "Cartridge".to_string(),
+                                                file_path.clone(),
+                                            );
+                                            settings.add_recent_file(file_path.clone());
+                                            if let Err(e) = settings.save() {
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
+                                            }
+                                            egui_app.update_recent_files(
+                                                settings.get_recent_files().to_vec(),
+                                            );
+                                            egui_app.status_bar.set_message(
+                                                "ColecoVision cartridge loaded (BIOS required)"
+                                                    .to_string(),
+                                            );
+                                            let _ = sys.resolution();
+                                            if let Some(ref hash) = rom_hash {
+                                                _game_saves = GameSaves::load(hash);
+                                            }
+                                        }
+                                    }
+                                    Ok(SystemType::SG1000) => {
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        let mut sg1000_sys = emu_sg1000::Sg1000System::new();
+                                        if let Err(e) = sg1000_sys.mount("Cartridge", &data) {
+                                            egui_app
+                                                .status_bar
+                                                .set_message(format!("Error: {}", e));
+                                            rom_hash = None;
+                                        } else {
+                                            rom_loaded = true;
+                                            sys = EmulatorSystem::SG1000(Box::new(sg1000_sys));
+                                            egui_app.property_pane.system_name =
+                                                "SG-1000".to_string();
+                                            egui_app.property_pane.rendering_backend =
+                                                sys.get_current_renderer_name();
+                                            egui_app.property_pane.available_renderers =
+                                                sys.get_available_renderers();
+                                            runtime_state.set_mount(
+                                                "Cartridge".to_string(),
+                                                file_path.clone(),
+                                            );
+                                            settings.add_recent_file(file_path.clone());
+                                            if let Err(e) = settings.save() {
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
+                                            }
+                                            egui_app.update_recent_files(
+                                                settings.get_recent_files().to_vec(),
+                                            );
+                                            egui_app.status_bar.set_message(
+                                                "SG-1000 cartridge loaded".to_string(),
+                                            );
                                             let _ = sys.resolution();
                                             if let Some(ref hash) = rom_hash {
                                                 _game_saves = GameSaves::load(hash);
