@@ -819,7 +819,7 @@ impl Ppu {
         //
         // Since tests don't call tick(), we need to manually initialize the v register
         // from t before rendering, simulating what tick() would do at pre-render
-        // scanline dot 280 and dot 257.
+        // scanline dots 280-304 and dot 257.
         let rendering_enabled = (self.mask & 0x18) != 0;
         if rendering_enabled {
             let t = self.temp_vram_addr.get();
