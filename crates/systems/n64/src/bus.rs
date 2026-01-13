@@ -502,23 +502,15 @@ impl MemoryMips for N64Bus {
         });
     }
 
-    fn tlb_write_random(&mut self, entry: emu_core::cpu_mips_r4300i::TlbEntryData) {
-        // For random writes, use a simple pseudo-random index based on cycle count
-        // Real hardware uses a random register that decrements, but this is simpler
-        // Use index 8-31 (0-7 are typically wired entries)
-        let random_index = 8
-            + (std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-                % 24) as usize;
-
-        self.tlb_write_indexed(random_index, entry);
+    fn tlb_write_random(&mut self, index: usize, entry: emu_core::cpu_mips_r4300i::TlbEntryData) {
+        // Use the index from CP0 Random register (passed from CPU)
+        // This ensures deterministic behavior for save states and debugging
+        self.tlb_write_indexed(index, entry);
 
         log(LogCategory::Bus, LogLevel::Debug, || {
             format!(
                 "N64 TLB: Write entry at random index {} - VPN2=0x{:07X}, ASID=0x{:02X}",
-                random_index, entry.vpn2, entry.asid
+                index, entry.vpn2, entry.asid
             )
         });
     }

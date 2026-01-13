@@ -135,7 +135,8 @@ pub trait MemoryMips {
     }
 
     /// Write TLB entry at random index (TLBWR)
-    fn tlb_write_random(&mut self, _entry: TlbEntryData) {
+    /// The index parameter comes from CP0 Random register for determinism
+    fn tlb_write_random(&mut self, _index: usize, _entry: TlbEntryData) {
         // Default: no-op for systems without TLB
     }
 
@@ -1517,28 +1518,30 @@ impl<M: MemoryMips> CpuMips<M> {
     fn execute_tlbr(&mut self) {
         let index = (self.cp0[CP0_INDEX] & 0x1F) as usize; // Bottom 5 bits
 
-        if let Some(entry) = self.memory.tlb_read_indexed(index) {
-            // Write to CP0 registers
-            // EntryHi: VPN2 (bits 39-13) and ASID (bits 7-0)
-            self.cp0[CP0_ENTRYHI] = (entry.vpn2 << 13) | (entry.asid as u64);
+        // Read the TLB entry, or use default if invalid index
+        // This matches MIPS behavior where invalid indices still update CP0 registers
+        let entry = self.memory.tlb_read_indexed(index).unwrap_or_default();
 
-            // EntryLo0: Even page (PFN, C, D, V, G)
-            self.cp0[CP0_ENTRYLO0] = ((entry.pfn0 as u64) << 6)
-                | ((entry.c0 as u64) << 3)
-                | ((entry.d0 as u64) << 2)
-                | ((entry.v0 as u64) << 1)
-                | (entry.global as u64);
+        // Write to CP0 registers
+        // EntryHi: VPN2 (bits 39-13) and ASID (bits 7-0)
+        self.cp0[CP0_ENTRYHI] = (entry.vpn2 << 13) | (entry.asid as u64);
 
-            // EntryLo1: Odd page (PFN, C, D, V, G)
-            self.cp0[CP0_ENTRYLO1] = ((entry.pfn1 as u64) << 6)
-                | ((entry.c1 as u64) << 3)
-                | ((entry.d1 as u64) << 2)
-                | ((entry.v1 as u64) << 1)
-                | (entry.global as u64);
+        // EntryLo0: Even page (PFN, C, D, V, G)
+        self.cp0[CP0_ENTRYLO0] = ((entry.pfn0 as u64) << 6)
+            | ((entry.c0 as u64) << 3)
+            | ((entry.d0 as u64) << 2)
+            | ((entry.v0 as u64) << 1)
+            | (entry.global as u64);
 
-            // PageMask
-            self.cp0[CP0_PAGEMASK] = entry.page_mask as u64;
-        }
+        // EntryLo1: Odd page (PFN, C, D, V, G)
+        self.cp0[CP0_ENTRYLO1] = ((entry.pfn1 as u64) << 6)
+            | ((entry.c1 as u64) << 3)
+            | ((entry.d1 as u64) << 2)
+            | ((entry.v1 as u64) << 1)
+            | (entry.global as u64);
+
+        // PageMask
+        self.cp0[CP0_PAGEMASK] = entry.page_mask as u64;
 
         self.cycles += 1;
     }
@@ -1553,10 +1556,13 @@ impl<M: MemoryMips> CpuMips<M> {
     }
 
     /// Execute TLBWR - Write Random TLB Entry
-    /// Writes TLB entry from CP0 registers to random index
+    /// Writes TLB entry from CP0 registers to random index (from CP0_RANDOM)
     fn execute_tlbwr(&mut self) {
         let entry = self.cp0_to_tlb_entry();
-        self.memory.tlb_write_random(entry);
+        // Use CP0 Random register (bottom 5 bits) for deterministic randomness
+        // Random register is typically in range 8-31 (wired entries are 0-7)
+        let random_index = (self.cp0[CP0_RANDOM] & 0x1F) as usize;
+        self.memory.tlb_write_random(random_index, entry);
         self.cycles += 1;
     }
 
