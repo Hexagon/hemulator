@@ -49,7 +49,7 @@ pub struct RomDbEntry {
     /// CRC32 checksum of the entire ROM file (including iNES header)
     pub crc32: u32,
     /// Optional mapper number override (if None, use header value)
-    pub mapper: Option<u8>,
+    pub mapper: Option<u16>,
     /// Optional mirroring mode override (if None, use header value)
     pub mirroring: Option<Mirroring>,
     /// Optional board name for documentation purposes
@@ -75,7 +75,7 @@ impl RomDbEntry {
     /// ```
     pub const fn new(
         crc32: u32,
-        mapper: Option<u8>,
+        mapper: Option<u16>,
         mirroring: Option<Mirroring>,
         board: Option<&'static str>,
     ) -> Self {

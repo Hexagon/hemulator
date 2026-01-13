@@ -3432,6 +3432,7 @@ fn main() {
                     if let Some(cart_info) = s.get_cartridge_info() {
                         let cart_data = egui_ui::NesCartridgeData {
                             mapper: cart_info.mapper,
+                            submapper: cart_info.submapper,
                             mapper_name: cart_info.mapper_name,
                             mirroring: cart_info.mirroring,
                             timing: format!("{:?}", cart_info.timing),
@@ -3439,6 +3440,7 @@ fn main() {
                             prg_size: cart_info.prg_size,
                             chr_size: cart_info.chr_size,
                             header_mapper: cart_info.header_mapper,
+                            header_submapper: cart_info.header_submapper,
                             header_mirroring: cart_info.header_mirroring,
                             db_mapper_override: cart_info.db_mapper_override,
                             db_mirroring_override: cart_info.db_mirroring_override,

@@ -118,7 +118,7 @@ impl NesBus {
     }
 
     /// Get mapper number for debug info
-    pub fn mapper_number(&self) -> Option<u8> {
+    pub fn mapper_number(&self) -> Option<u16> {
         self.mapper.as_ref().map(|m| m.borrow().mapper_number())
     }
 

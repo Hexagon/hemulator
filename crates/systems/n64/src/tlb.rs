@@ -400,11 +400,8 @@ mod tests {
         );
 
         // Verify the translation produces a valid physical address
-        if let Some((phys_addr, is_cached)) = result {
-            assert!(
-                phys_addr <= u32::MAX,
-                "Physical address should be within 32-bit range"
-            );
+        if let Some((_phys_addr, is_cached)) = result {
+            // Physical address is u32, so always within 32-bit range
             assert!(is_cached, "Should be cached (c=3)");
         }
     }
@@ -469,9 +466,8 @@ mod tests {
         // Should translate successfully (within 32-bit range)
         let result = tlb.translate(0x00010000);
         assert!(result.is_some());
-        if let Some((phys_addr, _)) = result {
-            // Physical address should fit in 32 bits
-            assert!(phys_addr <= u32::MAX);
+        if let Some((_phys_addr, _)) = result {
+            // Physical address is u32, so always within 32-bit range
         }
     }
 

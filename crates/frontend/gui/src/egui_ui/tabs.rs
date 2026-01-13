@@ -33,7 +33,9 @@ pub enum SystemTileData {
 #[derive(Clone)]
 pub struct NesCartridgeData {
     /// Mapper number being used
-    pub mapper: u8,
+    pub mapper: u16,
+    /// Submapper number (iNES 2.0)
+    pub submapper: u8,
     /// Human-readable mapper name
     pub mapper_name: String,
     /// Mirroring mode being used
@@ -47,7 +49,9 @@ pub struct NesCartridgeData {
     /// CHR ROM size (0 for CHR-RAM)
     pub chr_size: usize,
     /// Mapper from iNES header
-    pub header_mapper: u8,
+    pub header_mapper: u16,
+    /// Submapper from iNES 2.0 header
+    pub header_submapper: u8,
     /// Mirroring from iNES header
     pub header_mirroring: String,
     /// DB mapper override flag
