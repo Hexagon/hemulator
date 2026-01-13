@@ -899,6 +899,7 @@ dependencies = [
  "emu_n64",
  "emu_nes",
  "emu_pc",
+ "emu_sg1000",
  "emu_sms",
  "emu_snes",
  "env_logger",
@@ -945,6 +946,15 @@ version = "0.1.0"
 dependencies = [
  "emu_core",
  "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "emu_sg1000"
+version = "0.1.0"
+dependencies = [
+ "emu_core",
  "serde_json",
  "thiserror",
 ]

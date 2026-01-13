@@ -143,6 +143,7 @@ impl EmulatorSystem {
             EmulatorSystem::SMS(sys) => sys.reset(),
             EmulatorSystem::Chip8(sys) => sys.reset(),
             EmulatorSystem::ColecoVision(sys) => sys.reset(),
+            EmulatorSystem::SG1000(sys) => sys.reset(),
         }
     }
 
@@ -157,6 +158,7 @@ impl EmulatorSystem {
             EmulatorSystem::SMS(sys) => sys.debugger(),
             EmulatorSystem::Chip8(sys) => sys.debugger(),
             EmulatorSystem::ColecoVision(sys) => sys.debugger(),
+            EmulatorSystem::SG1000(sys) => sys.debugger(),
         }
     }
 
@@ -171,6 +173,7 @@ impl EmulatorSystem {
             EmulatorSystem::SMS(sys) => sys.get_total_cycles(),
             EmulatorSystem::Chip8(sys) => sys.get_total_cycles(),
             EmulatorSystem::ColecoVision(sys) => sys.get_total_cycles(),
+            EmulatorSystem::SG1000(sys) => sys.get_total_cycles(),
         }
     }
 
@@ -223,6 +226,7 @@ impl EmulatorSystem {
             EmulatorSystem::SMS(sys) => sys.mount_points(),
             EmulatorSystem::Chip8(sys) => sys.mount_points(),
             EmulatorSystem::ColecoVision(sys) => sys.mount_points(),
+            EmulatorSystem::SG1000(sys) => sys.mount_points(),
         }
     }
 
@@ -271,6 +275,7 @@ impl EmulatorSystem {
             EmulatorSystem::SMS(sys) => sys.is_mounted(mount_point_id),
             EmulatorSystem::Chip8(sys) => sys.is_mounted(mount_point_id),
             EmulatorSystem::ColecoVision(sys) => sys.is_mounted(mount_point_id),
+            EmulatorSystem::SG1000(sys) => sys.is_mounted(mount_point_id),
         }
     }
 
@@ -285,6 +290,7 @@ impl EmulatorSystem {
             EmulatorSystem::SMS(sys) => sys.supports_save_states(),
             EmulatorSystem::Chip8(sys) => sys.supports_save_states(),
             EmulatorSystem::ColecoVision(sys) => sys.supports_save_states(),
+            EmulatorSystem::SG1000(sys) => sys.supports_save_states(),
         }
     }
 
@@ -299,6 +305,7 @@ impl EmulatorSystem {
             EmulatorSystem::SMS(sys) => sys.save_state(),
             EmulatorSystem::Chip8(sys) => sys.save_state(),
             EmulatorSystem::ColecoVision(sys) => sys.save_state(),
+            EmulatorSystem::SG1000(sys) => sys.save_state(),
         }
     }
 
@@ -313,6 +320,7 @@ impl EmulatorSystem {
             EmulatorSystem::SMS(sys) => sys.load_state(state),
             EmulatorSystem::Chip8(sys) => sys.load_state(state),
             EmulatorSystem::ColecoVision(sys) => sys.load_state(state),
+            EmulatorSystem::SG1000(sys) => sys.load_state(state),
         }
     }
 
@@ -339,6 +347,9 @@ impl EmulatorSystem {
                                                  // Invert for Game Boy's active-low logic (0 = pressed)
                     sys.set_controller(!gb_state);
                 }
+            EmulatorSystem::SG1000(sys) => sys
+                .step_frame()
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
             }
             EmulatorSystem::Atari2600(sys) => sys.set_controller(port, state),
             EmulatorSystem::PC(_) => {} // PC doesn't use controller input
