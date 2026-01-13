@@ -90,6 +90,7 @@ mod ppu;
 pub mod ppu_renderer;
 #[cfg(feature = "opengl")]
 pub mod ppu_renderer_opengl;
+mod rom_db;
 
 use crate::bus::Bus;
 use crate::cartridge::Mirroring;
@@ -479,7 +480,7 @@ impl System for NesSystem {
 
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
         self.frame_index = self.frame_index.wrapping_add(1);
-        let debug_scanline_drift = (self.frame_index % 60) == 0;
+        let debug_scanline_drift = self.frame_index.is_multiple_of(60);
 
         // Drive the frame boundary from the PPU itself.
         //

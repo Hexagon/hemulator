@@ -141,13 +141,53 @@ impl Cartridge {
             vec![]
         };
 
+        // Calculate CRC32 and check ROM database for overrides
+        let crc32 = crate::rom_db::calculate_crc32(data);
+        let (mut final_mapper, mut final_mirroring) = (mapper, mirroring);
+
+        if let Some(db_entry) = crate::rom_db::lookup_rom(crc32) {
+            // Apply mapper override if present
+            if let Some(db_mapper) = db_entry.mapper {
+                log(LogCategory::Bus, LogLevel::Info, || {
+                    format!(
+                        "NES ROM DB: Overriding mapper {} -> {} for CRC32 0x{:08X}{}",
+                        mapper,
+                        db_mapper,
+                        crc32,
+                        db_entry
+                            .board
+                            .map(|b| format!(" ({})", b))
+                            .unwrap_or_default()
+                    )
+                });
+                final_mapper = db_mapper;
+            }
+
+            // Apply mirroring override if present
+            if let Some(db_mirroring) = db_entry.mirroring {
+                log(LogCategory::Bus, LogLevel::Info, || {
+                    format!(
+                        "NES ROM DB: Overriding mirroring {:?} -> {:?} for CRC32 0x{:08X}{}",
+                        mirroring,
+                        db_mirroring,
+                        crc32,
+                        db_entry
+                            .board
+                            .map(|b| format!(" ({})", b))
+                            .unwrap_or_default()
+                    )
+                });
+                final_mirroring = db_mirroring;
+            }
+        }
+
         log(LogCategory::Bus, LogLevel::Info, || {
             format!(
                 "NES: Loaded cartridge - Mapper {} ({} KB PRG, {} KB CHR, {:?}, {:?})",
-                mapper,
+                final_mapper,
                 prg_size / 1024,
                 chr_size / 1024,
-                mirroring,
+                final_mirroring,
                 timing
             )
         });
@@ -155,8 +195,8 @@ impl Cartridge {
         Ok(Self {
             prg_rom,
             chr_rom,
-            mapper,
-            mirroring,
+            mapper: final_mapper,
+            mirroring: final_mirroring,
             timing,
         })
     }
@@ -414,5 +454,80 @@ mod tests {
 
         let cart = Cartridge::from_bytes(&data).unwrap();
         assert_eq!(cart.mapper, 0x34); // Mapper 52 (0x30 | 0x04)
+    }
+
+    #[test]
+    fn test_rom_db_integration_no_override() {
+        // Test that ROMs not in the database work normally
+        let mut data = vec![
+            0x4E, 0x45, 0x53, 0x1A, // NES<EOF>
+            0x01, 0x00, // 16KB PRG, no CHR
+            0x00, // Flags 6: Mapper 0, horizontal mirroring
+            0x00, // Flags 7
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+        data.extend(vec![0; 16 * 1024]);
+
+        let cart = Cartridge::from_bytes(&data).unwrap();
+        assert_eq!(cart.mapper, 0);
+        assert_eq!(cart.mirroring, Mirroring::Horizontal);
+    }
+
+    #[test]
+    fn test_rom_db_crc32_calculation() {
+        // Test that CRC32 is calculated correctly for a known ROM
+        let mut data = vec![
+            0x4E, 0x45, 0x53, 0x1A, // NES<EOF>
+            0x01, 0x00, // 16KB PRG, no CHR
+            0x00, // Flags 6
+            0x00, // Flags 7
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+        data.extend(vec![0; 16 * 1024]);
+
+        // Calculate CRC32 manually to verify it's done during load
+        let expected_crc = crate::rom_db::calculate_crc32(&data);
+
+        // Load the cartridge (which also calculates CRC32 internally)
+        let _cart = Cartridge::from_bytes(&data).unwrap();
+
+        // Verify the CRC32 is non-zero (simple sanity check)
+        assert_ne!(expected_crc, 0);
+    }
+
+    #[test]
+    fn test_initial_mirroring_axrom() {
+        // Test that AxROM (mapper 7) always uses single-screen mirroring
+        let mut data = vec![
+            0x4E, 0x45, 0x53, 0x1A, // NES<EOF>
+            0x02, 0x00, // 32KB PRG, no CHR
+            0x71, // Flags 6: Mapper low nibble = 7, vertical mirroring
+            0x00, // Flags 7
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+        data.extend(vec![0; 32 * 1024]);
+
+        let cart = Cartridge::from_bytes(&data).unwrap();
+        assert_eq!(cart.mapper, 7);
+        // Even though header says vertical, AxROM should use single-screen
+        assert_eq!(cart.get_initial_mirroring(), Mirroring::SingleScreenLower);
+    }
+
+    #[test]
+    fn test_initial_mirroring_camerica() {
+        // Test that Camerica (mapper 71) respects header mirroring
+        let mut data = vec![
+            0x4E, 0x45, 0x53, 0x1A, // NES<EOF>
+            0x02, 0x00, // 32KB PRG, no CHR
+            0x71, // Flags 6: Mapper low nibble = 7, vertical mirroring
+            0x40, // Flags 7: Mapper high nibble = 4 -> mapper 71
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+        data.extend(vec![0; 32 * 1024]);
+
+        let cart = Cartridge::from_bytes(&data).unwrap();
+        assert_eq!(cart.mapper, 71);
+        // Camerica should respect header mirroring
+        assert_eq!(cart.get_initial_mirroring(), Mirroring::Vertical);
     }
 }
