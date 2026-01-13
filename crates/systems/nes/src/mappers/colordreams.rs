@@ -97,7 +97,13 @@ mod tests {
         prg[0x10000] = 0x33; // Bank 2 start
         prg[0x18000] = 0x44; // Bank 3 start
 
-        let cart = Cartridge::new_test(prg, vec![0; 0x2000], 11, Mirroring::Vertical, TimingMode::Ntsc);
+        let cart = Cartridge::new_test(
+            prg,
+            vec![0; 0x2000],
+            11,
+            Mirroring::Vertical,
+            TimingMode::Ntsc,
+        );
 
         let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut cd = ColorDreams::new(cart, &mut ppu);
@@ -125,7 +131,13 @@ mod tests {
         chr[0] = 0xAA; // Bank 0 start
         chr[0x2000] = 0xBB; // Bank 1 start
 
-        let cart = Cartridge::new_test(vec![0; 0x8000], chr, 11, Mirroring::Horizontal, TimingMode::Ntsc);
+        let cart = Cartridge::new_test(
+            vec![0; 0x8000],
+            chr,
+            11,
+            Mirroring::Horizontal,
+            TimingMode::Ntsc,
+        );
 
         let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut cd = ColorDreams::new(cart, &mut ppu);

@@ -1341,11 +1341,10 @@ mod tests {
         // Create a minimal PAL ROM using NES 2.0 format
         let mut data = vec![
             0x4E, 0x45, 0x53, 0x1A, // NES<EOF>
-            0x01, 0x00,             // 16KB PRG, no CHR
-            0x00,                   // Flags 6: NROM, horizontal mirroring
-            0x08,                   // Flags 7: NES 2.0 format (bits 2-3 = 10)
-            0x00, 0x00, 0x00, 0x00,
-            0x01,                   // Byte 12: PAL timing (bits 0-1 = 01)
+            0x01, 0x00, // 16KB PRG, no CHR
+            0x00, // Flags 6: NROM, horizontal mirroring
+            0x08, // Flags 7: NES 2.0 format (bits 2-3 = 10)
+            0x00, 0x00, 0x00, 0x00, 0x01, // Byte 12: PAL timing (bits 0-1 = 01)
             0x00, 0x00, 0x00,
         ];
         // Add PRG ROM (16KB) with proper reset vector
@@ -1366,11 +1365,10 @@ mod tests {
         // Create a minimal NTSC ROM using NES 2.0 format
         let mut data = vec![
             0x4E, 0x45, 0x53, 0x1A, // NES<EOF>
-            0x01, 0x00,             // 16KB PRG, no CHR
-            0x00,                   // Flags 6: NROM, horizontal mirroring
-            0x08,                   // Flags 7: NES 2.0 format (bits 2-3 = 10)
-            0x00, 0x00, 0x00, 0x00,
-            0x00,                   // Byte 12: NTSC timing (bits 0-1 = 00)
+            0x01, 0x00, // 16KB PRG, no CHR
+            0x00, // Flags 6: NROM, horizontal mirroring
+            0x08, // Flags 7: NES 2.0 format (bits 2-3 = 10)
+            0x00, 0x00, 0x00, 0x00, 0x00, // Byte 12: NTSC timing (bits 0-1 = 00)
             0x00, 0x00, 0x00,
         ];
         // Add PRG ROM (16KB) with proper reset vector
@@ -1391,10 +1389,9 @@ mod tests {
         // Create a PAL ROM
         let mut data = vec![
             0x4E, 0x45, 0x53, 0x1A, // NES<EOF>
-            0x01, 0x00,             // 16KB PRG, no CHR
-            0x00, 0x08,             // NES 2.0 format
-            0x00, 0x00, 0x00, 0x00,
-            0x01,                   // PAL timing
+            0x01, 0x00, // 16KB PRG, no CHR
+            0x00, 0x08, // NES 2.0 format
+            0x00, 0x00, 0x00, 0x00, 0x01, // PAL timing
             0x00, 0x00, 0x00,
         ];
         let mut prg = vec![0; 16 * 1024];

@@ -115,7 +115,13 @@ mod tests {
         prg[0] = 0x11; // Bank 0 start
         prg[0x8000] = 0x22; // Bank 1 start
 
-        let cart = Cartridge::new_test(prg, vec![0; 0x2000], 79, Mirroring::Vertical, TimingMode::Ntsc);
+        let cart = Cartridge::new_test(
+            prg,
+            vec![0; 0x2000],
+            79,
+            Mirroring::Vertical,
+            TimingMode::Ntsc,
+        );
 
         let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut nina = Nina::new(cart, &mut ppu);
@@ -141,7 +147,13 @@ mod tests {
         chr[0x4000] = 0xCC; // Bank 2
         chr[0x6000] = 0xDD; // Bank 3
 
-        let cart = Cartridge::new_test(vec![0; 0x8000], chr, 79, Mirroring::Horizontal, TimingMode::Ntsc);
+        let cart = Cartridge::new_test(
+            vec![0; 0x8000],
+            chr,
+            79,
+            Mirroring::Horizontal,
+            TimingMode::Ntsc,
+        );
 
         let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut nina = Nina::new(cart, &mut ppu);
@@ -201,7 +213,13 @@ mod tests {
         prg[0] = 0x11;
         prg[0x8000] = 0x22;
 
-        let cart = Cartridge::new_test(prg, vec![0; 0x2000], 79, Mirroring::Vertical, TimingMode::Ntsc);
+        let cart = Cartridge::new_test(
+            prg,
+            vec![0; 0x2000],
+            79,
+            Mirroring::Vertical,
+            TimingMode::Ntsc,
+        );
 
         let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut nina = Nina::new(cart, &mut ppu);
@@ -231,7 +249,13 @@ mod tests {
         chr[0] = 0xAA;
         chr[0x2000] = 0xBB;
 
-        let cart = Cartridge::new_test(vec![0; 0x8000], chr, 79, Mirroring::Vertical, TimingMode::Ntsc);
+        let cart = Cartridge::new_test(
+            vec![0; 0x8000],
+            chr,
+            79,
+            Mirroring::Vertical,
+            TimingMode::Ntsc,
+        );
 
         let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut nina = Nina::new(cart, &mut ppu);
