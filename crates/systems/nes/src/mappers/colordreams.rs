@@ -105,7 +105,7 @@ mod tests {
             mirroring: Mirroring::Vertical,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut cd = ColorDreams::new(cart, &mut ppu);
 
         // Initially bank 0
@@ -139,7 +139,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut cd = ColorDreams::new(cart, &mut ppu);
 
         // Initially bank 0
@@ -169,7 +169,7 @@ mod tests {
             mirroring: Mirroring::Vertical,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut cd = ColorDreams::new(cart, &mut ppu);
 
         // Switch to PRG bank 1 and CHR bank 1 (0x11)

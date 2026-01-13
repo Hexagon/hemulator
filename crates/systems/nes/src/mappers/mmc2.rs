@@ -295,7 +295,7 @@ mod tests {
             mirroring: Mirroring::Vertical,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut mmc2 = Mmc2::new(cart, &mut ppu);
 
         // Initially bank 0 at $8000-$9FFF
@@ -330,7 +330,7 @@ mod tests {
             mirroring: Mirroring::Vertical,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut mmc2 = Mmc2::new(cart, &mut ppu);
 
         // Set FD bank to 1 and FE bank to 2 for left pattern table
@@ -359,7 +359,7 @@ mod tests {
             mirroring: Mirroring::Vertical,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut mmc2 = Mmc2::new(cart, &mut ppu);
 
         // Switch to horizontal mirroring

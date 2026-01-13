@@ -110,7 +110,7 @@ mod tests {
             mirroring: Mirroring::Vertical,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut gxrom = Gxrom::new(cart, &mut ppu);
 
         // Initially bank 0 should be selected
@@ -137,7 +137,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut gxrom = Gxrom::new(cart, &mut ppu);
 
         // Initially bank 0 should be selected
@@ -171,7 +171,7 @@ mod tests {
             mirroring: Mirroring::Vertical,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut gxrom = Gxrom::new(cart, &mut ppu);
 
         // Test switching both PRG and CHR
@@ -206,7 +206,7 @@ mod tests {
             mirroring: Mirroring::Vertical,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut gxrom = Gxrom::new(cart, &mut ppu);
 
         // Try to select bank 3, should wrap to bank 1 (3 % 2 = 1)

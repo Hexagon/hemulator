@@ -17,7 +17,7 @@ This implementation follows specifications from the **SNESdev Wiki**:
 
 ## Current Status
 
-The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HDMA, both LoROM and HiROM cartridge support, SPC700 APU processor, and complete PPU rendering for all modes 0-7. All background modes now support their advanced features including Mode 7 matrix transformation (rotation/scaling), offset-per-tile rendering (Modes 2, 4, 6), and true hi-res 512px rendering (Modes 5-6). Audio processor (SPC700) is fully implemented but DSP (sound generation) is not, so games run silently.
+The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HDMA, LoROM, HiROM, and ExHiROM cartridge support, SPC700 APU processor, and complete PPU rendering for all modes 0-7. All background modes now support their advanced features including Mode 7 matrix transformation (rotation/scaling), offset-per-tile rendering (Modes 2, 4, 6), and true hi-res 512px rendering (Modes 5-6). Audio processor (SPC700) is fully implemented but DSP (sound generation) is not, so games run silently.
 
 ### What Works
 
@@ -35,11 +35,13 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
   - Hardware registers ($2100-$21FF, $4000-$43FF)
   - Reference: [Memory Map](https://snes.nesdev.org/wiki/Memory_map)
 
-- ✅ **Cartridge Loading** - Both LoROM and HiROM with auto-detection
-  - LoROM: 32KB banks at $8000-$FFFF per bank
-  - HiROM: Full 64KB banks with linear addressing
+- ✅ **Cartridge Loading** - LoROM, HiROM, and ExHiROM with auto-detection
+  - LoROM: 32KB banks at $8000-$FFFF per bank (up to 4MB)
+  - HiROM: Full 64KB banks with linear addressing (up to 4MB)
+  - ExHiROM: Extended HiROM for larger ROMs (up to 8MB, e.g., Tales of Phantasia)
+  - Header detection via map mode bytes ($20/$30=LoROM, $21/$31=HiROM, $25/$35=ExHiROM)
   - SMC header detection and removal
-  - SRAM support for both modes
+  - SRAM support for all mapping modes
   - Reference: [ROM File Formats](https://snes.nesdev.org/wiki/ROM_file_formats)
 
 #### PPU (Picture Processing Unit)
@@ -252,8 +254,8 @@ SnesSystem
           │   ├── 2 BG layers (modes 2-5)
           │   ├── 1 BG layer (modes 6-7)
           │   └── 2bpp/4bpp/8bpp tile support
-          └── Cartridge (LoROM/HiROM auto-detect)
-              ├── ROM banks (LoROM: 32KB chunks, HiROM: 64KB linear)
+          └── Cartridge (LoROM/HiROM/ExHiROM auto-detect)
+              ├── ROM banks (LoROM: 32KB chunks, HiROM/ExHiROM: 64KB linear)
               └── 32KB SRAM
 ```
 
@@ -286,8 +288,10 @@ Games known to work:
 - ✅ **Super Mario World** - Full support with Mode 1, sprites, scrolling (no audio)
 - ✅ **F-Zero** - Now works with Mode 7 rotation/scaling
 - ⚠️ **Donkey Kong Country** - Graphics work (no audio)
+- 🔧 **Tales of Phantasia** - ExHiROM support implemented, should work (not tested)
 - ❌ **Super Mario RPG** - Requires SA-1 chip
 - ❌ **Star Fox** - Requires SuperFX chip
+- ❌ **Star Ocean** - Requires SDD-1 chip (different from ExHiROM)
 
 ## Development
 

@@ -43,6 +43,7 @@
 //! - **$2007 (PPUDATA)**: VRAM data read/write (with buffering)
 
 use crate::cartridge::Mirroring;
+use emu_core::apu::TimingMode;
 use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::types::Frame;
 use std::cell::{Cell, RefCell};
@@ -163,6 +164,9 @@ pub struct Ppu {
     odd_frame: Cell<bool>,
     /// Monotonic frame counter (increments when scanline wraps 261 -> 0).
     frame_counter: Cell<u64>,
+    /// Timing mode (NTSC or PAL) for correct scanline count
+    /// NTSC: 262 scanlines, PAL: 312 scanlines
+    timing_mode: TimingMode,
 }
 
 impl fmt::Debug for Ppu {
@@ -172,7 +176,7 @@ impl fmt::Debug for Ppu {
 }
 
 impl Ppu {
-    pub fn new(chr: Vec<u8>, mirroring: Mirroring) -> Self {
+    pub fn new(chr: Vec<u8>, mirroring: Mirroring, timing_mode: TimingMode) -> Self {
         let (chr, chr_is_ram) = if chr.is_empty() {
             (vec![0u8; 0x2000], true)
         } else {
@@ -183,6 +187,11 @@ impl Ppu {
             0x1000 // 4KB for independent nametables
         } else {
             0x800 // 2KB for mirrored nametables
+        };
+        // Pre-render scanline: 261 for NTSC, 311 for PAL
+        let pre_render_scanline = match timing_mode {
+            TimingMode::Ntsc => 261,
+            TimingMode::Pal => 311,
         };
         Self {
             chr,
@@ -213,10 +222,30 @@ impl Ppu {
             oam_addr: Cell::new(0),
             first_frame_after_reset: Cell::new(true),
             // Cycle-accurate timing state - start at pre-render scanline
-            scanline: Cell::new(261),
+            scanline: Cell::new(pre_render_scanline),
             dot: Cell::new(0),
             odd_frame: Cell::new(false),
             frame_counter: Cell::new(0),
+            timing_mode,
+        }
+    }
+
+    /// Get the total scanline count for the current timing mode
+    /// NTSC: 262 scanlines (0-239 visible, 240 post-render, 241-260 vblank, 261 pre-render)
+    /// PAL: 312 scanlines (0-239 visible, 240 post-render, 241-310 vblank, 311 pre-render)
+    fn total_scanlines(&self) -> u16 {
+        match self.timing_mode {
+            TimingMode::Ntsc => 262,
+            TimingMode::Pal => 312,
+        }
+    }
+
+    /// Get the pre-render scanline for the current timing mode
+    /// NTSC: 261, PAL: 311
+    fn pre_render_scanline(&self) -> u16 {
+        match self.timing_mode {
+            TimingMode::Ntsc => 261,
+            TimingMode::Pal => 311,
         }
     }
 
@@ -1252,10 +1281,11 @@ impl Ppu {
         let dot = self.dot.get();
         let mut nmi_triggered = false;
         let mut ended_frame_number: Option<u64> = None;
+        let pre_render_scanline = self.pre_render_scanline();
 
         // Handle cycle-accurate events at specific scanline/dot positions
         match (scanline, dot) {
-            // Scanline 241, dot 1: VBlank starts
+            // Scanline 241, dot 1: VBlank starts (same for NTSC and PAL)
             (241, 1) => {
                 // Set VBlank flag
                 let was_vblank = self.vblank.replace(true);
@@ -1270,54 +1300,55 @@ impl Ppu {
                 }
             }
 
-            // Pre-render scanline (261), dot 1: Clear VBlank and sprite flags
-            (261, 1) => {
-                // Clear VBlank flag
-                self.vblank.set(false);
-                self.nmi_pending.set(false);
-
-                // Clear sprite flags (this is the ONLY place they're cleared on hardware)
-                self.sprite_0_hit.set(false);
-                self.sprite_overflow.set(false);
-
-                log(LogCategory::PPU, LogLevel::Trace, || {
-                    "PPU: Pre-render scanline, dot 1: cleared VBlank and sprite flags".to_string()
-                });
-
-                // Release register lock after first frame
-                if self.first_frame_after_reset.get() {
-                    log(LogCategory::PPU, LogLevel::Debug, || {
-                        "PPU: First frame complete, releasing register lock".to_string()
-                    });
-                    self.first_frame_after_reset.set(false);
-                }
-            }
-
-            // Pre-render scanline (261), dots 280-304: Copy vertical bits from t to v
-            // In the hardware-accurate / cycle-accurate tick() path, vertical bits are
-            // copied repeatedly during dots 280-304 of the pre-render scanline.
-            // (render_scanline() also copies these bits for compatibility when called without tick().)
-            // Critical for games with vertical scrolling and split-screen effects.
-            // Reference: https://www.nesdev.org/wiki/PPU_scrolling
-            (261, dot) if dot >= 280 && dot <= 304 => {
-                let rendering_enabled = (self.mask & 0x18) != 0;
-                if rendering_enabled {
-                    let t = self.temp_vram_addr.get();
-                    let v = self.vram_addr.get();
-                    // Copy vertical bits from t to v:
-                    // Bits 5-9 (coarse Y), bit 11 (nametable Y), bits 12-14 (fine Y)
-                    let new_v = (v & !0x7BE0) | (t & 0x7BE0);
-                    self.vram_addr.set(new_v);
-                }
-            }
-
             _ => {}
+        }
+
+        // Pre-render scanline, dot 1: Clear VBlank and sprite flags
+        // NTSC: scanline 261, PAL: scanline 311
+        if scanline == pre_render_scanline && dot == 1 {
+            // Clear VBlank flag
+            self.vblank.set(false);
+            self.nmi_pending.set(false);
+
+            // Clear sprite flags (this is the ONLY place they're cleared on hardware)
+            self.sprite_0_hit.set(false);
+            self.sprite_overflow.set(false);
+
+            log(LogCategory::PPU, LogLevel::Trace, || {
+                "PPU: Pre-render scanline, dot 1: cleared VBlank and sprite flags".to_string()
+            });
+
+            // Release register lock after first frame
+            if self.first_frame_after_reset.get() {
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    "PPU: First frame complete, releasing register lock".to_string()
+                });
+                self.first_frame_after_reset.set(false);
+            }
+        }
+
+        // Pre-render scanline, dots 280-304: Copy vertical bits from t to v
+        // In the hardware-accurate / cycle-accurate tick() path, vertical bits are
+        // copied repeatedly during dots 280-304 of the pre-render scanline.
+        // (render_scanline() also copies these bits for compatibility when called without tick().)
+        // Critical for games with vertical scrolling and split-screen effects.
+        // Reference: https://www.nesdev.org/wiki/PPU_scrolling
+        if scanline == pre_render_scanline && dot >= 280 && dot <= 304 {
+            let rendering_enabled = (self.mask & 0x18) != 0;
+            if rendering_enabled {
+                let t = self.temp_vram_addr.get();
+                let v = self.vram_addr.get();
+                // Copy vertical bits from t to v:
+                // Bits 5-9 (coarse Y), bit 11 (nametable Y), bits 12-14 (fine Y)
+                let new_v = (v & !0x7BE0) | (t & 0x7BE0);
+                self.vram_addr.set(new_v);
+            }
         }
 
         // Visible and pre-render scanlines, dot 257: Copy horizontal bits from t to v
         // This happens at the end of each scanline's rendering
         // Reference: https://www.nesdev.org/wiki/PPU_scrolling
-        if (scanline < 240 || scanline == 261) && dot == 257 {
+        if (scanline < 240 || scanline == pre_render_scanline) && dot == 257 {
             let rendering_enabled = (self.mask & 0x18) != 0;
             if rendering_enabled {
                 let t = self.temp_vram_addr.get();
@@ -1385,8 +1416,10 @@ impl Ppu {
             next_dot = 0;
             next_scanline += 1;
 
-            // Handle end of frame (262 scanlines: 0-239 visible, 240 post-render, 241-260 vblank, 261 pre-render)
-            if next_scanline >= 262 {
+            // Handle end of frame (total scanlines varies by timing mode)
+            // NTSC: 262 scanlines (0-239 visible, 240 post-render, 241-260 vblank, 261 pre-render)
+            // PAL: 312 scanlines (0-239 visible, 240 post-render, 241-310 vblank, 311 pre-render)
+            if next_scanline >= self.total_scanlines() {
                 next_scanline = 0;
                 // Toggle odd frame flag
                 self.odd_frame.set(!self.odd_frame.get());
@@ -1518,7 +1551,7 @@ mod tests {
 
     #[test]
     fn test_palette_writes_and_reads() {
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock(); // Bypass first frame register lock for tests
 
         // Write to universal background
@@ -1579,7 +1612,7 @@ mod tests {
 
     #[test]
     fn test_background_palette_rendering() {
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock(); // Bypass first frame register lock for tests
 
         // Set up a simple 8x8 tile in CHR-ROM (requires CHR-RAM for test)
@@ -1635,7 +1668,7 @@ mod tests {
 
     #[test]
     fn test_palette_color_zero_uses_backdrop() {
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock(); // Bypass first frame register lock for tests
         ppu.chr_is_ram = true;
 
@@ -1679,7 +1712,7 @@ mod tests {
 
     #[test]
     fn test_palette_ram_mirrors_throughout_range() {
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock(); // Bypass first frame register lock for tests
 
         // Write to $3F00 (universal background)
@@ -1725,7 +1758,7 @@ mod tests {
 
     #[test]
     fn test_sprite_overflow_flag() {
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock(); // Bypass first frame register lock for tests
 
         // Enable sprite rendering
@@ -1764,7 +1797,7 @@ mod tests {
 
     #[test]
     fn test_sprite_overflow_not_set_with_8_sprites() {
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock(); // Bypass first frame register lock for tests
 
         // Enable sprite rendering
@@ -1792,7 +1825,7 @@ mod tests {
 
     #[test]
     fn test_sprite_overflow_with_16_pixel_sprites() {
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock(); // Bypass first frame register lock for tests
 
         // Enable 8x16 sprite mode
@@ -1823,7 +1856,7 @@ mod tests {
 
     #[test]
     fn test_vblank_clears_sprite_flags() {
-        let ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
 
         // Set sprite 0 hit and sprite overflow
         ppu.sprite_0_hit.set(true);
@@ -1850,7 +1883,7 @@ mod tests {
 
     #[test]
     fn test_palette_read_updates_buffer_with_mirrored_nametable() {
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock(); // Bypass first frame register lock for tests
 
         // Write a distinctive value to nametable at $2F00 (which mirrors to palette $3F00)
@@ -1885,7 +1918,7 @@ mod tests {
 
     #[test]
     fn test_palette_mirroring_multiple_addresses() {
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock(); // Bypass first frame register lock for tests
 
         // Test that different palette addresses ($3F00-$3FFF) mirror to corresponding nametable addresses
@@ -1940,7 +1973,7 @@ mod tests {
 
     #[test]
     fn test_palette_mirroring_with_32byte_wrap() {
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock(); // Bypass first frame register lock for tests
 
         // Test that palette addresses mirror every 32 bytes
@@ -1970,7 +2003,7 @@ mod tests {
 
     #[test]
     fn test_palette_mirroring_across_nametable_boundaries() {
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Vertical, TimingMode::Ntsc);
         ppu.clear_first_frame_lock(); // Bypass first frame register lock for tests
 
         // Test palette mirroring with different nametable mirroring modes
@@ -2013,7 +2046,7 @@ mod tests {
 
     #[test]
     fn test_sequential_palette_reads_update_buffer() {
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock(); // Bypass first frame register lock for tests
 
         // Set up multiple values in nametable
@@ -2056,7 +2089,7 @@ mod tests {
 
     #[test]
     fn test_vram_address_wrapping() {
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock(); // Bypass first frame register lock for tests
         ppu.chr_is_ram = true;
 
@@ -2079,7 +2112,7 @@ mod tests {
 
     #[test]
     fn test_ppuctrl_ppumask_write_only() {
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock(); // Bypass first frame register lock for tests
 
         // Write distinctive values to PPUCTRL and PPUMASK
@@ -2094,7 +2127,7 @@ mod tests {
 
     #[test]
     fn test_ppustatus_clears_vblank_and_latch() {
-        let ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
 
         // Set VBlank flag
         ppu.set_vblank(true);
@@ -2119,7 +2152,7 @@ mod tests {
 
     #[test]
     fn test_ppuscroll_double_write_behavior() {
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock(); // Bypass first frame register lock for tests
 
         // First write sets X scroll
@@ -2140,7 +2173,7 @@ mod tests {
 
     #[test]
     fn test_ppuaddr_double_write_behavior() {
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock(); // Bypass first frame register lock for tests
 
         // Hardware-accurate behavior: first write ONLY affects t register, not v
@@ -2185,7 +2218,7 @@ mod tests {
 
     #[test]
     fn test_ppuaddr_ppuscroll_shared_latch() {
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock(); // Bypass first frame register lock for tests
 
         // Write to PPUSCROLL (sets latch)
@@ -2212,7 +2245,7 @@ mod tests {
 
     #[test]
     fn test_oam_addr_wrapping() {
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock(); // Bypass first frame register lock for tests
 
         // Set OAM address to 0xFF
@@ -2236,7 +2269,7 @@ mod tests {
 
     #[test]
     fn test_vram_increment_mode() {
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock(); // Bypass first frame register lock for tests
         ppu.chr_is_ram = true;
 
@@ -2273,7 +2306,7 @@ mod tests {
 
     #[test]
     fn test_nmi_on_vblank_when_enabled() {
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock(); // Bypass first frame register lock for tests
 
         // Enable NMI in PPUCTRL
@@ -2292,7 +2325,7 @@ mod tests {
 
     #[test]
     fn test_nmi_enable_during_vblank() {
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock(); // Bypass first frame register lock for tests
 
         // Start VBlank with NMI disabled
@@ -2310,7 +2343,7 @@ mod tests {
 
     #[test]
     fn test_palette_address_mirroring_edge_cases() {
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock(); // Bypass first frame register lock for tests
 
         // Test writing to palette addresses beyond $3F1F mirrors correctly
@@ -2347,7 +2380,7 @@ mod tests {
         // Reference: Fixed 2024-12-21
         // Super Mario Bros. 3 expects VBlank to be set on the first frame.
         // Starting with false causes SMB3 to hang waiting for VBlank.
-        let ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
 
         assert!(
             ppu.vblank_flag(),
@@ -2361,7 +2394,7 @@ mod tests {
         // Reference: Fixed 2024-12-21
         // This is critical for NMI timing - if a game reads PPUSTATUS right when
         // VBlank starts, the NMI must be prevented.
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock(); // Bypass first frame register lock for tests
 
         // Enable NMI
@@ -2393,7 +2426,7 @@ mod tests {
     fn regression_ppustatus_read_clears_vblank() {
         // REGRESSION TEST: Reading PPUSTATUS must clear VBlank flag
         // Reference: Fixed 2024-12-21
-        let ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
 
         // Start VBlank
         ppu.set_vblank(true);
@@ -2422,7 +2455,7 @@ mod tests {
     fn regression_vblank_end_clears_nmi() {
         // REGRESSION TEST: Ending VBlank (pre-render scanline) must clear NMI
         // Reference: Fixed 2024-12-21
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock(); // Bypass first frame register lock for tests
 
         // Enable NMI
@@ -2447,7 +2480,7 @@ mod tests {
         // REGRESSION TEST: Sprite flags should NOT be cleared when VBlank starts or ends
         // Reference: Fixed 2024-12-21
         // They should only be cleared on the pre-render scanline via clear_sprite_flags()
-        let ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
 
         // Set sprite flags
         ppu.sprite_0_hit.set(true);
@@ -2490,7 +2523,7 @@ mod tests {
         // REGRESSION TEST: Reading PPUSTATUS ($2002) should NOT clear sprite overflow flag
         // Reference: NESdev wiki - sprite overflow is only cleared at dot 1 of pre-render scanline
         // This is different from VBlank flag (bit 7) which IS cleared by reading $2002
-        let ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock();
 
         // Set sprite overflow flag
@@ -2547,7 +2580,7 @@ mod tests {
     fn regression_nmi_only_fires_on_rising_edge() {
         // REGRESSION TEST: NMI should only fire when VBlank transitions from false to true
         // Reference: Fixed 2024-12-21
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock(); // Bypass first frame register lock for tests
 
         // VBlank starts as true - clear it first
@@ -2584,7 +2617,7 @@ mod tests {
     fn test_sprite_priority_lower_oam_index_wins() {
         // Test that sprite with lower OAM index hides sprite with higher OAM index,
         // regardless of priority bits.
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock(); // Bypass first frame register lock for tests
         ppu.chr_is_ram = true;
 
@@ -2662,7 +2695,7 @@ mod tests {
         // Test the critical edge case: A back-priority sprite at lower OAM index
         // can hide a front-priority sprite at higher index, even though the
         // back-priority sprite itself may be hidden behind opaque background.
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock(); // Bypass first frame register lock for tests
         ppu.chr_is_ram = true;
 
@@ -2741,7 +2774,7 @@ mod tests {
     #[test]
     fn test_sprite_priority_front_over_transparent_bg() {
         // Test that front-priority sprites always show over transparent background
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock(); // Bypass first frame register lock for tests
         ppu.chr_is_ram = true;
 
@@ -2780,7 +2813,7 @@ mod tests {
     #[test]
     fn test_sprite_priority_back_over_transparent_bg() {
         // Test that back-priority sprites show over transparent background
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock(); // Bypass first frame register lock for tests
         ppu.chr_is_ram = true;
 
@@ -2819,7 +2852,7 @@ mod tests {
     #[test]
     fn test_sprite_priority_back_behind_opaque_bg() {
         // Test that back-priority sprites hide behind opaque background
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock(); // Bypass first frame register lock for tests
         ppu.chr_is_ram = true;
 
@@ -2871,7 +2904,7 @@ mod tests {
         // This test verifies that nametable selection uses XOR, not addition,
         // when scrolling crosses nametable boundaries. This is critical for
         // games like Turbo Racing that use scrolling across nametable boundaries.
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Vertical, TimingMode::Ntsc);
         ppu.clear_first_frame_lock(); // Bypass first frame register lock for tests
         ppu.chr_is_ram = true;
 
@@ -2947,7 +2980,7 @@ mod tests {
         // Test that vertical scrolling works correctly with PPUCTRL base nametable Y bit
         // This is critical for games like Rad Racer 2 and F1 Sensation that use Y scrolling
         // Regression test for bug where Y scrolling showed wrong nametable region
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock();
         ppu.chr_is_ram = true;
 
@@ -3044,7 +3077,7 @@ mod tests {
     #[test]
     fn test_eight_sprite_per_scanline_limit() {
         // Test that the NES hardware limitation of 8 sprites per scanline is enforced
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock(); // Bypass first frame register lock for tests
         ppu.chr_is_ram = true;
 
@@ -3133,7 +3166,7 @@ mod tests {
     #[test]
     fn test_eight_sprite_limit_with_scanline_rendering() {
         // Test that the 8-sprite limit works correctly with scanline-based rendering
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock();
         ppu.chr_is_ram = true;
 
@@ -3194,7 +3227,7 @@ mod tests {
     fn test_horizontal_mirroring_all_four_nametables() {
         // Horizontal mirroring: $2000 and $2400 map to same physical RAM
         //                       $2800 and $2C00 map to same physical RAM
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock();
 
         // Write unique values to all four logical nametables
@@ -3255,7 +3288,7 @@ mod tests {
     fn test_vertical_mirroring_all_four_nametables() {
         // Vertical mirroring: $2000 and $2800 map to same physical RAM
         //                     $2400 and $2C00 map to same physical RAM
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Vertical, TimingMode::Ntsc);
         ppu.clear_first_frame_lock();
 
         // Write unique values to all four logical nametables
@@ -3315,7 +3348,7 @@ mod tests {
     #[test]
     fn test_four_screen_mirroring_requires_4kb_vram() {
         // Four-screen mirroring uses 4KB VRAM (all four nametables independent)
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::FourScreen);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::FourScreen, TimingMode::Ntsc);
         ppu.clear_first_frame_lock();
 
         // Verify 4KB VRAM was allocated
@@ -3369,7 +3402,7 @@ mod tests {
     #[test]
     fn test_nametable_mirroring_with_offsets() {
         // Test that mirroring works correctly at arbitrary offsets within nametables
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock();
 
         // Write to $2050 (offset 0x50 in nametable 0)
@@ -3413,7 +3446,7 @@ mod tests {
     fn test_attribute_table_mirroring() {
         // Attribute tables are at +0x3C0 within each nametable
         // They should follow the same mirroring rules
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock();
 
         // Write to attribute table in nametable 0
@@ -3455,7 +3488,7 @@ mod tests {
         // using PPU registers, simulating how Camerica and other mappers access nametables
 
         // Test with Horizontal mirroring
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock();
 
         // Write distinct values to all four nametables at the same offset (0x24)
@@ -3585,7 +3618,7 @@ mod tests {
     fn test_four_screen_scrolling_nametable_selection() {
         // Test that 4-screen mode selects nametables correctly when scrolling
         // This is critical for games like Rad Racer 2
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::FourScreen);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::FourScreen, TimingMode::Ntsc);
         ppu.clear_first_frame_lock();
 
         // Write unique patterns to each nametable for identification
@@ -3735,7 +3768,7 @@ mod tests {
     #[test]
     fn test_loopy_register_ppuscroll_first_write() {
         // Test that first $2005 write updates temp register and fine_x correctly
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock();
 
         // Write scroll X = 123 ($7B)
@@ -3755,7 +3788,7 @@ mod tests {
     #[test]
     fn test_loopy_register_ppuscroll_second_write() {
         // Test that second $2005 write updates coarse Y and fine Y correctly
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock();
 
         // First write (X scroll)
@@ -3778,7 +3811,7 @@ mod tests {
     #[test]
     fn test_loopy_register_ppuaddr_first_write() {
         // Test that first $2006 write updates temp register high byte
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock();
 
         // Write high byte = $23
@@ -3795,7 +3828,7 @@ mod tests {
     #[test]
     fn test_loopy_register_ppuaddr_second_write() {
         // Test that second $2006 write updates temp register low byte
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock();
 
         // Write address $2345
@@ -3810,7 +3843,7 @@ mod tests {
     #[test]
     fn test_loopy_register_ppuscroll_ppuaddr_interaction() {
         // Test that $2005 and $2006 properly share the temp register
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock();
 
         // Set scroll to (8, 16)
@@ -3842,7 +3875,7 @@ mod tests {
     #[test]
     fn test_sprite_0_hit_edge_cases() {
         // Test sprite 0 hit detection edge cases
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock();
         ppu.chr_is_ram = true;
 
@@ -3915,7 +3948,7 @@ mod tests {
     #[test]
     fn test_sprite_0_hit_with_clipping() {
         // Test that sprite 0 hit respects left clipping
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock();
         ppu.chr_is_ram = true;
 
@@ -3988,7 +4021,7 @@ mod tests {
     #[test]
     fn test_sprite_evaluation_exactly_8_sprites() {
         // Test that sprite overflow is NOT set when exactly 8 sprites are on scanline
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock();
 
         // Place exactly 8 sprites on scanline 100
