@@ -1,6 +1,7 @@
 ---
 title: TIA (Television Interface Adapter)
 description: Atari 2600 TIA chip register reference and specifications
+parent: "CPU & Hardware References"
 ---
 
 # TIA (Television Interface Adapter)
