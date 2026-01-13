@@ -67,7 +67,7 @@ mod tests {
             mirroring: Mirroring::Vertical,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut uxrom = Uxrom::new(cart, &mut ppu);
 
         // Initially bank 0 at $8000, bank 1 (last) at $C000
@@ -95,7 +95,7 @@ mod tests {
             mirroring: Mirroring::Vertical,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let uxrom = Uxrom::new(cart, &mut ppu);
 
         // Last bank (2) should always be at $C000
@@ -116,7 +116,7 @@ mod tests {
             mirroring: Mirroring::Vertical,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut uxrom = Uxrom::new(cart, &mut ppu);
 
         // Try to select bank beyond available banks (should wrap)
@@ -142,7 +142,7 @@ mod tests {
             mirroring: Mirroring::Vertical,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut uxrom = Uxrom::new(cart, &mut ppu);
 
         // Bank select masks to 4 bits (0x0F), upper bits should be ignored
@@ -167,7 +167,7 @@ mod tests {
             mirroring: Mirroring::Vertical,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let uxrom = Uxrom::new(cart, &mut ppu);
 
         // With only 1 bank, both windows should show the same bank
@@ -193,7 +193,7 @@ mod tests {
             mirroring: Mirroring::Vertical,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut uxrom = Uxrom::new(cart, &mut ppu);
 
         // UxROM responds to writes anywhere in $8000-$FFFF

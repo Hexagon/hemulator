@@ -84,7 +84,7 @@ mod tests {
             mirroring: Mirroring::Vertical,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut bnrom = Bnrom::new(cart, &mut ppu);
 
         // Initially bank 0 should be selected
@@ -111,7 +111,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let bnrom = Bnrom::new(cart, &mut ppu);
 
         // With only one bank, should always read from bank 0
@@ -134,7 +134,7 @@ mod tests {
             mirroring: Mirroring::Vertical,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut bnrom = Bnrom::new(cart, &mut ppu);
 
         // Test switching through all 4 banks
@@ -158,7 +158,7 @@ mod tests {
             mirroring: Mirroring::Vertical,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut bnrom = Bnrom::new(cart, &mut ppu);
 
         // Try to select bank 3, should wrap to bank 1 (3 % 2 = 1)
@@ -187,7 +187,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut bnrom = Bnrom::new(cart, &mut ppu);
 
         // Bank 0: full 32KB range

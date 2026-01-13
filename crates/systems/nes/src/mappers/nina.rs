@@ -123,7 +123,7 @@ mod tests {
             mirroring: Mirroring::Vertical,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut nina = Nina::new(cart, &mut ppu);
 
         // Initially bank 0 should be selected
@@ -155,7 +155,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut nina = Nina::new(cart, &mut ppu);
 
         // Initially bank 0 should be selected
@@ -192,7 +192,7 @@ mod tests {
             mirroring: Mirroring::Vertical,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut nina = Nina::new(cart, &mut ppu);
 
         // Initially both banks 0
@@ -227,7 +227,7 @@ mod tests {
             mirroring: Mirroring::Vertical,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut nina = Nina::new(cart, &mut ppu);
 
         // Test different addresses in the register range
@@ -263,7 +263,7 @@ mod tests {
             mirroring: Mirroring::Vertical,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut nina = Nina::new(cart, &mut ppu);
 
         // Try to select bank 5 (bits 0-2 = 101), should wrap to bank 1 (5 % 2 = 1)

@@ -192,7 +192,7 @@ mod tests {
             mirroring: Mirroring::Vertical,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut n118 = Namco118::new(cart, &mut ppu);
 
         // Mode 0 (default): R6 at $8000, (-2) at $A000, R7 at $C000, (-1) at $E000
@@ -223,7 +223,7 @@ mod tests {
             mirroring: Mirroring::Vertical,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut n118 = Namco118::new(cart, &mut ppu);
 
         // Enable PRG mode 1 (bit 6 = 1)
@@ -254,7 +254,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut n118 = Namco118::new(cart, &mut ppu);
 
         // Mode 0 (default): two 2KB banks at $0000/$0800, four 1KB banks at $1000-$1FFF
@@ -280,7 +280,7 @@ mod tests {
             mirroring: Mirroring::Vertical,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut n118 = Namco118::new(cart, &mut ppu);
 
         // Initially vertical (from cartridge)
@@ -306,7 +306,7 @@ mod tests {
             mirroring: Mirroring::Vertical,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let mut n118 = Namco118::new(cart, &mut ppu);
 
         // Try to select bank 5, should wrap (5 % 2 = 1)

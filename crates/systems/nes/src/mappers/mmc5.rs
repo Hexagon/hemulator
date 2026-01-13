@@ -428,7 +428,7 @@ mod tests {
         cart.prg_rom[0x7E000] = 0xEE; // Second to last bank
         cart.prg_rom[0x7FFFF] = 0xFF; // Last bank
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc5 = Mmc5::new(cart, &mut ppu);
 
         // Mode 3: Four 8KB banks
@@ -457,7 +457,7 @@ mod tests {
             }
         }
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc5 = Mmc5::new(cart, &mut ppu);
 
         // Mode 3: 1KB mode
@@ -477,7 +477,7 @@ mod tests {
     #[test]
     fn test_mmc5_multiplication() {
         let cart = create_test_cart(0x8000, 0x2000);
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc5 = Mmc5::new(cart, &mut ppu);
 
         // Write multiplier values
@@ -495,7 +495,7 @@ mod tests {
     #[test]
     fn test_mmc5_exram() {
         let cart = create_test_cart(0x8000, 0x2000);
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut mmc5 = Mmc5::new(cart, &mut ppu);
 
         // Set ExRAM mode to CPU read/write (mode 2)

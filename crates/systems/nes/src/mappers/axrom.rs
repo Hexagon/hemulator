@@ -71,7 +71,7 @@ mod tests {
             mirroring: Mirroring::Vertical, // Will be overridden by mapper
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let axrom = Axrom::new(cart, &mut ppu);
 
         // All addresses should read the same value
@@ -97,7 +97,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut axrom = Axrom::new(cart, &mut ppu);
 
         // Initially bank 0
@@ -126,7 +126,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut axrom = Axrom::new(cart, &mut ppu);
 
         // Initially should be SingleScreenLower
@@ -158,7 +158,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut axrom = Axrom::new(cart, &mut ppu);
 
         // Bank 0
@@ -192,7 +192,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut axrom = Axrom::new(cart, &mut ppu);
 
         // AxROM uses bits 0-2 for bank select (3 bits = 8 banks max)
@@ -223,7 +223,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut axrom = Axrom::new(cart, &mut ppu);
 
         // AxROM should respond to writes anywhere in $8000-$FFFF
@@ -247,7 +247,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut axrom = Axrom::new(cart, &mut ppu);
 
         // Test lower screen (bit 4 = 0)

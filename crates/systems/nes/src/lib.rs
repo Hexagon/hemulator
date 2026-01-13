@@ -389,7 +389,7 @@ impl Default for NesSystem {
         // create PPU with empty CHR and NesBus and attach to CPU
         let mut cpu = NesCpu::new();
         cpu.reset();
-        let ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let ppu = Ppu::new(vec![], Mirroring::Vertical, TimingMode::Ntsc);
         let bus = NesBus::new(ppu);
         cpu.set_bus(bus);
         Self {
@@ -431,7 +431,7 @@ impl NesSystem {
             cart.chr_rom.clone()
         };
 
-        let ppu = Ppu::new(chr_backing, cart.mirroring);
+        let ppu = Ppu::new(chr_backing, cart.mirroring, cart.timing);
         let mut nb = NesBus::new(ppu);
         // Set APU timing to match cartridge
         nb.apu.set_timing(cart.timing);
@@ -1259,5 +1259,81 @@ mod tests {
                 percentage
             );
         }
+    }
+
+    #[test]
+    fn test_nes_pal_timing_detection() {
+        // Create a minimal PAL ROM using NES 2.0 format
+        let mut data = vec![
+            0x4E, 0x45, 0x53, 0x1A, // NES<EOF>
+            0x01, 0x00,             // 16KB PRG, no CHR
+            0x00,                   // Flags 6: NROM, horizontal mirroring
+            0x08,                   // Flags 7: NES 2.0 format (bits 2-3 = 10)
+            0x00, 0x00, 0x00, 0x00,
+            0x01,                   // Byte 12: PAL timing (bits 0-1 = 01)
+            0x00, 0x00, 0x00,
+        ];
+        // Add PRG ROM (16KB) with proper reset vector
+        let mut prg = vec![0; 16 * 1024];
+        prg[0x1FFC] = 0x00;
+        prg[0x1FFD] = 0x80;
+        data.extend(prg);
+
+        let mut sys = NesSystem::default();
+        sys.load_rom(&data).expect("Failed to load PAL ROM");
+
+        // Verify timing mode was set to PAL
+        assert_eq!(sys.timing(), TimingMode::Pal);
+    }
+
+    #[test]
+    fn test_nes_ntsc_timing_detection() {
+        // Create a minimal NTSC ROM using NES 2.0 format
+        let mut data = vec![
+            0x4E, 0x45, 0x53, 0x1A, // NES<EOF>
+            0x01, 0x00,             // 16KB PRG, no CHR
+            0x00,                   // Flags 6: NROM, horizontal mirroring
+            0x08,                   // Flags 7: NES 2.0 format (bits 2-3 = 10)
+            0x00, 0x00, 0x00, 0x00,
+            0x00,                   // Byte 12: NTSC timing (bits 0-1 = 00)
+            0x00, 0x00, 0x00,
+        ];
+        // Add PRG ROM (16KB) with proper reset vector
+        let mut prg = vec![0; 16 * 1024];
+        prg[0x1FFC] = 0x00;
+        prg[0x1FFD] = 0x80;
+        data.extend(prg);
+
+        let mut sys = NesSystem::default();
+        sys.load_rom(&data).expect("Failed to load NTSC ROM");
+
+        // Verify timing mode was set to NTSC
+        assert_eq!(sys.timing(), TimingMode::Ntsc);
+    }
+
+    #[test]
+    fn test_nes_timing_propagates_to_apu() {
+        // Create a PAL ROM
+        let mut data = vec![
+            0x4E, 0x45, 0x53, 0x1A, // NES<EOF>
+            0x01, 0x00,             // 16KB PRG, no CHR
+            0x00, 0x08,             // NES 2.0 format
+            0x00, 0x00, 0x00, 0x00,
+            0x01,                   // PAL timing
+            0x00, 0x00, 0x00,
+        ];
+        let mut prg = vec![0; 16 * 1024];
+        prg[0x1FFC] = 0x00;
+        prg[0x1FFD] = 0x80;
+        data.extend(prg);
+
+        let mut sys = NesSystem::default();
+        sys.load_rom(&data).expect("Failed to load PAL ROM");
+
+        // Verify we can change timing mode dynamically
+        sys.set_timing(TimingMode::Ntsc);
+        assert_eq!(sys.timing(), TimingMode::Ntsc);
+        sys.set_timing(TimingMode::Pal);
+        assert_eq!(sys.timing(), TimingMode::Pal);
     }
 }
