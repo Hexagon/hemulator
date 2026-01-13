@@ -278,14 +278,25 @@ impl Cartridge {
         // Banks $00-$3F:$8000-$FFFF mirror $40-$7F:$0000-$FFFF (first 4MB)
         // Banks $C0-$FF:$0000-$FFFF contain second 4MB
         match bank {
-            // Banks $00-$3F: SRAM at $6000-$7FFF, ROM at $8000-$FFFF
-            0x00..=0x3F => {
+            // Banks $00-$1F: ROM at $8000-$FFFF
+            0x00..=0x1F => {
+                if offset >= 0x8000 {
+                    // ROM (mirrors $40-$5F area)
+                    // Formula: ((Bank + $40) * $10000) + (Address - $8000)
+                    let rom_offset = ((bank as usize + 0x40) << 16) | (offset as usize - 0x8000);
+                    self.read_rom_mirrored(rom_offset)
+                } else {
+                    0
+                }
+            }
+            // Banks $20-$3F: SRAM at $6000-$7FFF, ROM at $8000-$FFFF
+            0x20..=0x3F => {
                 if (0x6000..0x8000).contains(&offset) {
                     // SRAM
                     let sram_offset = (offset - 0x6000) as usize;
                     *self.ram.get(sram_offset).unwrap_or(&0)
                 } else if offset >= 0x8000 {
-                    // ROM (mirrors $40-$7F area)
+                    // ROM (mirrors $60-$7F area)
                     // Formula: ((Bank + $40) * $10000) + (Address - $8000)
                     let rom_offset = ((bank as usize + 0x40) << 16) | (offset as usize - 0x8000);
                     self.read_rom_mirrored(rom_offset)
@@ -298,17 +309,29 @@ impl Cartridge {
                 let rom_offset = ((bank as usize) << 16) | (offset as usize);
                 self.read_rom_mirrored(rom_offset)
             }
-            // Banks $80-$BF: Mirror of $00-$3F with same ROM mapping
-            0x80..=0xBF => {
+            // Banks $80-$9F: Mirror of $00-$1F with same ROM mapping
+            0x80..=0x9F => {
+                if offset >= 0x8000 {
+                    // ROM (mirrors $40-$5F area)
+                    // Formula: ((Bank - $80 + $40) * $10000) + (Address - $8000)
+                    let rom_offset =
+                        ((bank as usize - 0x80 + 0x40) << 16) | (offset as usize - 0x8000);
+                    self.read_rom_mirrored(rom_offset)
+                } else {
+                    0
+                }
+            }
+            // Banks $A0-$BF: Mirror of $20-$3F with same ROM mapping
+            0xA0..=0xBF => {
                 if (0x6000..0x8000).contains(&offset) {
                     // SRAM (mirror)
                     let sram_offset = (offset - 0x6000) as usize;
                     *self.ram.get(sram_offset).unwrap_or(&0)
                 } else if offset >= 0x8000 {
-                    // ROM (mirrors $00-$3F behavior, which maps to $40-$7F ROM area)
-                    // Formula: ((Bank - $80 + $40) * $10000) + (Address - $8000)
+                    // ROM (mirrors $60-$7F area)
+                    // Formula: ((Bank - $A0 + $60) * $10000) + (Address - $8000)
                     let rom_offset =
-                        ((bank as usize - 0x80 + 0x40) << 16) | (offset as usize - 0x8000);
+                        ((bank as usize - 0xA0 + 0x60) << 16) | (offset as usize - 0x8000);
                     self.read_rom_mirrored(rom_offset)
                 } else {
                     0
