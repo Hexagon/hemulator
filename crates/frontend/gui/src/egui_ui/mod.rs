@@ -19,6 +19,6 @@ pub use layout::EguiApp;
 pub use property_pane::{InputConfigSource, PropertyAction};
 pub use tabs::{
     Atari2600TileData, Chip8TileData, ColecoVisionTileData, DebugAction, GbTileData, MountInfo,
-    NesTileData, PcBdaData, Sg1000TileData, SmsTileData, SnesTileData, SystemTileData, Tab,
-    TabAction,
+    NesCartridgeData, NesTileData, PcBdaData, Sg1000TileData, SmsTileData, SnesTileData,
+    SystemTileData, Tab, TabAction,
 };

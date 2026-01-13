@@ -20,6 +20,18 @@ pub struct Cartridge {
     pub mapper: u8,
     pub mirroring: Mirroring,
     pub timing: TimingMode,
+    /// CRC32 checksum of the entire ROM file (including header)
+    pub crc32: u32,
+    /// Mapper number from the iNES header (before any DB overrides)
+    pub header_mapper: u8,
+    /// Mirroring mode from the iNES header (before any DB overrides)
+    pub header_mirroring: Mirroring,
+    /// Whether the mapper was overridden by the ROM database
+    pub db_mapper_override: bool,
+    /// Whether the mirroring was overridden by the ROM database
+    pub db_mirroring_override: bool,
+    /// Board name from ROM database (if available)
+    pub board_name: Option<String>,
 }
 
 impl Cartridge {
@@ -144,6 +156,9 @@ impl Cartridge {
         // Calculate CRC32 and check ROM database for overrides
         let crc32 = crate::rom_db::calculate_crc32(data);
         let (mut final_mapper, mut final_mirroring) = (mapper, mirroring);
+        let mut db_mapper_override = false;
+        let mut db_mirroring_override = false;
+        let mut board_name: Option<String> = None;
 
         if let Some(db_entry) = crate::rom_db::lookup_rom(crc32) {
             // Helper to format board name for logging
@@ -151,6 +166,9 @@ impl Cartridge {
                 .board
                 .map(|b| format!(" ({})", b))
                 .unwrap_or_default();
+
+            // Store board name if available
+            board_name = db_entry.board.map(|b| b.to_string());
 
             // Apply mapper override if present
             if let Some(db_mapper) = db_entry.mapper {
@@ -161,6 +179,7 @@ impl Cartridge {
                     )
                 });
                 final_mapper = db_mapper;
+                db_mapper_override = true;
             }
 
             // Apply mirroring override if present
@@ -172,6 +191,7 @@ impl Cartridge {
                     )
                 });
                 final_mirroring = db_mirroring;
+                db_mirroring_override = true;
             }
         }
 
@@ -192,82 +212,21 @@ impl Cartridge {
             mapper: final_mapper,
             mirroring: final_mirroring,
             timing,
+            crc32,
+            header_mapper: mapper,
+            header_mirroring: mirroring,
+            db_mapper_override,
+            db_mirroring_override,
+            board_name,
         })
     }
 
     /// Very small iNES loader supporting all mappers.
     pub fn from_file<P: AsRef<Path>>(p: P) -> std::io::Result<Self> {
         let mut f = File::open(p)?;
-        let mut header = [0u8; 16];
-        f.read_exact(&mut header)?;
-        if &header[0..4] != b"NES\x1A" {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "Not iNES file",
-            ));
-        }
-
-        // Fix DiskDude! corruption
-        if &header[7..16] == b"DiskDude!" {
-            header[7..16].fill(0);
-        }
-
-        let prg_size = header[4] as usize * 16 * 1024;
-        let chr_size = header[5] as usize * 8 * 1024;
-        let mapper = (header[6] >> 4) | (header[7] & 0xF0);
-
-        // iNES flags 6:
-        // bit 0 = mirroring (0 horizontal, 1 vertical)
-        // bit 3 = four-screen VRAM
-        let four_screen = (header[6] & 0x08) != 0;
-        let vertical = (header[6] & 0x01) != 0;
-        let mirroring = if four_screen {
-            Mirroring::FourScreen
-        } else if vertical {
-            Mirroring::Vertical
-        } else {
-            Mirroring::Horizontal
-        };
-
-        // Auto-detect PAL/NTSC from iNES 2.0 header (byte 12) or NES 2.0 flags
-        let is_nes2 = (header[7] & 0x0C) == 0x08;
-        let timing = if is_nes2 {
-            // NES 2.0: byte 12 bits 0-1 indicate timing (always present in 16-byte header)
-            match header[12] & 0x03 {
-                1 => TimingMode::Pal,
-                _ => TimingMode::Ntsc,
-            }
-        } else {
-            // iNES 1.0: check unofficial PAL flag in byte 9
-            if header[9] & 0x01 != 0 {
-                TimingMode::Pal
-            } else {
-                TimingMode::Ntsc
-            }
-        };
-
-        // ignore trainer if present (flag 6 bit 2)
-        let has_trainer = (header[6] & 0x04) != 0;
-        if has_trainer {
-            let mut _trainer = vec![0u8; 512];
-            f.read_exact(&mut _trainer)?;
-        }
-
-        let mut prg_rom = vec![0u8; prg_size];
-        f.read_exact(&mut prg_rom)?;
-        let mut chr_rom = vec![];
-        if chr_size > 0 {
-            chr_rom = vec![0u8; chr_size];
-            f.read_exact(&mut chr_rom)?;
-        }
-
-        Ok(Self {
-            prg_rom,
-            chr_rom,
-            mapper,
-            mirroring,
-            timing,
-        })
+        let mut data = Vec::new();
+        f.read_to_end(&mut data)?;
+        Self::from_bytes(&data)
     }
 }
 

@@ -123,6 +123,37 @@ pub struct DebugInfo {
     pub chr_banks: usize,
 }
 
+/// Cartridge information for the inspector tab.
+///
+/// Contains metadata about the loaded cartridge including ROM database overrides.
+#[derive(Debug, Clone)]
+pub struct CartridgeInfo {
+    /// Mapper number being used (after any DB overrides)
+    pub mapper: u8,
+    /// Human-readable mapper name
+    pub mapper_name: String,
+    /// Mirroring mode being used (after any DB overrides)
+    pub mirroring: String,
+    /// Timing mode (NTSC or PAL)
+    pub timing: TimingMode,
+    /// CRC32 checksum of the entire ROM file (including header)
+    pub crc32: u32,
+    /// PRG ROM size in bytes
+    pub prg_size: usize,
+    /// CHR ROM size in bytes (0 for CHR-RAM)
+    pub chr_size: usize,
+    /// Mapper number from iNES header (before DB override)
+    pub header_mapper: u8,
+    /// Mirroring mode from iNES header (before DB override)
+    pub header_mirroring: String,
+    /// Whether mapper was overridden by ROM database
+    pub db_mapper_override: bool,
+    /// Whether mirroring was overridden by ROM database
+    pub db_mirroring_override: bool,
+    /// Board name from ROM database (if available)
+    pub board_name: Option<String>,
+}
+
 /// Tile viewer data for debugging PPU graphics.
 ///
 /// Contains CHR data, palettes, and PPU state for visualization.
@@ -218,6 +249,8 @@ pub struct NesSystem {
     breakpoint_manager: emu_core::breakpoints::BreakpointManager,
     /// Total CPU cycles executed since reset
     total_cycles: u64,
+    /// Cartridge information for inspector
+    cartridge_info: Option<CartridgeInfo>,
 }
 
 impl NesSystem {
@@ -333,6 +366,13 @@ impl NesSystem {
         }
     }
 
+    /// Get cartridge information for the inspector tab.
+    ///
+    /// Returns metadata about the loaded cartridge including ROM database overrides.
+    pub fn get_cartridge_info(&self) -> Option<CartridgeInfo> {
+        self.cartridge_info.clone()
+    }
+
     /// Get runtime stats for debugging / overlays.
     pub fn get_runtime_stats(&self) -> RuntimeStats {
         self.last_stats
@@ -402,6 +442,7 @@ impl Default for NesSystem {
             instruction_tracer: emu_core::instruction_tracer::InstructionTracer::new(),
             breakpoint_manager: emu_core::breakpoints::BreakpointManager::new(),
             total_cycles: 0,
+            cartridge_info: None,
         }
     }
 }
@@ -409,6 +450,40 @@ impl Default for NesSystem {
 impl NesSystem {
     /// Common cartridge setup logic
     fn setup_cartridge(&mut self, cart: cartridge::Cartridge) -> Result<(), std::io::Error> {
+        // Build cartridge info for inspector before moving the cart
+        let mapper_name = match cart.mapper {
+            0 => "NROM".to_string(),
+            1 => "MMC1/SxROM".to_string(),
+            2 => "UxROM".to_string(),
+            3 => "CNROM".to_string(),
+            4 => "MMC3/TxROM".to_string(),
+            7 => "AxROM".to_string(),
+            9 => "MMC2/PxROM".to_string(),
+            10 => "MMC4/FxROM".to_string(),
+            11 => "Color Dreams".to_string(),
+            34 => "BNROM".to_string(),
+            66 => "GxROM".to_string(),
+            71 => "Camerica".to_string(),
+            79 => "NINA-03/06".to_string(),
+            206 => "Namco 118".to_string(),
+            _ => format!("Mapper {}", cart.mapper),
+        };
+
+        self.cartridge_info = Some(CartridgeInfo {
+            mapper: cart.mapper,
+            mapper_name,
+            mirroring: format!("{:?}", cart.mirroring),
+            timing: cart.timing,
+            crc32: cart.crc32,
+            prg_size: cart.prg_rom.len(),
+            chr_size: cart.chr_rom.len(),
+            header_mapper: cart.header_mapper,
+            header_mirroring: format!("{:?}", cart.header_mirroring),
+            db_mapper_override: cart.db_mapper_override,
+            db_mirroring_override: cart.db_mirroring_override,
+            board_name: cart.board_name.clone(),
+        });
+
         // Set timing mode from cartridge
         self.timing = cart.timing;
 
