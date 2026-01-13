@@ -59,9 +59,9 @@ pub struct ColecoVisionSystem {
 
     // Debugging
     /// Instruction tracer for debugging
-    pub(crate) instruction_tracer: emu_core::instruction_tracer::InstructionTracer,
+    pub instruction_tracer: emu_core::instruction_tracer::InstructionTracer,
     /// Breakpoint manager for debugging
-    pub(crate) breakpoint_manager: emu_core::breakpoints::BreakpointManager,
+    pub breakpoint_manager: emu_core::breakpoints::BreakpointManager,
 }
 
 impl ColecoVisionSystem {
@@ -128,10 +128,7 @@ impl ColecoVisionSystem {
     /// Load a cartridge ROM
     pub fn load_cartridge(&mut self, rom_data: Vec<u8>) {
         log(LogCategory::CPU, LogLevel::Info, || {
-            format!(
-                "ColecoVision: Loading cartridge ({} bytes)",
-                rom_data.len()
-            )
+            format!("ColecoVision: Loading cartridge ({} bytes)", rom_data.len())
         });
 
         self.cartridge_loaded = true;
@@ -190,7 +187,8 @@ impl System for ColecoVisionSystem {
             self.cycles += cpu_cycles as u64;
 
             // Update VDP scanline based on cycles
-            let scanline = ((self.cycles % self.cpu_cycles_per_frame as u64) / self.scanline_cycles as u64) as u16;
+            let scanline = ((self.cycles % self.cpu_cycles_per_frame as u64)
+                / self.scanline_cycles as u64) as u16;
             self.vdp.borrow_mut().set_scanline(scanline);
 
             // Check for VDP interrupt

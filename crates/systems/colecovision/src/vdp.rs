@@ -521,10 +521,18 @@ impl Vdp {
         let sprite_pattern_base = ((self.registers[6] & 0x07) as usize) << 11;
 
         // Sprite size (register 1, bit 1: 0=8x8, 1=16x16)
-        let sprite_size = if (self.registers[1] & 0x02) != 0 { 16 } else { 8 };
+        let sprite_size = if (self.registers[1] & 0x02) != 0 {
+            16
+        } else {
+            8
+        };
 
         // Sprite magnification (register 1, bit 0)
-        let mag = if (self.registers[1] & 0x01) != 0 { 2 } else { 1 };
+        let mag = if (self.registers[1] & 0x01) != 0 {
+            2
+        } else {
+            1
+        };
         let actual_size = sprite_size * mag;
 
         let mut sprite_count = 0;
@@ -570,9 +578,9 @@ impl Vdp {
                     // 16x16 sprites use 4 consecutive patterns
                     let quad = (pattern_num & 0xFC) * 8;
                     if pattern_row < 8 {
-                        quad + (pattern_row * 1)
+                        quad + pattern_row
                     } else {
-                        quad + 16 + ((pattern_row - 8) * 1)
+                        quad + 16 + (pattern_row - 8)
                     }
                 } else {
                     // 8x8 sprites
@@ -587,7 +595,7 @@ impl Vdp {
                     if pixel_on {
                         for mx in 0..mag {
                             let x = sprite_x + x_offset + (bit * mag) as i16 + mx as i16;
-                            if x >= 0 && x < 256 {
+                            if (0..256).contains(&x) {
                                 let pixel_idx = line_offset + x as usize;
                                 // Check for sprite collision
                                 if self.frame.pixels[pixel_idx] != 0
@@ -607,10 +615,7 @@ impl Vdp {
                     let pattern_addr = if pattern_row < 8 {
                         sprite_pattern_base + ((pattern_num & 0xFC) * 8) + 8 + pattern_row
                     } else {
-                        sprite_pattern_base
-                            + ((pattern_num & 0xFC) * 8)
-                            + 24
-                            + (pattern_row - 8)
+                        sprite_pattern_base + ((pattern_num & 0xFC) * 8) + 24 + (pattern_row - 8)
                     };
 
                     let pattern_byte = self.vram[pattern_addr];
@@ -620,7 +625,7 @@ impl Vdp {
                         if pixel_on {
                             for mx in 0..mag {
                                 let x = sprite_x + x_offset + ((8 + bit) * mag) as i16 + mx as i16;
-                                if x >= 0 && x < 256 {
+                                if (0..256).contains(&x) {
                                     let pixel_idx = line_offset + x as usize;
                                     if self.frame.pixels[pixel_idx] != 0
                                         && self.frame.pixels[pixel_idx]

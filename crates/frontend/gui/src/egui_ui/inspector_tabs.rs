@@ -1060,7 +1060,7 @@ fn render_colecovision_vdp_tab(ui: &mut Ui, tab_manager: &mut TabManager) {
                     ui.add_space(5.0);
 
                     // Decode graphics mode from registers
-                    let reg0 = colecovision_data.registers.get(0).copied().unwrap_or(0);
+                    let reg0 = colecovision_data.registers.first().copied().unwrap_or(0);
                     let reg1 = colecovision_data.registers.get(1).copied().unwrap_or(0);
 
                     let m1 = (reg0 & 0x02) != 0;
@@ -1113,11 +1113,7 @@ fn render_colecovision_vdp_tab(ui: &mut Ui, tab_manager: &mut TabManager) {
                             ui.end_row();
 
                             ui.label("Sprite Size");
-                            ui.label(if (reg1 & 0x02) != 0 {
-                                "16x16"
-                            } else {
-                                "8x8"
-                            });
+                            ui.label(if (reg1 & 0x02) != 0 { "16x16" } else { "8x8" });
                             ui.end_row();
 
                             ui.label("Sprite Magnification");

@@ -205,6 +205,9 @@ impl EmulatorSystem {
             EmulatorSystem::Chip8(sys) => sys
                 .mount(mount_point_id, data)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::ColecoVision(sys) => sys
+                .mount(mount_point_id, data)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         }
     }
 
@@ -248,6 +251,9 @@ impl EmulatorSystem {
                 .unmount(mount_point_id)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
             EmulatorSystem::Chip8(sys) => sys
+                .unmount(mount_point_id)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::ColecoVision(sys) => sys
                 .unmount(mount_point_id)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         }
@@ -380,6 +386,14 @@ impl EmulatorSystem {
                 // Chip8 uses 16-bit controller state via set_controller_16
                 // This 8-bit set_controller is not used for Chip8
             }
+            EmulatorSystem::ColecoVision(sys) => {
+                // ColecoVision has 2 controller ports
+                if port == 0 {
+                    sys.set_controller(1, state);
+                } else if port == 1 {
+                    sys.set_controller(2, state);
+                }
+            }
         }
     }
 
@@ -475,6 +489,10 @@ impl EmulatorSystem {
                 let debug = sys.debug_info();
                 Some(debug.pc as u32)
             }
+            EmulatorSystem::ColecoVision(_) => {
+                // Z80 CPU - get PC from debugger
+                None // TODO: Implement when debugger provides PC
+            }
         }
     }
 
@@ -489,6 +507,7 @@ impl EmulatorSystem {
             EmulatorSystem::N64(_) => Some(93.75), // N64 R4300i (93.75 MHz)
             EmulatorSystem::SMS(_) => Some(3.58), // SMS Z80A (3.58 MHz NTSC)
             EmulatorSystem::Chip8(_) => Some(0.0007), // CHIP-8 runs at ~700 instructions/sec (~0.7 kHz)
+            EmulatorSystem::ColecoVision(_) => Some(3.58), // ColecoVision Z80A (3.579545 MHz NTSC)
         }
     }
 
@@ -510,6 +529,7 @@ impl EmulatorSystem {
             EmulatorSystem::N64(_) => emu_nes::RuntimeStats::default(),
             EmulatorSystem::SMS(_) => emu_nes::RuntimeStats::default(),
             EmulatorSystem::Chip8(_) => emu_nes::RuntimeStats::default(),
+            EmulatorSystem::ColecoVision(_) => emu_nes::RuntimeStats::default(),
         }
     }
 
@@ -523,6 +543,7 @@ impl EmulatorSystem {
             EmulatorSystem::N64(_) => emu_core::apu::TimingMode::Ntsc,
             EmulatorSystem::SMS(_) => emu_core::apu::TimingMode::Ntsc,
             EmulatorSystem::Chip8(_) => emu_core::apu::TimingMode::Ntsc,
+            EmulatorSystem::ColecoVision(_) => emu_core::apu::TimingMode::Ntsc,
         }
     }
 
@@ -536,6 +557,7 @@ impl EmulatorSystem {
             EmulatorSystem::N64(_) => vec![0; count], // TODO: Implement audio for N64
             EmulatorSystem::Chip8(_) => vec![0; count], // TODO: Implement CHIP-8 audio (single beep tone)
             EmulatorSystem::SMS(sys) => sys.get_audio_samples(count),
+            EmulatorSystem::ColecoVision(_) => vec![0; count], // TODO: Implement ColecoVision audio
         }
     }
 
@@ -549,6 +571,7 @@ impl EmulatorSystem {
             EmulatorSystem::N64(_) => (320, 240),
             EmulatorSystem::SMS(_) => (256, 192),
             EmulatorSystem::Chip8(_) => (64, 32),
+            EmulatorSystem::ColecoVision(_) => (256, 192), // TMS9918A resolution
         }
     }
 
@@ -639,6 +662,7 @@ impl EmulatorSystem {
             }
             EmulatorSystem::SMS(_) => "Software".to_string(),
             EmulatorSystem::Chip8(_) => "Software".to_string(),
+            EmulatorSystem::ColecoVision(_) => "Software".to_string(),
         }
     }
 
@@ -670,6 +694,7 @@ impl EmulatorSystem {
             }
             EmulatorSystem::SMS(_) => vec!["Software".to_string()],
             EmulatorSystem::Chip8(_) => vec!["Software".to_string()],
+            EmulatorSystem::ColecoVision(_) => vec!["Software".to_string()],
         }
     }
 
@@ -685,6 +710,7 @@ impl EmulatorSystem {
             EmulatorSystem::N64(_) => None,
             EmulatorSystem::SMS(_) => None,
             EmulatorSystem::Chip8(_) => None,
+            EmulatorSystem::ColecoVision(_) => None,
         }
     }
 
@@ -699,6 +725,7 @@ impl EmulatorSystem {
             EmulatorSystem::N64(sys) => Some(sys.get_instruction_tracer()),
             EmulatorSystem::SMS(sys) => Some(sys.get_instruction_tracer()),
             EmulatorSystem::Chip8(sys) => Some(sys.get_instruction_tracer()),
+            EmulatorSystem::ColecoVision(sys) => Some(&sys.instruction_tracer),
         }
     }
 }
@@ -1662,6 +1689,7 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
             EmulatorSystem::SNES(s) => s.set_instruction_tracing(true),
             EmulatorSystem::N64(s) => s.set_instruction_tracing(true),
             EmulatorSystem::PC(s) => s.set_instruction_tracing(true),
+            EmulatorSystem::ColecoVision(s) => s.instruction_tracer.set_enabled(true),
         }
     }
 
@@ -1676,6 +1704,7 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
             EmulatorSystem::SNES(s) => s.add_breakpoint(addr),
             EmulatorSystem::N64(s) => s.add_breakpoint(addr),
             EmulatorSystem::PC(s) => s.add_breakpoint(addr),
+            EmulatorSystem::ColecoVision(s) => s.breakpoint_manager.add_execute(addr),
         }
     }
 }
@@ -2607,7 +2636,8 @@ fn main() {
                             // ColecoVision requires BIOS - for now, just try loading cartridge
                             if let Err(e) = coleco_sys.mount("Cartridge", &data) {
                                 eprintln!("Failed to load ColecoVision ROM: {}", e);
-                                status_message = format!("Error: {} (Note: ColecoVision requires BIOS)", e);
+                                status_message =
+                                    format!("Error: {} (Note: ColecoVision requires BIOS)", e);
                                 rom_hash = None;
                             } else {
                                 rom_loaded = true;
@@ -2616,7 +2646,8 @@ fn main() {
                                 if let Err(e) = settings.save() {
                                     eprintln!("Warning: Failed to save settings: {}", e);
                                 }
-                                status_message = "ColecoVision cartridge loaded (BIOS required)".to_string();
+                                status_message =
+                                    "ColecoVision cartridge loaded (BIOS required)".to_string();
                                 println!("Loaded ColecoVision cartridge: {}", p);
                             }
                         }
@@ -3201,6 +3232,13 @@ fn main() {
                     }
                 }
                 EmulatorSystem::Chip8(s) => SystemDebugInfo::from_chip8(&s.debug_info()),
+                EmulatorSystem::ColecoVision(s) => {
+                    if let Some(debugger) = s.debugger() {
+                        SystemDebugInfo::from_debugger("ColecoVision", debugger)
+                    } else {
+                        SystemDebugInfo::new("ColecoVision".to_string())
+                    }
+                }
             };
             egui_app.tab_manager.update_debug_info(debug_info);
 
@@ -3816,19 +3854,24 @@ fn main() {
                                     }
                                     Ok(SystemType::ColecoVision) => {
                                         rom_hash = Some(GameSaves::rom_hash(&data));
-                                        let mut coleco_sys = emu_colecovision::ColecoVisionSystem::new();
+                                        let mut coleco_sys =
+                                            emu_colecovision::ColecoVisionSystem::new();
                                         if let Err(e) = coleco_sys.mount("Cartridge", &data) {
-                                            egui_app
-                                                .status_bar
-                                                .set_message(format!("Error: {} (Note: ColecoVision requires BIOS)", e));
+                                            egui_app.status_bar.set_message(format!(
+                                                "Error: {} (Note: ColecoVision requires BIOS)",
+                                                e
+                                            ));
                                             rom_hash = None;
                                         } else {
                                             rom_loaded = true;
-                                            sys = EmulatorSystem::ColecoVision(Box::new(coleco_sys));
+                                            sys =
+                                                EmulatorSystem::ColecoVision(Box::new(coleco_sys));
                                             egui_app.property_pane.system_name =
                                                 "ColecoVision".to_string();
-                                            runtime_state
-                                                .set_mount("Cartridge".to_string(), path_str.clone());
+                                            runtime_state.set_mount(
+                                                "Cartridge".to_string(),
+                                                path_str.clone(),
+                                            );
                                             settings.add_recent_file(path_str.clone());
                                             if let Err(e) = settings.save() {
                                                 eprintln!(
@@ -3839,9 +3882,10 @@ fn main() {
                                             egui_app.update_recent_files(
                                                 settings.get_recent_files().to_vec(),
                                             );
-                                            egui_app
-                                                .status_bar
-                                                .set_message("ColecoVision cartridge loaded (BIOS required)".to_string());
+                                            egui_app.status_bar.set_message(
+                                                "ColecoVision cartridge loaded (BIOS required)"
+                                                    .to_string(),
+                                            );
                                             let _ = sys.resolution();
                                             if let Some(ref hash) = rom_hash {
                                                 _game_saves = GameSaves::load(hash);
@@ -4393,15 +4437,18 @@ fn main() {
                                     }
                                     Ok(SystemType::ColecoVision) => {
                                         rom_hash = Some(GameSaves::rom_hash(&data));
-                                        let mut coleco_sys = emu_colecovision::ColecoVisionSystem::new();
+                                        let mut coleco_sys =
+                                            emu_colecovision::ColecoVisionSystem::new();
                                         if let Err(e) = coleco_sys.mount("Cartridge", &data) {
-                                            egui_app
-                                                .status_bar
-                                                .set_message(format!("Error: {} (Note: ColecoVision requires BIOS)", e));
+                                            egui_app.status_bar.set_message(format!(
+                                                "Error: {} (Note: ColecoVision requires BIOS)",
+                                                e
+                                            ));
                                             rom_hash = None;
                                         } else {
                                             rom_loaded = true;
-                                            sys = EmulatorSystem::ColecoVision(Box::new(coleco_sys));
+                                            sys =
+                                                EmulatorSystem::ColecoVision(Box::new(coleco_sys));
                                             egui_app.property_pane.system_name =
                                                 "ColecoVision".to_string();
                                             egui_app.property_pane.rendering_backend =
@@ -4422,9 +4469,10 @@ fn main() {
                                             egui_app.update_recent_files(
                                                 settings.get_recent_files().to_vec(),
                                             );
-                                            egui_app
-                                                .status_bar
-                                                .set_message("ColecoVision cartridge loaded (BIOS required)".to_string());
+                                            egui_app.status_bar.set_message(
+                                                "ColecoVision cartridge loaded (BIOS required)"
+                                                    .to_string(),
+                                            );
                                             let _ = sys.resolution();
                                             if let Some(ref hash) = rom_hash {
                                                 _game_saves = GameSaves::load(hash);
