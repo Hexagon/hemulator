@@ -569,29 +569,32 @@ impl TabManager {
                 // Dropdown for memory region selection
                 ui.horizontal(|ui| {
                     ui.label("Region:");
-                    egui::ComboBox::from_id_salt("memory_inspector_region_selector")
-                        .selected_text(
-                            state
-                                .memory_regions
-                                .get(self.selected_memory_region_index)
-                                .map(|r| r.name.as_str())
-                                .unwrap_or("Select region"),
-                        )
-                        .show_ui(ui, |ui| {
-                            for (idx, region) in state.memory_regions.iter().enumerate() {
-                                if ui
-                                    .selectable_value(
-                                        &mut self.selected_memory_region_index,
-                                        idx,
-                                        &region.name,
-                                    )
-                                    .clicked()
-                                {
-                                    // Reset view address to region start when changing regions
-                                    self.memory_view_address = region.start;
-                                }
+                    egui::ComboBox::from_id_salt(format!(
+                        "memory_inspector_region_selector_{}",
+                        state.system_type
+                    ))
+                    .selected_text(
+                        state
+                            .memory_regions
+                            .get(self.selected_memory_region_index)
+                            .map(|r| r.name.as_str())
+                            .unwrap_or("Select region"),
+                    )
+                    .show_ui(ui, |ui| {
+                        for (idx, region) in state.memory_regions.iter().enumerate() {
+                            if ui
+                                .selectable_value(
+                                    &mut self.selected_memory_region_index,
+                                    idx,
+                                    &region.name,
+                                )
+                                .clicked()
+                            {
+                                // Reset view address to region start when changing regions
+                                self.memory_view_address = region.start;
                             }
-                        });
+                        }
+                    });
                 });
 
                 ui.separator();
@@ -663,9 +666,10 @@ impl TabManager {
 
                     // Hex viewer
                     egui::ScrollArea::vertical()
+                        .id_salt(format!("memory_hex_viewer_{}", state.system_type))
                         .auto_shrink([false; 2])
                         .show(ui, |ui| {
-                            self.render_hex_dump(ui, region);
+                            self.render_hex_dump(ui, region, &state.system_type);
                         });
                 }
             });
@@ -1223,6 +1227,7 @@ impl TabManager {
                     ui.heading("📜 Disassembly");
                     ui.separator();
                     ScrollArea::vertical()
+                        .id_salt(format!("disassembly_scroll_{}", state.system_type))
                         .auto_shrink([false; 2])
                         .show(ui, |ui| {
                             self.render_disassembly_panel(ui, state);
@@ -1238,6 +1243,7 @@ impl TabManager {
                     ui.heading("🖥️ CPU State");
                     ui.separator();
                     ScrollArea::vertical()
+                        .id_salt(format!("cpu_state_scroll_{}", state.system_type))
                         .auto_shrink([false; 2])
                         .show(ui, |ui| {
                             self.render_cpu_state_panel(ui, state);
@@ -1254,7 +1260,7 @@ impl TabManager {
         }
 
         // Show disassembled instructions
-        egui::Grid::new("disasm_grid")
+        egui::Grid::new(format!("disasm_grid_{}", state.system_type))
             .num_columns(3)
             .spacing([5.0, 2.0])
             .striped(false)
@@ -1313,7 +1319,7 @@ impl TabManager {
             });
     }
 
-    fn render_hex_dump(&self, ui: &mut Ui, region: &MemoryRegion) {
+    fn render_hex_dump(&self, ui: &mut Ui, region: &MemoryRegion, system_type: &str) {
         // Check if we have cached memory data
         if self.cached_memory.is_empty() {
             ui.label(
@@ -1350,7 +1356,7 @@ impl TabManager {
         ui.separator();
 
         // Display hex dump rows
-        egui::Grid::new("hex_dump_grid")
+        egui::Grid::new(format!("hex_dump_grid_{}", system_type))
             .num_columns(18) // Address + 16 bytes + ASCII
             .spacing([8.0, 2.0])
             .striped(false)
@@ -1428,7 +1434,7 @@ impl TabManager {
 
             // Registers
             ui.heading("Registers");
-            egui::Grid::new("registers_grid")
+            egui::Grid::new(format!("registers_grid_{}", state.system_type))
                 .num_columns(2)
                 .spacing([15.0, 5.0])
                 .striped(true)
@@ -1450,7 +1456,7 @@ impl TabManager {
 
             // Flags
             ui.heading("Flags");
-            egui::Grid::new("flags_grid")
+            egui::Grid::new(format!("flags_grid_{}", state.system_type))
                 .num_columns(2)
                 .spacing([15.0, 5.0])
                 .striped(true)
@@ -1496,7 +1502,7 @@ impl TabManager {
                 ui.separator();
                 ui.add_space(10.0);
 
-                egui::Grid::new("debug_grid")
+                egui::Grid::new(format!("debug_grid_{}", debug_info.system_type))
                     .num_columns(2)
                     .spacing([40.0, 8.0])
                     .striped(true)
