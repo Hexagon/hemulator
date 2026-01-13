@@ -863,9 +863,9 @@ impl Ppu {
         for scanline in 0..240 {
             self.render_scanline(scanline, &mut frame);
 
-            // Simulate tick()'s dot 256 v register increment (for scanlines 0-238)
+            // Simulate tick()'s dot 256 v register increment (for all visible scanlines 0-239)
             // This would normally happen in tick() but tests don't call tick()
-            if rendering_enabled && scanline < 239 {
+            if rendering_enabled && scanline < 240 {
                 let mut v = self.vram_addr.get();
                 let fine_y = (v >> 12) & 0x0007;
 
@@ -1396,8 +1396,9 @@ impl Ppu {
         // Visible scanlines, dot 256: Increment v register's vertical position
         // This prepares the address for the next scanline's background fetches.
         // Reference: https://www.nesdev.org/wiki/PPU_scrolling
-        // Skip increment for scanline 239 to allow clean reinitialization at pre-render.
-        if scanline < 239 && dot == 256 {
+        // Increment happens for all visible scanlines (0-239).
+        // The pre-render scanline properly reinitializes vertical bits from t during dots 280-304.
+        if scanline < 240 && dot == 256 {
             let rendering_enabled = (self.mask & 0x18) != 0;
             if rendering_enabled {
                 let mut v = self.vram_addr.get();

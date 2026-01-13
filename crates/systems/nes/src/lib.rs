@@ -638,7 +638,25 @@ impl System for NesSystem {
                         // At this point, the v register contains the correct scroll for this scanline.
                         // The horizontal bits were just restored from t at dot 257 of the previous scanline,
                         // and vertical bits are correct for the current scanline.
-                        if dot_before == 0 && scanline_before < 240 {
+                        //
+                        // On odd frames, dot 0 of scanline 0 is skipped. Also, due to CPU instruction
+                        // boundaries, the frame may start at various dots within scanline 0.
+                        // We trigger rendering when:
+                        // 1. dot_before == 0 (standard trigger for all scanlines)
+                        // 2. For scanline 0: any dot if we haven't rendered it yet (catches odd frames
+                        //    and frames starting mid-scanline)
+                        // We use rendered_scanlines to prevent double-rendering.
+                        let should_render = if scanline_before < 240
+                            && scanline_before as u32 >= rendered_scanlines
+                        {
+                            // Standard trigger: at dot 0
+                            // Special case for scanline 0: trigger on any dot since we might have
+                            // missed dot 0 due to odd frame skip or CPU instruction boundaries
+                            dot_before == 0 || (scanline_before == 0 && rendered_scanlines == 0)
+                        } else {
+                            false
+                        };
+                        if should_render {
                             if debug_scanline_drift
                                 && (scanline_before < 3 || scanline_before >= 237)
                             {
