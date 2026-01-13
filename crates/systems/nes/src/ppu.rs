@@ -4086,25 +4086,25 @@ mod tests {
         // Test that PPU fetches 34 tiles per scanline (not just the 32 visible ones)
         // This is critical for games like Punch Out!! that use MMC2 mapper
         // Reference: https://www.nesdev.org/wiki/PPU_rendering
-        
+
         use std::cell::RefCell;
         use std::rc::Rc;
-        
+
         let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock();
-        
+
         // Track CHR reads via callback
         let chr_reads = Rc::new(RefCell::new(Vec::new()));
         let chr_reads_clone = chr_reads.clone();
-        
+
         ppu.set_chr_read_callback(Some(Box::new(move |addr| {
             chr_reads_clone.borrow_mut().push(addr);
         })));
-        
+
         // Enable rendering
         ppu.mask = 0x18; // Show background and sprites
         ppu.ctrl = 0x00; // Background pattern table at $0000
-        
+
         // Set up nametables with sequential but unique tile indices for both nametables
         // Nametable 0: tiles 0-31 for first 32 tiles, tiles 32-33 for extra 2 tiles
         // Nametable 1: tiles 64-95 so we can distinguish between nametables
@@ -4112,42 +4112,44 @@ mod tests {
             let addr = 0x2000 + i;
             let mapped_addr = ppu.map_nametable_addr(addr);
             ppu.vram[mapped_addr] = i as u8;
-            
+
             // Also set up second nametable with different tiles
             let addr2 = 0x2400 + i;
             let mapped_addr2 = ppu.map_nametable_addr(addr2);
             ppu.vram[mapped_addr2] = (i + 64) as u8;
         }
-        
+
         // Clear the CHR reads
         chr_reads.borrow_mut().clear();
-        
+
         // Render a scanline with no scrolling
         let mut frame = Frame::new(256, 240);
         ppu.render_scanline(0, &mut frame);
-        
+
         // Count how many CHR reads we got
         let reads = chr_reads.borrow();
-        
+
         // With horizontal mirroring:
         // - First 32 tiles come from nametable 0 (tiles 0-31)
         // - Next 2 tiles come from nametable 1 (which with horizontal mirroring maps to nametable 0)
         // Actually, let's just verify we got the right number of reads
-        
+
         // Each tile has 2 CHR reads (low and high bitplane)
         // So we expect 34 * 2 = 68 CHR reads
         assert_eq!(
-            reads.len(), 68,
+            reads.len(),
+            68,
             "PPU should make exactly 68 CHR reads (34 tiles * 2 bitplanes), got {}",
             reads.len()
         );
-        
+
         // The reads should be in pairs (low bitplane + 8, high bitplane)
         for i in (0..reads.len()).step_by(2) {
             let low_addr = reads[i];
             let high_addr = reads[i + 1];
             assert_eq!(
-                high_addr, low_addr + 8,
+                high_addr,
+                low_addr + 8,
                 "CHR reads should be in low/high bitplane pairs"
             );
         }
