@@ -153,6 +153,11 @@ impl OpenGLProcessor {
 
         let fragment_source = match filter {
             DisplayFilter::None => include_str!("../shaders/fragment_none.glsl"),
+            DisplayFilter::PhosphorPersistence => {
+                // Phosphor persistence is handled via CPU-side frame blending in main.rs
+                // For GPU rendering, use the None shader (no additional processing)
+                include_str!("../shaders/fragment_none.glsl")
+            }
             DisplayFilter::SonyTrinitron => include_str!("../shaders/fragment_sony_trinitron.glsl"),
             DisplayFilter::Ibm5151 => include_str!("../shaders/fragment_ibm5151.glsl"),
             DisplayFilter::Commodore1702 => include_str!("../shaders/fragment_commodore1702.glsl"),

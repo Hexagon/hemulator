@@ -11,6 +11,10 @@ pub enum DisplayFilter {
     /// No filter - raw pixels
     #[default]
     None,
+    /// Phosphor Persistence - Temporal frame blending to simulate CRT phosphor decay
+    /// Reduces sprite flicker in games like Atari 2600 Pac-Man by blending consecutive frames
+    /// Simulates ~16ms phosphor persistence of vintage CRT displays
+    PhosphorPersistence,
     /// Sony Trinitron - Color CRT TV/Monitor (1968-2008)
     /// Famous for aperture grille, RGB phosphor triads, and vivid colors
     SonyTrinitron,
@@ -33,6 +37,7 @@ impl DisplayFilter {
     pub fn name(&self) -> &str {
         match self {
             DisplayFilter::None => "None",
+            DisplayFilter::PhosphorPersistence => "Phosphor Persistence",
             DisplayFilter::SonyTrinitron => "Sony Trinitron",
             DisplayFilter::Ibm5151 => "IBM 5151",
             DisplayFilter::Commodore1702 => "Commodore 1702",
@@ -44,13 +49,19 @@ impl DisplayFilter {
     /// Cycle to the next filter in the sequence
     pub fn next(&self) -> Self {
         match self {
-            DisplayFilter::None => DisplayFilter::SonyTrinitron,
+            DisplayFilter::None => DisplayFilter::PhosphorPersistence,
+            DisplayFilter::PhosphorPersistence => DisplayFilter::SonyTrinitron,
             DisplayFilter::SonyTrinitron => DisplayFilter::Ibm5151,
             DisplayFilter::Ibm5151 => DisplayFilter::Commodore1702,
             DisplayFilter::Commodore1702 => DisplayFilter::SharpLcd,
             DisplayFilter::SharpLcd => DisplayFilter::RcaVictor,
             DisplayFilter::RcaVictor => DisplayFilter::None,
         }
+    }
+
+    /// Check if this filter requires previous frame data for temporal blending
+    pub fn requires_frame_history(&self) -> bool {
+        matches!(self, DisplayFilter::PhosphorPersistence)
     }
 
     /// Apply the filter to a frame buffer
@@ -63,6 +74,10 @@ impl DisplayFilter {
         match self {
             DisplayFilter::None => {
                 // No processing needed
+            }
+            DisplayFilter::PhosphorPersistence => {
+                // Temporal blending requires previous frame - handled separately
+                // This is a no-op when called without frame history
             }
             DisplayFilter::SonyTrinitron => {
                 apply_sony_trinitron(buffer, width, height);
@@ -78,6 +93,33 @@ impl DisplayFilter {
             }
             DisplayFilter::RcaVictor => {
                 apply_rca_victor(buffer, width, height);
+            }
+        }
+    }
+
+    /// Apply filter with access to previous frame for temporal effects
+    ///
+    /// # Arguments
+    /// * `buffer` - The current frame buffer (will be modified in place)
+    /// * `prev_buffer` - Optional previous frame buffer for temporal blending
+    /// * `width` - Width of the frame
+    /// * `height` - Height of the frame
+    pub fn apply_with_history(
+        &self,
+        buffer: &mut [u32],
+        prev_buffer: Option<&[u32]>,
+        width: usize,
+        height: usize,
+    ) {
+        match self {
+            DisplayFilter::PhosphorPersistence => {
+                if let Some(prev) = prev_buffer {
+                    apply_phosphor_persistence(buffer, prev, width, height);
+                }
+            }
+            _ => {
+                // For non-temporal filters, just use the regular apply
+                self.apply(buffer, width, height);
             }
         }
     }
@@ -616,6 +658,60 @@ fn apply_rca_victor(buffer: &mut [u32], width: usize, height: usize) {
     apply_crt_vignette(buffer, width, height);
 }
 
+/// Phosphor Persistence - Temporal frame blending to simulate CRT phosphor decay
+///
+/// This filter blends the current frame with the previous frame to simulate
+/// the phosphor persistence of CRT displays (~16ms decay time). This is particularly
+/// effective at reducing sprite flicker in games like Atari 2600 Pac-Man, where
+/// sprite multiplexing causes ghosts to flash on alternate frames.
+///
+/// On original CRT TVs, the phosphor coating would continue to glow after being
+/// struck by the electron beam, creating a natural motion blur and blending effect.
+/// Modern LCD/LED displays lack this persistence, making sprite flicker very pronounced.
+///
+/// This filter approximates the phosphor decay by blending:
+/// - 70% current frame (bright, active phosphor)
+/// - 30% previous frame (decaying phosphor glow)
+///
+/// This ratio simulates the fast but noticeable phosphor decay characteristic of
+/// vintage CRT displays used with the Atari 2600 and similar systems.
+fn apply_phosphor_persistence(
+    buffer: &mut [u32],
+    prev_buffer: &[u32],
+    width: usize,
+    height: usize,
+) {
+    // Blend ratio: 70% current frame, 30% previous frame
+    // This simulates the phosphor decay of a typical CRT display (~16ms persistence)
+    const CURRENT_WEIGHT: u16 = 179; // 70% = 179/256
+    const PREVIOUS_WEIGHT: u16 = 77; // 30% = 77/256
+
+    for y in 0..height {
+        for x in 0..width {
+            let idx = y * width + x;
+
+            if idx < buffer.len() && idx < prev_buffer.len() {
+                let current = buffer[idx];
+                let previous = prev_buffer[idx];
+
+                let (r_curr, g_curr, b_curr) = unpack_rgb(current);
+                let (r_prev, g_prev, b_prev) = unpack_rgb(previous);
+
+                // Blend using fixed-point arithmetic for performance
+                // Formula: (current * CURRENT_WEIGHT + previous * PREVIOUS_WEIGHT) / 256
+                let r =
+                    ((r_curr as u16 * CURRENT_WEIGHT + r_prev as u16 * PREVIOUS_WEIGHT) >> 8) as u8;
+                let g =
+                    ((g_curr as u16 * CURRENT_WEIGHT + g_prev as u16 * PREVIOUS_WEIGHT) >> 8) as u8;
+                let b =
+                    ((b_curr as u16 * CURRENT_WEIGHT + b_prev as u16 * PREVIOUS_WEIGHT) >> 8) as u8;
+
+                buffer[idx] = pack_rgb(r, g, b);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -623,6 +719,9 @@ mod tests {
     #[test]
     fn test_filter_cycling() {
         let filter = DisplayFilter::None;
+        assert_eq!(filter.next(), DisplayFilter::PhosphorPersistence);
+
+        let filter = DisplayFilter::PhosphorPersistence;
         assert_eq!(filter.next(), DisplayFilter::SonyTrinitron);
 
         let filter = DisplayFilter::SonyTrinitron;
@@ -644,11 +743,26 @@ mod tests {
     #[test]
     fn test_filter_names() {
         assert_eq!(DisplayFilter::None.name(), "None");
+        assert_eq!(
+            DisplayFilter::PhosphorPersistence.name(),
+            "Phosphor Persistence"
+        );
         assert_eq!(DisplayFilter::SonyTrinitron.name(), "Sony Trinitron");
         assert_eq!(DisplayFilter::Ibm5151.name(), "IBM 5151");
         assert_eq!(DisplayFilter::Commodore1702.name(), "Commodore 1702");
         assert_eq!(DisplayFilter::SharpLcd.name(), "Sharp LCD");
         assert_eq!(DisplayFilter::RcaVictor.name(), "RCA Victor");
+    }
+
+    #[test]
+    fn test_requires_frame_history() {
+        assert!(!DisplayFilter::None.requires_frame_history());
+        assert!(DisplayFilter::PhosphorPersistence.requires_frame_history());
+        assert!(!DisplayFilter::SonyTrinitron.requires_frame_history());
+        assert!(!DisplayFilter::Ibm5151.requires_frame_history());
+        assert!(!DisplayFilter::Commodore1702.requires_frame_history());
+        assert!(!DisplayFilter::SharpLcd.requires_frame_history());
+        assert!(!DisplayFilter::RcaVictor.requires_frame_history());
     }
 
     #[test]
@@ -675,6 +789,63 @@ mod tests {
         assert!((r as i32 - 150).abs() <= 1);
         assert!((g as i32 - 150).abs() <= 1);
         assert!((b as i32 - 150).abs() <= 1);
+    }
+
+    #[test]
+    fn test_phosphor_persistence() {
+        let width = 4;
+        let height = 4;
+        let mut current = vec![0xFFFFFFFF; width * height]; // All white
+        let previous = vec![0xFF000000; width * height]; // All black
+
+        apply_phosphor_persistence(&mut current, &previous, width, height);
+
+        // With 70% current (white) and 30% previous (black),
+        // result should be approximately 70% brightness
+        for &color in &current {
+            let (r, g, b) = unpack_rgb(color);
+            // Expected: ~179 (70% of 255)
+            assert!((175..=183).contains(&r), "R={}, expected ~179", r);
+            assert!((175..=183).contains(&g), "G={}, expected ~179", g);
+            assert!((175..=183).contains(&b), "B={}, expected ~179", b);
+        }
+    }
+
+    #[test]
+    fn test_phosphor_persistence_no_previous() {
+        let width = 4;
+        let height = 4;
+        let original_pixels = vec![0xFFFF0000; width * height]; // Red
+        let mut buffer = original_pixels.clone();
+
+        // PhosphorPersistence requires previous frame via apply_with_history
+        DisplayFilter::PhosphorPersistence.apply(&mut buffer, width, height);
+
+        // Without previous frame, apply() is a no-op
+        assert_eq!(buffer, original_pixels);
+    }
+
+    #[test]
+    fn test_apply_with_history() {
+        let width = 4;
+        let height = 4;
+        let mut current = vec![0xFFFFFFFF; width * height]; // White
+        let previous = vec![0xFF000000; width * height]; // Black
+
+        DisplayFilter::PhosphorPersistence.apply_with_history(
+            &mut current,
+            Some(&previous),
+            width,
+            height,
+        );
+
+        // Should blend frames
+        for &color in &current {
+            let (r, g, b) = unpack_rgb(color);
+            assert!((175..=183).contains(&r));
+            assert!((175..=183).contains(&g));
+            assert!((175..=183).contains(&b));
+        }
     }
 
     #[test]
@@ -734,6 +905,7 @@ mod tests {
 
         let filters = [
             DisplayFilter::None,
+            DisplayFilter::PhosphorPersistence,
             DisplayFilter::SonyTrinitron,
             DisplayFilter::Ibm5151,
             DisplayFilter::Commodore1702,
@@ -748,8 +920,8 @@ mod tests {
             // Verify buffer is still valid
             assert_eq!(buffer.len(), width * height);
 
-            // For None filter, buffer should be unchanged
-            if *filter == DisplayFilter::None {
+            // For None and PhosphorPersistence (without history), buffer should be unchanged
+            if *filter == DisplayFilter::None || *filter == DisplayFilter::PhosphorPersistence {
                 assert!(buffer.iter().all(|&c| c == 0xFFFFFFFF));
             } else {
                 // Other filters should modify at least some pixels
