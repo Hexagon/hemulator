@@ -945,6 +945,22 @@ impl Ppu {
         let nt_x = ((v >> 10) & 0x0001) as u8; // Bit 10: nametable X
         let nt_y = ((v >> 11) & 0x0001) as u8; // Bit 11: nametable Y
         let fine_y = ((v >> 12) & 0x0007) as u8; // Bits 12-14: fine Y scroll (0-7)
+        
+        // Debug: log v register for scanline 207
+        if y == 207 {
+            log(LogCategory::PPU, LogLevel::Debug, || {
+                format!(
+                    "Scanline 207: v=0x{:04X} coarse_x={} coarse_y={} nt_x={} nt_y={} fine_y={} fine_x={}",
+                    v, coarse_x, coarse_y, nt_x, nt_y, fine_y, fine_x_val
+                )
+            });
+        }
+
+        let coarse_x = (v & 0x001F) as u8; // Bits 0-4: tile column (0-31)
+        let coarse_y = ((v >> 5) & 0x001F) as u8; // Bits 5-9: tile row (0-31)
+        let nt_x = ((v >> 10) & 0x0001) as u8; // Bit 10: nametable X
+        let nt_y = ((v >> 11) & 0x0001) as u8; // Bit 11: nametable Y
+        let fine_y = ((v >> 12) & 0x0007) as u8; // Bits 12-14: fine Y scroll (0-7)
 
         // Use v register values directly - no screen scanline offset!
         // The v register already points to the correct nametable position for this scanline.
@@ -1166,6 +1182,7 @@ impl Ppu {
             }
 
             // Composite sprite buffer with background using priority rules and detect sprite 0 hit.
+            let mut sprite_0_logged = false;
             for x in 0..width as usize {
                 if let Some((sprite_color, behind_bg, sprite_idx)) = sprite_buffer[x] {
                     // Clip leftmost 8 pixels if PPUMASK bit 2 is clear
@@ -1174,15 +1191,32 @@ impl Ppu {
                     let idx = (y * width + x as u32) as usize;
 
                     // Sprite 0 hit detection - check if sprite 0 pixel overlaps opaque background
-                    if sprite_idx == 0
-                        && bg_enabled
-                        && !self.sprite_0_hit.get()
-                        && bg_priority[x]
-                        && x < 255
-                    {
-                        // Check left clipping - sprite 0 hit doesn't occur in clipped region
-                        if show_bg_left && show_sprites_left || x >= 8 {
-                            self.sprite_0_hit.set(true);
+                    if sprite_idx == 0 {
+                        if !sprite_0_logged && !self.sprite_0_hit.get() {
+                            log(LogCategory::PPU, LogLevel::Debug, || {
+                                format!(
+                                    "Sprite 0 at scanline {} x={}: bg_enabled={}, bg_priority={}, already_hit={}",
+                                    y, x, bg_enabled, bg_priority[x], self.sprite_0_hit.get()
+                                )
+                            });
+                            sprite_0_logged = true;
+                        }
+                        
+                        if bg_enabled
+                            && !self.sprite_0_hit.get()
+                            && bg_priority[x]
+                            && x < 255
+                        {
+                            // Check left clipping - sprite 0 hit doesn't occur in clipped region
+                            if show_bg_left && show_sprites_left || x >= 8 {
+                                log(LogCategory::PPU, LogLevel::Info, || {
+                                    format!(
+                                        "Sprite 0 HIT at scanline {} x={} (bg_priority={}, show_bg_left={}, show_sprites_left={})",
+                                        y, x, bg_priority[x], show_bg_left, show_sprites_left
+                                    )
+                                });
+                                self.sprite_0_hit.set(true);
+                            }
                         }
                     }
 

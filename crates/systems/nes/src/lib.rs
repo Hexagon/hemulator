@@ -538,58 +538,51 @@ impl System for NesSystem {
             // Tick the PPU 3 times for each CPU cycle (PPU runs at 3x CPU clock)
             // This provides cycle-accurate VBlank/NMI timing.
             //
-            // IMPORTANT: Drive scanline rendering from the PPU's actual scanline boundaries
-            // (dot 340 -> 0/1) rather than a synthesized 341-cycle counter. The synthesized
-            // approach can miss late visible scanlines when PPUMASK changes during vblank,
-            // causing "rolling" artifacts.
+            // IMPORTANT: Render scanlines early (dot 1) when the v register still contains
+            // the correct scroll position for that scanline. The v register is incremented
+            // at dot 256, so rendering after that point would use the wrong scroll values.
+            // This is critical for sprite 0 hit detection which depends on correct background
+            // rendering at the sprite's screen position.
             if let Some(b) = self.cpu.bus_mut() {
                 for _ in 0..used {
                     for _ in 0..3 {
                         let dot_before = b.ppu.get_dot();
+                        let scanline_before = b.ppu.get_scanline();
                         let nmi_triggered = b.ppu.tick();
                         if nmi_triggered {
                             nmi_to_fire = true;
                         }
 
-                        // End-of-scanline boundary: dot 340 -> next scanline.
-                        if dot_before == 340 {
-                            let scanline_now = b.ppu.get_scanline();
-                            let completed_scanline = if scanline_now == 0 {
-                                261
-                            } else {
-                                scanline_now.saturating_sub(1)
-                            };
+                        // Render at the START of visible scanlines (dot 0->1 transition)
+                        // At this point, the v register contains the correct scroll for this scanline.
+                        // The horizontal bits were just restored from t at dot 257 of the previous scanline,
+                        // and vertical bits are correct for the current scanline.
+                        if dot_before == 0 && scanline_before < 240 {
+                            if debug_scanline_drift
+                                && (scanline_before < 3 || scanline_before >= 237)
+                            {
+                                let ppu_dot = b.ppu.get_dot();
+                                let ppu_mask = b.ppu.mask();
+                                log(LogCategory::PPU, LogLevel::Info, || {
+                                    format!(
+                                        "NES: frame={} render_scanline={} ppu=({}, {}) mask=0x{:02X}",
+                                        self.frame_index, scanline_before, b.ppu.get_scanline(), ppu_dot, ppu_mask
+                                    )
+                                });
+                            }
 
-                            if completed_scanline < 240 {
-                                // Keep rendered_scanlines in sync with the PPU.
-                                rendered_scanlines = completed_scanline as u32;
+                            self.renderer
+                                .render_scanline(&mut b.ppu, scanline_before as u32);
+                            rendered_scanlines = scanline_before as u32 + 1;
 
-                                if debug_scanline_drift
-                                    && (rendered_scanlines < 3 || rendered_scanlines >= 237)
-                                {
-                                    let ppu_dot = b.ppu.get_dot();
-                                    let ppu_mask = b.ppu.mask();
-                                    log(LogCategory::PPU, LogLevel::Info, || {
-                                        format!(
-                                            "NES: frame={} render_scanline={} ppu=({}, {}) mask=0x{:02X}",
-                                            self.frame_index, rendered_scanlines, scanline_now, ppu_dot, ppu_mask
-                                        )
-                                    });
-                                }
-
-                                self.renderer
-                                    .render_scanline(&mut b.ppu, rendered_scanlines);
-                                rendered_scanlines += 1;
-
-                                // Approximate MMC3 scanline IRQ clocking once per visible scanline.
-                                // Gate it by rendering enabled (BG or sprites), matching common emulator behavior.
-                                let rendering_enabled = (b.ppu.mask() & 0x18) != 0;
-                                if rendering_enabled {
-                                    b.clock_mapper_a12_rising_edge();
-                                    mmc3_a12_edges = mmc3_a12_edges.wrapping_add(1);
-                                    if b.take_irq_pending() {
-                                        irq_to_fire = true;
-                                    }
+                            // Approximate MMC3 scanline IRQ clocking once per visible scanline.
+                            // Gate it by rendering enabled (BG or sprites), matching common emulator behavior.
+                            let rendering_enabled = (b.ppu.mask() & 0x18) != 0;
+                            if rendering_enabled {
+                                b.clock_mapper_a12_rising_edge();
+                                mmc3_a12_edges = mmc3_a12_edges.wrapping_add(1);
+                                if b.take_irq_pending() {
+                                    irq_to_fire = true;
                                 }
                             }
                         }
