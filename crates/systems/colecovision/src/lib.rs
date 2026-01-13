@@ -63,7 +63,7 @@ mod tests {
         vdp.write_control(0x81); // Write to register 1
 
         // Set up sprite attribute table at 0x3F00
-        vdp.write_control(0x7F); // Address low
+        vdp.write_control(0x7E); // Address low (0x7E << 7 = 0x3F00)
         vdp.write_control(0x85); // Register 5: sprite attribute table
 
         // Set up sprite pattern table at 0x0000
@@ -114,7 +114,7 @@ mod tests {
         vdp.write_control(0x81);
 
         // Set up sprite attribute table at 0x3F00
-        vdp.write_control(0x7F);
+        vdp.write_control(0x7E); // 0x7E << 7 = 0x3F00
         vdp.write_control(0x85);
 
         // Set up sprite pattern table

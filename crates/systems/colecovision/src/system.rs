@@ -174,7 +174,7 @@ impl System for ColecoVisionSystem {
     fn reset(&mut self) {
         self.cpu.reset();
         self.vdp.borrow_mut().reset();
-        self.psg = Rc::new(RefCell::new(ColecoVisionPsg::new())); // Reset PSG
+        self.psg.borrow_mut().reset(); // Reset PSG without replacing the shared reference
         self.cycles = 0;
         self.audio_buffer.clear();
     }

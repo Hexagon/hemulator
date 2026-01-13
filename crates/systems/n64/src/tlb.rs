@@ -119,7 +119,7 @@ impl Tlb {
             // Edge case: Limit page_mask to prevent overflow
             // Valid page sizes: 4KB to 16MB (mask 0x000 to 0xFFF)
             let safe_page_mask = (entry.page_mask & 0xFFF) as u64;
-            
+
             // Check if VPN2 matches (considering page mask)
             let mask = safe_page_mask << 12;
             let vpn_mask = !mask;
@@ -392,11 +392,19 @@ mod tests {
 
         // Should translate without overflow
         let result = tlb.translate(test_addr);
-        assert!(result.is_some(), "Should translate address 0x{:08X} with page_mask 0x{:03X}", test_addr, entry.page_mask);
-        
+        assert!(
+            result.is_some(),
+            "Should translate address 0x{:08X} with page_mask 0x{:03X}",
+            test_addr,
+            entry.page_mask
+        );
+
         // Verify the translation produces a valid physical address
         if let Some((phys_addr, is_cached)) = result {
-            assert!(phys_addr <= u32::MAX, "Physical address should be within 32-bit range");
+            assert!(
+                phys_addr <= u32::MAX,
+                "Physical address should be within 32-bit range"
+            );
             assert!(is_cached, "Should be cached (c=3)");
         }
     }
@@ -446,7 +454,7 @@ mod tests {
             asid: 1,
             global: false,
             page_mask: 0xFFF, // Large page
-            pfn0: 0xFFFFF, // Maximum PFN that stays within 32-bit space
+            pfn0: 0xFFFFF,    // Maximum PFN that stays within 32-bit space
             c0: 3,
             d0: true,
             v0: true,

@@ -170,8 +170,10 @@ impl Vdp {
         // In a full implementation, this would be the number of the first sprite
         // that couldn't be displayed
 
-        // Clear interrupt flag on read
+        // Clear flags on status read (per TMS9918A spec)
         self.frame_interrupt_pending = false;
+        self.sprite_overflow = false;
+        self.sprite_collision = false;
 
         status
     }
@@ -189,10 +191,7 @@ impl Vdp {
 
         // Render any scanlines that were crossed
         if scanline < old_scanline {
-            // Wrapped around to new frame - clear sprite flags
-            self.sprite_overflow = false;
-            self.sprite_collision = false;
-
+            // Wrapped around to new frame
             for line in old_scanline..192 {
                 self.render_scanline(line as u8);
             }
@@ -205,12 +204,6 @@ impl Vdp {
                 self.frame_interrupt_pending = true;
             }
         } else {
-            // Clear sprite flags at start of active display area (scanline 0)
-            if old_scanline < 1 && scanline >= 1 {
-                self.sprite_overflow = false;
-                self.sprite_collision = false;
-            }
-
             // Normal forward progress within same frame
             for line in (old_scanline + 1)..=scanline.min(191) {
                 self.render_scanline(line as u8);
