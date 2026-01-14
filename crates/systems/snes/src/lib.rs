@@ -301,6 +301,12 @@ impl System for SnesSystem {
                 "SNES: NMI triggered".to_string()
             });
             self.cpu.cpu.trigger_nmi();
+            log(LogCategory::Interrupts, LogLevel::Debug, || {
+                format!(
+                    "SNES: After NMI trigger, PC is now ${:02X}:{:04X}",
+                    self.cpu.cpu.pbr, self.cpu.cpu.pc
+                )
+            });
         }
 
         // Execute remaining VBlank cycles
@@ -311,6 +317,14 @@ impl System for SnesSystem {
             self.current_cycles += cycles;
             self.total_cycles += cycles as u64;
             self.cpu.bus_mut().tick_cycles(cycles);
+
+            // Record instruction if tracing is enabled
+            if self.instruction_tracer.is_enabled() {
+                if let Some(instr) = self.disassemble_instruction(pc_before) {
+                    let cpu_state = self.get_cpu_state();
+                    self.instruction_tracer.trace(instr, cpu_state);
+                }
+            }
 
             // Check for additional NMI requests during VBlank
             if self.cpu.bus_mut().ppu_mut().take_nmi_pending() {
