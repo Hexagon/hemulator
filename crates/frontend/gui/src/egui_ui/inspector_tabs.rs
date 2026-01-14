@@ -1208,7 +1208,12 @@ fn render_nes_cartridge_tab(ui: &mut Ui, tab_manager: &mut TabManager) {
                     .striped(true)
                     .show(ui, |ui| {
                         ui.label(egui::RichText::new("Mapper:").strong());
-                        ui.label(format!("{} ({})", cart_data.mapper_name, cart_data.mapper));
+                        if cart_data.submapper > 0 {
+                            ui.label(format!("{} (Mapper {}, Submapper {})", 
+                                cart_data.mapper_name, cart_data.mapper, cart_data.submapper));
+                        } else {
+                            ui.label(format!("{} ({})", cart_data.mapper_name, cart_data.mapper));
+                        }
                         ui.end_row();
 
                         ui.label(egui::RichText::new("Mirroring:").strong());
@@ -1248,11 +1253,22 @@ fn render_nes_cartridge_tab(ui: &mut Ui, tab_manager: &mut TabManager) {
 
                             if cart_data.db_mapper_override {
                                 ui.label("Mapper:");
-                                ui.label(format!("{}", cart_data.header_mapper));
-                                ui.label(
-                                    egui::RichText::new(format!("{} ✓", cart_data.mapper))
-                                        .color(egui::Color32::from_rgb(100, 255, 100))
-                                );
+                                if cart_data.header_submapper > 0 {
+                                    ui.label(format!("{}.{}", cart_data.header_mapper, cart_data.header_submapper));
+                                } else {
+                                    ui.label(format!("{}", cart_data.header_mapper));
+                                }
+                                if cart_data.submapper > 0 {
+                                    ui.label(
+                                        egui::RichText::new(format!("{}.{} ✓", cart_data.mapper, cart_data.submapper))
+                                            .color(egui::Color32::from_rgb(100, 255, 100))
+                                    );
+                                } else {
+                                    ui.label(
+                                        egui::RichText::new(format!("{} ✓", cart_data.mapper))
+                                            .color(egui::Color32::from_rgb(100, 255, 100))
+                                    );
+                                }
                                 ui.end_row();
                             }
 

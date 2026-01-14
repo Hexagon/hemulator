@@ -17,13 +17,16 @@ pub enum Mirroring {
 pub struct Cartridge {
     pub prg_rom: Vec<u8>,
     pub chr_rom: Vec<u8>,
-    pub mapper: u8,
+    pub mapper: u16,
+    pub submapper: u8,
     pub mirroring: Mirroring,
     pub timing: TimingMode,
     /// CRC32 checksum of the entire ROM file (including header)
     pub crc32: u32,
     /// Mapper number from the iNES header (before any DB overrides)
-    pub header_mapper: u8,
+    pub header_mapper: u16,
+    /// Submapper number from the iNES 2.0 header
+    pub header_submapper: u8,
     /// Mirroring mode from the iNES header (before any DB overrides)
     pub header_mirroring: Mirroring,
     /// Whether the mapper was overridden by the ROM database
@@ -89,7 +92,27 @@ impl Cartridge {
 
         let prg_size = header[4] as usize * 16 * 1024;
         let chr_size = header[5] as usize * 8 * 1024;
-        let mapper = (header[6] >> 4) | (header[7] & 0xF0);
+
+        // Check if this is iNES 2.0 format
+        let is_nes2 = (header[7] & 0x0C) == 0x08;
+
+        // Parse mapper number (8 bits for iNES 1.0, 12 bits for iNES 2.0)
+        let mapper = if is_nes2 {
+            // iNES 2.0: mapper is 12 bits (bytes 6, 7, and 8)
+            // Byte 6 bits 4-7: mapper bits 0-3
+            // Byte 7 bits 4-7: mapper bits 4-7
+            // Byte 8 bits 0-3: mapper bits 8-11
+            let low = (header[6] >> 4) as u16;
+            let mid = (header[7] & 0xF0) as u16;
+            let high = ((header[8] & 0x0F) as u16) << 8;
+            high | mid as u16 | low
+        } else {
+            // iNES 1.0: mapper is 8 bits (bytes 6 and 7)
+            ((header[6] >> 4) | (header[7] & 0xF0)) as u16
+        };
+
+        // Parse submapper (only in iNES 2.0)
+        let submapper = if is_nes2 { (header[8] >> 4) & 0x0F } else { 0 };
 
         // iNES flags 6:
         // bit 0 = mirroring (0 horizontal, 1 vertical)
@@ -105,8 +128,6 @@ impl Cartridge {
         };
 
         // Auto-detect PAL/NTSC from iNES 2.0 header (byte 12) or NES 2.0 flags
-        // If byte 7 & 0x0C == 0x08, it's NES 2.0 format
-        let is_nes2 = (header[7] & 0x0C) == 0x08;
         let timing = if is_nes2 && data.len() > 12 {
             // NES 2.0: byte 12 bits 0-1 indicate timing
             // 0 = NTSC, 1 = PAL, 2 = Dual compatible, 3 = Dendy
@@ -210,10 +231,12 @@ impl Cartridge {
             prg_rom,
             chr_rom,
             mapper: final_mapper,
+            submapper,
             mirroring: final_mirroring,
             timing,
             crc32,
             header_mapper: mapper,
+            header_submapper: submapper,
             header_mirroring: mirroring,
             db_mapper_override,
             db_mirroring_override,
@@ -241,11 +264,13 @@ impl Cartridge {
         Self {
             prg_rom,
             chr_rom,
-            mapper,
+            mapper: mapper as u16,
+            submapper: 0,
             mirroring,
             timing,
             crc32: 0,
-            header_mapper: mapper,
+            header_mapper: mapper as u16,
+            header_submapper: 0,
             header_mirroring: mirroring,
             db_mapper_override: false,
             db_mirroring_override: false,
@@ -506,5 +531,96 @@ mod tests {
         assert_eq!(cart.mapper, 71);
         // Camerica should respect header mirroring
         assert_eq!(cart.get_initial_mirroring(), Mirroring::Vertical);
+    }
+
+    #[test]
+    fn test_ines2_mapper_parsing() {
+        // Test iNES 2.0 mapper parsing with 12-bit mapper number
+        let mut data = vec![
+            0x4E, 0x45, 0x53, 0x1A, // NES<EOF>
+            0x01, 0x01, // 16KB PRG, 8KB CHR
+            0x00, // Flags 6: Mapper bits 0-3 = 0
+            0x08, // Flags 7: NES 2.0 format (bits 2-3 = 10), mapper bits 4-7 = 0
+            0x01, // Byte 8: Mapper bits 8-11 = 1 (bits 0-3), submapper = 0 (bits 4-7)
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+        data.extend(vec![0; 16 * 1024 + 8 * 1024]);
+
+        let cart = Cartridge::from_bytes(&data).unwrap();
+        // Mapper should be 0x100 (256) - high bits set via byte 8
+        assert_eq!(cart.mapper, 0x100);
+        assert_eq!(cart.submapper, 0);
+    }
+
+    #[test]
+    fn test_ines2_submapper_parsing() {
+        // Test iNES 2.0 submapper parsing
+        let mut data = vec![
+            0x4E, 0x45, 0x53, 0x1A, // NES<EOF>
+            0x01, 0x01, // 16KB PRG, 8KB CHR
+            0x10, // Flags 6: Mapper bits 0-3 = 1
+            0x08, // Flags 7: NES 2.0 format (bits 2-3 = 10), mapper bits 4-7 = 0
+            0x50, // Byte 8: Mapper bits 8-11 = 0 (bits 0-3), submapper = 5 (bits 4-7)
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+        data.extend(vec![0; 16 * 1024 + 8 * 1024]);
+
+        let cart = Cartridge::from_bytes(&data).unwrap();
+        assert_eq!(cart.mapper, 1); // Mapper 1 (MMC1)
+        assert_eq!(cart.submapper, 5); // Submapper 5
+    }
+
+    #[test]
+    fn test_ines2_full_mapper_range() {
+        // Test maximum mapper number in iNES 2.0 (12 bits = 4095)
+        let mut data = vec![
+            0x4E, 0x45, 0x53, 0x1A, // NES<EOF>
+            0x01, 0x00, // 16KB PRG, no CHR
+            0xF0, // Flags 6: Mapper bits 0-3 = 15 (0xF)
+            0xF8, // Flags 7: NES 2.0 format + mapper bits 4-7 = 15 (0xF)
+            0x0F, // Byte 8: Mapper bits 8-11 = 15 (0xF), submapper = 0
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+        data.extend(vec![0; 16 * 1024]);
+
+        let cart = Cartridge::from_bytes(&data).unwrap();
+        // Mapper should be 0xFFF (4095) - all 12 bits set
+        assert_eq!(cart.mapper, 0xFFF);
+        assert_eq!(cart.submapper, 0);
+    }
+
+    #[test]
+    fn test_ines2_full_submapper_range() {
+        // Test maximum submapper number in iNES 2.0 (4 bits = 15)
+        let mut data = vec![
+            0x4E, 0x45, 0x53, 0x1A, // NES<EOF>
+            0x01, 0x00, // 16KB PRG, no CHR
+            0x00, // Flags 6: Mapper bits 0-3 = 0
+            0x08, // Flags 7: NES 2.0 format, mapper bits 4-7 = 0
+            0xF0, // Byte 8: Mapper bits 8-11 = 0, submapper = 15 (0xF)
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+        data.extend(vec![0; 16 * 1024]);
+
+        let cart = Cartridge::from_bytes(&data).unwrap();
+        assert_eq!(cart.mapper, 0); // Mapper 0 (NROM)
+        assert_eq!(cart.submapper, 15); // Maximum submapper value
+    }
+
+    #[test]
+    fn test_ines1_backward_compatibility() {
+        // Test that iNES 1.0 ROMs still work correctly (8-bit mapper, no submapper)
+        let mut data = vec![
+            0x4E, 0x45, 0x53, 0x1A, // NES<EOF>
+            0x01, 0x00, // 16KB PRG, no CHR
+            0x40, // Flags 6: Mapper bits 0-3 = 4
+            0x30, // Flags 7: NOT NES 2.0 (bits 2-3 != 10), mapper bits 4-7 = 3
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+        data.extend(vec![0; 16 * 1024]);
+
+        let cart = Cartridge::from_bytes(&data).unwrap();
+        assert_eq!(cart.mapper, 0x34); // Mapper 52 (iNES 1.0 format)
+        assert_eq!(cart.submapper, 0); // No submapper in iNES 1.0
     }
 }

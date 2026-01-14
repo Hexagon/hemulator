@@ -154,6 +154,28 @@ Each mapper handles:
 
 **Mapper Selection**: Auto-detected from iNES header
 
+### ROM Format Support
+
+The emulator supports both **iNES 1.0** and **iNES 2.0** ROM formats:
+
+**iNES 1.0** (Legacy):
+- 8-bit mapper number (0-255)
+- Basic timing detection via unofficial flags
+- Limited metadata
+
+**iNES 2.0** (Modern):
+- 12-bit mapper number (0-4095) - supports extended mapper range
+- 4-bit submapper number (0-15) - distinguishes mapper variants
+- Official timing flags (NTSC/PAL/Dual/Dendy)
+- Enhanced ROM size fields
+- VS System and other metadata
+
+The format is auto-detected from the header (byte 7, bits 2-3):
+- iNES 1.0: bits 2-3 != `10`
+- iNES 2.0: bits 2-3 == `10`
+
+**Submapper Support**: When present in iNES 2.0 ROMs, the submapper number is stored and available for mapper implementations to distinguish between hardware variants (e.g., BNROM vs NINA-001 for mapper 34).
+
 ## Building
 
 ```bash

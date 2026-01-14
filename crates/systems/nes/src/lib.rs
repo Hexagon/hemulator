@@ -115,8 +115,8 @@ pub struct DebugInfo {
     pub timing_mode: TimingMode,
     /// Human-readable mapper name (e.g., "MMC3/TxROM")
     pub mapper_name: String,
-    /// iNES mapper number (0-255)
-    pub mapper_number: u8,
+    /// iNES mapper number (0-4095 for iNES 2.0)
+    pub mapper_number: u16,
     /// Number of 16KB PRG banks
     pub prg_banks: usize,
     /// Number of 8KB CHR banks (0 for CHR-RAM)
@@ -129,7 +129,9 @@ pub struct DebugInfo {
 #[derive(Debug, Clone)]
 pub struct CartridgeInfo {
     /// Mapper number being used (after any DB overrides)
-    pub mapper: u8,
+    pub mapper: u16,
+    /// Submapper number from iNES 2.0 header (0-15)
+    pub submapper: u8,
     /// Human-readable mapper name
     pub mapper_name: String,
     /// Mirroring mode being used (after any DB overrides)
@@ -143,7 +145,9 @@ pub struct CartridgeInfo {
     /// CHR ROM size in bytes (0 for CHR-RAM)
     pub chr_size: usize,
     /// Mapper number from iNES header (before DB override)
-    pub header_mapper: u8,
+    pub header_mapper: u16,
+    /// Submapper number from iNES 2.0 header
+    pub header_submapper: u8,
     /// Mirroring mode from iNES header (before DB override)
     pub header_mirroring: String,
     /// Whether mapper was overridden by ROM database
@@ -291,7 +295,7 @@ impl NesSystem {
     /// Get debug information for the GUI overlay.
     pub fn get_debug_info(&self) -> DebugInfo {
         let mut mapper_name = "Unknown".to_string();
-        let mut mapper_number = 0u8;
+        let mut mapper_number = 0u16;
         let mut prg_banks = 0;
         let mut chr_banks = 0;
 
@@ -471,6 +475,7 @@ impl NesSystem {
 
         self.cartridge_info = Some(CartridgeInfo {
             mapper: cart.mapper,
+            submapper: cart.submapper,
             mapper_name,
             mirroring: format!("{:?}", cart.mirroring),
             timing: cart.timing,
@@ -478,6 +483,7 @@ impl NesSystem {
             prg_size: cart.prg_rom.len(),
             chr_size: cart.chr_rom.len(),
             header_mapper: cart.header_mapper,
+            header_submapper: cart.header_submapper,
             header_mirroring: format!("{:?}", cart.header_mirroring),
             db_mapper_override: cart.db_mapper_override,
             db_mirroring_override: cart.db_mirroring_override,
@@ -632,7 +638,25 @@ impl System for NesSystem {
                         // At this point, the v register contains the correct scroll for this scanline.
                         // The horizontal bits were just restored from t at dot 257 of the previous scanline,
                         // and vertical bits are correct for the current scanline.
-                        if dot_before == 0 && scanline_before < 240 {
+                        //
+                        // On odd frames, dot 0 of scanline 0 is skipped. Also, due to CPU instruction
+                        // boundaries, the frame may start at various dots within scanline 0.
+                        // We trigger rendering when:
+                        // 1. dot_before == 0 (standard trigger for all scanlines)
+                        // 2. For scanline 0: any dot if we haven't rendered it yet (catches odd frames
+                        //    and frames starting mid-scanline)
+                        // We use rendered_scanlines to prevent double-rendering.
+                        let should_render = if scanline_before < 240
+                            && scanline_before as u32 >= rendered_scanlines
+                        {
+                            // Standard trigger: at dot 0
+                            // Special case for scanline 0: trigger on any dot since we might have
+                            // missed dot 0 due to odd frame skip or CPU instruction boundaries
+                            dot_before == 0 || (scanline_before == 0 && rendered_scanlines == 0)
+                        } else {
+                            false
+                        };
+                        if should_render {
                             if debug_scanline_drift
                                 && (scanline_before < 3 || scanline_before >= 237)
                             {
