@@ -242,6 +242,7 @@ impl Ppu {
 
     /// Get the pre-render scanline for the current timing mode
     /// NTSC: 261, PAL: 311
+    #[inline(always)]
     fn pre_render_scanline(&self) -> u16 {
         match self.timing_mode {
             TimingMode::Ntsc => 261,
@@ -249,6 +250,7 @@ impl Ppu {
         }
     }
 
+    #[inline]
     fn map_nametable_addr(&self, addr: u16) -> usize {
         // Map $2000-$2FFF into internal VRAM using cartridge mirroring.
         let a = addr & 0x0FFF; // 0x0000..0x0FFF
@@ -302,18 +304,22 @@ impl Ppu {
         self.mirroring = mirroring;
     }
 
+    #[inline(always)]
     pub fn get_mirroring(&self) -> Mirroring {
         self.mirroring
     }
 
+    #[inline(always)]
     pub fn nmi_enabled(&self) -> bool {
         (self.ctrl & 0x80) != 0
     }
 
+    #[inline(always)]
     pub fn ctrl(&self) -> u8 {
         self.ctrl
     }
 
+    #[inline(always)]
     pub fn mask(&self) -> u8 {
         self.mask
     }
@@ -1315,6 +1321,7 @@ impl Ppu {
     /// - Odd frame cycle skip at scanline 0, dot 0
     ///
     /// Returns true if an NMI should be triggered.
+    #[inline]
     pub fn tick(&self) -> bool {
         let scanline = self.scanline.get();
         let dot = self.dot.get();
@@ -1499,11 +1506,13 @@ impl Ppu {
     }
 
     /// Get current scanline (0-261)
+    #[inline(always)]
     pub fn get_scanline(&self) -> u16 {
         self.scanline.get()
     }
 
     /// Get current dot within scanline (0-340)
+    #[inline(always)]
     pub fn get_dot(&self) -> u16 {
         self.dot.get()
     }
@@ -1511,6 +1520,7 @@ impl Ppu {
     /// Get the monotonic PPU frame counter.
     ///
     /// This increments when the PPU wraps from scanline 261 back to scanline 0.
+    #[inline(always)]
     pub fn get_frame_counter(&self) -> u64 {
         self.frame_counter.get()
     }
