@@ -2347,14 +2347,12 @@ impl Ppu {
 
             // Log first 3 sprites for debugging
             if sprites_considered <= 3 {
-                log(
-                    LogCategory::PPU,
-                    LogLevel::Debug,
-                    || format!(
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!(
                         "OBJ {}: x={}, y={}, tile={:02X}, attr={:02X}, priority={}, size={}x{}, nameselect={}, palette={}",
                         sprite_index, x, y, tile, attr, sprite_priority, width, height, nameselect, palette
-                    ),
-                );
+                    )
+                });
             }
 
             // Filter by priority range
@@ -2425,10 +2423,8 @@ impl Ppu {
 
         // Log sprite rendering summary (only once per few frames to reduce spam)
         if sprites_considered > 0 || sprites_rendered > 0 {
-            log(
-                LogCategory::PPU,
-                LogLevel::Debug,
-                || format!(
+            log(LogCategory::PPU, LogLevel::Debug, || {
+                format!(
                     "OBJ render priority {}-{}: considered={}, priority_filtered={}, offscreen={}, scanline_limited={}, rendered={} | OBSEL: base=${:04X}, gap=${:04X}, sizes={}x{}/{}x{}",
                     min_priority,
                     max_priority,
@@ -2443,8 +2439,8 @@ impl Ppu {
                     small_size.1,
                     large_size.0,
                     large_size.1
-                ),
-            );
+                )
+            });
         }
     }
 
@@ -2578,14 +2574,12 @@ impl Ppu {
 
                             // Log first few pixels for the first sprite
                             if is_first_sprite && pixels_drawn <= 5 {
-                                log(
-                                    LogCategory::PPU,
-                                    LogLevel::Debug,
-                                    || format!(
+                                log(LogCategory::PPU, LogLevel::Debug, || {
+                                    format!(
                                         "OBJ pixel: screen=({},{}), tile_addr=${:04X}, bp=[{:02X},{:02X},{:02X},{:02X}], color_idx={}, cgram_idx={}, color=${:08X}",
                                         screen_x, screen_y, tile_addr, bp0, bp1, bp2, bp3, color_index, cgram_index, color
-                                    ),
-                                );
+                                    )
+                                });
                             }
                         }
                     }
@@ -2595,14 +2589,12 @@ impl Ppu {
 
         // Log summary for first sprite only
         if is_first_sprite {
-            log(
-                LogCategory::PPU,
-                LogLevel::Debug,
-                || format!(
+            log(LogCategory::PPU, LogLevel::Debug, || {
+                format!(
                     "First sprite rendered: pos=({},{}), size={}x{}, tile=${:02X}, tile_addr=${:04X}, palette={}, pixels_drawn={}",
                     x, y, width, height, tile, sprite_tile_base, palette, pixels_drawn
-                ),
-            );
+                )
+            });
         }
     }
 

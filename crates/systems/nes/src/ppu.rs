@@ -1298,7 +1298,9 @@ impl Ppu {
                         log(LogCategory::PPU, LogLevel::Debug, || {
                             format!(
                                 "Sprite 0 hit pending at scanline {} x={} (will trigger at dot {})",
-                                y, x, x + 2
+                                y,
+                                x,
+                                x + 2
                             )
                         });
                     }
@@ -1319,7 +1321,9 @@ impl Ppu {
                     log(LogCategory::PPU, LogLevel::Info, || {
                         format!(
                             "Sprite 0 HIT scheduled at scanline {} x={} (dot {})",
-                            y, hit_x, hit_x + 2
+                            y,
+                            hit_x,
+                            hit_x + 2
                         )
                     });
                 }
