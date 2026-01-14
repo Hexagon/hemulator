@@ -176,6 +176,58 @@ pub struct Ppu {
     /// Note: According to hardware documentation, all Mode 7 write-twice registers
     /// share the same previous-write latch (M7OLD)
     m7_prev: u8,
+
+    // Window registers
+    /// Window 1/2 mask settings for BG1/BG2 ($2123)
+    /// Bits 0-1: BG2 Window 1 enable/invert
+    /// Bits 2-3: BG2 Window 2 enable/invert
+    /// Bits 4-5: BG1 Window 1 enable/invert
+    /// Bits 6-7: BG1 Window 2 enable/invert
+    w12sel: u8,
+    /// Window 1/2 mask settings for BG3/BG4 ($2124)
+    w34sel: u8,
+    /// Window 1/2 mask settings for OBJ/Color ($2125)
+    wobjsel: u8,
+    /// Window 1 left position ($2126)
+    wh0: u8,
+    /// Window 1 right position ($2127)
+    wh1: u8,
+    /// Window 2 left position ($2128)
+    wh2: u8,
+    /// Window 2 right position ($2129)
+    wh3: u8,
+    /// Window mask logic for BG layers ($212A)
+    wbglog: u8,
+    /// Window mask logic for OBJ and color window ($212B)
+    wobjlog: u8,
+
+    /// Sub-screen designation ($212D) - which layers appear on sub-screen
+    /// Bits 0-4: Enable BG1-4 and OBJ on sub-screen
+    ts: u8,
+    /// Window mask designation for main screen ($212E)
+    tmw: u8,
+    /// Window mask designation for sub-screen ($212F)
+    tsw: u8,
+
+    // Color math registers
+    /// Color math control ($2130) - CGWSEL
+    /// Bits 0-1: Direct color mode for 256-color BGs
+    /// Bits 4-5: Color math enable for windows
+    /// Bit 6: Prevent color math
+    /// Bit 7: Add/subtract select for color window
+    cgwsel: u8,
+    /// Color math designation ($2131) - CGADSUB
+    /// Bits 0-5: Enable color math on BG1-4, OBJ, backdrop
+    /// Bit 6: Half color math
+    /// Bit 7: Add/subtract select (0=add, 1=subtract)
+    cgadsub: u8,
+    /// Fixed color data ($2132) - COLDATA
+    /// Color value in 5-bit BGR format (written multiple times for R/G/B)
+    coldata: u8,
+    /// Fixed color RGB components (extracted from COLDATA writes)
+    fixed_color_r: u8,
+    fixed_color_g: u8,
+    fixed_color_b: u8,
 }
 
 impl Ppu {
@@ -225,6 +277,27 @@ impl Ppu {
             m7x: 0,
             m7y: 0,
             m7_prev: 0,
+            // Window defaults
+            w12sel: 0,
+            w34sel: 0,
+            wobjsel: 0,
+            wh0: 0,
+            wh1: 0,
+            wh2: 0,
+            wh3: 0,
+            wbglog: 0,
+            wobjlog: 0,
+            // Screen designation defaults
+            ts: 0,
+            tmw: 0,
+            tsw: 0,
+            // Color math defaults
+            cgwsel: 0,
+            cgadsub: 0,
+            coldata: 0,
+            fixed_color_r: 0,
+            fixed_color_g: 0,
+            fixed_color_b: 0,
         }
     }
 
@@ -603,24 +676,131 @@ impl Ppu {
                 // Stub: Accept write but don't implement mosaic
             }
 
-            // $2123-$212B - Window registers (stub - not implemented)
-            0x2123..=0x212B => {
-                // Stub: Accept window configuration but don't implement
+            // $2123-$212B - Window registers
+            0x2123 => {
+                self.w12sel = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: W12SEL (BG1/BG2 window) = ${:02X}", val)
+                });
+            }
+            0x2124 => {
+                self.w34sel = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: W34SEL (BG3/BG4 window) = ${:02X}", val)
+                });
+            }
+            0x2125 => {
+                self.wobjsel = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: WOBJSEL (OBJ/Color window) = ${:02X}", val)
+                });
+            }
+            0x2126 => {
+                self.wh0 = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: WH0 (Window 1 left) = ${:02X}", val)
+                });
+            }
+            0x2127 => {
+                self.wh1 = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: WH1 (Window 1 right) = ${:02X}", val)
+                });
+            }
+            0x2128 => {
+                self.wh2 = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: WH2 (Window 2 left) = ${:02X}", val)
+                });
+            }
+            0x2129 => {
+                self.wh3 = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: WH3 (Window 2 right) = ${:02X}", val)
+                });
+            }
+            0x212A => {
+                self.wbglog = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: WBGLOG (BG window logic) = ${:02X}", val)
+                });
+            }
+            0x212B => {
+                self.wobjlog = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: WOBJLOG (OBJ window logic) = ${:02X}", val)
+                });
             }
 
-            // $212D - TS - Sub-screen Designation (stub - not implemented)
+            // $212D - TS - Sub-screen Designation
             0x212D => {
-                // Stub: Accept write but don't implement sub-screen
+                self.ts = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: TS (Sub-screen) = ${:02X}", val)
+                });
             }
 
-            // $212E-$212F - Window mask designation (stub - not implemented)
-            0x212E | 0x212F => {
-                // Stub: Accept window mask but don't implement
+            // $212E-$212F - Window mask designation
+            0x212E => {
+                self.tmw = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: TMW (Main screen window mask) = ${:02X}", val)
+                });
+            }
+            0x212F => {
+                self.tsw = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: TSW (Sub-screen window mask) = ${:02X}", val)
+                });
             }
 
-            // $2130-$2133 - Color math and screen mode registers (stub - not implemented)
-            0x2130..=0x2133 => {
-                // Stub: Accept color math configuration but don't implement
+            // $2130-$2132 - Color math and screen mode registers
+            0x2130 => {
+                self.cgwsel = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: CGWSEL (Color math control) = ${:02X}", val)
+                });
+            }
+            0x2131 => {
+                self.cgadsub = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!(
+                        "SNES PPU: CGADSUB (Color math designation) = ${:02X} ({}, targets: {}{}{}{}{}{})",
+                        val,
+                        if val & 0x80 != 0 { "subtract" } else { "add" },
+                        if val & 0x20 != 0 { "backdrop " } else { "" },
+                        if val & 0x10 != 0 { "OBJ " } else { "" },
+                        if val & 0x08 != 0 { "BG4 " } else { "" },
+                        if val & 0x04 != 0 { "BG3 " } else { "" },
+                        if val & 0x02 != 0 { "BG2 " } else { "" },
+                        if val & 0x01 != 0 { "BG1 " } else { "" }
+                    )
+                });
+            }
+            0x2132 => {
+                self.coldata = val;
+                // Extract color components (5-bit each) based on which bits are set
+                if val & 0x20 != 0 {
+                    self.fixed_color_r = val & 0x1F;
+                }
+                if val & 0x40 != 0 {
+                    self.fixed_color_g = val & 0x1F;
+                }
+                if val & 0x80 != 0 {
+                    self.fixed_color_b = val & 0x1F;
+                }
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!(
+                        "SNES PPU: COLDATA (Fixed color) = ${:02X} -> RGB({},{},{})",
+                        val, self.fixed_color_r, self.fixed_color_g, self.fixed_color_b
+                    )
+                });
+            }
+            0x2133 => {
+                // $2133 - SETINI - Screen mode/video select (stub for now)
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: SETINI (Screen mode) = ${:02X}", val)
+                });
             }
 
             // Other registers - stub (just accept writes)
@@ -748,6 +928,10 @@ impl Ppu {
         // Priority levels: 0 (backdrop) to 7 (highest sprite priority)
         // We use 255 as "unset" since it's higher than any valid priority
         let mut priority_buffer = vec![255u8; frame_width as usize * 224];
+
+        // Layer buffer: tracks which layer each pixel came from
+        // 0-3 = BG1-BG4, 4 = OBJ, 5 = backdrop
+        let mut layer_buffer = vec![5u8; frame_width as usize * 224];
 
         // NOTE: We render even when screen is blanked (bit 7 set)
         // This is not hardware-accurate but allows commercial ROMs to display
@@ -1054,8 +1238,30 @@ impl Ppu {
             if priority == 255 {
                 // No layer rendered here - use backdrop color
                 frame.pixels[i] = backdrop_color;
+                layer_buffer[i] = 5; // Mark as backdrop
             } else {
                 non_backdrop_pixels += 1;
+            }
+        }
+
+        // Apply color math if enabled
+        // Check if any layer has color math enabled
+        let color_math_any_enabled = self.cgadsub & 0x3F != 0;
+        if color_math_any_enabled {
+            for y in 0..224 {
+                for x in 0..frame_width as usize {
+                    let idx = y * frame_width as usize + x;
+                    let layer = layer_buffer[idx];
+                    let is_backdrop = layer == 5;
+                    
+                    // Apply color math to this pixel
+                    frame.pixels[idx] = self.apply_color_math(
+                        frame.pixels[idx],
+                        layer,
+                        x,
+                        is_backdrop,
+                    );
+                }
             }
         }
 
@@ -2618,6 +2824,275 @@ impl Ppu {
 
         // Return as ARGB (0xAARRGGBB)
         0xFF000000 | ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
+    }
+
+    /// Check if a pixel at (x, y) is inside the window for a given layer
+    /// Returns true if pixel should be rendered (not masked)
+    fn is_pixel_in_window(&self, x: usize, layer_bit: u8) -> bool {
+        // Window 1 and Window 2 boundaries
+        let w1_left = self.wh0 as usize;
+        let w1_right = self.wh1 as usize;
+        let w2_left = self.wh2 as usize;
+        let w2_right = self.wh3 as usize;
+
+        // Get window settings for this layer
+        let (w1_enable, w1_invert, w2_enable, w2_invert) = match layer_bit {
+            0 => {
+                // BG1 (bits 4-7 of W12SEL)
+                let settings = (self.w12sel >> 4) & 0x0F;
+                (
+                    (settings & 0x02) != 0,
+                    (settings & 0x01) != 0,
+                    (settings & 0x08) != 0,
+                    (settings & 0x04) != 0,
+                )
+            }
+            1 => {
+                // BG2 (bits 0-3 of W12SEL)
+                let settings = self.w12sel & 0x0F;
+                (
+                    (settings & 0x02) != 0,
+                    (settings & 0x01) != 0,
+                    (settings & 0x08) != 0,
+                    (settings & 0x04) != 0,
+                )
+            }
+            2 => {
+                // BG3 (bits 4-7 of W34SEL)
+                let settings = (self.w34sel >> 4) & 0x0F;
+                (
+                    (settings & 0x02) != 0,
+                    (settings & 0x01) != 0,
+                    (settings & 0x08) != 0,
+                    (settings & 0x04) != 0,
+                )
+            }
+            3 => {
+                // BG4 (bits 0-3 of W34SEL)
+                let settings = self.w34sel & 0x0F;
+                (
+                    (settings & 0x02) != 0,
+                    (settings & 0x01) != 0,
+                    (settings & 0x08) != 0,
+                    (settings & 0x04) != 0,
+                )
+            }
+            4 => {
+                // OBJ (bits 4-7 of WOBJSEL)
+                let settings = (self.wobjsel >> 4) & 0x0F;
+                (
+                    (settings & 0x02) != 0,
+                    (settings & 0x01) != 0,
+                    (settings & 0x08) != 0,
+                    (settings & 0x04) != 0,
+                )
+            }
+            _ => return true, // Invalid layer, don't mask
+        };
+
+        // If no windows enabled for this layer, always render
+        if !w1_enable && !w2_enable {
+            return true;
+        }
+
+        // Check if pixel is inside each window
+        let in_w1 = if w1_left <= w1_right {
+            x >= w1_left && x <= w1_right
+        } else {
+            x >= w1_left || x <= w1_right // Wraparound case
+        };
+
+        let in_w2 = if w2_left <= w2_right {
+            x >= w2_left && x <= w2_right
+        } else {
+            x >= w2_left || x <= w2_right // Wraparound case
+        };
+
+        // Apply inversion
+        let w1_result = if w1_invert { !in_w1 } else { in_w1 };
+        let w2_result = if w2_invert { !in_w2 } else { in_w2 };
+
+        // Get window logic for BG layers (WBGLOG) or OBJ (WOBJLOG)
+        let logic = if layer_bit < 4 {
+            // BG layers: get 2-bit logic from WBGLOG
+            (self.wbglog >> (layer_bit * 2)) & 0x03
+        } else {
+            // OBJ: get 2-bit logic from WOBJLOG bits 4-5
+            (self.wobjlog >> 4) & 0x03
+        };
+
+        // Apply window logic:
+        // 00 = OR: render if in either window
+        // 01 = AND: render only if in both windows
+        // 10 = XOR: render if in exactly one window
+        // 11 = XNOR: render if in both or neither window
+        match logic {
+            0 => {
+                // OR
+                if w1_enable && w2_enable {
+                    w1_result || w2_result
+                } else if w1_enable {
+                    w1_result
+                } else {
+                    w2_result
+                }
+            }
+            1 => {
+                // AND
+                if w1_enable && w2_enable {
+                    w1_result && w2_result
+                } else if w1_enable {
+                    w1_result
+                } else {
+                    w2_result
+                }
+            }
+            2 => {
+                // XOR
+                if w1_enable && w2_enable {
+                    w1_result ^ w2_result
+                } else if w1_enable {
+                    w1_result
+                } else {
+                    w2_result
+                }
+            }
+            3 => {
+                // XNOR
+                if w1_enable && w2_enable {
+                    !(w1_result ^ w2_result)
+                } else if w1_enable {
+                    w1_result
+                } else {
+                    w2_result
+                }
+            }
+            _ => true,
+        }
+    }
+
+    /// Apply color math to a pixel
+    /// Returns the modified color after color math operations
+    fn apply_color_math(
+        &self,
+        main_color: u32,
+        layer_bit: u8,
+        x: usize,
+        is_backdrop: bool,
+    ) -> u32 {
+        // Check if color math is enabled for this layer
+        let color_math_enabled = if is_backdrop {
+            (self.cgadsub & 0x20) != 0 // Bit 5: backdrop
+        } else {
+            match layer_bit {
+                0 => (self.cgadsub & 0x01) != 0, // BG1
+                1 => (self.cgadsub & 0x02) != 0, // BG2
+                2 => (self.cgadsub & 0x04) != 0, // BG3
+                3 => (self.cgadsub & 0x08) != 0, // BG4
+                4 => (self.cgadsub & 0x10) != 0, // OBJ
+                _ => false,
+            }
+        };
+
+        if !color_math_enabled {
+            return main_color;
+        }
+
+        // Check color window (if enabled)
+        let color_window_enable = (self.wobjsel & 0x02) != 0;
+        let color_window_invert = (self.wobjsel & 0x01) != 0;
+        
+        if color_window_enable {
+            // Check if pixel is in color window
+            let w1_left = self.wh0 as usize;
+            let w1_right = self.wh1 as usize;
+            let w2_left = self.wh2 as usize;
+            let w2_right = self.wh3 as usize;
+
+            let in_w1 = if w1_left <= w1_right {
+                x >= w1_left && x <= w1_right
+            } else {
+                x >= w1_left || x <= w1_right
+            };
+
+            let in_w2 = if w2_left <= w2_right {
+                x >= w2_left && x <= w2_right
+            } else {
+                x >= w2_left || x <= w2_right
+            };
+
+            let logic = (self.wobjlog >> 0) & 0x03;
+            let in_color_window = match logic {
+                0 => in_w1 || in_w2,                 // OR
+                1 => in_w1 && in_w2,                 // AND
+                2 => in_w1 ^ in_w2,                  // XOR
+                3 => !(in_w1 ^ in_w2),               // XNOR
+                _ => false,
+            };
+
+            let in_color_window = if color_window_invert {
+                !in_color_window
+            } else {
+                in_color_window
+            };
+
+            // Color math enable/prevent based on CGWSEL bits 4-5
+            let prevent_math = (self.cgwsel & 0x20) != 0;
+            let prevent_math_inside = (self.cgwsel & 0x10) != 0;
+
+            if prevent_math {
+                // Bit 6: prevent color math
+                return main_color;
+            }
+
+            if prevent_math_inside && in_color_window {
+                // Prevent math inside color window
+                return main_color;
+            }
+
+            if !prevent_math_inside && !in_color_window {
+                // Prevent math outside color window
+                return main_color;
+            }
+        }
+
+        // Get fixed color (5-bit BGR from register writes)
+        let fixed_r = ((self.fixed_color_r as u32) << 3) | (self.fixed_color_r as u32 >> 2);
+        let fixed_g = ((self.fixed_color_g as u32) << 3) | (self.fixed_color_g as u32 >> 2);
+        let fixed_b = ((self.fixed_color_b as u32) << 3) | (self.fixed_color_b as u32 >> 2);
+
+        // Extract RGB from main color
+        let main_r = (main_color >> 16) & 0xFF;
+        let main_g = (main_color >> 8) & 0xFF;
+        let main_b = main_color & 0xFF;
+
+        // Determine if we add or subtract
+        let subtract = (self.cgadsub & 0x80) != 0;
+        let half = (self.cgadsub & 0x40) != 0;
+
+        // Perform color math
+        let (result_r, result_g, result_b) = if subtract {
+            // Subtract fixed color
+            let r = main_r.saturating_sub(fixed_r);
+            let g = main_g.saturating_sub(fixed_g);
+            let b = main_b.saturating_sub(fixed_b);
+            (r, g, b)
+        } else {
+            // Add fixed color
+            let r = (main_r + fixed_r).min(255);
+            let g = (main_g + fixed_g).min(255);
+            let b = (main_b + fixed_b).min(255);
+            (r, g, b)
+        };
+
+        // Apply half intensity if enabled
+        let (final_r, final_g, final_b) = if half {
+            (result_r / 2, result_g / 2, result_b / 2)
+        } else {
+            (result_r, result_g, result_b)
+        };
+
+        0xFF000000 | (final_r << 16) | (final_g << 8) | final_b
     }
 }
 
