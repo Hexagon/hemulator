@@ -168,12 +168,20 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
 ### What's Missing
 
 #### PPU Advanced Features
-- ❌ **Windows** - No window masking ($2123-$212B)
+- ⚠️ **Windows** - Window registers stored but masking not applied ($2123-$212B)
+  - Registers: W12SEL, W34SEL, WOBJSEL, WH0-WH3, WBGLOG, WOBJLOG
+  - Window boundaries and logic stored
+  - Masking not yet implemented in rendering pipeline
   - Reference: [Windows](https://snes.nesdev.org/wiki/PPU_registers#Windows)
-- ❌ **Color Math** - No color addition/subtraction ($2130-$2132)
+- ⚠️ **Color Math** - Registers stored but not applied ($2130-$2132)
+  - Registers: CGWSEL, CGADSUB, COLDATA properly stored
+  - Fixed color RGB values extracted from COLDATA writes
+  - Not yet applied in rendering (requires per-pixel layer tracking)
   - Reference: [Color Math](https://snes.nesdev.org/wiki/PPU_registers#Color_addition)
 - ❌ **Mosaic** - No mosaic effect ($2106)
-- ❌ **Sub-screen** - No sub-screen support ($212D)
+- ⚠️ **Sub-screen** - Register stored but not used ($212D)
+  - TS register properly stored
+  - Sub-screen rendering not implemented
 
 #### Audio
 - ❌ **DSP (Digital Signal Processor)** - No sound generation

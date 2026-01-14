@@ -316,13 +316,16 @@ impl SnesBus {
     }
 
     /// Check if currently in VBlank period
-    /// VBlank occurs during the last ~15% of the frame
-    /// NTSC: ~89,342 cycles/frame, VBlank starts around cycle 75,000
+    /// VBlank occurs during scanlines 225-261 (after 224 visible scanlines)
+    /// Each scanline is 341 cycles, so:
+    /// - Scanline 0-223 (cycles 0-76,383): Visible display
+    /// - Scanline 224-261 (cycles 76,384-89,341): VBlank period
     fn is_in_vblank(&self) -> bool {
-        // VBlank starts after visible scanlines complete
-        // Roughly 224/262 scanlines = ~85.5% of frame
-        // So VBlank starts at cycle ~76,400 out of 89,342
-        self.frame_cycle >= 76400
+        let current_scanline = self.frame_cycle / Self::SCANLINE_CYCLES;
+        // VBlank is active during scanlines 225-261 (NTSC has 262 scanlines total)
+        // Scanline 224 is the transition scanline (partially visible, partially vblank)
+        // We use >= 225 to be conservative
+        current_scanline >= 225
     }
 
     /// Check if currently in HBlank period (approximate).

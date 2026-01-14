@@ -1239,57 +1239,9 @@ impl Ppu {
             }
         }
 
-        // Apply color math if enabled (simplified version without per-pixel layer tracking)
-        // Check if any layer has color math enabled
-        let color_math_any_enabled = self.cgadsub & 0x3F != 0;
-        if color_math_any_enabled {
-            // Get fixed color (5-bit BGR from register writes)
-            let fixed_r = ((self.fixed_color_r as u32) << 3) | (self.fixed_color_r as u32 >> 2);
-            let fixed_g = ((self.fixed_color_g as u32) << 3) | (self.fixed_color_g as u32 >> 2);
-            let fixed_b = ((self.fixed_color_b as u32) << 3) | (self.fixed_color_b as u32 >> 2);
-
-            // Determine if we add or subtract
-            let subtract = (self.cgadsub & 0x80) != 0;
-            let half = (self.cgadsub & 0x40) != 0;
-
-            // Apply color math to all non-backdrop pixels
-            // This is a simplified version - proper implementation would check per-layer and per-pixel
-            for (i, &priority) in priority_buffer.iter().enumerate() {
-                if priority != 255 {
-                    // Extract RGB from current pixel
-                    let pixel = frame.pixels[i];
-                    let r = (pixel >> 16) & 0xFF;
-                    let g = (pixel >> 8) & 0xFF;
-                    let b = pixel & 0xFF;
-
-                    // Perform color math
-                    let (result_r, result_g, result_b) = if subtract {
-                        // Subtract fixed color
-                        (
-                            r.saturating_sub(fixed_r),
-                            g.saturating_sub(fixed_g),
-                            b.saturating_sub(fixed_b),
-                        )
-                    } else {
-                        // Add fixed color
-                        (
-                            (r + fixed_r).min(255),
-                            (g + fixed_g).min(255),
-                            (b + fixed_b).min(255),
-                        )
-                    };
-
-                    // Apply half intensity if enabled
-                    let (final_r, final_g, final_b) = if half {
-                        (result_r / 2, result_g / 2, result_b / 2)
-                    } else {
-                        (result_r, result_g, result_b)
-                    };
-
-                    frame.pixels[i] = 0xFF000000 | (final_r << 16) | (final_g << 8) | final_b;
-                }
-            }
-        }
+        // NOTE: Color math registers are stored ($2130-$2132) but not yet applied
+        // Proper implementation requires per-pixel layer tracking to apply color math correctly
+        // TODO: Implement color math with per-pixel layer tracking
 
         // Apply brightness (bits 0-3 of $2100) ONLY when force blank is OFF
         // This preserves the behavior where we render during force blank for boot sequences
