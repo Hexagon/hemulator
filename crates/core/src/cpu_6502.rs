@@ -3538,4 +3538,84 @@ mod tests {
         assert_eq!(cpu.a, 0x52);
         assert_eq!(cpu.status & 0x01, 0x00); // Carry clear (no overflow from ADC)
     }
+
+    #[test]
+    fn test_page_crossing_penalty() {
+        // Test that page crossing adds +1 cycle to indexed read instructions
+        
+        // Test LDA absolute,X with NO page crossing
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu6502::new(mem);
+        cpu.memory.write(0x0210, 0x42);
+        cpu.memory.load_program(0x8000, &[0xBD, 0x00, 0x02]); // LDA $0200,X
+        cpu.reset();
+        cpu.x = 0x10; // $0200 + $10 = $0210 (no page cross: $02 -> $02)
+        assert_eq!(cpu.step(), 4); // Base 4 cycles, no page crossing
+        assert_eq!(cpu.a, 0x42);
+        
+        // Test LDA absolute,X WITH page crossing
+        let mem2 = ArrayMemory::new();
+        let mut cpu2 = Cpu6502::new(mem2);
+        cpu2.memory.write(0x0300, 0x55);
+        cpu2.memory.load_program(0x8000, &[0xBD, 0xFF, 0x02]); // LDA $02FF,X
+        cpu2.reset();
+        cpu2.x = 0x01; // $02FF + $01 = $0300 (page cross: $02 -> $03)
+        assert_eq!(cpu2.step(), 5); // Base 4 cycles + 1 for page crossing
+        assert_eq!(cpu2.a, 0x55);
+        
+        // Test LDA absolute,Y with page crossing
+        let mem3 = ArrayMemory::new();
+        let mut cpu3 = Cpu6502::new(mem3);
+        cpu3.memory.write(0x0400, 0x77);
+        cpu3.memory.load_program(0x8000, &[0xB9, 0x80, 0x03]); // LDA $0380,Y
+        cpu3.reset();
+        cpu3.y = 0x80; // $0380 + $80 = $0400 (page cross: $03 -> $04)
+        assert_eq!(cpu3.step(), 5); // Base 4 cycles + 1 for page crossing
+        assert_eq!(cpu3.a, 0x77);
+        
+        // Test LDA (indirect),Y with page crossing
+        let mem4 = ArrayMemory::new();
+        let mut cpu4 = Cpu6502::new(mem4);
+        cpu4.memory.write(0x20, 0xFE); // Low byte of pointer
+        cpu4.memory.write(0x21, 0x01); // High byte of pointer -> $01FE
+        cpu4.memory.write(0x0200, 0x99); // Target value at $01FE + $02 = $0200
+        cpu4.memory.load_program(0x8000, &[0xB1, 0x20]); // LDA ($20),Y
+        cpu4.reset();
+        cpu4.y = 0x02; // $01FE + $02 = $0200 (page cross: $01 -> $02)
+        assert_eq!(cpu4.step(), 6); // Base 5 cycles + 1 for page crossing
+        assert_eq!(cpu4.a, 0x99);
+        
+        // Test ADC absolute,X with page crossing
+        let mem5 = ArrayMemory::new();
+        let mut cpu5 = Cpu6502::new(mem5);
+        cpu5.memory.write(0x1000, 0x10);
+        cpu5.memory.load_program(0x8000, &[0x7D, 0xFF, 0x0F]); // ADC $0FFF,X
+        cpu5.reset();
+        cpu5.a = 0x20;
+        cpu5.x = 0x01; // $0FFF + $01 = $1000 (page cross: $0F -> $10)
+        cpu5.status &= !0x01; // Clear carry
+        assert_eq!(cpu5.step(), 5); // Base 4 cycles + 1 for page crossing
+        assert_eq!(cpu5.a, 0x30);
+        
+        // Test CMP absolute,Y with page crossing
+        let mem6 = ArrayMemory::new();
+        let mut cpu6 = Cpu6502::new(mem6);
+        cpu6.memory.write(0x2100, 0x30);
+        cpu6.memory.load_program(0x8000, &[0xD9, 0x00, 0x20]); // CMP $2000,Y
+        cpu6.reset();
+        cpu6.a = 0x40;
+        cpu6.y = 0xFF; // $2000 + $FF = $20FF (no cross)
+        assert_eq!(cpu6.step(), 4); // Base 4 cycles, no page crossing
+        
+        // Test with actual page crossing
+        let mem7 = ArrayMemory::new();
+        let mut cpu7 = Cpu6502::new(mem7);
+        cpu7.memory.write(0x2100, 0x30);
+        cpu7.memory.load_program(0x8000, &[0xD9, 0xFF, 0x20]); // CMP $20FF,Y
+        cpu7.reset();
+        cpu7.a = 0x40;
+        cpu7.y = 0x01; // $20FF + $01 = $2100 (page cross: $20 -> $21)
+        assert_eq!(cpu7.step(), 5); // Base 4 cycles + 1 for page crossing
+        assert_eq!(cpu7.status & 0x01, 0x01); // Carry set (A >= M)
+    }
 }
