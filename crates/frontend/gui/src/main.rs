@@ -5562,6 +5562,36 @@ fn main() {
                                 .status_bar
                                 .set_message("Created new CHIP-8 system".to_string());
                         }
+                        "ColecoVision" => {
+                            sys = EmulatorSystem::ColecoVision(Box::new(
+                                emu_colecovision::ColecoVisionSystem::new(),
+                            ));
+                            rom_loaded = false;
+                            rom_hash = None;
+                            runtime_state.clear_mounts();
+                            egui_app.property_pane.system_name = "ColecoVision".to_string();
+                            egui_app.property_pane.rendering_backend =
+                                sys.get_current_renderer_name();
+                            egui_app.property_pane.available_renderers =
+                                sys.get_available_renderers();
+                            egui_app
+                                .status_bar
+                                .set_message("Created new ColecoVision system".to_string());
+                        }
+                        "SG-1000" => {
+                            sys = EmulatorSystem::SG1000(Box::new(emu_sg1000::Sg1000System::new()));
+                            rom_loaded = false;
+                            rom_hash = None;
+                            runtime_state.clear_mounts();
+                            egui_app.property_pane.system_name = "SG-1000".to_string();
+                            egui_app.property_pane.rendering_backend =
+                                sys.get_current_renderer_name();
+                            egui_app.property_pane.available_renderers =
+                                sys.get_available_renderers();
+                            egui_app
+                                .status_bar
+                                .set_message("Created new SG-1000 system".to_string());
+                        }
                         _ => {
                             egui_app
                                 .status_bar

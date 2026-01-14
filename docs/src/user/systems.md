@@ -6,7 +6,7 @@ nav_order: 5
 
 # Supported Systems
 
-This emulator supports 8 different retro gaming systems. **NES emulation is fully working** with ~90% game coverage. Other systems are in various stages of development.
+This emulator supports 10 different retro gaming systems. **NES emulation is fully working** with ~90% game coverage. Other systems are in various stages of development.
 
 | System | Status | What Works | What's Missing | Recommended For |
 |--------|--------|------------|----------------|-----------------|
@@ -15,6 +15,8 @@ This emulator supports 8 different retro gaming systems. **NES emulation is full
 | **CHIP-8** | ✅ Fully Working | Complete CHIP-8/Super-CHIP/XO-CHIP | - | Playing CHIP-8 programs |
 | **Game Boy** | ✅ Fully Functional (GB) / 🚧 GBC WIP | Core features, MBC0/1/2/3/5 | Some edge cases, GBC features incomplete | Playing GB games |
 | **SMS** | ✅ Functional | Z80 CPU, VDP, PSG, ROM banking | Test ROM, full game testing | Testing/gameplay |
+| **ColecoVision** | ✅ Functional | Z80 CPU, TMS9918A VDP, SN76489 PSG | Audio output, BIOS required, test ROM | Testing/gameplay |
+| **SG-1000** | ✅ Functional | Z80 CPU, TMS9918A VDP, SN76489 PSG | Audio output, test ROM | Testing/gameplay |
 | **SNES** | ✅ Functional (Graphics Working!) | CPU, PPU rendering, sprites, input | Audio, advanced graphics features | Playing most games (silent) |
 | **N64** | 🚧 In Development | 3D rendering, CPU | Full graphics, audio, games | Development/testing |
 | **PC/DOS** | 🧪 Experimental | Multi-slot mounts, disk controller, custom BIOS, CGA/EGA/VGA | Full disk I/O, boot | Development/testing |
@@ -315,6 +317,160 @@ For more technical information, see [crates/systems/chip8/README.md](../crates/s
 - Commercial SMS ROMs with TMR SEGA header
 - Games using standard ROM banking (most cartridge games)
 - Games not requiring special peripherals (Light Phaser, paddle controllers)
+
+### ColecoVision
+
+**Status**: ✅ Functional  
+**Coverage**: Complete hardware emulation - Z80 CPU, TMS9918A VDP, SN76489 PSG fully implemented
+
+**ROM Format**: COL (.col files) - automatically detected
+
+**Features**:
+- **Z80 CPU**: Complete instruction set implementation (reused from `emu_core`)
+  - All base instructions (8080-compatible)
+  - Extended instruction sets (CB, DD, ED, FD prefixes)
+  - Interrupt modes (IM 0, IM 1, IM 2)
+  - 3.579545 MHz clock speed (NTSC)
+- **TMS9918A VDP (Video Display Processor)**: Full tilemap-based rendering
+  - 256×192 resolution (standard display)
+  - 16-color palette
+  - 16 KB VRAM
+  - 4 graphics modes:
+    - Graphics I: 256×192, 8×8 tiles, 2 colors per 8 patterns
+    - Graphics II: 256×192, 8×8 tiles, 2 colors per pattern row (most common)
+    - Text: 40×24 characters, 6×8 font
+    - Multicolor: 64×48 blocks, 4×4 pixels per block
+  - 32 hardware sprites:
+    - 8×8 or 16×16 pixels
+    - 1× or 2× magnification
+    - 4 sprites per scanline limit
+    - Sprite collision detection
+  - Frame interrupts at 60 Hz
+- **SN76489 PSG (Programmable Sound Generator)**: Full audio implementation
+  - 3 square wave tone generators (10-bit frequency)
+  - 1 noise generator (white/periodic noise)
+  - 4-bit volume control per channel
+  - Reuses the SN76489 implementation from `emu_core`
+- **Memory System**:
+  - 8 KB BIOS ROM (required, must be provided separately)
+  - 1 KB work RAM (mirrored in upper address space)
+  - Up to 32 KB cartridge ROM
+  - I/O port mapping (VDP, PSG, controllers)
+- **Controller Support**: 2 controller ports
+  - Standard joystick with fire buttons
+  - Full button mapping (Up, Down, Left, Right, Fire 1, Fire 2)
+- **Save States** (F5/F6): Complete state serialization
+  - CPU state (all Z80 registers and flags)
+  - VDP state (VRAM, registers, internal state)
+  - PSG audio state (all channels)
+  - Memory state (RAM, BIOS, cartridge)
+
+**Known Limitations**:
+- **Audio Output**: PSG implemented but not yet connected to audio pipeline - silent gameplay
+- **BIOS Required**: Must provide 8 KB BIOS ROM separately (not included)
+- **Test ROM**: No smoke test ROM yet - testing with commercial ROMs needed
+- **Timing Model**: Frame-based rendering (not cycle-accurate) - suitable for most games
+- **No Expansion Modules**: Super Game Module and other expansions not supported
+- **Controllers**: Limited to standard joystick (no Super Action Controllers, spinners, etc.)
+
+**Controls**: ColecoVision controller mapped to same keyboard layout as NES:
+- Arrow keys = D-pad
+- Z = Fire 1
+- X = Fire 2
+- Enter = Not used (ColecoVision keypad not implemented)
+- Left Shift = Not used
+
+**ROM Loading**: 
+- ROMs with .col extension are auto-detected as ColecoVision
+- BIOS must be mounted separately via mount points system
+- Cartridges up to 32 KB supported
+
+**Technical Details**:
+- Z80 clock speed: 3.579545 MHz (NTSC colorburst frequency)
+- VDP frame rate: 60 Hz
+- Display resolution: 256×192 pixels
+- Color depth: 4-bit RGB (16 total colors)
+- Audio sample rate: 44100 Hz (when connected)
+
+**Recent Improvements** (January 2026):
+- Sprite collision detection now uses dedicated sprite buffer
+- Sprite overflow handling properly persists across scanlines
+- Corrected sprite Y position offset (-1)
+- Added array bounds checking for sprite table accesses
+- PSG state now properly resets on system reset
+- Fixed sprite enable logic
+
+For detailed technical information, see [crates/systems/colecovision/README.md](../../../crates/systems/colecovision/README.md).
+
+### SG-1000
+
+**Status**: ✅ Functional  
+**Coverage**: Complete hardware emulation - Z80 CPU, TMS9918A VDP, SN76489 PSG fully implemented
+
+**ROM Format**: SG (.sg, .sc files) - automatically detected
+
+**Features**:
+- **Z80 CPU**: Complete instruction set (shared with ColecoVision and SMS)
+  - 3.579545 MHz clock speed (NTSC)
+  - Reuses the Z80 CPU implementation from `emu_core`
+- **TMS9918A VDP**: Same graphics chip as ColecoVision
+  - 256×192 resolution
+  - 16-color palette
+  - 16 KB VRAM
+  - 4 graphics modes (Graphics I/II, Text, Multicolor)
+  - 32 hardware sprites with collision detection
+  - Frame interrupts at 60 Hz
+- **SN76489 PSG**: Same sound chip as ColecoVision and SMS
+  - 3 square wave tone generators
+  - 1 noise generator
+  - Reuses the SN76489 implementation from `emu_core`
+- **Memory System**:
+  - No BIOS ROM (boots directly from cartridge)
+  - Up to 48 KB cartridge ROM
+  - 1 KB work RAM (mirrored in upper address space)
+  - Different memory map than ColecoVision (cartridge at 0x0000)
+- **Controller Support**: 2 controller ports
+  - Standard joystick with fire buttons
+  - Full button mapping
+- **Save States** (F5/F6): Complete state serialization
+  - CPU state (all Z80 registers)
+  - VDP state (VRAM, registers)
+  - PSG audio state (all channels)
+  - Memory state (RAM contents)
+
+**Hardware Differences from ColecoVision**:
+- **No BIOS**: SG-1000 boots directly from cartridge (ColecoVision requires BIOS)
+- **Memory Map**: Cartridge at 0x0000 instead of 0x8000
+- **I/O Ports**: PSG at 0x7F instead of 0xA0
+- **Same Components**: Identical Z80, TMS9918A, and SN76489 chips
+
+**Known Limitations**:
+- **Audio Output**: PSG implemented but not yet connected to audio pipeline - silent gameplay
+- **Test ROM**: No smoke test ROM yet - testing with commercial ROMs needed
+- **Timing Model**: Frame-based rendering (not cycle-accurate) - suitable for most games
+- **No SC-3000**: Keyboard computer variant not supported
+- **Controllers**: Limited to standard joystick
+
+**Controls**: SG-1000 controller mapped to same keyboard layout as NES:
+- Arrow keys = D-pad
+- Z = Fire 1
+- X = Fire 2
+- Enter = Not used
+- Left Shift = Not used
+
+**ROM Loading**: 
+- ROMs with .sg or .sc extension are auto-detected as SG-1000
+- No BIOS required (unlike ColecoVision)
+- Cartridges up to 48 KB supported
+
+**Technical Details**:
+- Z80 clock speed: 3.579545 MHz (NTSC colorburst frequency)
+- VDP frame rate: 60 Hz
+- Display resolution: 256×192 pixels
+- Color depth: 4-bit RGB (16 total colors)
+- Audio sample rate: 44100 Hz (when connected)
+
+For detailed technical information, see [crates/systems/sg1000/README.md](../../../crates/systems/sg1000/README.md).
 
 ### SNES (Super Nintendo Entertainment System)
 
