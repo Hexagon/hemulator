@@ -934,6 +934,7 @@ name = "emu_nes"
 version = "0.1.0"
 dependencies = [
  "crc32fast",
+ "criterion",
  "emu_core",
  "glow 0.13.1",
  "serde",
