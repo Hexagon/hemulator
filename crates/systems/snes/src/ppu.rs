@@ -1897,6 +1897,11 @@ impl Ppu {
                 // Priority 0 BG = priority level 1, Priority 1 BG = priority level 3
                 let render_priority = if filter_priority == 0 { 1 } else { 3 };
 
+                // Check window masking for this layer
+                if self.is_pixel_masked_by_window(screen_x, bg_index) {
+                    continue;
+                }
+
                 // Draw pixel if it has equal or higher priority
                 let frame_offset = screen_y * 256 + screen_x;
                 if render_priority <= priority_buffer[frame_offset] {
@@ -2004,6 +2009,11 @@ impl Ppu {
                 // Priority 0 BG = priority level 1, Priority 1 BG = priority level 3
                 let render_priority = if filter_priority == 0 { 1 } else { 3 };
 
+                // Check window masking for this layer
+                if self.is_pixel_masked_by_window(screen_x, bg_index) {
+                    continue;
+                }
+
                 // Draw pixel if it has equal or higher priority
                 let frame_offset = screen_y * 256 + screen_x;
                 if render_priority <= priority_buffer[frame_offset] {
@@ -2102,6 +2112,11 @@ impl Ppu {
 
                 // Calculate rendering priority
                 let render_priority = if filter_priority == 0 { 1 } else { 3 };
+
+                // Check window masking for this layer
+                if self.is_pixel_masked_by_window(screen_x, bg_index) {
+                    continue;
+                }
 
                 // Draw pixel if it has equal or higher priority
                 let frame_offset = screen_y * 256 + screen_x;
@@ -2333,6 +2348,11 @@ impl Ppu {
                 // Calculate rendering priority
                 let render_priority = if filter_priority == 0 { 1 } else { 3 };
 
+                // Check window masking for this layer (use x/2 for 512px mode)
+                if self.is_pixel_masked_by_window(screen_x / 2, bg_index) {
+                    continue;
+                }
+
                 // Draw pixel at hi-res position
                 let frame_offset = screen_y * 512 + screen_x;
                 if render_priority <= priority_buffer[frame_offset] {
@@ -2427,6 +2447,11 @@ impl Ppu {
 
                 // Calculate rendering priority
                 let render_priority = if filter_priority == 0 { 1 } else { 3 };
+
+                // Check window masking for this layer (use x/2 for 512px mode)
+                if self.is_pixel_masked_by_window(screen_x / 2, bg_index) {
+                    continue;
+                }
 
                 // Draw pixel at hi-res position
                 let frame_offset = screen_y * 512 + screen_x;
@@ -2742,6 +2767,11 @@ impl Ppu {
                             continue;
                         }
 
+                        // Check window masking for sprites (layer 4)
+                        if self.is_pixel_masked_by_window(screen_x as usize, 4) {
+                            continue;
+                        }
+
                         // Sprites use palettes 128-255 (palette 0-7 maps to CGRAM 128-255)
                         let cgram_index = (128 + palette * 16 + color_index as usize) as u8;
                         let color = self.get_color(cgram_index);
@@ -2779,6 +2809,84 @@ impl Ppu {
                     x, y, width, height, tile, sprite_tile_base, palette, pixels_drawn
                 )
             });
+        }
+    }
+
+    /// Check if a pixel at the given x coordinate is masked by windows for a given layer
+    /// layer: 0=BG1, 1=BG2, 2=BG3, 3=BG4, 4=OBJ
+    /// Returns true if the pixel should be masked (not drawn)
+    fn is_pixel_masked_by_window(&self, x: usize, layer: usize) -> bool {
+        // Window masking only applies to main screen layers
+
+        // Get window settings for this layer
+        let w_sel = match layer {
+            0 | 1 => self.w12sel, // BG1/BG2
+            2 | 3 => self.w34sel, // BG3/BG4
+            4 => self.wobjsel,    // OBJ
+            _ => return false,    // Invalid layer
+        };
+
+        // Extract window enable bits for this layer
+        let layer_shift = if layer == 0 || layer == 2 || layer == 4 {
+            0
+        } else {
+            4
+        };
+        let w1_enable = (w_sel >> layer_shift) & 0x0F;
+        let w2_enable = (w_sel >> (layer_shift + 2)) & 0x03;
+
+        // If no windows are enabled for this layer, no masking
+        if w1_enable == 0 && w2_enable == 0 {
+            return false;
+        }
+
+        // Check if pixel is inside window 1
+        let in_w1 = if self.wh0 <= self.wh1 {
+            x >= self.wh0 as usize && x <= self.wh1 as usize
+        } else {
+            x >= self.wh0 as usize || x <= self.wh1 as usize
+        };
+
+        // Check if pixel is inside window 2
+        let in_w2 = if self.wh2 <= self.wh3 {
+            x >= self.wh2 as usize && x <= self.wh3 as usize
+        } else {
+            x >= self.wh2 as usize || x <= self.wh3 as usize
+        };
+
+        // Apply window inversion based on enable bits
+        let w1_masked = if w1_enable & 0x01 != 0 {
+            if w1_enable & 0x02 != 0 {
+                !in_w1
+            } else {
+                in_w1
+            }
+        } else {
+            false
+        };
+
+        let w2_masked = if w2_enable & 0x01 != 0 {
+            if w2_enable & 0x02 != 0 {
+                !in_w2
+            } else {
+                in_w2
+            }
+        } else {
+            false
+        };
+
+        // Get window logic for this layer
+        let logic_reg = if layer < 4 { self.wbglog } else { self.wobjlog };
+        let logic_shift = (layer % 4) * 2;
+        let logic = (logic_reg >> logic_shift) & 0x03;
+
+        // Apply logic: 00=OR, 01=AND, 10=XOR, 11=XNOR
+        match logic {
+            0 => w1_masked || w2_masked,   // OR
+            1 => w1_masked && w2_masked,   // AND
+            2 => w1_masked ^ w2_masked,    // XOR
+            3 => !(w1_masked ^ w2_masked), // XNOR
+            _ => unreachable!(),
         }
     }
 
