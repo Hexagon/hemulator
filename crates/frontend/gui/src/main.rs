@@ -3430,23 +3430,25 @@ fn main() {
 
                     // Update cartridge info
                     if let Some(cart_info) = s.get_cartridge_info() {
-                        let cart_data = egui_ui::NesCartridgeData {
-                            mapper: cart_info.mapper,
-                            submapper: cart_info.submapper,
-                            mapper_name: cart_info.mapper_name,
-                            mirroring: cart_info.mirroring,
-                            timing: format!("{:?}", cart_info.timing),
+                        let cart_data = egui_ui::CartridgeData {
+                            system_name: "NES".to_string(),
                             crc32: cart_info.crc32,
-                            prg_size: cart_info.prg_size,
-                            chr_size: cart_info.chr_size,
-                            header_mapper: cart_info.header_mapper,
-                            header_submapper: cart_info.header_submapper,
-                            header_mirroring: cart_info.header_mirroring,
-                            db_mapper_override: cart_info.db_mapper_override,
-                            db_mirroring_override: cart_info.db_mirroring_override,
-                            board_name: cart_info.board_name,
+                            rom_size: cart_info.prg_size + cart_info.chr_size,
+                            nes_mapper: Some(cart_info.mapper),
+                            nes_submapper: Some(cart_info.submapper),
+                            nes_mapper_name: Some(cart_info.mapper_name),
+                            nes_mirroring: Some(cart_info.mirroring),
+                            nes_timing: Some(format!("{:?}", cart_info.timing)),
+                            nes_prg_size: Some(cart_info.prg_size),
+                            nes_chr_size: Some(cart_info.chr_size),
+                            nes_header_mapper: Some(cart_info.header_mapper),
+                            nes_header_submapper: Some(cart_info.header_submapper),
+                            nes_header_mirroring: Some(cart_info.header_mirroring),
+                            nes_db_mapper_override: cart_info.db_mapper_override,
+                            nes_db_mirroring_override: cart_info.db_mirroring_override,
+                            nes_board_name: cart_info.board_name,
                         };
-                        egui_app.tab_manager.update_nes_cartridge_data(cart_data);
+                        egui_app.tab_manager.update_cartridge_data(cart_data);
                     }
                 }
                 EmulatorSystem::GameBoy(s) => {
@@ -4748,6 +4750,7 @@ fn main() {
                 MenuAction::Pause => {
                     if rom_loaded {
                         settings.emulation_speed = 0.0;
+                        egui_app.property_pane.emulation_speed_percent = 0;
                         egui_app.status_bar.set_message("Paused".to_string());
                     } else {
                         egui_app.status_bar.set_message("No ROM loaded".to_string());
@@ -4756,6 +4759,7 @@ fn main() {
                 MenuAction::Resume => {
                     if rom_loaded {
                         settings.emulation_speed = 1.0;
+                        egui_app.property_pane.emulation_speed_percent = 100;
                         egui_app.status_bar.set_message("Resumed".to_string());
                     } else {
                         egui_app.status_bar.set_message("No ROM loaded".to_string());
@@ -5575,6 +5579,7 @@ fn main() {
                 DebugAction::Pause => {
                     if rom_loaded {
                         settings.emulation_speed = 0.0;
+                        egui_app.property_pane.emulation_speed_percent = 0;
                         egui_app.status_bar.set_message("Paused".to_string());
                     } else {
                         egui_app.status_bar.set_message("No ROM loaded".to_string());
@@ -5583,6 +5588,7 @@ fn main() {
                 DebugAction::Resume => {
                     if rom_loaded {
                         settings.emulation_speed = 1.0;
+                        egui_app.property_pane.emulation_speed_percent = 100;
                         egui_app.status_bar.set_message("Resumed".to_string());
                     } else {
                         egui_app.status_bar.set_message("No ROM loaded".to_string());

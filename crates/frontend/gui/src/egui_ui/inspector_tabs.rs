@@ -11,10 +11,12 @@ pub enum InspectorTab {
     Log,
     Memory,
     Debug,  // Generic debugger with CPU state, memory, disassembly
-    Mounts, // Mount points and loaded media
+    Mounts, // Mount points and loaded media (for non-cartridge systems like PC)
+
+    // Cartridge tab (for cartridge-based systems - shows cartridge info + mount status)
+    Cartridge,
 
     // System-specific tabs
-    NesCartridge, // Cartridge info (mapper, CRC32, DB overrides)
     NesTiles,
     NesPalettes,
     NesNametables,
@@ -53,7 +55,7 @@ impl InspectorTab {
             InspectorTab::Memory => "💾 Memory",
             InspectorTab::Debug => "🔧 Debug",
             InspectorTab::Mounts => "💿 Mounts",
-            InspectorTab::NesCartridge => "📦 Cartridge",
+            InspectorTab::Cartridge => "📦 Cartridge",
             InspectorTab::NesTiles => "🎨 Tiles",
             InspectorTab::NesPalettes => "🎨 Palettes",
             InspectorTab::NesNametables => "🗺️ Nametables",
@@ -89,24 +91,20 @@ impl InspectorTab {
 
 /// Get the list of tabs that should be shown for a given system
 pub fn get_tabs_for_system(system_type: Option<&SystemType>) -> Vec<InspectorTab> {
-    let mut tabs = vec![
-        InspectorTab::Log,
-        InspectorTab::Debug,
-        InspectorTab::Memory,
-        InspectorTab::Mounts,
-    ];
+    let mut tabs = vec![InspectorTab::Log, InspectorTab::Debug, InspectorTab::Memory];
 
     if let Some(sys_type) = system_type {
         match sys_type {
             SystemType::NES => {
+                tabs.push(InspectorTab::Cartridge); // Unified cartridge tab instead of Mounts
                 tabs.extend_from_slice(&[
-                    InspectorTab::NesCartridge,
                     InspectorTab::NesTiles,
                     InspectorTab::NesPalettes,
                     InspectorTab::NesNametables,
                 ]);
             }
             SystemType::GameBoy => {
+                tabs.push(InspectorTab::Cartridge); // Unified cartridge tab instead of Mounts
                 tabs.extend_from_slice(&[
                     InspectorTab::GbTiles,
                     InspectorTab::GbPalettes,
@@ -114,9 +112,11 @@ pub fn get_tabs_for_system(system_type: Option<&SystemType>) -> Vec<InspectorTab
                 ]);
             }
             SystemType::SMS => {
+                tabs.push(InspectorTab::Cartridge); // Unified cartridge tab instead of Mounts
                 tabs.extend_from_slice(&[InspectorTab::SmsTiles, InspectorTab::SmsPalettes]);
             }
             SystemType::ColecoVision => {
+                tabs.push(InspectorTab::Cartridge); // Unified cartridge tab instead of Mounts
                 tabs.extend_from_slice(&[
                     InspectorTab::ColecoVisionTiles,
                     InspectorTab::ColecoVisionPalettes,
@@ -124,16 +124,15 @@ pub fn get_tabs_for_system(system_type: Option<&SystemType>) -> Vec<InspectorTab
                 ]);
             }
             SystemType::SNES => {
+                tabs.push(InspectorTab::Cartridge); // Unified cartridge tab instead of Mounts
                 tabs.extend_from_slice(&[
                     InspectorTab::SnesTiles,
                     InspectorTab::SnesPalettes,
                     InspectorTab::SnesLayers,
                 ]);
             }
-            SystemType::PC => {
-                tabs.push(InspectorTab::PcBda);
-            }
             SystemType::Atari2600 => {
+                tabs.push(InspectorTab::Cartridge); // Unified cartridge tab instead of Mounts
                 tabs.extend_from_slice(&[
                     InspectorTab::Atari2600Playfield,
                     InspectorTab::Atari2600Sprites,
@@ -141,13 +140,23 @@ pub fn get_tabs_for_system(system_type: Option<&SystemType>) -> Vec<InspectorTab
                     InspectorTab::Atari2600Collision,
                 ]);
             }
+            SystemType::PC => {
+                tabs.push(InspectorTab::Mounts); // PC uses Mounts tab (BIOS, floppies, HDD)
+                tabs.push(InspectorTab::PcBda);
+            }
             SystemType::Chip8 => {
+                tabs.push(InspectorTab::Mounts); // CHIP-8 uses Mounts tab for "Program"
                 tabs.extend_from_slice(&[InspectorTab::Chip8Display, InspectorTab::Chip8Registers]);
             }
             _ => {
-                // For other systems (N64), just show generic tabs
+                // Fallback for cartridge-based systems not explicitly listed above
+                // This includes N64, SG-1000, and any future cartridge systems
+                tabs.push(InspectorTab::Cartridge);
             }
         }
+    } else {
+        // No system loaded - show generic Mounts tab
+        tabs.push(InspectorTab::Mounts);
     }
 
     tabs
@@ -166,8 +175,8 @@ pub fn render_inspector_tab(tab: &InspectorTab, ui: &mut Ui, tab_manager: &mut T
         InspectorTab::Mounts => {
             tab_manager.render_mounts_tab(ui);
         }
-        InspectorTab::NesCartridge => {
-            render_nes_cartridge_tab(ui, tab_manager);
+        InspectorTab::Cartridge => {
+            render_cartridge_tab(ui, tab_manager);
         }
         InspectorTab::NesTiles
         | InspectorTab::GbTiles
@@ -1149,8 +1158,8 @@ fn render_colecovision_vdp_tab(ui: &mut Ui, tab_manager: &mut TabManager) {
         });
 }
 
-/// Render the NES Cartridge tab
-fn render_nes_cartridge_tab(ui: &mut Ui, tab_manager: &mut TabManager) {
+/// Render the unified Cartridge tab (for all cartridge-based systems)
+fn render_cartridge_tab(ui: &mut Ui, tab_manager: &mut TabManager) {
     use egui::ScrollArea;
 
     let available_height = ui.available_height();
@@ -1158,9 +1167,84 @@ fn render_nes_cartridge_tab(ui: &mut Ui, tab_manager: &mut TabManager) {
         .auto_shrink([false; 2])
         .max_height(available_height)
         .show(ui, |ui| {
-            if let Some(ref cart_data) = tab_manager.nes_cartridge_data {
+            if let Some(ref cart_data) = tab_manager.cartridge_data {
                 // Header
-                ui.heading("📦 NES Cartridge Information");
+                ui.heading(format!("📦 {} Cartridge Information", cart_data.system_name));
+                ui.separator();
+                ui.add_space(10.0);
+
+                // Mount Status Section
+                ui.heading("Mount Status");
+                ui.add_space(5.0);
+
+                // Find the cartridge mount point from mount_info
+                // Note: SMS uses lowercase "cartridge" ID, others use "Cartridge"
+                let cartridge_mount = tab_manager
+                    .mount_info
+                    .iter()
+                    .find(|m| m.id.eq_ignore_ascii_case("Cartridge"));
+
+                if let Some(mount) = cartridge_mount {
+                    egui::Grid::new("inspector_cart_mount_grid")
+                        .num_columns(2)
+                        .spacing([40.0, 8.0])
+                        .striped(true)
+                        .show(ui, |ui| {
+                            ui.label(egui::RichText::new("Slot:").strong());
+                            ui.label(&mount.name);
+                            ui.end_row();
+
+                            ui.label(egui::RichText::new("Status:").strong());
+                            if mount.mounted_file.is_some() {
+                                ui.label(
+                                    egui::RichText::new("✅ Mounted")
+                                        .color(egui::Color32::from_rgb(100, 200, 100)),
+                                );
+                            } else {
+                                ui.label(
+                                    egui::RichText::new("⚠️ Empty")
+                                        .color(egui::Color32::from_rgb(200, 200, 100)),
+                                );
+                            }
+                            ui.end_row();
+
+                            if let Some(ref file_path) = mount.mounted_file {
+                                let filename = std::path::Path::new(file_path)
+                                    .file_name()
+                                    .and_then(|n| n.to_str())
+                                    .unwrap_or(file_path);
+
+                                ui.label(egui::RichText::new("File:").strong());
+                                ui.label(
+                                    egui::RichText::new(filename)
+                                        .monospace()
+                                        .color(egui::Color32::from_rgb(100, 200, 100)),
+                                );
+                                ui.end_row();
+
+                                if filename != file_path {
+                                    ui.label("");
+                                    ui.label(
+                                        egui::RichText::new(file_path)
+                                            .weak()
+                                            .italics()
+                                            .size(10.0),
+                                    );
+                                    ui.end_row();
+                                }
+                            }
+
+                            ui.label(egui::RichText::new("Accepted:").strong());
+                            ui.label(
+                                egui::RichText::new(mount.extensions.join(", "))
+                                    .monospace()
+                                    .size(12.0),
+                            );
+                            ui.end_row();
+                        });
+                }
+
+                ui.add_space(15.0);
                 ui.separator();
                 ui.add_space(10.0);
 
@@ -1168,7 +1252,7 @@ fn render_nes_cartridge_tab(ui: &mut Ui, tab_manager: &mut TabManager) {
                 ui.heading("ROM Information");
                 ui.add_space(5.0);
 
-                egui::Grid::new("inspector_nes_cart_rom_grid")
+                egui::Grid::new("inspector_cart_rom_grid")
                     .num_columns(2)
                     .spacing([40.0, 8.0])
                     .striped(true)
@@ -1177,141 +1261,207 @@ fn render_nes_cartridge_tab(ui: &mut Ui, tab_manager: &mut TabManager) {
                         ui.monospace(format!("0x{:08X}", cart_data.crc32));
                         ui.end_row();
 
-                        ui.label(egui::RichText::new("PRG ROM Size:").strong());
-                        ui.label(format!("{} KB ({} bytes)", cart_data.prg_size / 1024, cart_data.prg_size));
-                        ui.end_row();
-
-                        ui.label(egui::RichText::new("CHR ROM Size:").strong());
-                        if cart_data.chr_size > 0 {
-                            ui.label(format!("{} KB ({} bytes)", cart_data.chr_size / 1024, cart_data.chr_size));
-                        } else {
-                            ui.label("CHR-RAM (no CHR ROM)");
-                        }
-                        ui.end_row();
-
-                        ui.label(egui::RichText::new("Timing:").strong());
-                        ui.label(&cart_data.timing);
+                        ui.label(egui::RichText::new("Size:").strong());
+                        ui.label(format!(
+                            "{} KB ({} bytes)",
+                            cart_data.rom_size / 1024,
+                            cart_data.rom_size
+                        ));
                         ui.end_row();
                     });
 
-                ui.add_space(15.0);
-                ui.separator();
-                ui.add_space(10.0);
-
-                // Mapper Information
-                ui.heading("Mapper Configuration");
-                ui.add_space(5.0);
-
-                egui::Grid::new("inspector_nes_cart_mapper_grid")
-                    .num_columns(2)
-                    .spacing([40.0, 8.0])
-                    .striped(true)
-                    .show(ui, |ui| {
-                        ui.label(egui::RichText::new("Mapper:").strong());
-                        if cart_data.submapper > 0 {
-                            ui.label(format!("{} (Mapper {}, Submapper {})", 
-                                cart_data.mapper_name, cart_data.mapper, cart_data.submapper));
-                        } else {
-                            ui.label(format!("{} ({})", cart_data.mapper_name, cart_data.mapper));
-                        }
-                        ui.end_row();
-
-                        ui.label(egui::RichText::new("Mirroring:").strong());
-                        ui.label(&cart_data.mirroring);
-                        ui.end_row();
-
-                        if let Some(ref board) = cart_data.board_name {
-                            ui.label(egui::RichText::new("Board:").strong());
-                            ui.label(board);
-                            ui.end_row();
-                        }
-                    });
-
-                // Database Overrides Section
-                if cart_data.db_mapper_override || cart_data.db_mirroring_override {
+                // NES-specific information (if available)
+                if cart_data.nes_mapper.is_some() {
                     ui.add_space(15.0);
                     ui.separator();
                     ui.add_space(10.0);
 
-                    ui.heading("ROM Database Overrides");
-                    ui.add_space(5.0);
-                    ui.label(
-                        egui::RichText::new("⚠ This ROM has known incorrect header information")
-                            .color(egui::Color32::from_rgb(255, 200, 100))
-                    );
+                    ui.heading("NES Mapper Configuration");
                     ui.add_space(5.0);
 
-                    egui::Grid::new("inspector_nes_cart_db_grid")
-                        .num_columns(3)
-                        .spacing([20.0, 8.0])
+                    egui::Grid::new("inspector_cart_nes_mapper_grid")
+                        .num_columns(2)
+                        .spacing([40.0, 8.0])
                         .striped(true)
                         .show(ui, |ui| {
-                            ui.label(egui::RichText::new("Property").strong());
-                            ui.label(egui::RichText::new("Header Value").strong());
-                            ui.label(egui::RichText::new("Corrected Value").strong());
-                            ui.end_row();
-
-                            if cart_data.db_mapper_override {
-                                ui.label("Mapper:");
-                                if cart_data.header_submapper > 0 {
-                                    ui.label(format!("{}.{}", cart_data.header_mapper, cart_data.header_submapper));
+                            if let Some(mapper) = cart_data.nes_mapper {
+                                ui.label(egui::RichText::new("Mapper:").strong());
+                                if let Some(submapper) = cart_data.nes_submapper {
+                                    if submapper > 0 {
+                                        ui.label(format!(
+                                            "{} (Mapper {}, Submapper {})",
+                                            cart_data.nes_mapper_name.as_deref().unwrap_or("Unknown"),
+                                            mapper,
+                                            submapper
+                                        ));
+                                    } else {
+                                        ui.label(format!(
+                                            "{} ({})",
+                                            cart_data.nes_mapper_name.as_deref().unwrap_or("Unknown"),
+                                            mapper
+                                        ));
+                                    }
                                 } else {
-                                    ui.label(format!("{}", cart_data.header_mapper));
-                                }
-                                if cart_data.submapper > 0 {
-                                    ui.label(
-                                        egui::RichText::new(format!("{}.{} ✓", cart_data.mapper, cart_data.submapper))
-                                            .color(egui::Color32::from_rgb(100, 255, 100))
-                                    );
-                                } else {
-                                    ui.label(
-                                        egui::RichText::new(format!("{} ✓", cart_data.mapper))
-                                            .color(egui::Color32::from_rgb(100, 255, 100))
-                                    );
+                                    ui.label(format!(
+                                        "{} ({})",
+                                        cart_data.nes_mapper_name.as_deref().unwrap_or("Unknown"),
+                                        mapper
+                                    ));
                                 }
                                 ui.end_row();
                             }
 
-                            if cart_data.db_mirroring_override {
-                                ui.label("Mirroring:");
-                                ui.label(&cart_data.header_mirroring);
-                                ui.label(
-                                    egui::RichText::new(format!("{} ✓", cart_data.mirroring))
-                                        .color(egui::Color32::from_rgb(100, 255, 100))
-                                );
+                            if let Some(ref mirroring) = cart_data.nes_mirroring {
+                                ui.label(egui::RichText::new("Mirroring:").strong());
+                                ui.label(mirroring);
+                                ui.end_row();
+                            }
+
+                            if let Some(ref timing) = cart_data.nes_timing {
+                                ui.label(egui::RichText::new("Timing:").strong());
+                                ui.label(timing);
+                                ui.end_row();
+                            }
+
+                            if let Some(prg_size) = cart_data.nes_prg_size {
+                                ui.label(egui::RichText::new("PRG ROM:").strong());
+                                ui.label(format!("{} KB ({} bytes)", prg_size / 1024, prg_size));
+                                ui.end_row();
+                            }
+
+                            if let Some(chr_size) = cart_data.nes_chr_size {
+                                ui.label(egui::RichText::new("CHR ROM:").strong());
+                                if chr_size > 0 {
+                                    ui.label(format!("{} KB ({} bytes)", chr_size / 1024, chr_size));
+                                } else {
+                                    ui.label("CHR-RAM (no CHR ROM)");
+                                }
+                                ui.end_row();
+                            }
+
+                            if let Some(ref board) = cart_data.nes_board_name {
+                                ui.label(egui::RichText::new("Board:").strong());
+                                ui.label(board);
                                 ui.end_row();
                             }
                         });
 
-                    ui.add_space(10.0);
-                    ui.label(
-                        egui::RichText::new("Values shown above are from the ROM database and override the iNES header.")
+                    // Database Overrides Section (NES-specific)
+                    if cart_data.nes_db_mapper_override || cart_data.nes_db_mirroring_override {
+                        ui.add_space(15.0);
+                        ui.separator();
+                        ui.add_space(10.0);
+
+                        ui.heading("ROM Database Overrides");
+                        ui.add_space(5.0);
+                        ui.label(
+                            egui::RichText::new(
+                                "⚠ This ROM has known incorrect header information",
+                            )
+                            .color(egui::Color32::from_rgb(255, 200, 100)),
+                        );
+                        ui.add_space(5.0);
+
+                        egui::Grid::new("inspector_cart_nes_db_grid")
+                            .num_columns(3)
+                            .spacing([20.0, 8.0])
+                            .striped(true)
+                            .show(ui, |ui| {
+                                ui.label(egui::RichText::new("Property").strong());
+                                ui.label(egui::RichText::new("Header Value").strong());
+                                ui.label(egui::RichText::new("Corrected Value").strong());
+                                ui.end_row();
+
+                                if cart_data.nes_db_mapper_override {
+                                    ui.label("Mapper:");
+                                    if let (Some(h_mapper), Some(h_submapper)) = (
+                                        cart_data.nes_header_mapper,
+                                        cart_data.nes_header_submapper,
+                                    ) {
+                                        if h_submapper > 0 {
+                                            ui.label(format!("{}.{}", h_mapper, h_submapper));
+                                        } else {
+                                            ui.label(format!("{}", h_mapper));
+                                        }
+                                    } else {
+                                        ui.label("?");
+                                    }
+
+                                    if let (Some(mapper), Some(submapper)) =
+                                        (cart_data.nes_mapper, cart_data.nes_submapper)
+                                    {
+                                        if submapper > 0 {
+                                            ui.label(
+                                                egui::RichText::new(format!(
+                                                    "{}.{} ✓",
+                                                    mapper, submapper
+                                                ))
+                                                .color(egui::Color32::from_rgb(100, 255, 100)),
+                                            );
+                                        } else {
+                                            ui.label(
+                                                egui::RichText::new(format!("{} ✓", mapper))
+                                                    .color(egui::Color32::from_rgb(100, 255, 100)),
+                                            );
+                                        }
+                                    }
+                                    ui.end_row();
+                                }
+
+                                if cart_data.nes_db_mirroring_override {
+                                    ui.label("Mirroring:");
+                                    if let Some(ref h_mirroring) = cart_data.nes_header_mirroring {
+                                        ui.label(h_mirroring);
+                                    } else {
+                                        ui.label("?");
+                                    }
+                                    if let Some(ref mirroring) = cart_data.nes_mirroring {
+                                        ui.label(
+                                            egui::RichText::new(format!("{} ✓", mirroring))
+                                                .color(egui::Color32::from_rgb(100, 255, 100)),
+                                        );
+                                    }
+                                    ui.end_row();
+                                }
+                            });
+
+                        ui.add_space(10.0);
+                        ui.label(
+                            egui::RichText::new(
+                                "Values shown above are from the ROM database and override the iNES header.",
+                            )
                             .weak()
-                            .italics()
-                    );
-                } else {
+                            .italics(),
+                        );
+                    } else {
+                        ui.add_space(15.0);
+                        ui.separator();
+                        ui.add_space(10.0);
+
+                        ui.heading("Header Information");
+                        ui.add_space(5.0);
+                        ui.label(
+                            egui::RichText::new(
+                                "✓ Header information is correct (no database overrides needed)",
+                            )
+                            .color(egui::Color32::from_rgb(100, 255, 100)),
+                        );
+                    }
+
                     ui.add_space(15.0);
                     ui.separator();
                     ui.add_space(10.0);
 
-                    ui.heading("Header Information");
+                    ui.heading("About");
                     ui.add_space(5.0);
                     ui.label(
-                        egui::RichText::new("✓ Header information is correct (no database overrides needed)")
-                            .color(egui::Color32::from_rgb(100, 255, 100))
+                        "The CRC32 checksum is calculated from the entire ROM file (including iNES header).",
                     );
+                    ui.label(
+                        "The ROM database can override incorrect mapper or mirroring values from the header.",
+                    );
+                    ui.label("See crates/systems/nes/src/rom_db.rs to add new ROM database entries.");
                 }
-
-                ui.add_space(15.0);
-                ui.separator();
-                ui.add_space(10.0);
-
-                // Reference Information
-                ui.heading("About");
-                ui.add_space(5.0);
-                ui.label("The CRC32 checksum is calculated from the entire ROM file (including iNES header).");
-                ui.label("The ROM database can override incorrect mapper or mirroring values from the header.");
-                ui.label("See crates/systems/nes/src/rom_db.rs to add new ROM database entries.");
             } else {
                 // No cartridge data available
                 ui.vertical_centered(|ui| {
@@ -1320,7 +1470,7 @@ fn render_nes_cartridge_tab(ui: &mut Ui, tab_manager: &mut TabManager) {
                     ui.add_space(10.0);
                     ui.heading("No Cartridge Loaded");
                     ui.add_space(10.0);
-                    ui.label("Load a NES ROM to see cartridge information");
+                    ui.label("Load a ROM to see cartridge information");
                 });
             }
         });
