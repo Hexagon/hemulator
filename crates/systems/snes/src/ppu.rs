@@ -1090,15 +1090,8 @@ impl Ppu {
             let vram_any = self.vram.iter().any(|&b| b != 0);
             let cgram_any = self.cgram.iter().any(|&b| b != 0);
             let oam_any = self.oam.iter().any(|&b| b != 0);
-            // Check a sprite pixel (100,101) should be at offset 101*256+100 = 25856
-            let sprite_pixel_offset = 101 * 256 + 100;
-            let sprite_pixel = if sprite_pixel_offset < frame.pixels.len() {
-                frame.pixels[sprite_pixel_offset]
-            } else {
-                0
-            };
             format!(
-                "SNES PPU: Frame rendered - {} non-backdrop pixels, backdrop=0x{:08X}, brightness={}, TM=0x{:02X}, BGMODE=0x{:02X}, OBSEL=0x{:02X}, VRAM_any={}, CGRAM_any={}, OAM_any={}, first=0x{:08X}, sprite_pixel@({},{})=0x{:08X}",
+                "SNES PPU: Frame rendered - {} non-backdrop pixels, backdrop=0x{:08X}, brightness={}, TM=0x{:02X}, BGMODE=0x{:02X}, OBSEL=0x{:02X}, VRAM_any={}, CGRAM_any={}, OAM_any={}",
                 non_backdrop_pixels,
                 backdrop_color,
                 brightness,
@@ -1107,25 +1100,7 @@ impl Ppu {
                 self.obsel,
                 vram_any,
                 cgram_any,
-                oam_any,
-                frame.pixels[0],
-                100,
-                101,
-                sprite_pixel
-            )
-        });
-
-        // Diagnostic: check final frame has sprite pixels before returning
-        let final_sprite_pixel = if 101 * 256 + 100 < frame.pixels.len() {
-            frame.pixels[101 * 256 + 100]
-        } else {
-            0
-        };
-        log(LogCategory::PPU, LogLevel::Debug, || {
-            format!(
-                "SNES PPU: Returning frame - sprite_pixel@(100,101)=0x{:08X}, pixels.len()={}",
-                final_sprite_pixel,
-                frame.pixels.len()
+                oam_any
             )
         });
 

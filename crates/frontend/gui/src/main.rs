@@ -1151,17 +1151,6 @@ fn save_screenshot(
     use png::Encoder;
     use rand::Rng;
 
-    // DEBUG: Check if sprite pixel is present in buffer
-    if width == 256 && height == 224 {
-        let sprite_pixel_offset = 101 * 256 + 100;
-        if sprite_pixel_offset < buffer.len() {
-            eprintln!(
-                "DEBUG save_screenshot: buffer[{}] @(100,101) = 0x{:08X}",
-                sprite_pixel_offset, buffer[sprite_pixel_offset]
-            );
-        }
-    }
-
     // Get current local time
     let now = Local::now();
 
@@ -1179,21 +1168,13 @@ fn save_screenshot(
 
     // Convert RGBA buffer to RGB
     let mut rgb_data = Vec::with_capacity(width * height * 3);
-    for (i, pixel) in buffer.iter().enumerate() {
+    for pixel in buffer {
         let r = ((pixel >> 16) & 0xFF) as u8;
         let g = ((pixel >> 8) & 0xFF) as u8;
         let b = (pixel & 0xFF) as u8;
         rgb_data.push(r);
         rgb_data.push(g);
         rgb_data.push(b);
-
-        // DEBUG: Log the sprite pixel RGB conversion
-        if width == 256 && height == 224 && i == 101 * 256 + 100 {
-            eprintln!(
-                "DEBUG save_screenshot: RGB conversion @{}: 0x{:08X} -> R={}, G={}, B={}",
-                i, pixel, r, g, b
-            );
-        }
     }
 
     // Write PNG file
@@ -2959,19 +2940,6 @@ fn main() {
                     // Store the latest frame for screenshot (move pixels instead of cloning)
                     latest_frame_buffer =
                         Some((frame.pixels, frame.width as usize, frame.height as usize));
-
-                    // DEBUG: Check if sprite pixel is in the buffer
-                    if let Some((ref pixels, width, _height)) = latest_frame_buffer {
-                        if 101 * width + 100 < pixels.len() {
-                            let sprite_pixel = pixels[101 * width + 100];
-                            if sprite_pixel != 0xFF000000 {
-                                eprintln!(
-                                    "DEBUG: Sprite pixel in latest_frame_buffer @(100,101) = 0x{:08X}",
-                                    sprite_pixel
-                                );
-                            }
-                        }
-                    }
 
                     // Get actual CPU cycles from the system
                     total_cycles = sys.get_total_cycles();
