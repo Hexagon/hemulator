@@ -31,35 +31,29 @@ pub enum SystemTileData {
 
 /// NES cartridge information data
 #[derive(Clone)]
-pub struct NesCartridgeData {
-    /// Mapper number being used
-    pub mapper: u16,
-    /// Submapper number (iNES 2.0)
-    pub submapper: u8,
-    /// Human-readable mapper name
-    pub mapper_name: String,
-    /// Mirroring mode being used
-    pub mirroring: String,
-    /// Timing mode (NTSC or PAL)
-    pub timing: String,
-    /// CRC32 checksum
+/// Generic cartridge information for all cartridge-based systems
+pub struct CartridgeData {
+    /// System type (e.g., "NES", "Game Boy", "Atari 2600")
+    pub system_name: String,
+    /// CRC32 checksum of the ROM file
     pub crc32: u32,
-    /// PRG ROM size
-    pub prg_size: usize,
-    /// CHR ROM size (0 for CHR-RAM)
-    pub chr_size: usize,
-    /// Mapper from iNES header
-    pub header_mapper: u16,
-    /// Submapper from iNES 2.0 header
-    pub header_submapper: u8,
-    /// Mirroring from iNES header
-    pub header_mirroring: String,
-    /// DB mapper override flag
-    pub db_mapper_override: bool,
-    /// DB mirroring override flag
-    pub db_mirroring_override: bool,
-    /// Board name from DB
-    pub board_name: Option<String>,
+    /// ROM size in bytes
+    pub rom_size: usize,
+
+    // NES-specific fields (optional, only populated for NES)
+    pub nes_mapper: Option<u16>,
+    pub nes_submapper: Option<u8>,
+    pub nes_mapper_name: Option<String>,
+    pub nes_mirroring: Option<String>,
+    pub nes_timing: Option<String>,
+    pub nes_prg_size: Option<usize>,
+    pub nes_chr_size: Option<usize>,
+    pub nes_header_mapper: Option<u16>,
+    pub nes_header_submapper: Option<u8>,
+    pub nes_header_mirroring: Option<String>,
+    pub nes_db_mapper_override: bool,
+    pub nes_db_mirroring_override: bool,
+    pub nes_board_name: Option<String>,
 }
 
 /// NES tile viewer data
@@ -294,7 +288,7 @@ pub struct TabManager {
     pub enhanced_debug_state: Option<EnhancedDebugState>,
     pub system_tile_data: Option<SystemTileData>,
     pub pc_bda_data: Option<PcBdaData>,
-    pub nes_cartridge_data: Option<NesCartridgeData>,
+    pub cartridge_data: Option<CartridgeData>,
     pub mount_info: Vec<MountInfo>,
     pub new_project_visible: bool,
     pub selected_system: String,
@@ -322,7 +316,7 @@ impl TabManager {
             enhanced_debug_state: None,
             system_tile_data: None,
             pc_bda_data: None,
-            nes_cartridge_data: None,
+            cartridge_data: None,
             mount_info: Vec::new(),
             new_project_visible: false,
             selected_system: "NES".to_string(),
@@ -353,8 +347,8 @@ impl TabManager {
         self.pc_bda_data = Some(data);
     }
 
-    pub fn update_nes_cartridge_data(&mut self, data: NesCartridgeData) {
-        self.nes_cartridge_data = Some(data);
+    pub fn update_cartridge_data(&mut self, data: CartridgeData) {
+        self.cartridge_data = Some(data);
     }
 
     pub fn update_mount_info(&mut self, mounts: Vec<MountInfo>) {
