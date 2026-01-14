@@ -456,6 +456,7 @@ impl Ppu {
     }
 
     /// Read a PPU register (very partial implementation).
+    #[inline]
     pub fn read_register(&self, reg: u16) -> u8 {
         match reg & 0x7 {
             2 => {
@@ -540,6 +541,7 @@ impl Ppu {
         }
     }
 
+    #[inline]
     pub fn write_register(&mut self, reg: u16, val: u8) {
         match reg & 0x7 {
             0 => {

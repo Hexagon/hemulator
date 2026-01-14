@@ -96,13 +96,13 @@ impl<M: Memory6502> Cpu6502<M> {
     }
 
     /// Read a byte from memory
-    #[inline]
+    #[inline(always)]
     fn read(&self, addr: u16) -> u8 {
         self.memory.read(addr)
     }
 
     /// Write a byte to memory
-    #[inline]
+    #[inline(always)]
     fn write(&mut self, addr: u16, val: u8) {
         self.memory.write(addr, val);
     }
@@ -113,14 +113,14 @@ impl<M: Memory6502> Cpu6502<M> {
         (hi << 8) | lo
     }
 
-    #[inline]
+    #[inline(always)]
     fn fetch_u8(&mut self) -> u8 {
         let v = self.read(self.pc);
         self.pc = self.pc.wrapping_add(1);
         v
     }
 
-    #[inline]
+    #[inline(always)]
     fn fetch_u16(&mut self) -> u16 {
         let lo = self.fetch_u8() as u16;
         let hi = self.fetch_u8() as u16;
@@ -246,6 +246,7 @@ impl<M: Memory6502> Cpu6502<M> {
         self.cycles = self.cycles.wrapping_add(7);
     }
 
+    #[inline(always)]
     fn set_zero_and_negative(&mut self, v: u8) {
         if v == 0 {
             self.status |= 0x02; // Z
@@ -260,7 +261,7 @@ impl<M: Memory6502> Cpu6502<M> {
     }
 
     /// Perform ADC operation on a value and update accumulator and flags
-    #[inline]
+    #[inline(always)]
     fn adc(&mut self, val: u8) {
         let carry_in = if (self.status & 0x01) != 0 {
             1u16
@@ -289,6 +290,7 @@ impl<M: Memory6502> Cpu6502<M> {
     }
 
     /// Execute one instruction and return cycles used.
+    #[inline(always)]
     pub fn step(&mut self) -> u32 {
         log(LogCategory::CPU, LogLevel::Trace, || {
             let op = self.read(self.pc);
