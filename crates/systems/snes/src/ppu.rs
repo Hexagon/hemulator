@@ -4003,4 +4003,100 @@ mod tests {
             ppu.tm
         );
     }
+
+    #[test]
+    fn test_window_masking() {
+        let mut ppu = Ppu::new();
+
+        // Set up window 1: left=50, right=100
+        ppu.write_register(0x2126, 50); // WH0 - Window 1 left
+        ppu.write_register(0x2127, 100); // WH1 - Window 1 right
+
+        // Enable window 1 for BG1 (no inversion)
+        // W12SEL bits 0-1: Window 1 enable for BG1
+        ppu.write_register(0x2123, 0x01); // W12SEL
+
+        // Set window logic to OR (default)
+        ppu.write_register(0x212A, 0x00); // WBGLOG
+
+        // Test pixels inside window (should be masked)
+        assert!(ppu.is_pixel_masked_by_window(50, 0)); // Left edge
+        assert!(ppu.is_pixel_masked_by_window(75, 0)); // Middle
+        assert!(ppu.is_pixel_masked_by_window(100, 0)); // Right edge
+
+        // Test pixels outside window (should not be masked)
+        assert!(!ppu.is_pixel_masked_by_window(49, 0)); // Just before left
+        assert!(!ppu.is_pixel_masked_by_window(101, 0)); // Just after right
+        assert!(!ppu.is_pixel_masked_by_window(0, 0)); // Far left
+        assert!(!ppu.is_pixel_masked_by_window(255, 0)); // Far right
+
+        // Test window inversion
+        // W12SEL bits 0-1: Window 1 enable + invert for BG1
+        ppu.write_register(0x2123, 0x03); // Enable + invert
+
+        // Now pixels inside window should NOT be masked
+        assert!(!ppu.is_pixel_masked_by_window(50, 0)); // Left edge
+        assert!(!ppu.is_pixel_masked_by_window(75, 0)); // Middle
+        assert!(!ppu.is_pixel_masked_by_window(100, 0)); // Right edge
+
+        // Pixels outside window should be masked
+        assert!(ppu.is_pixel_masked_by_window(49, 0)); // Just before left
+        assert!(ppu.is_pixel_masked_by_window(101, 0)); // Just after right
+
+        // Test with no window enabled (no masking)
+        ppu.write_register(0x2123, 0x00); // Disable windows
+        assert!(!ppu.is_pixel_masked_by_window(50, 0));
+        assert!(!ppu.is_pixel_masked_by_window(75, 0));
+        assert!(!ppu.is_pixel_masked_by_window(100, 0));
+    }
+
+    #[test]
+    fn test_window_masking_two_windows() {
+        let mut ppu = Ppu::new();
+
+        // Set up window 1: left=30, right=80
+        ppu.write_register(0x2126, 30); // WH0
+        ppu.write_register(0x2127, 80); // WH1
+
+        // Set up window 2: left=60, right=120
+        ppu.write_register(0x2128, 60); // WH2
+        ppu.write_register(0x2129, 120); // WH3
+
+        // Enable both windows for BG1 (no inversion)
+        // Bits 0-1: W1 enable for BG1
+        // Bits 2-3: W2 enable for BG1
+        ppu.write_register(0x2123, 0x05); // Enable W1 and W2 for BG1
+
+        // Test OR logic (default) - masked if in either window
+        ppu.write_register(0x212A, 0x00); // WBGLOG OR
+
+        assert!(ppu.is_pixel_masked_by_window(40, 0)); // In W1 only
+        assert!(ppu.is_pixel_masked_by_window(70, 0)); // In both W1 and W2
+        assert!(ppu.is_pixel_masked_by_window(100, 0)); // In W2 only
+        assert!(!ppu.is_pixel_masked_by_window(20, 0)); // In neither
+
+        // Test AND logic - masked only if in both windows
+        ppu.write_register(0x212A, 0x01); // WBGLOG AND
+
+        assert!(!ppu.is_pixel_masked_by_window(40, 0)); // In W1 only
+        assert!(ppu.is_pixel_masked_by_window(70, 0)); // In both W1 and W2
+        assert!(!ppu.is_pixel_masked_by_window(100, 0)); // In W2 only
+        assert!(!ppu.is_pixel_masked_by_window(20, 0)); // In neither
+
+        // Test XOR logic - masked if in exactly one window
+        ppu.write_register(0x212A, 0x02); // WBGLOG XOR
+
+        assert!(ppu.is_pixel_masked_by_window(40, 0)); // In W1 only
+        assert!(!ppu.is_pixel_masked_by_window(70, 0)); // In both (XOR = false)
+        assert!(ppu.is_pixel_masked_by_window(100, 0)); // In W2 only
+        assert!(!ppu.is_pixel_masked_by_window(20, 0)); // In neither
+
+        // Test XNOR logic - masked if in both or neither
+        ppu.write_register(0x212A, 0x03); // WBGLOG XNOR
+
+        assert!(!ppu.is_pixel_masked_by_window(40, 0)); // In W1 only
+        assert!(ppu.is_pixel_masked_by_window(70, 0)); // In both (XNOR = true)
+        assert!(!ppu.is_pixel_masked_by_window(100, 0)); // In W2 only
+        assert!(ppu.is_pixel_masked_by_window(20, 0)); // In neither (XNOR = true)
+    }
 }
