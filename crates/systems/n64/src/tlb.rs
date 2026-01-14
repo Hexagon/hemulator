@@ -60,7 +60,7 @@ pub struct TlbEntry {
 /// Translation Lookaside Buffer
 pub struct Tlb {
     /// 32 TLB entries (standard R4300i configuration)
-    entries: [TlbEntry; 32],
+    pub(crate) entries: [TlbEntry; 32],
 
     /// Current ASID from CP0 EntryHi register
     current_asid: u8,
@@ -400,8 +400,18 @@ mod tests {
         );
 
         // Verify the translation produces a valid physical address
-        if let Some((_phys_addr, is_cached)) = result {
-            // Physical address is u32, so always within 32-bit range
+        if let Some((phys_addr, is_cached)) = result {
+            // The test validates that page_mask is properly applied in address calculation
+            // With page_mask=0x1F (256KB pages), the offset includes bits 12-17
+            // Expected physical address: PFN0 << 12 | page_offset
+            // For even page (bit 12 = 0): pfn0=0, so physical should be < 256KB
+            let page_size = ((entry.page_mask as u64 + 1) << 12) as u32;
+            assert!(
+                phys_addr < page_size,
+                "Physical address 0x{:08X} should be within page size 0x{:08X}",
+                phys_addr,
+                page_size
+            );
             assert!(is_cached, "Should be cached (c=3)");
         }
     }
@@ -441,17 +451,17 @@ mod tests {
 
     #[test]
     fn test_tlb_edge_case_physical_address_overflow() {
-        // Test that physical addresses exceeding 32 bits are rejected
+        // Test that physical addresses exceeding 32 bits are properly handled
         let mut tlb = Tlb::new();
         tlb.set_asid(1);
 
-        // Create entry that could produce 64-bit physical address
+        // Test case 1: Maximum PFN that still fits in 32-bit space
         let entry = TlbEntry {
             vpn2: 0x00010000 >> 13,
             asid: 1,
             global: false,
-            page_mask: 0xFFF, // Large page
-            pfn0: 0xFFFFF,    // Maximum PFN that stays within 32-bit space
+            page_mask: 0x000, // 4KB pages (smallest)
+            pfn0: 0xFFFFF,    // Maximum PFN (20 bits) - will produce 0xFFFFF000
             c0: 3,
             d0: true,
             v0: true,
@@ -463,12 +473,47 @@ mod tests {
 
         tlb.write_entry(0, entry);
 
-        // Should translate successfully (within 32-bit range)
+        // Should translate successfully - 0xFFFFF << 12 = 0xFFFFF000 (fits in 32 bits)
         let result = tlb.translate(0x00010000);
-        assert!(result.is_some());
-        if let Some((_phys_addr, _)) = result {
-            // Physical address is u32, so always within 32-bit range
+        assert!(
+            result.is_some(),
+            "Maximum valid PFN should translate successfully"
+        );
+        if let Some((phys_addr, _)) = result {
+            // Verify it's the expected high address
+            assert_eq!(
+                phys_addr & 0xFFFFF000,
+                0xFFFFF000,
+                "Physical address should be 0xFFFFF000 + page offset"
+            );
         }
+
+        // Test case 2: Verify the overflow protection works
+        // With large page masks, ensure we don't overflow
+        let entry_large = TlbEntry {
+            vpn2: 0x00020000 >> 13,
+            asid: 1,
+            global: false,
+            page_mask: 0xFFF, // 16MB pages (page_mask limited to 0xFFF max)
+            pfn0: 0xFFFFF,    // High PFN
+            c0: 3,
+            d0: true,
+            v0: true,
+            pfn1: 0xFFFFF,
+            c1: 3,
+            d1: true,
+            v1: true,
+        };
+
+        tlb.write_entry(1, entry_large);
+
+        // The TLB limits page_mask to prevent overflow (safe_page_mask & 0xFFF)
+        // So even with large page_mask, calculation should stay within 32 bits
+        let result = tlb.translate(0x00020000);
+        assert!(
+            result.is_some(),
+            "Large page mask should be safely limited to prevent overflow"
+        );
     }
 
     #[test]
