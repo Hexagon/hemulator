@@ -98,6 +98,13 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
   - VRAM access protection during active display
   - Reference: [VRAM](https://snes.nesdev.org/wiki/PPU_registers#VRAM)
 
+- ✅ **Window Masking** - Complete window system implementation
+  - Two independent windows with configurable left/right boundaries
+  - Per-layer window enable and inversion controls
+  - Window logic operations: OR, AND, XOR, XNOR
+  - Applied to all BG layers and sprites
+  - Reference: [Windows](https://snes.nesdev.org/wiki/PPU_registers#Windows)
+
 #### DMA & HDMA
 - ✅ **General-Purpose DMA** - Full 8-channel support
   - Channels configured via $4300-$437F
@@ -168,10 +175,10 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
 ### What's Missing
 
 #### PPU Advanced Features
-- ⚠️ **Windows** - Window registers stored but masking not applied ($2123-$212B)
+- ✅ **Windows** - Complete window masking implementation ($2123-$212B)
   - Registers: W12SEL, W34SEL, WOBJSEL, WH0-WH3, WBGLOG, WOBJLOG
-  - Window boundaries and logic stored
-  - Masking not yet implemented in rendering pipeline
+  - Window enable, inversion, and logic (OR/AND/XOR/XNOR) fully implemented
+  - Applied to all BG layers and sprites
   - Reference: [Windows](https://snes.nesdev.org/wiki/PPU_registers#Windows)
 - ⚠️ **Color Math** - Registers stored but not applied ($2130-$2132)
   - Registers: CGWSEL, CGADSUB, COLDATA properly stored
@@ -217,7 +224,7 @@ Core PPU registers implemented:
 - ✅ $2101-$2104 - OAM access
 - ✅ $212C (TM) - Main screen layer enable
 - ✅ $213F (STAT78) - PPU status and NMI flag
-- ⚠️ $2123-$212B - Windows (stubbed)
+- ✅ $2123-$212B - Windows (complete implementation)
 - ⚠️ $2130-$2132 - Color math (stubbed)
 
 Reference: [PPU Registers](https://snes.nesdev.org/wiki/PPU_registers)
