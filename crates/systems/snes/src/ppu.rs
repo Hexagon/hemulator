@@ -176,6 +176,58 @@ pub struct Ppu {
     /// Note: According to hardware documentation, all Mode 7 write-twice registers
     /// share the same previous-write latch (M7OLD)
     m7_prev: u8,
+
+    // Window registers
+    /// Window 1/2 mask settings for BG1/BG2 ($2123)
+    /// Bits 0-1: BG2 Window 1 enable/invert
+    /// Bits 2-3: BG2 Window 2 enable/invert
+    /// Bits 4-5: BG1 Window 1 enable/invert
+    /// Bits 6-7: BG1 Window 2 enable/invert
+    w12sel: u8,
+    /// Window 1/2 mask settings for BG3/BG4 ($2124)
+    w34sel: u8,
+    /// Window 1/2 mask settings for OBJ/Color ($2125)
+    wobjsel: u8,
+    /// Window 1 left position ($2126)
+    wh0: u8,
+    /// Window 1 right position ($2127)
+    wh1: u8,
+    /// Window 2 left position ($2128)
+    wh2: u8,
+    /// Window 2 right position ($2129)
+    wh3: u8,
+    /// Window mask logic for BG layers ($212A)
+    wbglog: u8,
+    /// Window mask logic for OBJ and color window ($212B)
+    wobjlog: u8,
+
+    /// Sub-screen designation ($212D) - which layers appear on sub-screen
+    /// Bits 0-4: Enable BG1-4 and OBJ on sub-screen
+    ts: u8,
+    /// Window mask designation for main screen ($212E)
+    tmw: u8,
+    /// Window mask designation for sub-screen ($212F)
+    tsw: u8,
+
+    // Color math registers
+    /// Color math control ($2130) - CGWSEL
+    /// Bits 0-1: Direct color mode for 256-color BGs
+    /// Bits 4-5: Color math enable for windows
+    /// Bit 6: Prevent color math
+    /// Bit 7: Add/subtract select for color window
+    cgwsel: u8,
+    /// Color math designation ($2131) - CGADSUB
+    /// Bits 0-5: Enable color math on BG1-4, OBJ, backdrop
+    /// Bit 6: Half color math
+    /// Bit 7: Add/subtract select (0=add, 1=subtract)
+    cgadsub: u8,
+    /// Fixed color data ($2132) - COLDATA
+    /// Color value in 5-bit BGR format (written multiple times for R/G/B)
+    coldata: u8,
+    /// Fixed color RGB components (extracted from COLDATA writes)
+    fixed_color_r: u8,
+    fixed_color_g: u8,
+    fixed_color_b: u8,
 }
 
 impl Ppu {
@@ -225,6 +277,27 @@ impl Ppu {
             m7x: 0,
             m7y: 0,
             m7_prev: 0,
+            // Window defaults
+            w12sel: 0,
+            w34sel: 0,
+            wobjsel: 0,
+            wh0: 0,
+            wh1: 0,
+            wh2: 0,
+            wh3: 0,
+            wbglog: 0,
+            wobjlog: 0,
+            // Screen designation defaults
+            ts: 0,
+            tmw: 0,
+            tsw: 0,
+            // Color math defaults
+            cgwsel: 0,
+            cgadsub: 0,
+            coldata: 0,
+            fixed_color_r: 0,
+            fixed_color_g: 0,
+            fixed_color_b: 0,
         }
     }
 
@@ -603,24 +676,131 @@ impl Ppu {
                 // Stub: Accept write but don't implement mosaic
             }
 
-            // $2123-$212B - Window registers (stub - not implemented)
-            0x2123..=0x212B => {
-                // Stub: Accept window configuration but don't implement
+            // $2123-$212B - Window registers
+            0x2123 => {
+                self.w12sel = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: W12SEL (BG1/BG2 window) = ${:02X}", val)
+                });
+            }
+            0x2124 => {
+                self.w34sel = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: W34SEL (BG3/BG4 window) = ${:02X}", val)
+                });
+            }
+            0x2125 => {
+                self.wobjsel = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: WOBJSEL (OBJ/Color window) = ${:02X}", val)
+                });
+            }
+            0x2126 => {
+                self.wh0 = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: WH0 (Window 1 left) = ${:02X}", val)
+                });
+            }
+            0x2127 => {
+                self.wh1 = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: WH1 (Window 1 right) = ${:02X}", val)
+                });
+            }
+            0x2128 => {
+                self.wh2 = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: WH2 (Window 2 left) = ${:02X}", val)
+                });
+            }
+            0x2129 => {
+                self.wh3 = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: WH3 (Window 2 right) = ${:02X}", val)
+                });
+            }
+            0x212A => {
+                self.wbglog = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: WBGLOG (BG window logic) = ${:02X}", val)
+                });
+            }
+            0x212B => {
+                self.wobjlog = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: WOBJLOG (OBJ window logic) = ${:02X}", val)
+                });
             }
 
-            // $212D - TS - Sub-screen Designation (stub - not implemented)
+            // $212D - TS - Sub-screen Designation
             0x212D => {
-                // Stub: Accept write but don't implement sub-screen
+                self.ts = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: TS (Sub-screen) = ${:02X}", val)
+                });
             }
 
-            // $212E-$212F - Window mask designation (stub - not implemented)
-            0x212E | 0x212F => {
-                // Stub: Accept window mask but don't implement
+            // $212E-$212F - Window mask designation
+            0x212E => {
+                self.tmw = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: TMW (Main screen window mask) = ${:02X}", val)
+                });
+            }
+            0x212F => {
+                self.tsw = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: TSW (Sub-screen window mask) = ${:02X}", val)
+                });
             }
 
-            // $2130-$2133 - Color math and screen mode registers (stub - not implemented)
-            0x2130..=0x2133 => {
-                // Stub: Accept color math configuration but don't implement
+            // $2130-$2132 - Color math and screen mode registers
+            0x2130 => {
+                self.cgwsel = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: CGWSEL (Color math control) = ${:02X}", val)
+                });
+            }
+            0x2131 => {
+                self.cgadsub = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!(
+                        "SNES PPU: CGADSUB (Color math designation) = ${:02X} ({}, targets: {}{}{}{}{}{})",
+                        val,
+                        if val & 0x80 != 0 { "subtract" } else { "add" },
+                        if val & 0x20 != 0 { "backdrop " } else { "" },
+                        if val & 0x10 != 0 { "OBJ " } else { "" },
+                        if val & 0x08 != 0 { "BG4 " } else { "" },
+                        if val & 0x04 != 0 { "BG3 " } else { "" },
+                        if val & 0x02 != 0 { "BG2 " } else { "" },
+                        if val & 0x01 != 0 { "BG1 " } else { "" }
+                    )
+                });
+            }
+            0x2132 => {
+                self.coldata = val;
+                // Extract color components (5-bit each) based on which bits are set
+                if val & 0x20 != 0 {
+                    self.fixed_color_r = val & 0x1F;
+                }
+                if val & 0x40 != 0 {
+                    self.fixed_color_g = val & 0x1F;
+                }
+                if val & 0x80 != 0 {
+                    self.fixed_color_b = val & 0x1F;
+                }
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!(
+                        "SNES PPU: COLDATA (Fixed color) = ${:02X} -> RGB({},{},{})",
+                        val, self.fixed_color_r, self.fixed_color_g, self.fixed_color_b
+                    )
+                });
+            }
+            0x2133 => {
+                // $2133 - SETINI - Screen mode/video select (stub for now)
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: SETINI (Screen mode) = ${:02X}", val)
+                });
             }
 
             // Other registers - stub (just accept writes)
@@ -1058,6 +1238,10 @@ impl Ppu {
                 non_backdrop_pixels += 1;
             }
         }
+
+        // NOTE: Color math registers are stored ($2130-$2132) but not yet applied
+        // Proper implementation requires per-pixel layer tracking to apply color math correctly
+        // TODO: Implement color math with per-pixel layer tracking
 
         // Apply brightness (bits 0-3 of $2100) ONLY when force blank is OFF
         // This preserves the behavior where we render during force blank for boot sequences
