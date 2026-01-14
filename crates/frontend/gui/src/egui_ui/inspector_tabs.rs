@@ -149,8 +149,8 @@ pub fn get_tabs_for_system(system_type: Option<&SystemType>) -> Vec<InspectorTab
                 tabs.extend_from_slice(&[InspectorTab::Chip8Display, InspectorTab::Chip8Registers]);
             }
             _ => {
-                // For other systems (N64, SG-1000), show Cartridge tab if they have cartridge slot
-                // N64 is cartridge-based
+                // Fallback for cartridge-based systems not explicitly listed above
+                // This includes N64, SG-1000, and any future cartridge systems
                 tabs.push(InspectorTab::Cartridge);
             }
         }
@@ -1178,10 +1178,11 @@ fn render_cartridge_tab(ui: &mut Ui, tab_manager: &mut TabManager) {
                 ui.add_space(5.0);
 
                 // Find the cartridge mount point from mount_info
+                // Note: SMS uses lowercase "cartridge" ID, others use "Cartridge"
                 let cartridge_mount = tab_manager
                     .mount_info
                     .iter()
-                    .find(|m| m.id == "Cartridge" || m.id == "cartridge");
+                    .find(|m| m.id.eq_ignore_ascii_case("Cartridge"));
 
                 if let Some(mount) = cartridge_mount {
                     egui::Grid::new("inspector_cart_mount_grid")
