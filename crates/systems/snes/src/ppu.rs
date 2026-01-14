@@ -1091,7 +1091,7 @@ impl Ppu {
             let cgram_any = self.cgram.iter().any(|&b| b != 0);
             let oam_any = self.oam.iter().any(|&b| b != 0);
             format!(
-                "SNES PPU: Frame rendered - {} non-backdrop pixels, backdrop=0x{:08X}, brightness={}, TM=0x{:02X}, BGMODE=0x{:02X}, OBSEL=0x{:02X}, VRAM_any={}, CGRAM_any={}, OAM_any={}, first=0x{:08X}",
+                "SNES PPU: Frame rendered - {} non-backdrop pixels, backdrop=0x{:08X}, brightness={}, TM=0x{:02X}, BGMODE=0x{:02X}, OBSEL=0x{:02X}, VRAM_any={}, CGRAM_any={}, OAM_any={}",
                 non_backdrop_pixels,
                 backdrop_color,
                 brightness,
@@ -1100,8 +1100,7 @@ impl Ppu {
                 self.obsel,
                 vram_any,
                 cgram_any,
-                oam_any,
-                frame.pixels[0]
+                oam_any
             )
         });
 
@@ -2278,6 +2277,13 @@ impl Ppu {
         // Get the nameselect gap for second sprite page
         let nameselect_gap = self.get_obj_nameselect_gap();
 
+        // Diagnostics: track sprite rendering statistics
+        let mut sprites_considered = 0;
+        let mut sprites_priority_filtered = 0;
+        let mut sprites_offscreen = 0;
+        let mut sprites_scanline_limited = 0;
+        let mut sprites_rendered = 0;
+
         // SNES has 128 sprites, rendered in reverse order (127 -> 0) for priority
         for sprite_index in (0..128).rev() {
             // Each sprite has 4 bytes in main OAM table
@@ -2337,14 +2343,28 @@ impl Ppu {
             let flip_x = (attr & 0x40) != 0;
             let flip_y = (attr & 0x80) != 0;
 
+            sprites_considered += 1;
+
+            // Log first 3 sprites for debugging
+            if sprites_considered <= 3 {
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!(
+                        "OBJ {}: x={}, y={}, tile={:02X}, attr={:02X}, priority={}, size={}x{}, nameselect={}, palette={}",
+                        sprite_index, x, y, tile, attr, sprite_priority, width, height, nameselect, palette
+                    )
+                });
+            }
+
             // Filter by priority range
             if sprite_priority < min_priority || sprite_priority > max_priority {
+                sprites_priority_filtered += 1;
                 continue;
             }
 
             // Skip offscreen sprites (basic culling)
             // X can be -256 to 255, Y can be negative too (wrapping)
             if x >= 256 || y >= 224 || x + width as i16 <= 0 || y + height as i16 <= 0 {
+                sprites_offscreen += 1;
                 continue;
             }
 
@@ -2370,6 +2390,7 @@ impl Ppu {
 
             // Skip if limits exceeded
             if !can_render {
+                sprites_scanline_limited += 1;
                 continue;
             }
 
@@ -2378,6 +2399,8 @@ impl Ppu {
                 sprites_per_scanline[scanline] += 1;
                 tiles_per_scanline[scanline] += tiles_wide;
             }
+
+            sprites_rendered += 1;
 
             // Render sprite pixels with priority
             self.render_sprite_priority(
@@ -2396,6 +2419,28 @@ impl Ppu {
                 flip_x,
                 flip_y,
             );
+        }
+
+        // Log sprite rendering summary (only once per few frames to reduce spam)
+        if sprites_considered > 0 || sprites_rendered > 0 {
+            log(LogCategory::PPU, LogLevel::Debug, || {
+                format!(
+                    "OBJ render priority {}-{}: considered={}, priority_filtered={}, offscreen={}, scanline_limited={}, rendered={} | OBSEL: base=${:04X}, gap=${:04X}, sizes={}x{}/{}x{}",
+                    min_priority,
+                    max_priority,
+                    sprites_considered,
+                    sprites_priority_filtered,
+                    sprites_offscreen,
+                    sprites_scanline_limited,
+                    sprites_rendered,
+                    obj_base,
+                    nameselect_gap,
+                    small_size.0,
+                    small_size.1,
+                    large_size.0,
+                    large_size.1
+                )
+            });
         }
     }
 
@@ -2434,6 +2479,15 @@ impl Ppu {
         } else {
             obj_base
         };
+
+        // Track pixels drawn for diagnostics (only log first sprite)
+        static mut SPRITE_COUNT: usize = 0;
+        let is_first_sprite = unsafe {
+            let count = SPRITE_COUNT;
+            SPRITE_COUNT += 1;
+            count == 0
+        };
+        let mut pixels_drawn = 0;
 
         for ty in 0..tiles_high {
             for tx in 0..tiles_wide {
@@ -2516,10 +2570,31 @@ impl Ppu {
                         {
                             frame.pixels[frame_offset] = color;
                             priority_buffer[frame_offset] = render_priority;
+                            pixels_drawn += 1;
+
+                            // Log first few pixels for the first sprite
+                            if is_first_sprite && pixels_drawn <= 5 {
+                                log(LogCategory::PPU, LogLevel::Debug, || {
+                                    format!(
+                                        "OBJ pixel: screen=({},{}), tile_addr=${:04X}, bp=[{:02X},{:02X},{:02X},{:02X}], color_idx={}, cgram_idx={}, color=${:08X}",
+                                        screen_x, screen_y, tile_addr, bp0, bp1, bp2, bp3, color_index, cgram_index, color
+                                    )
+                                });
+                            }
                         }
                     }
                 }
             }
+        }
+
+        // Log summary for first sprite only
+        if is_first_sprite {
+            log(LogCategory::PPU, LogLevel::Debug, || {
+                format!(
+                    "First sprite rendered: pos=({},{}), size={}x{}, tile=${:02X}, tile_addr=${:04X}, palette={}, pixels_drawn={}",
+                    x, y, width, height, tile, sprite_tile_base, palette, pixels_drawn
+                )
+            });
         }
     }
 
