@@ -424,3 +424,77 @@ Studied bsnes `ppu/object.cpp` and `ppu-fast/object.cpp` to understand correct S
 2. **OBJ rendering validation**: Need a sprite-specific test ROM to verify OBJ fixes work
 
 3. **SMW-specific debugging**: May need to set breakpoints earlier in SMW's boot sequence to catch where things go wrong
+
+---
+
+## Update (Jan 14, 2026): NMI and Main Loop Confirmed Working
+
+### Investigation summary
+
+Deep dive into why SMW shows 0 rendered pixels despite all systems appearing functional. Used extensive tracing and memory debugging to understand the execution flow.
+
+### Key discovery: The game loop IS running correctly
+
+Added WRAM[0x10] read/write tracing and discovered:
+
+1. **NMI enables correctly** after ~23 frames of initialization
+   - Game writes `$4200 = 0x81` (NMI enable + auto-joypad)
+   - Subsequent VBlanks correctly set `nmi_pending = true`
+
+2. **NMI fires every frame** and handler executes:
+   - NMI vector ($FFEA) correctly reads $816A from ROM
+   - Handler pushes registers: SEI, PHP, REP #$30, PHA, PHX, PHY, PHB, PHK...
+   - Handler increments `$10` (the "frame ready" flag)
+
+3. **Main loop responds correctly**:
+   ```
+   NMI triggered at PC=$00806B
+   WRAM[0x10] write: 00 -> 01   (NMI handler sets flag)
+   WRAM[0x10] read: 01          (main loop sees it)
+   WRAM[0x10] write: 01 -> 00   (main loop clears after processing)
+   ```
+
+4. **Pattern repeats every frame**:
+   ```
+   NMI triggered → INC $10 → main loop processes → STZ $10 → repeat
+   ```
+
+### What this means
+
+- **CPU execution is correct** - The main game loop and NMI handler are functioning properly
+- **Memory read/write is correct** - WRAM operations work as expected
+- **NMI timing is correct** - VBlank triggers NMI, handler executes, returns properly
+- **The problem is NOT CPU/memory/interrupt related**
+
+### Remaining issue: Rendering
+
+The game is running but producing no visible output. Given that:
+- Test ROMs render correctly (57,344 pixels for BG test)
+- SMW has TM=0x10 (OBJ only, no BG layers enabled)
+- VRAM/CGRAM/OAM contain data
+
+The issue is likely in **OBJ (sprite) rendering** specifically:
+
+1. **OBJ tile addressing** may still be incorrect for SMW's specific sprite setup
+2. **OBJ visibility calculations** may be culling all sprites as off-screen
+3. **Sprite priority/transparency** handling may make sprites invisible
+4. SMW may be using specific OBSEL/nameselect combinations we don't handle correctly
+
+### Artifacts from this phase
+
+- Trace showing NMI + main loop pattern: `trace_dump.txt`
+- Memory access logs showing WRAM[0x10] lifecycle
+
+### Next steps
+
+1. **Add OBJ rendering diagnostics**:
+   - Count sprites considered vs sprites actually rendered
+   - Log first N sprites' computed tile addresses and screen positions
+   - Verify OBSEL settings match what we're calculating
+
+2. **Create OBJ-specific test ROM**:
+   - Simple sprite at known position with known tile
+   - Verify OBJ pipeline independent of SMW complexity
+
+3. **Compare OBJ tile addresses with known-good emulator**:
+   - May need to diff against bsnes trace output
