@@ -696,7 +696,13 @@ impl<M: Memory6502> Cpu6502<M> {
                     self.status &= !0x01;
                 }
                 self.set_zero_and_negative(res);
-                let cycles = if op == 0xC9 { 2 } else if page_crossed { 5 } else { 4 };
+                let cycles = if op == 0xC9 {
+                    2
+                } else if page_crossed {
+                    5
+                } else {
+                    4
+                };
                 self.cycles += cycles as u64;
                 cycles
             }
@@ -949,7 +955,11 @@ impl<M: Memory6502> Cpu6502<M> {
                     0xFD => 4, // absolute,X
                     _ => 2,
                 };
-                let cycles = if page_crossed { base_cycles + 1 } else { base_cycles };
+                let cycles = if page_crossed {
+                    base_cycles + 1
+                } else {
+                    base_cycles
+                };
                 self.cycles += cycles as u64;
                 cycles
             }
@@ -3542,7 +3552,7 @@ mod tests {
     #[test]
     fn test_page_crossing_penalty() {
         // Test that page crossing adds +1 cycle to indexed read instructions
-        
+
         // Test LDA absolute,X with NO page crossing
         let mem = ArrayMemory::new();
         let mut cpu = Cpu6502::new(mem);
@@ -3552,7 +3562,7 @@ mod tests {
         cpu.x = 0x10; // $0200 + $10 = $0210 (no page cross: $02 -> $02)
         assert_eq!(cpu.step(), 4); // Base 4 cycles, no page crossing
         assert_eq!(cpu.a, 0x42);
-        
+
         // Test LDA absolute,X WITH page crossing
         let mem2 = ArrayMemory::new();
         let mut cpu2 = Cpu6502::new(mem2);
@@ -3562,7 +3572,7 @@ mod tests {
         cpu2.x = 0x01; // $02FF + $01 = $0300 (page cross: $02 -> $03)
         assert_eq!(cpu2.step(), 5); // Base 4 cycles + 1 for page crossing
         assert_eq!(cpu2.a, 0x55);
-        
+
         // Test LDA absolute,Y with page crossing
         let mem3 = ArrayMemory::new();
         let mut cpu3 = Cpu6502::new(mem3);
@@ -3572,7 +3582,7 @@ mod tests {
         cpu3.y = 0x80; // $0380 + $80 = $0400 (page cross: $03 -> $04)
         assert_eq!(cpu3.step(), 5); // Base 4 cycles + 1 for page crossing
         assert_eq!(cpu3.a, 0x77);
-        
+
         // Test LDA (indirect),Y with page crossing
         let mem4 = ArrayMemory::new();
         let mut cpu4 = Cpu6502::new(mem4);
@@ -3584,7 +3594,7 @@ mod tests {
         cpu4.y = 0x02; // $01FE + $02 = $0200 (page cross: $01 -> $02)
         assert_eq!(cpu4.step(), 6); // Base 5 cycles + 1 for page crossing
         assert_eq!(cpu4.a, 0x99);
-        
+
         // Test ADC absolute,X with page crossing
         let mem5 = ArrayMemory::new();
         let mut cpu5 = Cpu6502::new(mem5);
@@ -3596,7 +3606,7 @@ mod tests {
         cpu5.status &= !0x01; // Clear carry
         assert_eq!(cpu5.step(), 5); // Base 4 cycles + 1 for page crossing
         assert_eq!(cpu5.a, 0x30);
-        
+
         // Test CMP absolute,Y with page crossing
         let mem6 = ArrayMemory::new();
         let mut cpu6 = Cpu6502::new(mem6);
@@ -3606,7 +3616,7 @@ mod tests {
         cpu6.a = 0x40;
         cpu6.y = 0xFF; // $2000 + $FF = $20FF (no cross)
         assert_eq!(cpu6.step(), 4); // Base 4 cycles, no page crossing
-        
+
         // Test with actual page crossing
         let mem7 = ArrayMemory::new();
         let mut cpu7 = Cpu6502::new(mem7);
