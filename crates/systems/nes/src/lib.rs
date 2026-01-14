@@ -658,14 +658,15 @@ impl System for NesSystem {
                         };
                         if should_render {
                             if debug_scanline_drift
-                                && (scanline_before < 3 || scanline_before >= 237)
+                                && (scanline_before < 3 || scanline_before >= 237 || (scanline_before >= 14 && scanline_before <= 20))
                             {
                                 let ppu_dot = b.ppu.get_dot();
                                 let ppu_mask = b.ppu.mask();
+                                let v = b.ppu.vram_addr.get();
                                 log(LogCategory::PPU, LogLevel::Info, || {
                                     format!(
-                                        "NES: frame={} render_scanline={} ppu=({}, {}) mask=0x{:02X}",
-                                        self.frame_index, scanline_before, b.ppu.get_scanline(), ppu_dot, ppu_mask
+                                        "NES: frame={} render_scanline={} ppu=({}, {}) mask=0x{:02X} v=${:04X}",
+                                        self.frame_index, scanline_before, b.ppu.get_scanline(), ppu_dot, ppu_mask, v
                                     )
                                 });
                             }
