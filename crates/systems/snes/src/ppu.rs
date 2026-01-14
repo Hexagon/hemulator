@@ -929,10 +929,6 @@ impl Ppu {
         // We use 255 as "unset" since it's higher than any valid priority
         let mut priority_buffer = vec![255u8; frame_width as usize * 224];
 
-        // Layer buffer: tracks which layer each pixel came from
-        // 0-3 = BG1-BG4, 4 = OBJ, 5 = backdrop
-        let mut layer_buffer = vec![5u8; frame_width as usize * 224];
-
         // NOTE: We render even when screen is blanked (bit 7 set)
         // This is not hardware-accurate but allows commercial ROMs to display
         // something during boot sequences before they unblank the screen
@@ -1238,29 +1234,59 @@ impl Ppu {
             if priority == 255 {
                 // No layer rendered here - use backdrop color
                 frame.pixels[i] = backdrop_color;
-                layer_buffer[i] = 5; // Mark as backdrop
             } else {
                 non_backdrop_pixels += 1;
             }
         }
 
-        // Apply color math if enabled
+        // Apply color math if enabled (simplified version without per-pixel layer tracking)
         // Check if any layer has color math enabled
         let color_math_any_enabled = self.cgadsub & 0x3F != 0;
         if color_math_any_enabled {
-            for y in 0..224 {
-                for x in 0..frame_width as usize {
-                    let idx = y * frame_width as usize + x;
-                    let layer = layer_buffer[idx];
-                    let is_backdrop = layer == 5;
-                    
-                    // Apply color math to this pixel
-                    frame.pixels[idx] = self.apply_color_math(
-                        frame.pixels[idx],
-                        layer,
-                        x,
-                        is_backdrop,
-                    );
+            // Get fixed color (5-bit BGR from register writes)
+            let fixed_r = ((self.fixed_color_r as u32) << 3) | (self.fixed_color_r as u32 >> 2);
+            let fixed_g = ((self.fixed_color_g as u32) << 3) | (self.fixed_color_g as u32 >> 2);
+            let fixed_b = ((self.fixed_color_b as u32) << 3) | (self.fixed_color_b as u32 >> 2);
+
+            // Determine if we add or subtract
+            let subtract = (self.cgadsub & 0x80) != 0;
+            let half = (self.cgadsub & 0x40) != 0;
+
+            // Apply color math to all non-backdrop pixels
+            // This is a simplified version - proper implementation would check per-layer and per-pixel
+            for (i, &priority) in priority_buffer.iter().enumerate() {
+                if priority != 255 {
+                    // Extract RGB from current pixel
+                    let pixel = frame.pixels[i];
+                    let r = (pixel >> 16) & 0xFF;
+                    let g = (pixel >> 8) & 0xFF;
+                    let b = pixel & 0xFF;
+
+                    // Perform color math
+                    let (result_r, result_g, result_b) = if subtract {
+                        // Subtract fixed color
+                        (
+                            r.saturating_sub(fixed_r),
+                            g.saturating_sub(fixed_g),
+                            b.saturating_sub(fixed_b),
+                        )
+                    } else {
+                        // Add fixed color
+                        (
+                            (r + fixed_r).min(255),
+                            (g + fixed_g).min(255),
+                            (b + fixed_b).min(255),
+                        )
+                    };
+
+                    // Apply half intensity if enabled
+                    let (final_r, final_g, final_b) = if half {
+                        (result_r / 2, result_g / 2, result_b / 2)
+                    } else {
+                        (result_r, result_g, result_b)
+                    };
+
+                    frame.pixels[i] = 0xFF000000 | (final_r << 16) | (final_g << 8) | final_b;
                 }
             }
         }
@@ -2824,275 +2850,6 @@ impl Ppu {
 
         // Return as ARGB (0xAARRGGBB)
         0xFF000000 | ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
-    }
-
-    /// Check if a pixel at (x, y) is inside the window for a given layer
-    /// Returns true if pixel should be rendered (not masked)
-    fn is_pixel_in_window(&self, x: usize, layer_bit: u8) -> bool {
-        // Window 1 and Window 2 boundaries
-        let w1_left = self.wh0 as usize;
-        let w1_right = self.wh1 as usize;
-        let w2_left = self.wh2 as usize;
-        let w2_right = self.wh3 as usize;
-
-        // Get window settings for this layer
-        let (w1_enable, w1_invert, w2_enable, w2_invert) = match layer_bit {
-            0 => {
-                // BG1 (bits 4-7 of W12SEL)
-                let settings = (self.w12sel >> 4) & 0x0F;
-                (
-                    (settings & 0x02) != 0,
-                    (settings & 0x01) != 0,
-                    (settings & 0x08) != 0,
-                    (settings & 0x04) != 0,
-                )
-            }
-            1 => {
-                // BG2 (bits 0-3 of W12SEL)
-                let settings = self.w12sel & 0x0F;
-                (
-                    (settings & 0x02) != 0,
-                    (settings & 0x01) != 0,
-                    (settings & 0x08) != 0,
-                    (settings & 0x04) != 0,
-                )
-            }
-            2 => {
-                // BG3 (bits 4-7 of W34SEL)
-                let settings = (self.w34sel >> 4) & 0x0F;
-                (
-                    (settings & 0x02) != 0,
-                    (settings & 0x01) != 0,
-                    (settings & 0x08) != 0,
-                    (settings & 0x04) != 0,
-                )
-            }
-            3 => {
-                // BG4 (bits 0-3 of W34SEL)
-                let settings = self.w34sel & 0x0F;
-                (
-                    (settings & 0x02) != 0,
-                    (settings & 0x01) != 0,
-                    (settings & 0x08) != 0,
-                    (settings & 0x04) != 0,
-                )
-            }
-            4 => {
-                // OBJ (bits 4-7 of WOBJSEL)
-                let settings = (self.wobjsel >> 4) & 0x0F;
-                (
-                    (settings & 0x02) != 0,
-                    (settings & 0x01) != 0,
-                    (settings & 0x08) != 0,
-                    (settings & 0x04) != 0,
-                )
-            }
-            _ => return true, // Invalid layer, don't mask
-        };
-
-        // If no windows enabled for this layer, always render
-        if !w1_enable && !w2_enable {
-            return true;
-        }
-
-        // Check if pixel is inside each window
-        let in_w1 = if w1_left <= w1_right {
-            x >= w1_left && x <= w1_right
-        } else {
-            x >= w1_left || x <= w1_right // Wraparound case
-        };
-
-        let in_w2 = if w2_left <= w2_right {
-            x >= w2_left && x <= w2_right
-        } else {
-            x >= w2_left || x <= w2_right // Wraparound case
-        };
-
-        // Apply inversion
-        let w1_result = if w1_invert { !in_w1 } else { in_w1 };
-        let w2_result = if w2_invert { !in_w2 } else { in_w2 };
-
-        // Get window logic for BG layers (WBGLOG) or OBJ (WOBJLOG)
-        let logic = if layer_bit < 4 {
-            // BG layers: get 2-bit logic from WBGLOG
-            (self.wbglog >> (layer_bit * 2)) & 0x03
-        } else {
-            // OBJ: get 2-bit logic from WOBJLOG bits 4-5
-            (self.wobjlog >> 4) & 0x03
-        };
-
-        // Apply window logic:
-        // 00 = OR: render if in either window
-        // 01 = AND: render only if in both windows
-        // 10 = XOR: render if in exactly one window
-        // 11 = XNOR: render if in both or neither window
-        match logic {
-            0 => {
-                // OR
-                if w1_enable && w2_enable {
-                    w1_result || w2_result
-                } else if w1_enable {
-                    w1_result
-                } else {
-                    w2_result
-                }
-            }
-            1 => {
-                // AND
-                if w1_enable && w2_enable {
-                    w1_result && w2_result
-                } else if w1_enable {
-                    w1_result
-                } else {
-                    w2_result
-                }
-            }
-            2 => {
-                // XOR
-                if w1_enable && w2_enable {
-                    w1_result ^ w2_result
-                } else if w1_enable {
-                    w1_result
-                } else {
-                    w2_result
-                }
-            }
-            3 => {
-                // XNOR
-                if w1_enable && w2_enable {
-                    !(w1_result ^ w2_result)
-                } else if w1_enable {
-                    w1_result
-                } else {
-                    w2_result
-                }
-            }
-            _ => true,
-        }
-    }
-
-    /// Apply color math to a pixel
-    /// Returns the modified color after color math operations
-    fn apply_color_math(
-        &self,
-        main_color: u32,
-        layer_bit: u8,
-        x: usize,
-        is_backdrop: bool,
-    ) -> u32 {
-        // Check if color math is enabled for this layer
-        let color_math_enabled = if is_backdrop {
-            (self.cgadsub & 0x20) != 0 // Bit 5: backdrop
-        } else {
-            match layer_bit {
-                0 => (self.cgadsub & 0x01) != 0, // BG1
-                1 => (self.cgadsub & 0x02) != 0, // BG2
-                2 => (self.cgadsub & 0x04) != 0, // BG3
-                3 => (self.cgadsub & 0x08) != 0, // BG4
-                4 => (self.cgadsub & 0x10) != 0, // OBJ
-                _ => false,
-            }
-        };
-
-        if !color_math_enabled {
-            return main_color;
-        }
-
-        // Check color window (if enabled)
-        let color_window_enable = (self.wobjsel & 0x02) != 0;
-        let color_window_invert = (self.wobjsel & 0x01) != 0;
-        
-        if color_window_enable {
-            // Check if pixel is in color window
-            let w1_left = self.wh0 as usize;
-            let w1_right = self.wh1 as usize;
-            let w2_left = self.wh2 as usize;
-            let w2_right = self.wh3 as usize;
-
-            let in_w1 = if w1_left <= w1_right {
-                x >= w1_left && x <= w1_right
-            } else {
-                x >= w1_left || x <= w1_right
-            };
-
-            let in_w2 = if w2_left <= w2_right {
-                x >= w2_left && x <= w2_right
-            } else {
-                x >= w2_left || x <= w2_right
-            };
-
-            let logic = (self.wobjlog >> 0) & 0x03;
-            let in_color_window = match logic {
-                0 => in_w1 || in_w2,                 // OR
-                1 => in_w1 && in_w2,                 // AND
-                2 => in_w1 ^ in_w2,                  // XOR
-                3 => !(in_w1 ^ in_w2),               // XNOR
-                _ => false,
-            };
-
-            let in_color_window = if color_window_invert {
-                !in_color_window
-            } else {
-                in_color_window
-            };
-
-            // Color math enable/prevent based on CGWSEL bits 4-5
-            let prevent_math = (self.cgwsel & 0x20) != 0;
-            let prevent_math_inside = (self.cgwsel & 0x10) != 0;
-
-            if prevent_math {
-                // Bit 6: prevent color math
-                return main_color;
-            }
-
-            if prevent_math_inside && in_color_window {
-                // Prevent math inside color window
-                return main_color;
-            }
-
-            if !prevent_math_inside && !in_color_window {
-                // Prevent math outside color window
-                return main_color;
-            }
-        }
-
-        // Get fixed color (5-bit BGR from register writes)
-        let fixed_r = ((self.fixed_color_r as u32) << 3) | (self.fixed_color_r as u32 >> 2);
-        let fixed_g = ((self.fixed_color_g as u32) << 3) | (self.fixed_color_g as u32 >> 2);
-        let fixed_b = ((self.fixed_color_b as u32) << 3) | (self.fixed_color_b as u32 >> 2);
-
-        // Extract RGB from main color
-        let main_r = (main_color >> 16) & 0xFF;
-        let main_g = (main_color >> 8) & 0xFF;
-        let main_b = main_color & 0xFF;
-
-        // Determine if we add or subtract
-        let subtract = (self.cgadsub & 0x80) != 0;
-        let half = (self.cgadsub & 0x40) != 0;
-
-        // Perform color math
-        let (result_r, result_g, result_b) = if subtract {
-            // Subtract fixed color
-            let r = main_r.saturating_sub(fixed_r);
-            let g = main_g.saturating_sub(fixed_g);
-            let b = main_b.saturating_sub(fixed_b);
-            (r, g, b)
-        } else {
-            // Add fixed color
-            let r = (main_r + fixed_r).min(255);
-            let g = (main_g + fixed_g).min(255);
-            let b = (main_b + fixed_b).min(255);
-            (r, g, b)
-        };
-
-        // Apply half intensity if enabled
-        let (final_r, final_g, final_b) = if half {
-            (result_r / 2, result_g / 2, result_b / 2)
-        } else {
-            (result_r, result_g, result_b)
-        };
-
-        0xFF000000 | (final_r << 16) | (final_g << 8) | final_b
     }
 }
 
