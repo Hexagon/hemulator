@@ -5579,8 +5579,7 @@ fn main() {
                                 .set_message("Created new ColecoVision system".to_string());
                         }
                         "SG-1000" => {
-                            sys =
-                                EmulatorSystem::SG1000(Box::new(emu_sg1000::Sg1000System::new()));
+                            sys = EmulatorSystem::SG1000(Box::new(emu_sg1000::Sg1000System::new()));
                             rom_loaded = false;
                             rom_hash = None;
                             runtime_state.clear_mounts();
