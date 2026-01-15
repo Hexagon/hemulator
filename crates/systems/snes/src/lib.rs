@@ -13,6 +13,7 @@
 
 mod bus;
 mod cartridge;
+pub mod coprocessors;
 mod cpu;
 mod debugger;
 mod ppu;

@@ -171,6 +171,10 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
 #### Other Features
 - ✅ **Save States** - Full system state serialization
 - ✅ **Logging** - Comprehensive debug logging for CPU, PPU, DMA, interrupts
+- ✅ **Enhancement Chips** - DSP-1 math coprocessor fully implemented
+  - Automatic detection from ROM header
+  - Support for Pilotwings, Super Mario Kart, and other DSP-1 games
+  - All major DSP-1 commands implemented (multiply, inverse, sin/cos, rotation, projection, distance)
 
 ### What's Missing
 
@@ -198,10 +202,57 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
   - Reference: [DSP](https://snes.nesdev.org/wiki/DSP)
 
 #### Enhancement Chips
-- ❌ **No enhancement chip support**
-  - No SuperFX, SA-1, DSP-1/2/3/4, S-DD1, Cx4, etc.
-  - Games requiring these chips will not work
-  - Reference: [Enhancement Chips](https://snes.nesdev.org/wiki/Enhancement_chips)
+
+The emulator now includes a framework for enhancement chip (coprocessor) support:
+
+- ✅ **DSP-1** - Math coprocessor (fully implemented)
+  - Used in ~20 games including Pilotwings, Super Mario Kart, Ace o Nerae!
+  - Provides hardware acceleration for 3D math operations
+  - Supported operations: multiply, inverse, attitude (sin/cos), gyrate (2D rotation), distance, radius, range, project (3D projection), polar to cartesian
+  - Both LoROM and HiROM memory mappings supported
+  - Reference: [DSP-1](https://snes.nesdev.org/wiki/DSP-1), [SNESLab DSP1](https://sneslab.net/wiki/DSP1)
+
+- ❌ **Not Yet Implemented**
+  - SuperFX/SuperFX2 (GSU-1/GSU-2) - Graphics coprocessor (Star Fox, Yoshi's Island, Doom)
+  - SA-1 - CPU coprocessor with additional 65C816 (Super Mario RPG, Kirby's Dream Land 3)
+  - DSP-2 - Math coprocessor variant (Dungeon Master)
+  - DSP-3 - Math coprocessor variant (SD Gundam GX)
+  - DSP-4 - Math coprocessor variant (Top Gear 3000)
+  - S-DD1 - Decompression chip (Star Ocean, Street Fighter Alpha 2)
+  - CX4 - Coprocessor (Mega Man X2, Mega Man X3)
+  - SPC7110 - Data decompression (Far East of Eden Zero)
+  - ST010/ST011/ST018 - Various coprocessors (F1 ROC II, Hayazashi Nidan Morita Shougi)
+  - OBC-1 - Coprocessor (Metal Combat: Falcon's Revenge)
+
+### Enhancement Chip Roadmap
+
+**Priority 1 - Most Common Chips (High Impact)**
+1. ✅ **DSP-1** - Implemented
+2. **SuperFX** - Graphics coprocessor, ~10 popular games (Star Fox, Yoshi's Island)
+3. **SA-1** - CPU coprocessor, ~30 games including Super Mario RPG
+
+**Priority 2 - Moderately Common**
+4. **S-DD1** - Decompression chip, ~5 games including Star Ocean
+5. **CX4** - Used in Mega Man X2/X3
+
+**Priority 3 - Less Common**
+6. **DSP-2/3/4** - Math coprocessor variants (few games each)
+7. **SPC7110** - Decompression chip (few games)
+8. **OBC-1** - Rare coprocessor (1-2 games)
+9. **ST010/ST011/ST018** - Very rare (1-2 games each)
+
+**Implementation Notes:**
+- Enhancement chips are detected automatically from ROM header (byte $FFD6)
+- Chips are instantiated during cartridge load if detected and implemented
+- Memory mapping is handled transparently by the cartridge module
+- Interior mutability (RefCell) allows chip state updates during memory reads
+- Save state support needs to be added for chip state serialization
+
+**References:**
+- [Enhancement Chips Overview](https://snes.nesdev.org/wiki/Enhancement_chips)
+- [List of SNES Enhancement Chips](https://en.wikipedia.org/wiki/List_of_Super_NES_enhancement_chips)
+- [SNES Coprocessors Blog Post](https://jsgroth.dev/blog/posts/snes-coprocessors-part-1/)
+
 
 #### Other Missing Features
 - ❌ **IRQ** - H/V timer interrupts not implemented
@@ -271,7 +322,9 @@ SnesSystem
           │   └── 2bpp/4bpp/8bpp tile support
           └── Cartridge (LoROM/HiROM/ExHiROM auto-detect)
               ├── ROM banks (LoROM: 32KB chunks, HiROM/ExHiROM: 64KB linear)
-              └── 32KB SRAM
+              ├── 32KB SRAM
+              └── Enhancement Chip (optional)
+                  └── DSP-1 (math coprocessor) - RefCell for interior mutability
 ```
 
 ### Key Files
@@ -280,7 +333,9 @@ SnesSystem
 - `src/bus.rs` - Memory bus with all hardware registers
 - `src/ppu.rs` - Complete PPU implementation (modes 0-7)
 - `src/ppu_renderer.rs` - Rendering backend
-- `src/cartridge.rs` - ROM loading and mapping
+- `src/cartridge.rs` - ROM loading, mapping, and enhancement chip integration
+- `src/coprocessors/mod.rs` - Enhancement chip framework and chip type detection
+- `src/coprocessors/dsp1.rs` - DSP-1 math coprocessor implementation
 
 ## Testing
 
@@ -304,9 +359,13 @@ Games known to work:
 - ✅ **F-Zero** - Now works with Mode 7 rotation/scaling
 - ⚠️ **Donkey Kong Country** - Graphics work (no audio)
 - 🔧 **Tales of Phantasia** - ExHiROM support implemented, should work (not tested)
-- ❌ **Super Mario RPG** - Requires SA-1 chip
-- ❌ **Star Fox** - Requires SuperFX chip
-- ❌ **Star Ocean** - Requires SDD-1 chip (different from ExHiROM)
+- ✅ **Pilotwings** - Should work with DSP-1 support (not tested)
+- ✅ **Super Mario Kart** - Should work with DSP-1 support (not tested)
+- ❌ **Super Mario RPG** - Requires SA-1 chip (not yet implemented)
+- ❌ **Star Fox** - Requires SuperFX chip (not yet implemented)
+- ❌ **Yoshi's Island** - Requires SuperFX2 chip (not yet implemented)
+- ❌ **Star Ocean** - Requires S-DD1 chip (not yet implemented)
+- ❌ **Mega Man X2/X3** - Requires CX4 chip (not yet implemented)
 
 ## Development
 
@@ -342,6 +401,12 @@ cargo run -- game.sfc --log-bus debug
 2. **Timing** - Frame-based, not cycle-accurate
    - Good enough for most games
    - Some timing-sensitive effects may not work
+
+3. **Enhancement Chips** - Most chips not yet implemented
+   - DSP-1 is fully implemented and working
+   - SuperFX, SA-1, S-DD1, CX4, and other chips not yet implemented
+   - Games requiring unimplemented chips will not work properly
+   - See Enhancement Chip Roadmap section for planned implementations
 
 ## Additional Documentation
 
