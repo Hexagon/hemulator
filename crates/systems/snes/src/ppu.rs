@@ -3350,9 +3350,9 @@ impl Ppu {
         // Window enable bits for color math are in wobjsel ($2125) bits 4-7
         // Bit 4-5: Window 1 enable and inversion
         // Bit 6-7: Window 2 enable and inversion
-        let win1_enable = (self.wobjsel & 0x30) != 0;
+        let win1_enable = (self.wobjsel & 0x10) != 0;
         let win1_invert = (self.wobjsel & 0x20) != 0;
-        let win2_enable = (self.wobjsel & 0xC0) != 0;
+        let win2_enable = (self.wobjsel & 0x40) != 0;
         let win2_invert = (self.wobjsel & 0x80) != 0;
 
         if !win1_enable && !win2_enable {
