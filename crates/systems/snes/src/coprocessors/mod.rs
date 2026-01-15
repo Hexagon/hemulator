@@ -140,4 +140,12 @@ pub trait EnhancementChip {
 
     /// Get the chip type
     fn chip_type(&self) -> ChipType;
+
+    /// Serialize chip state for save states
+    /// Returns a JSON string representation of the chip's state
+    fn save_state(&self) -> Result<String, String>;
+
+    /// Deserialize chip state from save states
+    /// Restores the chip's state from a JSON string
+    fn load_state(&mut self, state: &str) -> Result<(), String>;
 }
