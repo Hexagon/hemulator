@@ -1112,6 +1112,7 @@ impl<M: Memory65c816> Cpu65c816<M> {
 
             // RTI - Return from Interrupt
             0x40 => {
+                let old_status = self.status;
                 if self.emulation {
                     self.status = self.pop_byte();
                     self.pc = self.pop_word();
@@ -1121,6 +1122,11 @@ impl<M: Memory65c816> Cpu65c816<M> {
                     self.pc = self.pop_word();
                     self.pbr = self.pop_byte();
                     self.cycles += 7;
+                }
+                // If X flag transitions from 0 to 1, clear high bytes of X and Y
+                if (old_status & FLAG_INDEX) == 0 && (self.status & FLAG_INDEX) != 0 {
+                    self.x &= 0x00FF;
+                    self.y &= 0x00FF;
                 }
                 // Clear NMI flag when returning from interrupt
                 self.in_nmi = false;
@@ -3724,6 +3730,11 @@ impl<M: Memory65c816> Cpu65c816<M> {
             0xE2 => {
                 let mask = self.fetch_byte();
                 self.status |= mask;
+                // When X flag is set (8-bit index registers), high bytes of X and Y are forced to 0
+                if mask & FLAG_INDEX != 0 {
+                    self.x &= 0x00FF;
+                    self.y &= 0x00FF;
+                }
                 self.cycles += 3;
             }
 
@@ -3877,9 +3888,15 @@ impl<M: Memory65c816> Cpu65c816<M> {
             }
             0x28 => {
                 // PLP - Pull Processor Status
+                let old_status = self.status;
                 self.status = self.pop_byte();
                 if self.emulation {
                     self.status |= FLAG_MEMORY | FLAG_INDEX;
+                }
+                // If X flag transitions from 0 to 1, clear high bytes of X and Y
+                if (old_status & FLAG_INDEX) == 0 && (self.status & FLAG_INDEX) != 0 {
+                    self.x &= 0x00FF;
+                    self.y &= 0x00FF;
                 }
                 self.cycles += 4;
             }
