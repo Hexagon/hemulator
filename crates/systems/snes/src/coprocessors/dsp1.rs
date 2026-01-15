@@ -228,7 +228,22 @@ impl Dsp1 {
                 self.write_s16(0, result);
             }
             Dsp1Command::Attitude => {
-                // Calculate sin/cos for 4 angles
+                // FIXME: Incomplete implementation!
+                // This should output a full 3x3 rotation matrix (18 bytes total),
+                // but currently only outputs 8 bytes.
+                //
+                // According to DSP-1 documentation, the Attitude command should:
+                // - Input: 4 rotation angles (Z, X, Y axes) - 8 bytes
+                // - Output: 9 matrix elements (M11-M33) - 18 bytes
+                //
+                // The matrix represents a Direction Cosine Matrix (DCM) for 3D rotation.
+                // Current implementation is a placeholder that only calculates sine values.
+                //
+                // References:
+                // - https://sneslab.net/wiki/DSP1/Attitude
+                // - bsnes/sfc/coprocessor/dsp1/dsp1emu.cpp
+                //
+                // TODO: Implement proper 3x3 rotation matrix calculation
                 for i in 0..4 {
                     let angle = self.read_s16(i * 2);
                     // Convert to radians: angle is in 1/256th of a full rotation
@@ -236,8 +251,6 @@ impl Dsp1 {
                     let sin_val = (radians.sin() * 32767.0) as i16;
                     let _cos_val = (radians.cos() * 32767.0) as i16;
                     self.write_s16(i * 2, sin_val);
-                    // Note: actual DSP-1 interleaves sin/cos differently
-                    // This is a simplified implementation
                 }
             }
             Dsp1Command::Gyrate => {
@@ -306,7 +319,19 @@ impl Dsp1 {
                 self.write_s16(2, y);
             }
             Dsp1Command::Target | Dsp1Command::Rotate | Dsp1Command::Unknown => {
-                // Not implemented - fill output with zeros
+                // FIXME: Not implemented!
+                // These commands are not yet implemented and will return zeros.
+                //
+                // Target (0x20): Coordinate transformation (8 bytes in, 8 bytes out)
+                // Rotate (0x24): 3D rotation (6 bytes in, 6 bytes out)
+                //
+                // Games using these commands will not function correctly.
+                //
+                // References:
+                // - https://sneslab.net/wiki/DSP1
+                // - https://wiki.superfamicom.org/dsp1-command-matrix
+                //
+                // TODO: Implement these commands based on hardware documentation
                 for i in 0..self.output_buffer.len() {
                     self.output_buffer[i] = 0;
                 }
@@ -432,6 +457,16 @@ impl EnhancementChip for Dsp1 {
     fn chip_type(&self) -> ChipType {
         ChipType::Dsp1
     }
+
+    fn save_state(&self) -> Result<String, String> {
+        serde_json::to_string(self).map_err(|e| format!("Failed to serialize DSP-1 state: {}", e))
+    }
+
+    fn load_state(&mut self, state: &str) -> Result<(), String> {
+        *self = serde_json::from_str(state)
+            .map_err(|e| format!("Failed to deserialize DSP-1 state: {}", e))?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -528,5 +563,86 @@ mod tests {
 
         let result = i16::from_le_bytes([b0, b1]);
         assert_eq!(result, 0x7FFF); // Maximum positive value
+    }
+
+    #[test]
+    fn test_dsp1_save_load_state() {
+        let mut dsp = Dsp1::new();
+
+        // Set up some state
+        dsp.write_data(0x00); // Multiply command
+        dsp.write_data(0x64);
+        dsp.write_data(0x00);
+
+        // Save state
+        let state = dsp.save_state().unwrap();
+
+        // Create new instance and load state
+        let mut dsp2 = Dsp1::new();
+        dsp2.load_state(&state).unwrap();
+
+        // Verify state was restored
+        assert_eq!(dsp2.state, dsp.state);
+        assert_eq!(dsp2.command, dsp.command);
+        assert_eq!(dsp2.input_pos, dsp.input_pos);
+        assert_eq!(dsp2.input_buffer, dsp.input_buffer);
+    }
+
+    #[test]
+    fn test_dsp1_gyrate() {
+        let mut dsp = Dsp1::new();
+
+        // Send gyrate command (0x0C) - 2D rotation
+        dsp.write_data(0x0C);
+
+        // Send parameters: x=100, y=0, angle=0 (should be identity)
+        dsp.write_data(0x64); // x low
+        dsp.write_data(0x00); // x high
+        dsp.write_data(0x00); // y low
+        dsp.write_data(0x00); // y high
+        dsp.write_data(0x00); // angle low
+        dsp.write_data(0x00); // angle high
+
+        // Read result (at 0 degrees, should be roughly x=100, y=0)
+        let x_low = dsp.read_data();
+        let x_high = dsp.read_data();
+        let y_low = dsp.read_data();
+        let y_high = dsp.read_data();
+
+        let x = i16::from_le_bytes([x_low, x_high]);
+        let y = i16::from_le_bytes([y_low, y_high]);
+
+        // At 0 degrees, output should be close to input
+        assert_eq!(x, 100);
+        assert_eq!(y, 0);
+    }
+
+    #[test]
+    fn test_dsp1_polar_to_cartesian() {
+        let mut dsp = Dsp1::new();
+
+        // Send polar command (0x28)
+        dsp.write_data(0x28);
+
+        // Send parameters: radius=100, angle=0
+        dsp.write_data(0x64); // radius low
+        dsp.write_data(0x00); // radius high
+        dsp.write_data(0x00); // angle low (need 4 more bytes for padding)
+        dsp.write_data(0x00); // angle high
+        dsp.write_data(0x00); // padding
+        dsp.write_data(0x00); // padding
+
+        // Read result
+        let x_low = dsp.read_data();
+        let x_high = dsp.read_data();
+        let y_low = dsp.read_data();
+        let y_high = dsp.read_data();
+
+        let x = i16::from_le_bytes([x_low, x_high]);
+        let y = i16::from_le_bytes([y_low, y_high]);
+
+        // At angle 0, x should be ~100, y should be ~0
+        assert!(x > 90 && x < 110);
+        assert!(y.abs() < 10);
     }
 }

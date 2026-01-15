@@ -171,10 +171,15 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
 #### Other Features
 - ✅ **Save States** - Full system state serialization
 - ✅ **Logging** - Comprehensive debug logging for CPU, PPU, DMA, interrupts
-- ✅ **Enhancement Chips** - DSP-1 math coprocessor fully implemented
+- ✅ **Enhancement Chips** - DSP-1 math coprocessor partially implemented
   - Automatic detection from ROM header
-  - Support for Pilotwings, Super Mario Kart, and other DSP-1 games
-  - All major DSP-1 commands implemented (multiply, inverse, sin/cos, rotation, projection, distance)
+  - Support for most DSP-1 games (Pilotwings, Super Mario Kart)
+  - Implemented commands: Multiply, Inverse, Gyrate, Distance, Radius, Range, Project, Polar
+  - **Known Limitations**:
+    - Attitude command (0x08) is incomplete - outputs only partial rotation matrix
+    - Target command (0x20) not implemented - returns zeros
+    - Rotate command (0x24) not implemented - returns zeros
+    - Games heavily using these commands may not work correctly
 
 ### What's Missing
 
@@ -205,11 +210,16 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
 
 The emulator now includes a framework for enhancement chip (coprocessor) support:
 
-- ✅ **DSP-1** - Math coprocessor (fully implemented)
+- ⚠️ **DSP-1** - Math coprocessor (partially implemented)
   - Used in ~20 games including Pilotwings, Super Mario Kart, Ace o Nerae!
   - Provides hardware acceleration for 3D math operations
-  - Supported operations: multiply, inverse, attitude (sin/cos), gyrate (2D rotation), distance, radius, range, project (3D projection), polar to cartesian
+  - Implemented operations: multiply, inverse, gyrate (2D rotation), distance, radius, range, project (3D projection), polar to cartesian
+  - **Incomplete operations**:
+    - Attitude (sin/cos) - only partial implementation, missing full 3x3 rotation matrix
+    - Target - coordinate transformation not implemented
+    - Rotate - 3D rotation not implemented
   - Both LoROM and HiROM memory mappings supported
+  - Save state support included
   - Reference: [DSP-1](https://snes.nesdev.org/wiki/DSP-1), [SNESLab DSP1](https://sneslab.net/wiki/DSP1)
 
 - ❌ **Not Yet Implemented**
@@ -226,16 +236,24 @@ The emulator now includes a framework for enhancement chip (coprocessor) support
 
 ### Enhancement Chip Roadmap
 
-**Priority 1 - Most Common Chips (High Impact)**
-1. ✅ **DSP-1** - Implemented
+**Current Status**
+- ⚠️ **DSP-1** - Partially implemented (missing Attitude/Target/Rotate)
+
+**Priority 1 - Complete Existing Chip**
+1. **DSP-1 Completion** - Finish Attitude, Target, and Rotate commands
+   - Requires proper 3x3 rotation matrix implementation for Attitude
+   - Reference bsnes implementation for accuracy
+   - Add comprehensive tests for all commands
+
+**Priority 2 - Most Common Chips (High Impact)**
 2. **SuperFX** - Graphics coprocessor, ~10 popular games (Star Fox, Yoshi's Island)
 3. **SA-1** - CPU coprocessor, ~30 games including Super Mario RPG
 
-**Priority 2 - Moderately Common**
+**Priority 3 - Moderately Common**
 4. **S-DD1** - Decompression chip, ~5 games including Star Ocean
 5. **CX4** - Used in Mega Man X2/X3
 
-**Priority 3 - Less Common**
+**Priority 4 - Less Common**
 6. **DSP-2/3/4** - Math coprocessor variants (few games each)
 7. **SPC7110** - Decompression chip (few games)
 8. **OBC-1** - Rare coprocessor (1-2 games)
@@ -246,7 +264,13 @@ The emulator now includes a framework for enhancement chip (coprocessor) support
 - Chips are instantiated during cartridge load if detected and implemented
 - Memory mapping is handled transparently by the cartridge module
 - Interior mutability (RefCell) allows chip state updates during memory reads
-- Save state support needs to be added for chip state serialization
+- Save state support implemented via EnhancementChip trait
+- Unimplemented chips are detected but log warnings and don't instantiate
+
+**Known Issues:**
+- DSP-1 Attitude command incomplete (missing full 3x3 rotation matrix)
+- DSP-1 Target and Rotate commands not implemented
+- Games heavily relying on these commands may malfunction
 
 **References:**
 - [Enhancement Chips Overview](https://snes.nesdev.org/wiki/Enhancement_chips)
@@ -403,7 +427,10 @@ cargo run -- game.sfc --log-bus debug
    - Some timing-sensitive effects may not work
 
 3. **Enhancement Chips** - Most chips not yet implemented
-   - DSP-1 is fully implemented and working
+   - DSP-1 is partially implemented with known limitations:
+     - Attitude command (0x08) incomplete - missing full rotation matrix
+     - Target command (0x20) not implemented
+     - Rotate command (0x24) not implemented
    - SuperFX, SA-1, S-DD1, CX4, and other chips not yet implemented
    - Games requiring unimplemented chips will not work properly
    - See Enhancement Chip Roadmap section for planned implementations
