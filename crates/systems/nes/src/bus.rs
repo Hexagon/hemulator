@@ -48,6 +48,10 @@ pub struct NesBus {
     strobe: Cell<bool>,
     // CPU cycle counter for mapper timing (e.g., MMC1 consecutive write detection)
     cpu_cycles: Cell<u64>,
+    // Open bus value: last value read from the data bus
+    // Used when reading from unmapped addresses (e.g., $6000-$7FFF on carts without WRAM)
+    // Reference: https://www.nesdev.org/wiki/Open_bus_behavior
+    open_bus: Cell<u8>,
 }
 
 impl NesBus {
@@ -63,6 +67,7 @@ impl NesBus {
             controller_read_count: [Cell::new(0), Cell::new(0)],
             strobe: Cell::new(false),
             cpu_cycles: Cell::new(0),
+            open_bus: Cell::new(0),
         }
     }
 
@@ -149,7 +154,7 @@ impl NesBus {
 impl Bus for NesBus {
     #[inline]
     fn read(&self, addr: u16) -> u8 {
-        match addr {
+        let value = match addr {
             0x0000..=0x1FFF => {
                 // internal RAM mirrored
                 let a = (addr as usize) & 0x07FF;
@@ -171,13 +176,15 @@ impl Bus for NesBus {
                     0x4016 => {
                         // When strobed, return current button A state (bit 0).
                         // When not strobed, shift out latched controller bits.
-                        if self.strobe.get() {
+                        // Controller ports affect only bits 4-0; bits 7-5 are open bus
+                        let open_bus_bits = self.open_bus.get() & 0xE0;
+                        let controller_bits = if self.strobe.get() {
                             self.controller_state[0] & 1
                         } else {
                             let count = self.controller_read_count[0].get();
                             self.controller_read_count[0].set(count.saturating_add(1));
 
-                            // After 8 reads, return 1 (open bus behavior)
+                            // After 8 reads, return 1 (standard controller behavior)
                             if count >= 8 {
                                 1
                             } else {
@@ -186,16 +193,19 @@ impl Bus for NesBus {
                                 self.controller_shift[0].set(cur >> 1);
                                 v
                             }
-                        }
+                        };
+                        open_bus_bits | (controller_bits & 0x1F)
                     }
                     0x4017 => {
-                        if self.strobe.get() {
+                        // Controller ports affect only bits 4-0; bits 7-5 are open bus
+                        let open_bus_bits = self.open_bus.get() & 0xE0;
+                        let controller_bits = if self.strobe.get() {
                             self.controller_state[1] & 1
                         } else {
                             let count = self.controller_read_count[1].get();
                             self.controller_read_count[1].set(count.saturating_add(1));
 
-                            // After 8 reads, return 1 (open bus behavior)
+                            // After 8 reads, return 1 (standard controller behavior)
                             if count >= 8 {
                                 1
                             } else {
@@ -204,22 +214,46 @@ impl Bus for NesBus {
                                 self.controller_shift[1].set(cur >> 1);
                                 v
                             }
-                        }
+                        };
+                        open_bus_bits | (controller_bits & 0x1F)
                     }
-                    _ => 0,
+                    // $4000-$4014, $4018-$401F are open bus
+                    _ => self.open_bus.get(),
                 }
             }
+            0x4018..=0x5FFF => {
+                // Expansion area - typically open bus unless mapper provides something
+                self.open_bus.get()
+            }
             0x6000..=0x7FFF => {
-                let off = (addr - 0x6000) as usize;
-                self.wram[off]
+                // Only return WRAM data if the mapper has WRAM
+                // Otherwise return open bus (last value read from data bus)
+                // This is critical for games like Battletoads that rely on open bus behavior
+                // Reference: https://www.nesdev.org/wiki/Open_bus_behavior
+                if self
+                    .mapper
+                    .as_ref()
+                    .map(|m| m.borrow().has_wram())
+                    .unwrap_or(false)
+                {
+                    let off = (addr - 0x6000) as usize;
+                    self.wram[off]
+                } else {
+                    // Open bus: return last value read from data bus
+                    self.open_bus.get()
+                }
             }
             0x8000..=0xFFFF => self
                 .mapper
                 .as_ref()
                 .map(|m| m.borrow().read_prg(addr))
-                .unwrap_or(0),
-            _ => 0,
-        }
+                .unwrap_or(self.open_bus.get()),
+        };
+
+        // Update open bus with the value just read
+        // This is used for subsequent open bus reads
+        self.open_bus.set(value);
+        value
     }
 
     #[inline]
@@ -279,8 +313,17 @@ impl Bus for NesBus {
                 }
             }
             0x6000..=0x7FFF => {
-                let off = (addr - 0x6000) as usize;
-                self.wram[off] = val;
+                // Only write to WRAM if the mapper has WRAM
+                if self
+                    .mapper
+                    .as_ref()
+                    .map(|m| m.borrow().has_wram())
+                    .unwrap_or(false)
+                {
+                    let off = (addr - 0x6000) as usize;
+                    self.wram[off] = val;
+                }
+                // Otherwise ignore the write (no WRAM present)
             }
             0x8000..=0xFFFF => {
                 if let Some(m) = &mut self.mapper {
