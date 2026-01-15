@@ -189,15 +189,53 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
   - Window enable, inversion, and logic (OR/AND/XOR/XNOR) fully implemented
   - Applied to all BG layers and sprites
   - Reference: [Windows](https://snes.nesdev.org/wiki/PPU_registers#Windows)
-- ⚠️ **Color Math** - Registers stored but not applied ($2130-$2132)
-  - Registers: CGWSEL, CGADSUB, COLDATA properly stored
-  - Fixed color RGB values extracted from COLDATA writes
-  - Not yet applied in rendering (requires per-pixel layer tracking)
-  - Reference: [Color Math](https://snes.nesdev.org/wiki/PPU_registers#Color_addition)
+
+- ✅ **Color Math** - Fully implemented with per-pixel layer tracking ($2130-$2132)
+  - **Implementation Status**: Complete with sub-screen and fixed color blending
+    - $2130 (CGWSEL): Color math control with prevent-math and window-based clipping
+    - $2131 (CGADSUB): Per-layer enable (BG1-4, OBJ, backdrop) with add/subtract/half modes
+    - $2132 (COLDATA): Fixed color RGB blending source
+    - $212D (TS): Sub-screen layer designation for blending
+  
+  - **Features Implemented**:
+    - ✅ Per-pixel layer tracking (BG1-4, OBJ, backdrop)
+    - ✅ Selective color math based on layer source
+    - ✅ Add and subtract color blending modes
+    - ✅ Half-color math mode (divide result by 2)
+    - ✅ Color component clamping (0-255 range)
+    - ✅ Fixed color blending source
+    - ✅ Sub-screen rendering and blending
+    - ✅ Window-based color math clipping (CGWSEL bits 4-5)
+    
+  - **Technical Details**:
+    - Layer buffer tracks source layer for each pixel (BG1=0, BG2=1, BG3=2, BG4=3, OBJ=4, backdrop=5)
+    - Both main screen and sub-screen rendered independently
+    - Sub-screen layers determined by TS register ($212D)
+    - Color math applied in post-processing pass after all layers rendered
+    - Only pixels from layers enabled in CGADSUB undergo blending
+    - CGWSEL prevent-math bit (bit 6) can globally disable color math
+    - Window-based clipping allows selective color math by screen region
+    - Blending performed in 8-bit RGB color space with proper clamping
+    
+  - **Current Limitations**:
+    - ⏳ Direct color mode not implemented (CGWSEL bits 0-1)
+      - Direct color mode is rarely used (can be enabled for Modes 3, 4, and 7)
+      - Normal palette-based rendering works for all common use cases
+    
+  - **Impact on Game Compatibility**:
+    - Games using color math now work correctly
+    - Fade effects, transparency, and color tinting render properly
+    - Sub-screen blending effects (transparencies, shadows) work correctly
+    - Window-based effects (spotlight, fade regions) work correctly
+    
+  - Reference: [Color Math](https://snes.nesdev.org/wiki/Color_math)
+
 - ❌ **Mosaic** - No mosaic effect ($2106)
-- ⚠️ **Sub-screen** - Register stored but not used ($212D)
-  - TS register properly stored
-  - Sub-screen rendering not implemented
+
+- ✅ **Sub-screen** - Fully implemented for color math ($212D)
+  - TS register controls which layers appear on sub-screen
+  - Sub-screen pixels blended with main screen via color math
+  - Used for transparency, shadows, and other blending effects
 
 #### Audio
 - ❌ **DSP (Digital Signal Processor)** - No sound generation
