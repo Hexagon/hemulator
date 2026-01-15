@@ -3262,7 +3262,10 @@ fn main() {
             }
 
             // Update mount points from current system
-            if rom_loaded {
+            // For PC systems, show mount points even when rom_loaded is false
+            // because PC can boot from disk images without a ROM file
+            let is_pc_system = matches!(sys, EmulatorSystem::PC(_));
+            if rom_loaded || is_pc_system {
                 use egui_ui::property_pane::MountPoint;
                 let mount_points_info = sys.mount_points();
                 egui_app.property_pane.mount_points = mount_points_info
