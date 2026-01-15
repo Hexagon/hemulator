@@ -2145,7 +2145,13 @@ impl Ppu {
         };
 
         // Determine layer ID for tracking
-        let layer_id = bg_index as u8;
+        let layer_id = match bg_index {
+            0 => LAYER_BG1,
+            1 => LAYER_BG2,
+            2 => LAYER_BG3,
+            3 => LAYER_BG4,
+            _ => LAYER_BACKDROP,
+        };
 
         // Render all visible tiles
         for screen_y in 0..224 {
