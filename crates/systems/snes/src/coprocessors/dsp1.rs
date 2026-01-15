@@ -243,13 +243,17 @@ impl Dsp1 {
                 // - https://sneslab.net/wiki/DSP1/Attitude
                 // - bsnes/sfc/coprocessor/dsp1/dsp1emu.cpp
                 //
-                // TODO: Implement proper 3x3 rotation matrix calculation
+                // TODO: Complete rotation matrix implementation
+                // Current implementation only outputs sine values as a placeholder
+                // Full implementation should calculate all 9 matrix elements:
+                // M11-M33 using sine and cosine combinations
                 for i in 0..4 {
                     let angle = self.read_s16(i * 2);
                     // Convert to radians: angle is in 1/256th of a full rotation
                     let radians = (angle as f64) * 2.0 * PI / 65536.0;
                     let sin_val = (radians.sin() * 32767.0) as i16;
-                    let _cos_val = (radians.cos() * 32767.0) as i16;
+                    // Cosine will be needed for proper matrix calculation
+                    // let cos_val = (radians.cos() * 32767.0) as i16;
                     self.write_s16(i * 2, sin_val);
                 }
             }
@@ -463,8 +467,19 @@ impl EnhancementChip for Dsp1 {
     }
 
     fn load_state(&mut self, state: &str) -> Result<(), String> {
-        *self = serde_json::from_str(state)
+        // Deserialize and validate the state
+        let loaded: Dsp1 = serde_json::from_str(state)
             .map_err(|e| format!("Failed to deserialize DSP-1 state: {}", e))?;
+
+        // Validate state is reasonable (basic sanity checks)
+        if loaded.input_pos > loaded.input_buffer.len()
+            || loaded.output_pos > loaded.output_buffer.len()
+        {
+            return Err("Invalid DSP-1 state: buffer positions out of bounds".to_string());
+        }
+
+        // State is valid, replace current state
+        *self = loaded;
         Ok(())
     }
 }
@@ -621,18 +636,18 @@ mod tests {
     fn test_dsp1_polar_to_cartesian() {
         let mut dsp = Dsp1::new();
 
-        // Send polar command (0x28)
+        // Send polar command (0x28) - requires 6 bytes total input
         dsp.write_data(0x28);
 
-        // Send parameters: radius=100, angle=0
+        // Send parameters: radius=100, angle=0, plus extra parameter
         dsp.write_data(0x64); // radius low
         dsp.write_data(0x00); // radius high
-        dsp.write_data(0x00); // angle low (need 4 more bytes for padding)
+        dsp.write_data(0x00); // angle low
         dsp.write_data(0x00); // angle high
-        dsp.write_data(0x00); // padding
-        dsp.write_data(0x00); // padding
+        dsp.write_data(0x00); // extra param low (DSP-1 uses 3x 16-bit for polar)
+        dsp.write_data(0x00); // extra param high
 
-        // Read result
+        // Read result (should be 4 bytes: x, y coordinates)
         let x_low = dsp.read_data();
         let x_high = dsp.read_data();
         let y_low = dsp.read_data();
