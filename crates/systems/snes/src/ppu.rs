@@ -3287,8 +3287,12 @@ impl Ppu {
         let width = frame.width as usize;
         let mut x = 0usize;
         for (i, &layer) in layer_buffer.iter().enumerate() {
+            // Ensure layer value is within the valid range before using it as a bit index
+            if layer > LAYER_BACKDROP {
+                continue;
+            }
             // Check if color math is enabled for this layer (CGADSUB bits 0-5)
-            let layer_bit = 1 << layer;
+            let layer_bit = 1u8 << layer;
 
             // Only apply color math when enabled for this layer and allowed by window clipping
             if (self.cgadsub & layer_bit) != 0
