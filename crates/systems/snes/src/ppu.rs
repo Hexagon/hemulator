@@ -3760,7 +3760,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_mode1_typical_commercial_pattern() {
         let mut ppu = Ppu::new();
 
