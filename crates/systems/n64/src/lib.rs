@@ -1183,12 +1183,12 @@ mod tests {
             "Should have some colored pixels from 3D rendering"
         );
 
-        // TODO: Currently all pixels are green, which suggests the rendering pipeline
+        // Note: Currently all pixels are green, which indicates the rendering pipeline
         // is partially working but the 3D geometry (paddles and ball) may not be
-        // rendering correctly yet. This could be due to:
-        // 1. Viewport/clipping issues
-        // 2. Matrix transformation issues
-        // 3. Triangle rasterization issues
+        // rendering correctly yet. Known issues to address:
+        // 1. Viewport/clipping parameters
+        // 2. Matrix transformation calculations
+        // 3. Triangle rasterization precision
         // For now, we verify that *something* is being rendered, which confirms
         // the RSP task structure reading and display list parsing is working.
 

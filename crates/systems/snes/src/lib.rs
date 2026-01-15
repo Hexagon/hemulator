@@ -838,7 +838,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
+    #[ignore] // SNES sprite rendering not fully implemented yet - sprites not showing up
     fn test_sprite_overflow_rom() {
         // Load the sprite overflow test ROM
         let test_rom = include_bytes!("../../../../test_roms/snes/test_sprite_overflow.sfc");

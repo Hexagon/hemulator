@@ -516,12 +516,12 @@ impl EmulatorSystem {
                 Some(debug.pc as u32)
             }
             EmulatorSystem::ColecoVision(_) => {
-                // Z80 CPU - get PC from debugger
-                None // TODO: Implement when debugger provides PC
+                // Z80 CPU - debugger implementation needed to expose PC
+                None
             }
             EmulatorSystem::SG1000(_) => {
-                // Z80 CPU - get PC from debugger
-                None // TODO: Implement when debugger provides PC
+                // Z80 CPU - debugger implementation needed to expose PC
+                None
             }
         }
     }
@@ -585,13 +585,13 @@ impl EmulatorSystem {
             EmulatorSystem::NES(sys) => sys.get_audio_samples(count),
             EmulatorSystem::GameBoy(sys) => sys.get_audio_samples(count),
             EmulatorSystem::Atari2600(sys) => sys.get_audio_samples(count),
-            EmulatorSystem::PC(_) => vec![0; count], // TODO: Implement audio for PC
-            EmulatorSystem::SNES(_) => vec![0; count], // TODO: Implement audio for SNES
+            EmulatorSystem::PC(_) => vec![0; count], // PC audio: Speaker/AdLib/Sound Blaster not yet implemented
+            EmulatorSystem::SNES(_) => vec![0; count], // SNES SPC700 DSP audio generation not yet implemented
             EmulatorSystem::N64(sys) => sys.get_audio_samples(count),
-            EmulatorSystem::Chip8(_) => vec![0; count], // TODO: Implement CHIP-8 audio (single beep tone)
+            EmulatorSystem::Chip8(_) => vec![0; count], // CHIP-8 audio: Single beep tone not yet implemented
             EmulatorSystem::SMS(sys) => sys.get_audio_samples(count),
-            EmulatorSystem::ColecoVision(_) => vec![0; count], // TODO: Implement ColecoVision audio
-            EmulatorSystem::SG1000(_) => vec![0; count],       // TODO: Implement SG-1000 audio
+            EmulatorSystem::ColecoVision(_) => vec![0; count], // ColecoVision: TI SN76489 PSG integration needed
+            EmulatorSystem::SG1000(_) => vec![0; count], // SG-1000: TI SN76489 PSG integration needed
         }
     }
 
@@ -741,8 +741,8 @@ impl EmulatorSystem {
     /// Returns Some(pc) if a breakpoint is hit, None otherwise
     fn check_breakpoint(&self) -> Option<u32> {
         match self {
-            EmulatorSystem::NES(_) => None,     // TODO: Implement for NES
-            EmulatorSystem::GameBoy(_) => None, // TODO: Implement for other systems
+            EmulatorSystem::NES(_) => None, // NES: Debugger trait implementation needed
+            EmulatorSystem::GameBoy(_) => None, // GameBoy: Debugger trait implementation needed
             EmulatorSystem::Atari2600(_) => None,
             EmulatorSystem::PC(_) => None,
             EmulatorSystem::SNES(sys) => sys.check_breakpoint(),
@@ -5251,7 +5251,9 @@ fn main() {
                     }
                 }
                 PropertyAction::ConfigureInput => {
-                    // TODO: Open input configuration dialog
+                    // Input configuration dialog
+                    // Future feature: Allow users to customize keyboard mappings
+                    // Currently uses default mappings defined in settings.rs
                     // For now, just show a message that this feature is coming soon
                     egui_app.status_bar.set_message(
                         "Input configuration dialog coming soon. Edit config.json manually for now."
