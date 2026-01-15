@@ -205,7 +205,7 @@ impl Dsp1 {
     /// Execute the current command
     fn execute_command(&mut self) {
         let cmd = Dsp1Command::from(self.command);
-        
+
         match cmd {
             Dsp1Command::Multiply => {
                 let a = self.read_s16(0) as i32;
@@ -282,8 +282,16 @@ impl Dsp1 {
                 let y = self.read_s16(2);
                 let z = self.read_s16(4);
                 // Perspective divide by z (with safety check)
-                let screen_x = if z != 0 { (x as i32 * 256) / z as i32 } else { x as i32 };
-                let screen_y = if z != 0 { (y as i32 * 256) / z as i32 } else { y as i32 };
+                let screen_x = if z != 0 {
+                    (x as i32 * 256) / z as i32
+                } else {
+                    x as i32
+                };
+                let screen_y = if z != 0 {
+                    (y as i32 * 256) / z as i32
+                } else {
+                    y as i32
+                };
                 self.write_s16(0, screen_x as i16);
                 self.write_s16(2, screen_y as i16);
             }
@@ -319,7 +327,7 @@ impl Dsp1 {
                 self.output_buffer = vec![0; self.output_size];
                 self.input_pos = 0;
                 self.output_pos = 0;
-                
+
                 if self.expected_params == 0 {
                     // No parameters needed, execute immediately
                     self.execute_command();
@@ -333,7 +341,7 @@ impl Dsp1 {
                 if self.input_pos < self.input_buffer.len() {
                     self.input_buffer[self.input_pos] = value;
                     self.input_pos += 1;
-                    
+
                     if self.input_pos >= self.expected_params {
                         // All parameters received, execute command
                         self.execute_command();
@@ -354,12 +362,12 @@ impl Dsp1 {
                 if self.output_pos < self.output_buffer.len() {
                     let value = self.output_buffer[self.output_pos];
                     self.output_pos += 1;
-                    
+
                     if self.output_pos >= self.output_size {
                         // All output read, ready for next command
                         self.state = Dsp1State::WaitingForCommand;
                     }
-                    
+
                     value
                 } else {
                     0
@@ -386,7 +394,7 @@ impl Dsp1 {
 impl EnhancementChip for Dsp1 {
     fn read(&mut self, addr: u32) -> u8 {
         let offset = (addr & 0xFFFF) as u16;
-        
+
         // Check if reading from status register area ($7000-$7FFF in LoROM banks $30-$3F)
         // or data register area ($3000-$3FFF in LoROM banks $30-$3F)
         if offset >= 0x7000 {
@@ -402,9 +410,9 @@ impl EnhancementChip for Dsp1 {
 
     fn write(&mut self, addr: u32, value: u8) {
         let offset = (addr & 0xFFFF) as u16;
-        
+
         // Data register is at $3000-$3FFF in LoROM banks $30-$3F
-        if offset >= 0x3000 && offset < 0x7000 {
+        if (0x3000..0x7000).contains(&offset) {
             self.write_data(value);
         }
         // Status register is read-only
@@ -433,31 +441,31 @@ mod tests {
     #[test]
     fn test_dsp1_multiply() {
         let mut dsp = Dsp1::new();
-        
+
         // Status should indicate ready
         assert_eq!(dsp.read_status(), 0x80);
-        
+
         // Send multiply command (0x00)
         dsp.write_data(0x00);
-        
+
         // Send parameters: 100 (0x0064) and 200 (0x00C8)
         dsp.write_data(0x64); // low byte of first param
         dsp.write_data(0x00); // high byte of first param
         dsp.write_data(0xC8); // low byte of second param
         dsp.write_data(0x00); // high byte of second param
-        
+
         // Should now be in output state
         assert_eq!(dsp.state, Dsp1State::WritingOutput);
-        
+
         // Read result (100 * 200 = 20000 = 0x00004E20)
         let b0 = dsp.read_data();
         let b1 = dsp.read_data();
         let b2 = dsp.read_data();
         let b3 = dsp.read_data();
-        
+
         let result = i32::from_le_bytes([b0, b1, b2, b3]);
         assert_eq!(result, 20000);
-        
+
         // Should be back to waiting for command
         assert_eq!(dsp.state, Dsp1State::WaitingForCommand);
     }
@@ -465,18 +473,18 @@ mod tests {
     #[test]
     fn test_dsp1_inverse() {
         let mut dsp = Dsp1::new();
-        
+
         // Send inverse command (0x04)
         dsp.write_data(0x04);
-        
+
         // Send parameter: 100 (0x0064)
         dsp.write_data(0x64); // low byte
         dsp.write_data(0x00); // high byte
-        
+
         // Read result
         let b0 = dsp.read_data();
         let b1 = dsp.read_data();
-        
+
         let result = i16::from_le_bytes([b0, b1]);
         // Result should be approximately 0x10000 / 100 = 655
         assert!((result as i32 - 655).abs() <= 1);
@@ -485,20 +493,20 @@ mod tests {
     #[test]
     fn test_dsp1_distance() {
         let mut dsp = Dsp1::new();
-        
+
         // Send distance command (0x1C)
         dsp.write_data(0x1C);
-        
+
         // Send parameters: x=3, y=4
         dsp.write_data(0x03); // low byte of x
         dsp.write_data(0x00); // high byte of x
         dsp.write_data(0x04); // low byte of y
         dsp.write_data(0x00); // high byte of y
-        
+
         // Read result (should be 5, since 3^2 + 4^2 = 25, sqrt(25) = 5)
         let b0 = dsp.read_data();
         let b1 = dsp.read_data();
-        
+
         let result = i16::from_le_bytes([b0, b1]);
         assert_eq!(result, 5);
     }
@@ -506,18 +514,18 @@ mod tests {
     #[test]
     fn test_dsp1_divide_by_zero() {
         let mut dsp = Dsp1::new();
-        
+
         // Send inverse command (0x04)
         dsp.write_data(0x04);
-        
+
         // Send parameter: 0
         dsp.write_data(0x00);
         dsp.write_data(0x00);
-        
+
         // Read result (should be max value, not crash)
         let b0 = dsp.read_data();
         let b1 = dsp.read_data();
-        
+
         let result = i16::from_le_bytes([b0, b1]);
         assert_eq!(result, 0x7FFF); // Maximum positive value
     }

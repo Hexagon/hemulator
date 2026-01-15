@@ -80,18 +80,18 @@ impl ChipType {
         // $F6: ST011
         // $F9: ST018
         // And more...
-        
+
         match rom_type {
             0x03 | 0x04 => ChipType::Dsp1,
             0x05 => ChipType::Dsp2,
             0x06 => ChipType::Dsp3,
             0x0B => ChipType::Dsp4,
-            0x13 | 0x14 | 0x15 | 0x1A => ChipType::SuperFx,
-            0x23 | 0x24 | 0x25 => ChipType::SuperFx2,
-            0x33 | 0x34 | 0x35 => ChipType::Sa1,
-            0x43 | 0x44 | 0x45 => ChipType::Sdd1,
+            0x13..=0x15 | 0x1A => ChipType::SuperFx,
+            0x23..=0x25 => ChipType::SuperFx2,
+            0x33..=0x35 => ChipType::Sa1,
+            0x43..=0x45 => ChipType::Sdd1,
             0xD3 => ChipType::Obc1,
-            0xE3 | 0xE4 | 0xE5 => ChipType::Spc7110,
+            0xE3..=0xE5 => ChipType::Spc7110,
             0xF3 => ChipType::Cx4,
             0xF5 => ChipType::St010,
             0xF6 => ChipType::St011,

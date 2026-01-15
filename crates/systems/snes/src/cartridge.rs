@@ -193,7 +193,10 @@ impl Cartridge {
     }
 
     /// Detect enhancement chip from ROM header
-    fn detect_chip(rom: &[u8], mapping_mode: MappingMode) -> (ChipType, Option<RefCell<Box<dyn EnhancementChip + Send>>>) {
+    fn detect_chip(
+        rom: &[u8],
+        mapping_mode: MappingMode,
+    ) -> (ChipType, Option<RefCell<Box<dyn EnhancementChip + Send>>>) {
         // Determine header offset based on mapping mode
         let header_offset = match mapping_mode {
             MappingMode::LoROM => 0x7FC0,
@@ -241,7 +244,7 @@ impl Cartridge {
         if let Some(ref chip) = self.chip {
             let bank = (addr >> 16) as u8;
             let offset = (addr & 0xFFFF) as u16;
-            
+
             match (self.chip_type, self.mapping_mode) {
                 (ChipType::Dsp1, MappingMode::LoROM) => {
                     // DSP-1 LoROM mapping
@@ -258,7 +261,7 @@ impl Cartridge {
                 _ => {}
             }
         }
-        
+
         match self.mapping_mode {
             MappingMode::LoROM => self.read_lorom(addr),
             MappingMode::HiROM => self.read_hirom(addr),
@@ -437,11 +440,11 @@ impl Cartridge {
         if let Some(ref chip) = self.chip {
             let bank = (addr >> 16) as u8;
             let offset = (addr & 0xFFFF) as u16;
-            
+
             match (self.chip_type, self.mapping_mode) {
                 (ChipType::Dsp1, MappingMode::LoROM) => {
                     // DSP-1 LoROM mapping (data register only)
-                    if matches!(bank, 0x30..=0x3F) && (offset >= 0x3000 && offset < 0x7000) {
+                    if matches!(bank, 0x30..=0x3F) && (0x3000..0x7000).contains(&offset) {
                         chip.borrow_mut().write(addr, val);
                         return;
                     }
@@ -456,7 +459,7 @@ impl Cartridge {
                 _ => {}
             }
         }
-        
+
         match self.mapping_mode {
             MappingMode::LoROM => self.write_lorom(addr, val),
             MappingMode::HiROM => self.write_hirom(addr, val),
@@ -530,6 +533,7 @@ impl Cartridge {
     }
 
     /// Get the enhancement chip type
+    #[allow(dead_code)]
     pub fn chip_type(&self) -> ChipType {
         self.chip_type
     }
