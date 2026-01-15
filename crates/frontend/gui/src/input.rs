@@ -262,6 +262,11 @@ mod tests {
         assert_eq!(profile.device_type, Some(InputDeviceType::Keyboard));
         assert!(profile.mappings.contains_key(&VirtualButton::A));
         assert!(profile.mappings.contains_key(&VirtualButton::Up));
+        // Verify x, y, l, r buttons are mapped
+        assert!(profile.mappings.contains_key(&VirtualButton::X));
+        assert!(profile.mappings.contains_key(&VirtualButton::Y));
+        assert!(profile.mappings.contains_key(&VirtualButton::L));
+        assert!(profile.mappings.contains_key(&VirtualButton::R));
     }
 
     #[test]

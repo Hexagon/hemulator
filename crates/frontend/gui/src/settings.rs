@@ -328,8 +328,17 @@ mod tests {
         let settings = Settings::default();
         assert_eq!(settings.input.player1.a, "Z");
         assert_eq!(settings.input.player1.b, "X");
+        // Verify x, y, l, r buttons are mapped by default
+        assert_eq!(settings.input.player1.x, "A");
+        assert_eq!(settings.input.player1.y, "S");
+        assert_eq!(settings.input.player1.l, "Q");
+        assert_eq!(settings.input.player1.r, "W");
         assert_eq!(settings.input.player2.a, "U");
         assert_eq!(settings.input.player2.b, "O");
+        assert_eq!(settings.input.player2.x, "Y");
+        assert_eq!(settings.input.player2.y, "H");
+        assert_eq!(settings.input.player2.l, "T");
+        assert_eq!(settings.input.player2.r, "R");
         assert_eq!(settings.input.host_modifier, "RightCtrl");
         assert_eq!(settings.window_width, 512);
         assert_eq!(settings.window_height, 480);
