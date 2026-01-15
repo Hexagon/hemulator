@@ -171,9 +171,6 @@ pub struct Ppu {
     /// This is set during render_scanline() and the flag is actually set during tick()
     /// when we reach the corresponding dot position (X + 2 to account for PPU pipeline).
     sprite_0_hit_pending: Cell<Option<(u16, u16)>>,
-    /// Diagnostic: count consecutive PPUSTATUS reads without sprite 0 hit being set.
-    /// Used to detect games stuck in a sprite 0 hit polling loop.
-    sprite_0_poll_count: Cell<u32>,
 }
 
 impl fmt::Debug for Ppu {
@@ -235,7 +232,6 @@ impl Ppu {
             frame_counter: Cell::new(0),
             timing_mode,
             sprite_0_hit_pending: Cell::new(None),
-            sprite_0_poll_count: Cell::new(0),
         }
     }
 
@@ -502,44 +498,14 @@ impl Ppu {
                 let scanline = self.scanline.get();
                 let dot = self.dot.get();
 
-                // Diagnostic: track sprite 0 hit polling
+                // Log PPUSTATUS reads that see sprite 0 hit at Info level (not performance-critical)
                 if self.sprite_0_hit.get() {
-                    // Reset poll counter when hit is detected
-                    self.sprite_0_poll_count.set(0);
                     log(LogCategory::PPU, LogLevel::Info, || {
                         format!(
                             "PPUSTATUS read: ${:02X} (S0H=1) @ scanline {} dot {}",
                             status, scanline, dot
                         )
                     });
-                } else if scanline < 240 && scanline > 0 {
-                    // Increment poll counter when reading during visible scanlines without hit
-                    let count = self.sprite_0_poll_count.get().saturating_add(1);
-                    self.sprite_0_poll_count.set(count);
-
-                    // Log diagnostic info periodically when polling seems excessive
-                    // This helps detect games stuck waiting for sprite 0 hit
-                    if count == 1000
-                        || count == 5000
-                        || count == 10000
-                        || count.is_multiple_of(50000)
-                    {
-                        let sprite_0_y = self.oam[0];
-                        let sprite_0_tile = self.oam[1];
-                        let sprite_0_attr = self.oam[2];
-                        let sprite_0_x = self.oam[3];
-                        let mask = self.mask;
-                        let bg_enabled = (mask & 0x08) != 0;
-                        let sprites_enabled = (mask & 0x10) != 0;
-                        let v = self.vram_addr.get();
-
-                        log(LogCategory::PPU, LogLevel::Warn, || {
-                            format!(
-                                "Sprite 0 hit poll #{}: scanline={} dot={} sprite0=(y={},tile=${:02X},attr=${:02X},x={}) mask=${:02X} bg={} spr={} v=${:04X}",
-                                count, scanline, dot, sprite_0_y, sprite_0_tile, sprite_0_attr, sprite_0_x, mask, bg_enabled, sprites_enabled, v
-                            )
-                        });
-                    }
                 }
 
                 // CRITICAL: PPUSTATUS read behavior (DO NOT CHANGE - required for NMI timing)
@@ -625,24 +591,6 @@ impl Ppu {
                         format!("PPU: $2000 write BLOCKED (first frame): val=${:02X}", val)
                     });
                     return;
-                }
-
-                // Diagnostic: log mid-frame PPUCTRL writes (during visible scanlines)
-                let scanline = self.scanline.get();
-                let dot = self.dot.get();
-                if scanline < 240 {
-                    static MID_FRAME_CTRL_LOG: std::sync::atomic::AtomicU32 =
-                        std::sync::atomic::AtomicU32::new(0);
-                    let count =
-                        MID_FRAME_CTRL_LOG.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    if count < 50 {
-                        log(LogCategory::PPU, LogLevel::Warn, || {
-                            format!(
-                                "MID-FRAME PPUCTRL: sl={} dot={} val=${:02X}",
-                                scanline, dot, val
-                            )
-                        });
-                    }
                 }
 
                 let old_nmi = (self.ctrl & 0x80) != 0;
@@ -817,33 +765,6 @@ impl Ppu {
                     // CHR-ROM is typically read-only; only allow writes for CHR-RAM.
                     if self.chr_is_ram && self.chr.len() >= (addr as usize + 1) {
                         self.chr[addr as usize] = val;
-                        // Diagnostic: log first few non-zero CHR RAM writes
-                        static CHR_WRITE_COUNT: std::sync::atomic::AtomicU32 =
-                            std::sync::atomic::AtomicU32::new(0);
-                        let count =
-                            CHR_WRITE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        if count < 20 && val != 0 {
-                            log(LogCategory::PPU, LogLevel::Warn, || {
-                                format!(
-                                    "CHR RAM write #{}: addr=${:04X} val=${:02X}",
-                                    count, addr, val
-                                )
-                            });
-                        }
-                    } else if !self.chr_is_ram {
-                        // Diagnostic: log CHR ROM write attempts
-                        static ROM_WRITE_COUNT: std::sync::atomic::AtomicU32 =
-                            std::sync::atomic::AtomicU32::new(0);
-                        let count =
-                            ROM_WRITE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        if count < 5 {
-                            log(LogCategory::PPU, LogLevel::Warn, || {
-                                format!(
-                                    "CHR ROM write REJECTED #{}: addr=${:04X} val=${:02X}",
-                                    count, addr, val
-                                )
-                            });
-                        }
                     }
                 } else if addr < 0x3F00 {
                     // Nametable VRAM space with mirroring
