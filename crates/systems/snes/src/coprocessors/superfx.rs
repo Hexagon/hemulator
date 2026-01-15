@@ -832,7 +832,16 @@ impl EnhancementChip for SuperFx {
     }
 
     fn reset(&mut self) {
+        // Preserve ROM data and chip variant across reset
+        let rom = self.rom.clone();
+        let is_superfx2 = self.is_superfx2;
+
+        // Reset all other internal state to defaults
         *self = Self::default();
+
+        // Restore preserved fields
+        self.rom = rom;
+        self.is_superfx2 = is_superfx2;
     }
 
     fn chip_type(&self) -> ChipType {
