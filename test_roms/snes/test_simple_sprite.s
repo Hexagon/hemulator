@@ -211,19 +211,30 @@ IRQ:
     rti
 
 ; Sprite tile data: 8x8 4bpp sprite (32 bytes total)
-; SNES 4bpp format: SEQUENTIAL bitplanes (like BG tiles)
-; Layout: BP0[rows 0-7], BP1[rows 0-7], BP2[rows 0-7], BP3[rows 0-7]
+; SNES 4bpp format: INTERLEAVED bitplane pairs
+; Bytes 0-15: BP0 and BP1 interleaved (row N: BP0 at N*2, BP1 at N*2+1)
+; Bytes 16-31: BP2 and BP3 interleaved (row N: BP2 at 16+N*2, BP3 at 16+N*2+1)
 ; Each bitplane byte has MSB = leftmost pixel
 ; We'll make a solid square using color index 1 (BP0=1, BP1=0, BP2=0, BP3=0)
 SPRITE_TILE_DATA:
-    ; Bitplane 0 (8 bytes, one per row)
-    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
+    ; Bytes 0-15: BP0 and BP1 interleaved (8 rows)
+    ; For color 1: BP0=0xFF, BP1=0x00 per row
+    .byte $FF, $00          ; Row 0: BP0=$FF, BP1=$00
+    .byte $FF, $00          ; Row 1
+    .byte $FF, $00          ; Row 2
+    .byte $FF, $00          ; Row 3
+    .byte $FF, $00          ; Row 4
+    .byte $FF, $00          ; Row 5
+    .byte $FF, $00          ; Row 6
+    .byte $FF, $00          ; Row 7
     
-    ; Bitplane 1 (8 bytes, one per row)
-    .byte $00, $00, $00, $00, $00, $00, $00, $00
-    
-    ; Bitplane 2 (8 bytes, one per row)
-    .byte $00, $00, $00, $00, $00, $00, $00, $00
-    
-    ; Bitplane 3 (8 bytes, one per row)
-    .byte $00, $00, $00, $00, $00, $00, $00, $00
+    ; Bytes 16-31: BP2 and BP3 interleaved (8 rows)
+    ; For color 1: BP2=0x00, BP3=0x00 per row
+    .byte $00, $00          ; Row 0: BP2=$00, BP3=$00
+    .byte $00, $00          ; Row 1
+    .byte $00, $00          ; Row 2
+    .byte $00, $00          ; Row 3
+    .byte $00, $00          ; Row 4
+    .byte $00, $00          ; Row 5
+    .byte $00, $00          ; Row 6
+    .byte $00, $00          ; Row 7

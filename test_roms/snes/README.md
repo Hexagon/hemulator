@@ -2,6 +2,51 @@
 
 This directory contains test ROMs for the SNES emulator.
 
+## ⚠️ REBUILD REQUIRED
+
+**The following test ROMs need to be rebuilt** after fixing the PPU bitplane addressing:
+
+- `test.sfc` - Updated source in `test.s` to use correct interleaved 2bpp format
+- `test_simple_sprite.sfc` - Needs source update for correct interleaved 4bpp format
+
+**What changed**: The PPU was fixed to use the correct SNES bitplane layout:
+- 2bpp: BP0,BP1 interleaved per row (not sequential BP0[0-7], BP1[8-15])
+- 4bpp: BP0,BP1 pairs in bytes 0-15, BP2,BP3 pairs in bytes 16-31
+- 8bpp: Four pairs of interleaved bitplanes in 64 bytes
+
+**To rebuild after installing cc65**:
+```bash
+cd test_roms/snes
+./build.sh  # or manually: ca65 test.s -o test.o && ld65 -C snes.cfg test.o -o test.sfc
+```
+
+**For test_simple_sprite.s**, update the SPRITE_TILE_DATA section to use interleaved 4bpp format:
+```asm
+; Correct SNES 4bpp format: BP0,BP1 pairs (bytes 0-15), BP2,BP3 pairs (bytes 16-31)
+; For color 1 (BP0=1, BP1=0, BP2=0, BP3=0):
+SPRITE_TILE_DATA:
+    ; Bytes 0-15: BP0,BP1 pairs for rows 0-7
+    .byte $FF, $00  ; Row 0: BP0=$FF, BP1=$00
+    .byte $FF, $00  ; Row 1
+    .byte $FF, $00  ; Row 2
+    .byte $FF, $00  ; Row 3
+    .byte $FF, $00  ; Row 4
+    .byte $FF, $00  ; Row 5
+    .byte $FF, $00  ; Row 6
+    .byte $FF, $00  ; Row 7
+    ; Bytes 16-31: BP2,BP3 pairs for rows 0-7
+    .byte $00, $00  ; Row 0: BP2=$00, BP3=$00
+    .byte $00, $00  ; Row 1
+    .byte $00, $00  ; Row 2
+    .byte $00, $00  ; Row 3
+    .byte $00, $00  ; Row 4
+    .byte $00, $00  ; Row 5
+    .byte $00, $00  ; Row 6
+    .byte $00, $00  ; Row 7
+```
+
+---
+
 ## Test ROMs
 
 ### test.sfc

@@ -129,36 +129,25 @@ RESET:
     stx $2116               ; VRAM address
     
     ; Tile 0: Blue square (all pixels use color 3 = binary 11)
-    ; Bitplane 0: all 1s (bytes 0-7), Bitplane 1: all 1s (bytes 8-15)
-    ; Write as 16-bit words to VRAM
+    ; SNES 2bpp format: bitplanes are interleaved (BP0, BP1 for each row)
+    ; Row N: BP0 at offset N*2, BP1 at offset N*2+1
+    ; For color 3: BP0=0xFF, BP1=0xFF for each row
     lda #$FF
-    ldx #$0008              ; 16 bytes = 8 words
-:   sta $2118               ; Low byte
-    sta $2119               ; High byte (same as low for tile 0)
+    ldx #$0008              ; 8 rows
+:   sta $2118               ; BP0 for this row (low byte of word)
+    sta $2119               ; BP1 for this row (high byte of word)
     dex
     bne :-
     
     ; Tile 1: Red square (color 2 = binary 10)
-    ; Bitplane 0: all 0s (bytes 0-7), Bitplane 1: all 1s (bytes 8-15)
-    ; Write as 16-bit words
-    stz $2118               ; Bitplane 0, row 0 (low byte)
-    stz $2119               ; Bitplane 0, row 1 (high byte)
-    stz $2118               ; Bitplane 0, row 2
-    stz $2119               ; Bitplane 0, row 3
-    stz $2118               ; Bitplane 0, row 4
-    stz $2119               ; Bitplane 0, row 5
-    stz $2118               ; Bitplane 0, row 6
-    stz $2119               ; Bitplane 0, row 7
-    
+    ; For color 2: BP0=0x00, BP1=0xFF for each row
+    ; Write as 16-bit words: low=BP0=0x00, high=BP1=0xFF
+    ldx #$0008              ; 8 rows
     lda #$FF
-    sta $2118               ; Bitplane 1, row 0 (low byte)
-    sta $2119               ; Bitplane 1, row 1 (high byte)
-    sta $2118               ; Bitplane 1, row 2
-    sta $2119               ; Bitplane 1, row 3
-    sta $2118               ; Bitplane 1, row 4
-    sta $2119               ; Bitplane 1, row 5
-    sta $2118               ; Bitplane 1, row 6
-    sta $2119               ; Bitplane 1, row 7
+:   stz $2118               ; BP0 = 0x00 (low byte)
+    sta $2119               ; BP1 = 0xFF (high byte)
+    dex
+    bne :-
     
     ; Upload tilemap to VRAM
     ; Set VRAM address to $0000 (tilemap for BG1)
