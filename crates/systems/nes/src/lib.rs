@@ -658,14 +658,17 @@ impl System for NesSystem {
                         };
                         if should_render {
                             if debug_scanline_drift
-                                && (scanline_before < 3 || scanline_before >= 237)
+                                && (scanline_before < 3
+                                    || scanline_before >= 237
+                                    || (scanline_before >= 14 && scanline_before <= 20))
                             {
                                 let ppu_dot = b.ppu.get_dot();
                                 let ppu_mask = b.ppu.mask();
+                                let v = b.ppu.vram_addr.get();
                                 log(LogCategory::PPU, LogLevel::Info, || {
                                     format!(
-                                        "NES: frame={} render_scanline={} ppu=({}, {}) mask=0x{:02X}",
-                                        self.frame_index, scanline_before, b.ppu.get_scanline(), ppu_dot, ppu_mask
+                                        "NES: frame={} render_scanline={} ppu=({}, {}) mask=0x{:02X} v=${:04X}",
+                                        self.frame_index, scanline_before, b.ppu.get_scanline(), ppu_dot, ppu_mask, v
                                     )
                                 });
                             }
@@ -1252,9 +1255,23 @@ mod tests {
     fn test_nes_wram_boundaries() {
         // Edge case: WRAM is at 0x6000-0x7FFF (8KB)
         // Verify no mirroring/wrapping within this range
+        // NOTE: WRAM is only present for mappers that support it (MMC1, MMC3, MMC5)
         use crate::bus::Bus;
+        use crate::cartridge::{Cartridge, Mirroring};
+        use emu_core::apu::TimingMode;
 
         let mut sys = NesSystem::default();
+
+        // Create a minimal MMC1 cartridge (mapper 1) which has WRAM
+        let cart = Cartridge::new_test(
+            vec![0; 0x8000], // 32KB PRG ROM
+            vec![0; 0x2000], // 8KB CHR ROM
+            1,               // MMC1 mapper
+            Mirroring::Horizontal,
+            TimingMode::Ntsc,
+        );
+        sys.setup_cartridge(cart)
+            .expect("Failed to load test cartridge");
 
         if let Some(bus) = sys.cpu.bus_mut() {
             // Write to start and end of WRAM
@@ -1275,6 +1292,46 @@ mod tests {
             // They should be different regions
             assert_eq!(bus.read(0x1FFF), 0x33);
             assert_eq!(bus.read(0x6000), 0x44);
+        }
+    }
+
+    #[test]
+    fn test_nes_wram_not_present_for_axrom() {
+        // Verify WRAM is NOT present for mappers without PRG RAM (e.g., AxROM)
+        // This is important for games like Battletoads that rely on open bus behavior
+        // Open bus returns the last value read from the data bus
+        // Reference: https://www.nesdev.org/wiki/Open_bus_behavior
+        use crate::bus::Bus;
+        use crate::cartridge::{Cartridge, Mirroring};
+        use emu_core::apu::TimingMode;
+
+        let mut sys = NesSystem::default();
+
+        // Create a minimal AxROM cartridge (mapper 7) which does NOT have WRAM
+        let cart = Cartridge::new_test(
+            vec![0xAB; 0x8000], // 32KB PRG ROM filled with 0xAB
+            vec![0; 0x2000],    // 8KB CHR ROM
+            7,                  // AxROM mapper
+            Mirroring::Horizontal,
+            TimingMode::Ntsc,
+        );
+        sys.setup_cartridge(cart)
+            .expect("Failed to load test cartridge");
+
+        if let Some(bus) = sys.cpu.bus_mut() {
+            // First read from PRG ROM to set the open bus value
+            let prg_value = bus.read(0x8000);
+            assert_eq!(prg_value, 0xAB, "PRG ROM should return 0xAB");
+
+            // Write to WRAM area should be ignored (no WRAM present)
+            bus.write(0x6000, 0x42);
+
+            // Read from WRAM area should return open bus (last value read = 0xAB)
+            assert_eq!(
+                bus.read(0x6000),
+                0xAB,
+                "AxROM should not have WRAM - reads should return open bus (last value read)"
+            );
         }
     }
 

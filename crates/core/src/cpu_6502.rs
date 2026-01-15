@@ -139,6 +139,16 @@ impl<M: Memory6502> Cpu6502<M> {
         base.wrapping_add(self.x as u16)
     }
 
+    /// Absolute,X addressing with page crossing detection
+    /// Returns (address, page_crossed)
+    #[inline]
+    fn addr_absolute_x_page(&mut self) -> (u16, bool) {
+        let base = self.fetch_u16();
+        let addr = base.wrapping_add(self.x as u16);
+        let page_crossed = (base & 0xFF00) != (addr & 0xFF00);
+        (addr, page_crossed)
+    }
+
     #[inline]
     fn addr_zero_page_y(&mut self) -> u16 {
         let zp = self.fetch_u8();
@@ -149,6 +159,16 @@ impl<M: Memory6502> Cpu6502<M> {
     fn addr_absolute_y(&mut self) -> u16 {
         let base = self.fetch_u16();
         base.wrapping_add(self.y as u16)
+    }
+
+    /// Absolute,Y addressing with page crossing detection
+    /// Returns (address, page_crossed)
+    #[inline]
+    fn addr_absolute_y_page(&mut self) -> (u16, bool) {
+        let base = self.fetch_u16();
+        let addr = base.wrapping_add(self.y as u16);
+        let page_crossed = (base & 0xFF00) != (addr & 0xFF00);
+        (addr, page_crossed)
     }
 
     /// (Indirect,X) addressing: take zero-page operand, add X, then read 16-bit address from that page.
@@ -168,6 +188,19 @@ impl<M: Memory6502> Cpu6502<M> {
         let hi = self.read(zp.wrapping_add(1) as u16) as u16;
         let base = (hi << 8) | lo;
         base.wrapping_add(self.y as u16)
+    }
+
+    /// (Indirect),Y addressing with page crossing detection
+    /// Returns (address, page_crossed)
+    #[inline]
+    fn addr_indirect_y_page(&mut self) -> (u16, bool) {
+        let zp = self.fetch_u8();
+        let lo = self.read(zp as u16) as u16;
+        let hi = self.read(zp.wrapping_add(1) as u16) as u16;
+        let base = (hi << 8) | lo;
+        let addr = base.wrapping_add(self.y as u16);
+        let page_crossed = (base & 0xFF00) != (addr & 0xFF00);
+        (addr, page_crossed)
     }
 
     /// Read a 16-bit pointer for JMP (indirect) with the 6502 page-wrapping bug.
@@ -411,12 +444,13 @@ impl<M: Memory6502> Cpu6502<M> {
             }
             0xBE => {
                 // LDX absolute,Y
-                let addr = self.addr_absolute_y();
+                let (addr, page_crossed) = self.addr_absolute_y_page();
                 let val = self.read(addr);
                 self.x = val;
                 self.set_zero_and_negative(self.x);
-                self.cycles += 4;
-                4
+                let cycles = if page_crossed { 5 } else { 4 };
+                self.cycles += cycles as u64;
+                cycles
             }
             0xA0 => {
                 // LDY immediate
@@ -455,12 +489,13 @@ impl<M: Memory6502> Cpu6502<M> {
             }
             0xBC => {
                 // LDY absolute,X
-                let addr = self.addr_absolute_x();
+                let (addr, page_crossed) = self.addr_absolute_x_page();
                 let val = self.read(addr);
                 self.y = val;
                 self.set_zero_and_negative(self.y);
-                self.cycles += 4;
-                4
+                let cycles = if page_crossed { 5 } else { 4 };
+                self.cycles += cycles as u64;
+                cycles
             }
             0x69 => {
                 // ADC immediate
@@ -478,47 +513,49 @@ impl<M: Memory6502> Cpu6502<M> {
                     self.cycles += 2;
                     2
                 } else {
-                    let val = match op {
+                    let (val, page_crossed) = match op {
                         0x25 => {
                             let zp = self.fetch_u8() as u16;
-                            self.read(zp)
+                            (self.read(zp), false)
                         }
                         0x2D => {
                             let a = self.fetch_u16();
-                            self.read(a)
+                            (self.read(a), false)
                         }
                         0x21 => {
                             let a = self.addr_indirect_x();
-                            self.read(a)
+                            (self.read(a), false)
                         }
                         0x31 => {
-                            let a = self.addr_indirect_y();
-                            self.read(a)
+                            let (a, crossed) = self.addr_indirect_y_page();
+                            (self.read(a), crossed)
                         }
                         0x35 => {
                             let a = self.addr_zero_page_x();
-                            self.read(a)
+                            (self.read(a), false)
                         }
                         0x39 => {
-                            let a = self.addr_absolute_y();
-                            self.read(a)
+                            let (a, crossed) = self.addr_absolute_y_page();
+                            (self.read(a), crossed)
                         }
-                        _ => 0,
+                        _ => (0, false),
                     };
                     self.a &= val;
                     self.set_zero_and_negative(self.a);
-                    self.cycles += 4;
-                    4
+                    let cycles = if page_crossed { 5 } else { 4 };
+                    self.cycles += cycles as u64;
+                    cycles
                 }
             }
             0x3D => {
                 // AND absolute,X
-                let addr = self.addr_absolute_x();
+                let (addr, page_crossed) = self.addr_absolute_x_page();
                 let val = self.read(addr);
                 self.a &= val;
                 self.set_zero_and_negative(self.a);
-                self.cycles += 4;
-                4
+                let cycles = if page_crossed { 5 } else { 4 };
+                self.cycles += cycles as u64;
+                cycles
             }
             0x09 | 0x05 | 0x0D | 0x01 | 0x11 | 0x15 | 0x19 | 0x1D => {
                 // ORA variants
@@ -529,41 +566,42 @@ impl<M: Memory6502> Cpu6502<M> {
                     self.cycles += 2;
                     2
                 } else {
-                    let val = match op {
+                    let (val, page_crossed) = match op {
                         0x05 => {
                             let zp = self.fetch_u8() as u16;
-                            self.read(zp)
+                            (self.read(zp), false)
                         }
                         0x0D => {
                             let a = self.fetch_u16();
-                            self.read(a)
+                            (self.read(a), false)
                         }
                         0x01 => {
                             let a = self.addr_indirect_x();
-                            self.read(a)
+                            (self.read(a), false)
                         }
                         0x11 => {
-                            let a = self.addr_indirect_y();
-                            self.read(a)
+                            let (a, crossed) = self.addr_indirect_y_page();
+                            (self.read(a), crossed)
                         }
                         0x15 => {
                             let a = self.addr_zero_page_x();
-                            self.read(a)
+                            (self.read(a), false)
                         }
                         0x19 => {
-                            let a = self.addr_absolute_y();
-                            self.read(a)
+                            let (a, crossed) = self.addr_absolute_y_page();
+                            (self.read(a), crossed)
                         }
                         0x1D => {
-                            let a = self.addr_absolute_x();
-                            self.read(a)
+                            let (a, crossed) = self.addr_absolute_x_page();
+                            (self.read(a), crossed)
                         }
-                        _ => 0,
+                        _ => (0, false),
                     };
                     self.a |= val;
                     self.set_zero_and_negative(self.a);
-                    self.cycles += 4;
-                    4
+                    let cycles = if page_crossed { 5 } else { 4 };
+                    self.cycles += cycles as u64;
+                    cycles
                 }
             }
             0x49 | 0x45 | 0x4D | 0x41 | 0x51 | 0x55 | 0x59 | 0x5D => {
@@ -575,79 +613,80 @@ impl<M: Memory6502> Cpu6502<M> {
                     self.cycles += 2;
                     2
                 } else {
-                    let val = match op {
+                    let (val, page_crossed) = match op {
                         0x45 => {
                             let zp = self.fetch_u8() as u16;
-                            self.read(zp)
+                            (self.read(zp), false)
                         }
                         0x4D => {
                             let a = self.fetch_u16();
-                            self.read(a)
+                            (self.read(a), false)
                         }
                         0x41 => {
                             let a = self.addr_indirect_x();
-                            self.read(a)
+                            (self.read(a), false)
                         }
                         0x51 => {
-                            let a = self.addr_indirect_y();
-                            self.read(a)
+                            let (a, crossed) = self.addr_indirect_y_page();
+                            (self.read(a), crossed)
                         }
                         0x55 => {
                             let a = self.addr_zero_page_x();
-                            self.read(a)
+                            (self.read(a), false)
                         }
                         0x59 => {
-                            let a = self.addr_absolute_y();
-                            self.read(a)
+                            let (a, crossed) = self.addr_absolute_y_page();
+                            (self.read(a), crossed)
                         }
                         0x5D => {
-                            let a = self.addr_absolute_x();
-                            self.read(a)
+                            let (a, crossed) = self.addr_absolute_x_page();
+                            (self.read(a), crossed)
                         }
-                        _ => 0,
+                        _ => (0, false),
                     };
                     self.a ^= val;
                     self.set_zero_and_negative(self.a);
-                    self.cycles += 4;
-                    4
+                    let cycles = if page_crossed { 5 } else { 4 };
+                    self.cycles += cycles as u64;
+                    cycles
                 }
             }
             0xC9 | 0xC5 | 0xCD | 0xC1 | 0xD1 | 0xD5 | 0xD9 | 0xDD => {
                 // CMP variants (A - M) - all addressing modes
-                let val = match op {
-                    0xC9 => self.fetch_u8(),
+                let (val, page_crossed) = match op {
+                    0xC9 => (self.fetch_u8(), false),
                     0xC5 => {
                         let zp = self.fetch_u8() as u16;
-                        self.read(zp)
+                        (self.read(zp), false)
                     }
                     0xCD => {
                         let a = self.fetch_u16();
-                        self.read(a)
+                        (self.read(a), false)
                     }
                     0xC1 => {
                         let a = self.addr_indirect_x();
-                        self.read(a)
+                        (self.read(a), false)
                     }
                     0xD1 => {
-                        let a = self.addr_indirect_y();
-                        self.read(a)
+                        let (a, crossed) = self.addr_indirect_y_page();
+                        (self.read(a), crossed)
                     }
                     0xD5 => {
                         // CMP zp,X
                         let a = self.addr_zero_page_x();
-                        self.read(a)
+                        (self.read(a), false)
                     }
                     0xD9 => {
                         // CMP abs,Y
-                        let a = self.addr_absolute_y();
-                        self.read(a)
+                        let (a, crossed) = self.addr_absolute_y_page();
+                        (self.read(a), crossed)
                     }
                     0xDD => {
                         // CMP abs,X
-                        let a = self.addr_absolute_x();
-                        self.read(a)
+                        let (a, crossed) = self.addr_absolute_x_page();
+                        (self.read(a), crossed)
                     }
-                    _ => 0,
+                    _ => (0, false),
                 };
                 let res = (self.a as i16).wrapping_sub(val as i16) as u8;
                 // carry set if A >= M
@@ -657,8 +696,15 @@ impl<M: Memory6502> Cpu6502<M> {
                     self.status &= !0x01;
                 }
                 self.set_zero_and_negative(res);
-                self.cycles += 2;
-                2
+                let cycles = if op == 0xC9 {
+                    2
+                } else if page_crossed {
+                    5
+                } else {
+                    4
+                };
+                self.cycles += cycles as u64;
+                cycles
             }
             0x24 | 0x2C => {
                 // BIT zp/abs
@@ -847,38 +893,39 @@ impl<M: Memory6502> Cpu6502<M> {
             0xE9 | 0xE5 | 0xED | 0xE1 | 0xF1 | 0xF5 | 0xF9 | 0xFD => {
                 // SBC variants (immediate, zp, abs, (ind,X), (ind),Y, zp,X, abs,Y, abs,X)
                 // Implement using ADC on one's complement: A = A - M - (1 - C)
-                let m = match op {
-                    0xE9 => self.fetch_u8(),
+                let (m, page_crossed) = match op {
+                    0xE9 => (self.fetch_u8(), false),
                     0xE5 => {
                         let zp = self.fetch_u8() as u16;
-                        self.read(zp)
+                        (self.read(zp), false)
                     }
                     0xED => {
                         let a = self.fetch_u16();
-                        self.read(a)
+                        (self.read(a), false)
                     }
                     0xE1 => {
                         let a = self.addr_indirect_x();
-                        self.read(a)
+                        (self.read(a), false)
                     }
                     0xF1 => {
-                        let a = self.addr_indirect_y();
-                        self.read(a)
+                        let (a, crossed) = self.addr_indirect_y_page();
+                        (self.read(a), crossed)
                     }
                     0xF5 => {
                         let a = self.addr_zero_page_x();
-                        self.read(a)
+                        (self.read(a), false)
                     }
                     0xF9 => {
-                        let a = self.addr_absolute_y();
-                        self.read(a)
+                        let (a, crossed) = self.addr_absolute_y_page();
+                        (self.read(a), crossed)
                     }
                     0xFD => {
-                        let a = self.addr_absolute_x();
-                        self.read(a)
+                        let (a, crossed) = self.addr_absolute_x_page();
+                        (self.read(a), crossed)
                     }
-                    _ => 0,
-                } as i16;
+                    _ => (0, false),
+                };
+                let m = m as i16;
                 let carry = if (self.status & 0x01) != 0 { 1 } else { 0 };
                 let value = m ^ 0xFF; // one's complement
                 let sum = (self.a as u16) + (value as u16) + (carry as u16);
@@ -897,7 +944,7 @@ impl<M: Memory6502> Cpu6502<M> {
                 }
                 self.a = result;
                 self.set_zero_and_negative(self.a);
-                let cycles = match op {
+                let base_cycles = match op {
                     0xE9 => 2, // immediate
                     0xE5 => 3, // zero page
                     0xED => 4, // absolute
@@ -907,6 +954,11 @@ impl<M: Memory6502> Cpu6502<M> {
                     0xF9 => 4, // absolute,Y
                     0xFD => 4, // absolute,X
                     _ => 2,
+                };
+                let cycles = if page_crossed {
+                    base_cycles + 1
+                } else {
+                    base_cycles
                 };
                 self.cycles += cycles as u64;
                 cycles
@@ -1038,10 +1090,14 @@ impl<M: Memory6502> Cpu6502<M> {
                     _ => false,
                 };
                 if cond {
+                    let old_pc = self.pc;
                     let rel = offset as i16 as i32;
                     self.pc = ((self.pc as i32).wrapping_add(rel)) as u16;
-                    self.cycles += 3;
-                    3
+                    // Branch taken: 3 cycles, +1 if page boundary crossed
+                    let page_crossed = (old_pc & 0xFF00) != (self.pc & 0xFF00);
+                    let cycles = if page_crossed { 4 } else { 3 };
+                    self.cycles += cycles as u64;
+                    cycles
                 } else {
                     self.cycles += 2;
                     2
@@ -1113,21 +1169,23 @@ impl<M: Memory6502> Cpu6502<M> {
             }
             0xBD => {
                 // LDA absolute,X
-                let addr = self.addr_absolute_x();
+                let (addr, page_crossed) = self.addr_absolute_x_page();
                 let val = self.read(addr);
                 self.a = val;
                 self.set_zero_and_negative(self.a);
-                self.cycles += 4;
-                4
+                let cycles = if page_crossed { 5 } else { 4 };
+                self.cycles += cycles as u64;
+                cycles
             }
             0xB9 => {
                 // LDA absolute,Y
-                let addr = self.addr_absolute_y();
+                let (addr, page_crossed) = self.addr_absolute_y_page();
                 let val = self.read(addr);
                 self.a = val;
                 self.set_zero_and_negative(self.a);
-                self.cycles += 4;
-                4
+                let cycles = if page_crossed { 5 } else { 4 };
+                self.cycles += cycles as u64;
+                cycles
             }
             0xA1 => {
                 // LDA (indirect,X)
@@ -1140,12 +1198,13 @@ impl<M: Memory6502> Cpu6502<M> {
             }
             0xB1 => {
                 // LDA (indirect),Y
-                let addr = self.addr_indirect_y();
+                let (addr, page_crossed) = self.addr_indirect_y_page();
                 let val = self.read(addr);
                 self.a = val;
                 self.set_zero_and_negative(self.a);
-                self.cycles += 5;
-                5
+                let cycles = if page_crossed { 6 } else { 5 };
+                self.cycles += cycles as u64;
+                cycles
             }
             0x6D => {
                 // ADC absolute
@@ -1165,19 +1224,21 @@ impl<M: Memory6502> Cpu6502<M> {
             }
             0x7D => {
                 // ADC absolute,X
-                let addr = self.addr_absolute_x();
+                let (addr, page_crossed) = self.addr_absolute_x_page();
                 let val = self.read(addr);
                 self.adc(val);
-                self.cycles += 4;
-                4
+                let cycles = if page_crossed { 5 } else { 4 };
+                self.cycles += cycles as u64;
+                cycles
             }
             0x79 => {
                 // ADC absolute,Y
-                let addr = self.addr_absolute_y();
+                let (addr, page_crossed) = self.addr_absolute_y_page();
                 let val = self.read(addr);
                 self.adc(val);
-                self.cycles += 4;
-                4
+                let cycles = if page_crossed { 5 } else { 4 };
+                self.cycles += cycles as u64;
+                cycles
             }
             0x61 => {
                 // ADC (indirect,X)
@@ -1189,11 +1250,12 @@ impl<M: Memory6502> Cpu6502<M> {
             }
             0x71 => {
                 // ADC (indirect),Y
-                let addr = self.addr_indirect_y();
+                let (addr, page_crossed) = self.addr_indirect_y_page();
                 let val = self.read(addr);
                 self.adc(val);
-                self.cycles += 5;
-                5
+                let cycles = if page_crossed { 6 } else { 5 };
+                self.cycles += cycles as u64;
+                cycles
             }
             0x85 => {
                 // STA zero page
@@ -3489,5 +3551,139 @@ mod tests {
                                                    // ROR sets carry to 1 (bit 0 was set), then ADC: 0x10 + 0x41 + 1 = 0x52
         assert_eq!(cpu.a, 0x52);
         assert_eq!(cpu.status & 0x01, 0x00); // Carry clear (no overflow from ADC)
+    }
+
+    #[test]
+    fn test_page_crossing_penalty() {
+        // Test that page crossing adds +1 cycle to indexed read instructions
+
+        // Test LDA absolute,X with NO page crossing
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu6502::new(mem);
+        cpu.memory.write(0x0210, 0x42);
+        cpu.memory.load_program(0x8000, &[0xBD, 0x00, 0x02]); // LDA $0200,X
+        cpu.reset();
+        cpu.x = 0x10; // $0200 + $10 = $0210 (no page cross: $02 -> $02)
+        assert_eq!(cpu.step(), 4); // Base 4 cycles, no page crossing
+        assert_eq!(cpu.a, 0x42);
+
+        // Test LDA absolute,X WITH page crossing
+        let mem2 = ArrayMemory::new();
+        let mut cpu2 = Cpu6502::new(mem2);
+        cpu2.memory.write(0x0300, 0x55);
+        cpu2.memory.load_program(0x8000, &[0xBD, 0xFF, 0x02]); // LDA $02FF,X
+        cpu2.reset();
+        cpu2.x = 0x01; // $02FF + $01 = $0300 (page cross: $02 -> $03)
+        assert_eq!(cpu2.step(), 5); // Base 4 cycles + 1 for page crossing
+        assert_eq!(cpu2.a, 0x55);
+
+        // Test LDA absolute,Y with page crossing
+        let mem3 = ArrayMemory::new();
+        let mut cpu3 = Cpu6502::new(mem3);
+        cpu3.memory.write(0x0400, 0x77);
+        cpu3.memory.load_program(0x8000, &[0xB9, 0x80, 0x03]); // LDA $0380,Y
+        cpu3.reset();
+        cpu3.y = 0x80; // $0380 + $80 = $0400 (page cross: $03 -> $04)
+        assert_eq!(cpu3.step(), 5); // Base 4 cycles + 1 for page crossing
+        assert_eq!(cpu3.a, 0x77);
+
+        // Test LDA (indirect),Y with page crossing
+        let mem4 = ArrayMemory::new();
+        let mut cpu4 = Cpu6502::new(mem4);
+        cpu4.memory.write(0x20, 0xFE); // Low byte of pointer
+        cpu4.memory.write(0x21, 0x01); // High byte of pointer -> $01FE
+        cpu4.memory.write(0x0200, 0x99); // Target value at $01FE + $02 = $0200
+        cpu4.memory.load_program(0x8000, &[0xB1, 0x20]); // LDA ($20),Y
+        cpu4.reset();
+        cpu4.y = 0x02; // $01FE + $02 = $0200 (page cross: $01 -> $02)
+        assert_eq!(cpu4.step(), 6); // Base 5 cycles + 1 for page crossing
+        assert_eq!(cpu4.a, 0x99);
+
+        // Test ADC absolute,X with page crossing
+        let mem5 = ArrayMemory::new();
+        let mut cpu5 = Cpu6502::new(mem5);
+        cpu5.memory.write(0x1000, 0x10);
+        cpu5.memory.load_program(0x8000, &[0x7D, 0xFF, 0x0F]); // ADC $0FFF,X
+        cpu5.reset();
+        cpu5.a = 0x20;
+        cpu5.x = 0x01; // $0FFF + $01 = $1000 (page cross: $0F -> $10)
+        cpu5.status &= !0x01; // Clear carry
+        assert_eq!(cpu5.step(), 5); // Base 4 cycles + 1 for page crossing
+        assert_eq!(cpu5.a, 0x30);
+
+        // Test CMP absolute,Y with page crossing
+        let mem6 = ArrayMemory::new();
+        let mut cpu6 = Cpu6502::new(mem6);
+        cpu6.memory.write(0x2100, 0x30);
+        cpu6.memory.load_program(0x8000, &[0xD9, 0x00, 0x20]); // CMP $2000,Y
+        cpu6.reset();
+        cpu6.a = 0x40;
+        cpu6.y = 0xFF; // $2000 + $FF = $20FF (no cross)
+        assert_eq!(cpu6.step(), 4); // Base 4 cycles, no page crossing
+
+        // Test with actual page crossing
+        let mem7 = ArrayMemory::new();
+        let mut cpu7 = Cpu6502::new(mem7);
+        cpu7.memory.write(0x2100, 0x30);
+        cpu7.memory.load_program(0x8000, &[0xD9, 0xFF, 0x20]); // CMP $20FF,Y
+        cpu7.reset();
+        cpu7.a = 0x40;
+        cpu7.y = 0x01; // $20FF + $01 = $2100 (page cross: $20 -> $21)
+        assert_eq!(cpu7.step(), 5); // Base 4 cycles + 1 for page crossing
+        assert_eq!(cpu7.status & 0x01, 0x01); // Carry set (A >= M)
+    }
+
+    #[test]
+    fn test_branch_page_crossing_penalty() {
+        // Test that branch instructions add +1 cycle when crossing page boundary
+
+        // Test BEQ with NO page crossing
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu6502::new(mem);
+        // BEQ forward by 10 bytes (stays in same page)
+        cpu.memory.load_program(0x8000, &[0xA9, 0x00, 0xF0, 0x0A]);
+        cpu.reset();
+        assert_eq!(cpu.step(), 2); // LDA #0 (sets Z flag)
+        let cycles = cpu.step(); // BEQ +10 (branch taken, no page cross)
+        assert_eq!(cycles, 3); // Base 3 cycles for taken branch, no page crossing
+        assert_eq!(cpu.pc, 0x800E); // PC should be at 0x8004 + 10 = 0x800E
+
+        // Test BNE with page crossing (backward)
+        // Position BNE at $80FE so PC after fetch is $8100, branch back to $80FF
+        let mem2 = ArrayMemory::new();
+        let mut cpu2 = Cpu6502::new(mem2);
+        cpu2.memory.load_program(0x80FC, &[0xA9, 0x01, 0xD0, 0xFF]);
+        cpu2.reset();
+        cpu2.pc = 0x80FC;
+        assert_eq!(cpu2.step(), 2); // LDA #1 (clears Z flag) -> PC now at $80FE
+                                    // BNE at $80FE: fetch opcode->$80FF, fetch offset->$8100 (old_pc for calc)
+        let cycles = cpu2.step(); // BNE -1 (branch taken, crosses page backward)
+        assert_eq!(cycles, 4); // Base 3 cycles + 1 for page crossing
+                               // target = $8100 + (-1) = $80FF
+        assert_eq!(cpu2.pc, 0x80FF);
+
+        // Test BEQ with page crossing (forward)
+        // Position BEQ so PC after fetch is $80FF, branch forward to $8101
+        let mem3 = ArrayMemory::new();
+        let mut cpu3 = Cpu6502::new(mem3);
+        cpu3.memory.load_program(0x80FB, &[0xA9, 0x00, 0xF0, 0x02]);
+        cpu3.reset();
+        cpu3.pc = 0x80FB;
+        assert_eq!(cpu3.step(), 2); // LDA #0 (sets Z flag) -> PC now at $80FD
+                                    // BEQ at $80FD: fetch opcode->$80FE, fetch offset->$80FF (old_pc for calc)
+        let cycles = cpu3.step(); // BEQ +2 (branch taken, crosses page forward)
+        assert_eq!(cycles, 4); // Base 3 cycles + 1 for page crossing
+                               // target = $80FF + 2 = $8101
+        assert_eq!(cpu3.pc, 0x8101);
+
+        // Test BNE with branch NOT taken (no extra cycles)
+        let mem4 = ArrayMemory::new();
+        let mut cpu4 = Cpu6502::new(mem4);
+        cpu4.memory.load_program(0x8000, &[0xA9, 0x00, 0xD0, 0x10]);
+        cpu4.reset();
+        assert_eq!(cpu4.step(), 2); // LDA #0 (sets Z flag)
+        let cycles = cpu4.step(); // BNE +16 (branch NOT taken because Z=1)
+        assert_eq!(cycles, 2); // Only 2 cycles for branch not taken
+        assert_eq!(cpu4.pc, 0x8004); // PC advances past the branch instruction
     }
 }

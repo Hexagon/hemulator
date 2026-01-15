@@ -494,6 +494,20 @@ impl Ppu {
                 if self.sprite_overflow.get() {
                     status |= 0x20;
                 }
+
+                let scanline = self.scanline.get();
+                let dot = self.dot.get();
+
+                // Log PPUSTATUS reads that see sprite 0 hit at Info level (not performance-critical)
+                if self.sprite_0_hit.get() {
+                    log(LogCategory::PPU, LogLevel::Info, || {
+                        format!(
+                            "PPUSTATUS read: ${:02X} (S0H=1) @ scanline {} dot {}",
+                            status, scanline, dot
+                        )
+                    });
+                }
+
                 // CRITICAL: PPUSTATUS read behavior (DO NOT CHANGE - required for NMI timing)
                 // Reading PPUSTATUS has three effects:
                 // 1. Clears the VBlank flag (bit 7)
@@ -573,8 +587,8 @@ impl Ppu {
                 // Reference: problemkaputt.de everynes.htm - PPU Reset section
                 // Reference: https://www.nesdev.org/wiki/PPU_scrolling
                 if self.first_frame_after_reset.get() {
-                    log(LogCategory::PPU, LogLevel::Trace, || {
-                        "PPU: $2000 write blocked (first frame)".to_string()
+                    log(LogCategory::PPU, LogLevel::Warn, || {
+                        format!("PPU: $2000 write BLOCKED (first frame): val=${:02X}", val)
                     });
                     return;
                 }
@@ -696,6 +710,9 @@ impl Ppu {
                     return;
                 }
 
+                let scanline = self.scanline.get();
+                let dot = self.dot.get();
+
                 if !self.addr_latch.get() {
                     // First write (w=0): set high byte of t register ONLY
                     // t: .FEDCBA ........ <- val: ..FEDCBA
@@ -707,6 +724,16 @@ impl Ppu {
 
                     // NOTE: v (vram_addr) is NOT updated on first write!
                     // This is crucial for mid-frame scroll splits to work correctly.
+
+                    log(LogCategory::PPU, LogLevel::Info, || {
+                        format!(
+                            "$2006 hi-write: ${:02X} @ scanline {} dot {} (t=${:04X})",
+                            val,
+                            scanline,
+                            dot,
+                            (t & 0x00FF) | (hi_masked << 8)
+                        )
+                    });
 
                     self.addr_latch.set(true);
                 } else {
@@ -720,12 +747,20 @@ impl Ppu {
                     // Copy complete t register to v (this is when scroll takes effect)
                     self.vram_addr.set(new_t);
 
+                    log(LogCategory::PPU, LogLevel::Info, || {
+                        format!(
+                            "$2006 lo-write: ${:02X} @ scanline {} dot {} => v=${:04X}",
+                            val, scanline, dot, new_t
+                        )
+                    });
+
                     self.addr_latch.set(false);
                 }
             }
             7 => {
                 // PPUDATA: write to vram or chr depending on address
                 let addr = self.vram_addr.get() & 0x3FFF;
+
                 if addr < 0x2000 {
                     // CHR-ROM is typically read-only; only allow writes for CHR-RAM.
                     if self.chr_is_ram && self.chr.len() >= (addr as usize + 1) {
@@ -1301,11 +1336,14 @@ impl Ppu {
                         && x < 255
                         && (show_bg_left && show_sprites_left || x >= 8);
 
+                    // Sprite 0 NO HIT logging disabled - too verbose
+                    // if sprite_idx == 0 && sprite_0_hit_x.is_none() && !is_sprite_0_hit_candidate { ... }
+
                     if is_sprite_0_hit_candidate {
                         sprite_0_hit_x = Some(x as u16);
-                        log(LogCategory::PPU, LogLevel::Debug, || {
+                        log(LogCategory::PPU, LogLevel::Warn, || {
                             format!(
-                                "Sprite 0 hit pending at scanline {} x={} (will trigger at dot {})",
+                                "Sprite 0 hit FOUND at scanline {} x={} (will trigger at dot {})",
                                 y,
                                 x,
                                 x + 2
@@ -1367,6 +1405,26 @@ impl Ppu {
         if (scanline, dot) == (241, 1) {
             // Set VBlank flag
             let was_vblank = self.vblank.replace(true);
+
+            // COMPATIBILITY FIX: Clear sprite 0 hit at VBlank start.
+            //
+            // Hardware-accurate behavior is to clear sprite 0 hit on the pre-render scanline
+            // at dot 1 (261/311). This implementation still performs that hardware-timed clear
+            // on the pre-render line; this earlier clear at VBlank start is *in addition* to
+            // that, not a replacement.
+            //
+            // Rationale: some games poll the sprite 0 hit flag during VBlank. If we only clear
+            // on the pre-render scanline, those games can observe a "stale" hit flag from the
+            // previous frame (e.g., Battletoads screen jumping). Clearing at VBlank start
+            // prevents such games from reading stale state while still allowing the pre-render
+            // clear to occur at the hardware-accurate time before the next visible frame.
+            //
+            // Double-clearing here is intentional and safe: the flag is simply guaranteed to be
+            // false throughout VBlank, and it will be cleared again on the pre-render scanline
+            // for correctness with code that assumes the hardware timing.
+            // NOTE: This is a deviation from strict hardware accuracy for better game compatibility.
+            self.sprite_0_hit.set(false);
+            self.sprite_0_hit_pending.set(None);
 
             // If VBlank just started and NMI is enabled, trigger NMI
             if !was_vblank && self.nmi_enabled() {
