@@ -953,6 +953,16 @@ impl TabManager {
                             "8-bit console with tile-based graphics and Z80 CPU",
                         ),
                         (
+                            "ColecoVision",
+                            "ColecoVision",
+                            "Advanced 1982 console with arcade-quality graphics",
+                        ),
+                        (
+                            "SG-1000",
+                            "Sega SG-1000",
+                            "Sega's first home console released in 1983",
+                        ),
+                        (
                             "CHIP-8",
                             "CHIP-8",
                             "Classic interpreted programming language for vintage computers",

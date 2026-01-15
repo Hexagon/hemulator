@@ -21,8 +21,10 @@ The PC emulator is **experimental** with CGA/EGA/VGA graphics support and basic 
 - ✅ **Boot Sector Loading** - Loads from floppy/hard drive with boot priority
 - ✅ **Keyboard** - Full passthrough with host modifier and shift flag tracking
 - ✅ **INT 16h Keyboard Services** - Read keystroke, check keystroke, get shift flags (all functions working)
-- ✅ **Mount System** - Multi-slot disk image mounting with validation
+- ✅ **Mount System** - Multi-slot disk image mounting with validation and GUI integration
 - ✅ **Persistent Disk State** - Disk images are modified in-place (writes persist to files)
+- ✅ **Project Files** - Save/load complete PC configurations with .hemu files
+- ✅ **GUI Mount Point Management** - Mount/eject disks through Property Panel interface
 
 ### Video Adapter Support
 
@@ -213,6 +215,104 @@ let frame = pc.step_frame()?;
 // Disk state changes are in-memory on the mounted disk image
 // To persist changes, you would need to write the disk image back to disk
 ```
+
+## GUI Workflow
+
+The PC emulator has a specialized GUI workflow designed for systems with multiple mount points.
+
+### Creating a PC System
+
+1. **Launch Hemulator**: Run `hemu` with no arguments
+2. **New Project**: Click "📁 File" → "➕ New Project..."
+3. **Select PC**: Choose "PC" from the system selector
+4. **Mount Points Available**: The Property Panel (right side) immediately shows all mount points:
+   - **BIOS**: Custom BIOS ROM (optional)
+   - **Floppy A**: Primary floppy disk drive
+   - **Floppy B**: Secondary floppy disk drive
+   - **Hard Drive**: Hard disk drive
+
+### Mounting Disk Images
+
+**From Property Panel** (recommended for PC systems):
+1. Open the "💿 Mount Points" section in the Property Panel
+2. Click "Mount..." next to any mount point (BIOS, Floppy A, Floppy B, Hard Drive)
+3. Select a disk image file
+4. The mounted file appears next to the mount point name
+5. Click "Eject" to unmount
+
+**Using .hemu Project Files**:
+1. Create or edit a `.hemu` project file with mount paths (see below)
+2. Click "📁 File" → "📁 Open Project..."
+3. Select your `.hemu` file
+4. All disks are automatically mounted
+
+### Project Files (.hemu)
+
+PC systems use `.hemu` project files to save complete system configurations. This includes:
+- Mounted disk images (BIOS, Floppy A, Floppy B, Hard Drive)
+- CPU model (8086, 80186, 80286, etc.)
+- Memory size (64KB - 16MB)
+- Video adapter (CGA, EGA, VGA)
+- Boot priority (Floppy First, Hard Drive First, etc.)
+
+**Example `.hemu` file**:
+```json
+{
+  "version": 1,
+  "system": "pc",
+  "mounts": {
+    "FloppyA": "images/freedos.img",
+    "FloppyB": "images/data.img",
+    "HardDrive": "images/hdd.img"
+  },
+  "boot_priority": "FloppyFirst",
+  "cpu_model": "Intel8086",
+  "memory_kb": 640,
+  "video_mode": "CGA"
+}
+```
+
+**Saving Projects**:
+1. Configure your PC system (mount disks, set CPU model, etc.)
+2. Click "📁 File" → "💾 Save Project..."
+3. Choose a location and filename
+4. The emulator remembers this location for quick re-saves
+
+**Loading Projects**:
+- Click "📁 File" → "📁 Open Project..."
+- Or use "🕒 Recent Files" to quickly reload recent projects
+- All configuration is automatically restored
+
+### Persistent Disk State
+
+**Important**: Disk writes in PC systems are **in-memory only** during a session. To persist changes:
+1. The GUI currently doesn't auto-save disk modifications
+2. Disk images remain unchanged on the file system
+3. This prevents accidental corruption of disk images
+4. Future versions may add explicit "Save Disk Image" functionality
+
+### Boot Priority
+
+PC systems can boot from different devices. Set boot priority in:
+- **Property Panel**: "PC Configuration" → "Boot Priority" (coming soon)
+- **.hemu file**: `"boot_priority": "FloppyFirst"` (or `"HardDriveFirst"`, `"FloppyOnly"`, `"HardDriveOnly"`)
+
+### Workflow Examples
+
+**Quick Testing**:
+1. Create new PC system
+2. Mount floppy image from Property Panel
+3. System automatically boots from floppy
+4. No project file needed
+
+**DOS Development Workflow**:
+1. Create a `.hemu` project with FreeDOS on Floppy A and work disk on Floppy B
+2. Save project as `dos_dev.hemu`
+3. Edit code externally
+4. Rebuild disk image with your changes
+5. Reload project to test (File → Open Project → Recent Files)
+
+**See also**: [workbench/README.md](../../../workbench/README.md) for rapid iteration workflow with auto-building and disk injection
 
 ## Keyboard Input
 

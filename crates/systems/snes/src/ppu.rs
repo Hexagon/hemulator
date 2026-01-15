@@ -176,6 +176,58 @@ pub struct Ppu {
     /// Note: According to hardware documentation, all Mode 7 write-twice registers
     /// share the same previous-write latch (M7OLD)
     m7_prev: u8,
+
+    // Window registers
+    /// Window 1/2 mask settings for BG1/BG2 ($2123)
+    /// Bits 0-1: BG2 Window 1 enable/invert
+    /// Bits 2-3: BG2 Window 2 enable/invert
+    /// Bits 4-5: BG1 Window 1 enable/invert
+    /// Bits 6-7: BG1 Window 2 enable/invert
+    w12sel: u8,
+    /// Window 1/2 mask settings for BG3/BG4 ($2124)
+    w34sel: u8,
+    /// Window 1/2 mask settings for OBJ/Color ($2125)
+    wobjsel: u8,
+    /// Window 1 left position ($2126)
+    wh0: u8,
+    /// Window 1 right position ($2127)
+    wh1: u8,
+    /// Window 2 left position ($2128)
+    wh2: u8,
+    /// Window 2 right position ($2129)
+    wh3: u8,
+    /// Window mask logic for BG layers ($212A)
+    wbglog: u8,
+    /// Window mask logic for OBJ and color window ($212B)
+    wobjlog: u8,
+
+    /// Sub-screen designation ($212D) - which layers appear on sub-screen
+    /// Bits 0-4: Enable BG1-4 and OBJ on sub-screen
+    ts: u8,
+    /// Window mask designation for main screen ($212E)
+    tmw: u8,
+    /// Window mask designation for sub-screen ($212F)
+    tsw: u8,
+
+    // Color math registers
+    /// Color math control ($2130) - CGWSEL
+    /// Bits 0-1: Direct color mode for 256-color BGs
+    /// Bits 4-5: Color math enable for windows
+    /// Bit 6: Prevent color math
+    /// Bit 7: Add/subtract select for color window
+    cgwsel: u8,
+    /// Color math designation ($2131) - CGADSUB
+    /// Bits 0-5: Enable color math on BG1-4, OBJ, backdrop
+    /// Bit 6: Half color math
+    /// Bit 7: Add/subtract select (0=add, 1=subtract)
+    cgadsub: u8,
+    /// Fixed color data ($2132) - COLDATA
+    /// Color value in 5-bit BGR format (written multiple times for R/G/B)
+    coldata: u8,
+    /// Fixed color RGB components (extracted from COLDATA writes)
+    fixed_color_r: u8,
+    fixed_color_g: u8,
+    fixed_color_b: u8,
 }
 
 impl Ppu {
@@ -225,6 +277,27 @@ impl Ppu {
             m7x: 0,
             m7y: 0,
             m7_prev: 0,
+            // Window defaults
+            w12sel: 0,
+            w34sel: 0,
+            wobjsel: 0,
+            wh0: 0,
+            wh1: 0,
+            wh2: 0,
+            wh3: 0,
+            wbglog: 0,
+            wobjlog: 0,
+            // Screen designation defaults
+            ts: 0,
+            tmw: 0,
+            tsw: 0,
+            // Color math defaults
+            cgwsel: 0,
+            cgadsub: 0,
+            coldata: 0,
+            fixed_color_r: 0,
+            fixed_color_g: 0,
+            fixed_color_b: 0,
         }
     }
 
@@ -603,24 +676,131 @@ impl Ppu {
                 // Stub: Accept write but don't implement mosaic
             }
 
-            // $2123-$212B - Window registers (stub - not implemented)
-            0x2123..=0x212B => {
-                // Stub: Accept window configuration but don't implement
+            // $2123-$212B - Window registers
+            0x2123 => {
+                self.w12sel = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: W12SEL (BG1/BG2 window) = ${:02X}", val)
+                });
+            }
+            0x2124 => {
+                self.w34sel = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: W34SEL (BG3/BG4 window) = ${:02X}", val)
+                });
+            }
+            0x2125 => {
+                self.wobjsel = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: WOBJSEL (OBJ/Color window) = ${:02X}", val)
+                });
+            }
+            0x2126 => {
+                self.wh0 = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: WH0 (Window 1 left) = ${:02X}", val)
+                });
+            }
+            0x2127 => {
+                self.wh1 = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: WH1 (Window 1 right) = ${:02X}", val)
+                });
+            }
+            0x2128 => {
+                self.wh2 = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: WH2 (Window 2 left) = ${:02X}", val)
+                });
+            }
+            0x2129 => {
+                self.wh3 = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: WH3 (Window 2 right) = ${:02X}", val)
+                });
+            }
+            0x212A => {
+                self.wbglog = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: WBGLOG (BG window logic) = ${:02X}", val)
+                });
+            }
+            0x212B => {
+                self.wobjlog = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: WOBJLOG (OBJ window logic) = ${:02X}", val)
+                });
             }
 
-            // $212D - TS - Sub-screen Designation (stub - not implemented)
+            // $212D - TS - Sub-screen Designation
             0x212D => {
-                // Stub: Accept write but don't implement sub-screen
+                self.ts = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: TS (Sub-screen) = ${:02X}", val)
+                });
             }
 
-            // $212E-$212F - Window mask designation (stub - not implemented)
-            0x212E | 0x212F => {
-                // Stub: Accept window mask but don't implement
+            // $212E-$212F - Window mask designation
+            0x212E => {
+                self.tmw = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: TMW (Main screen window mask) = ${:02X}", val)
+                });
+            }
+            0x212F => {
+                self.tsw = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: TSW (Sub-screen window mask) = ${:02X}", val)
+                });
             }
 
-            // $2130-$2133 - Color math and screen mode registers (stub - not implemented)
-            0x2130..=0x2133 => {
-                // Stub: Accept color math configuration but don't implement
+            // $2130-$2132 - Color math and screen mode registers
+            0x2130 => {
+                self.cgwsel = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: CGWSEL (Color math control) = ${:02X}", val)
+                });
+            }
+            0x2131 => {
+                self.cgadsub = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!(
+                        "SNES PPU: CGADSUB (Color math designation) = ${:02X} ({}, targets: {}{}{}{}{}{})",
+                        val,
+                        if val & 0x80 != 0 { "subtract" } else { "add" },
+                        if val & 0x20 != 0 { "backdrop " } else { "" },
+                        if val & 0x10 != 0 { "OBJ " } else { "" },
+                        if val & 0x08 != 0 { "BG4 " } else { "" },
+                        if val & 0x04 != 0 { "BG3 " } else { "" },
+                        if val & 0x02 != 0 { "BG2 " } else { "" },
+                        if val & 0x01 != 0 { "BG1 " } else { "" }
+                    )
+                });
+            }
+            0x2132 => {
+                self.coldata = val;
+                // Extract color components (5-bit each) based on which bits are set
+                if val & 0x20 != 0 {
+                    self.fixed_color_r = val & 0x1F;
+                }
+                if val & 0x40 != 0 {
+                    self.fixed_color_g = val & 0x1F;
+                }
+                if val & 0x80 != 0 {
+                    self.fixed_color_b = val & 0x1F;
+                }
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!(
+                        "SNES PPU: COLDATA (Fixed color) = ${:02X} -> RGB({},{},{})",
+                        val, self.fixed_color_r, self.fixed_color_g, self.fixed_color_b
+                    )
+                });
+            }
+            0x2133 => {
+                // $2133 - SETINI - Screen mode/video select (stub for now)
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SNES PPU: SETINI (Screen mode) = ${:02X}", val)
+                });
             }
 
             // Other registers - stub (just accept writes)
@@ -1058,6 +1238,10 @@ impl Ppu {
                 non_backdrop_pixels += 1;
             }
         }
+
+        // NOTE: Color math registers are stored ($2130-$2132) but not yet applied
+        // Proper implementation requires per-pixel layer tracking to apply color math correctly
+        // TODO: Implement color math with per-pixel layer tracking
 
         // Apply brightness (bits 0-3 of $2100) ONLY when force blank is OFF
         // This preserves the behavior where we render during force blank for boot sequences
@@ -1713,6 +1897,11 @@ impl Ppu {
                 // Priority 0 BG = priority level 1, Priority 1 BG = priority level 3
                 let render_priority = if filter_priority == 0 { 1 } else { 3 };
 
+                // Check window masking for this layer
+                if self.is_pixel_masked_by_window(screen_x, bg_index) {
+                    continue;
+                }
+
                 // Draw pixel if it has equal or higher priority
                 let frame_offset = screen_y * 256 + screen_x;
                 if render_priority <= priority_buffer[frame_offset] {
@@ -1820,6 +2009,11 @@ impl Ppu {
                 // Priority 0 BG = priority level 1, Priority 1 BG = priority level 3
                 let render_priority = if filter_priority == 0 { 1 } else { 3 };
 
+                // Check window masking for this layer
+                if self.is_pixel_masked_by_window(screen_x, bg_index) {
+                    continue;
+                }
+
                 // Draw pixel if it has equal or higher priority
                 let frame_offset = screen_y * 256 + screen_x;
                 if render_priority <= priority_buffer[frame_offset] {
@@ -1918,6 +2112,11 @@ impl Ppu {
 
                 // Calculate rendering priority
                 let render_priority = if filter_priority == 0 { 1 } else { 3 };
+
+                // Check window masking for this layer
+                if self.is_pixel_masked_by_window(screen_x, bg_index) {
+                    continue;
+                }
 
                 // Draw pixel if it has equal or higher priority
                 let frame_offset = screen_y * 256 + screen_x;
@@ -2149,6 +2348,11 @@ impl Ppu {
                 // Calculate rendering priority
                 let render_priority = if filter_priority == 0 { 1 } else { 3 };
 
+                // Check window masking for this layer (use x/2 for 512px mode)
+                if self.is_pixel_masked_by_window(screen_x / 2, bg_index) {
+                    continue;
+                }
+
                 // Draw pixel at hi-res position
                 let frame_offset = screen_y * 512 + screen_x;
                 if render_priority <= priority_buffer[frame_offset] {
@@ -2243,6 +2447,11 @@ impl Ppu {
 
                 // Calculate rendering priority
                 let render_priority = if filter_priority == 0 { 1 } else { 3 };
+
+                // Check window masking for this layer (use x/2 for 512px mode)
+                if self.is_pixel_masked_by_window(screen_x / 2, bg_index) {
+                    continue;
+                }
 
                 // Draw pixel at hi-res position
                 let frame_offset = screen_y * 512 + screen_x;
@@ -2558,6 +2767,11 @@ impl Ppu {
                             continue;
                         }
 
+                        // Check window masking for sprites (layer 4)
+                        if self.is_pixel_masked_by_window(screen_x as usize, 4) {
+                            continue;
+                        }
+
                         // Sprites use palettes 128-255 (palette 0-7 maps to CGRAM 128-255)
                         let cgram_index = (128 + palette * 16 + color_index as usize) as u8;
                         let color = self.get_color(cgram_index);
@@ -2595,6 +2809,84 @@ impl Ppu {
                     x, y, width, height, tile, sprite_tile_base, palette, pixels_drawn
                 )
             });
+        }
+    }
+
+    /// Check if a pixel at the given x coordinate is masked by windows for a given layer
+    /// layer: 0=BG1, 1=BG2, 2=BG3, 3=BG4, 4=OBJ
+    /// Returns true if the pixel should be masked (not drawn)
+    fn is_pixel_masked_by_window(&self, x: usize, layer: usize) -> bool {
+        // Window masking only applies to main screen layers
+
+        // Get window settings for this layer
+        let w_sel = match layer {
+            0 | 1 => self.w12sel, // BG1/BG2
+            2 | 3 => self.w34sel, // BG3/BG4
+            4 => self.wobjsel,    // OBJ
+            _ => return false,    // Invalid layer
+        };
+
+        // Extract window enable bits for this layer
+        let layer_shift = if layer == 0 || layer == 2 || layer == 4 {
+            0
+        } else {
+            4
+        };
+        let w1_enable = (w_sel >> layer_shift) & 0x0F;
+        let w2_enable = (w_sel >> (layer_shift + 2)) & 0x03;
+
+        // If no windows are enabled for this layer, no masking
+        if w1_enable == 0 && w2_enable == 0 {
+            return false;
+        }
+
+        // Check if pixel is inside window 1
+        let in_w1 = if self.wh0 <= self.wh1 {
+            x >= self.wh0 as usize && x <= self.wh1 as usize
+        } else {
+            x >= self.wh0 as usize || x <= self.wh1 as usize
+        };
+
+        // Check if pixel is inside window 2
+        let in_w2 = if self.wh2 <= self.wh3 {
+            x >= self.wh2 as usize && x <= self.wh3 as usize
+        } else {
+            x >= self.wh2 as usize || x <= self.wh3 as usize
+        };
+
+        // Apply window inversion based on enable bits
+        let w1_masked = if w1_enable & 0x01 != 0 {
+            if w1_enable & 0x02 != 0 {
+                !in_w1
+            } else {
+                in_w1
+            }
+        } else {
+            false
+        };
+
+        let w2_masked = if w2_enable & 0x01 != 0 {
+            if w2_enable & 0x02 != 0 {
+                !in_w2
+            } else {
+                in_w2
+            }
+        } else {
+            false
+        };
+
+        // Get window logic for this layer
+        let logic_reg = if layer < 4 { self.wbglog } else { self.wobjlog };
+        let logic_shift = (layer % 4) * 2;
+        let logic = (logic_reg >> logic_shift) & 0x03;
+
+        // Apply logic: 00=OR, 01=AND, 10=XOR, 11=XNOR
+        match logic {
+            0 => w1_masked || w2_masked,   // OR
+            1 => w1_masked && w2_masked,   // AND
+            2 => w1_masked ^ w2_masked,    // XOR
+            3 => !(w1_masked ^ w2_masked), // XNOR
+            _ => unreachable!(),
         }
     }
 
@@ -3710,5 +4002,101 @@ mod tests {
             ppu.bgmode & 0x07,
             ppu.tm
         );
+    }
+
+    #[test]
+    fn test_window_masking() {
+        let mut ppu = Ppu::new();
+
+        // Set up window 1: left=50, right=100
+        ppu.write_register(0x2126, 50); // WH0 - Window 1 left
+        ppu.write_register(0x2127, 100); // WH1 - Window 1 right
+
+        // Enable window 1 for BG1 (no inversion)
+        // W12SEL bits 0-1: Window 1 enable for BG1
+        ppu.write_register(0x2123, 0x01); // W12SEL
+
+        // Set window logic to OR (default)
+        ppu.write_register(0x212A, 0x00); // WBGLOG
+
+        // Test pixels inside window (should be masked)
+        assert!(ppu.is_pixel_masked_by_window(50, 0)); // Left edge
+        assert!(ppu.is_pixel_masked_by_window(75, 0)); // Middle
+        assert!(ppu.is_pixel_masked_by_window(100, 0)); // Right edge
+
+        // Test pixels outside window (should not be masked)
+        assert!(!ppu.is_pixel_masked_by_window(49, 0)); // Just before left
+        assert!(!ppu.is_pixel_masked_by_window(101, 0)); // Just after right
+        assert!(!ppu.is_pixel_masked_by_window(0, 0)); // Far left
+        assert!(!ppu.is_pixel_masked_by_window(255, 0)); // Far right
+
+        // Test window inversion
+        // W12SEL bits 0-1: Window 1 enable + invert for BG1
+        ppu.write_register(0x2123, 0x03); // Enable + invert
+
+        // Now pixels inside window should NOT be masked
+        assert!(!ppu.is_pixel_masked_by_window(50, 0)); // Left edge
+        assert!(!ppu.is_pixel_masked_by_window(75, 0)); // Middle
+        assert!(!ppu.is_pixel_masked_by_window(100, 0)); // Right edge
+
+        // Pixels outside window should be masked
+        assert!(ppu.is_pixel_masked_by_window(49, 0)); // Just before left
+        assert!(ppu.is_pixel_masked_by_window(101, 0)); // Just after right
+
+        // Test with no window enabled (no masking)
+        ppu.write_register(0x2123, 0x00); // Disable windows
+        assert!(!ppu.is_pixel_masked_by_window(50, 0));
+        assert!(!ppu.is_pixel_masked_by_window(75, 0));
+        assert!(!ppu.is_pixel_masked_by_window(100, 0));
+    }
+
+    #[test]
+    fn test_window_masking_two_windows() {
+        let mut ppu = Ppu::new();
+
+        // Set up window 1: left=30, right=80
+        ppu.write_register(0x2126, 30); // WH0
+        ppu.write_register(0x2127, 80); // WH1
+
+        // Set up window 2: left=60, right=120
+        ppu.write_register(0x2128, 60); // WH2
+        ppu.write_register(0x2129, 120); // WH3
+
+        // Enable both windows for BG1 (no inversion)
+        // Bits 0-1: W1 enable for BG1
+        // Bits 2-3: W2 enable for BG1
+        ppu.write_register(0x2123, 0x05); // Enable W1 and W2 for BG1
+
+        // Test OR logic (default) - masked if in either window
+        ppu.write_register(0x212A, 0x00); // WBGLOG OR
+
+        assert!(ppu.is_pixel_masked_by_window(40, 0)); // In W1 only
+        assert!(ppu.is_pixel_masked_by_window(70, 0)); // In both W1 and W2
+        assert!(ppu.is_pixel_masked_by_window(100, 0)); // In W2 only
+        assert!(!ppu.is_pixel_masked_by_window(20, 0)); // In neither
+
+        // Test AND logic - masked only if in both windows
+        ppu.write_register(0x212A, 0x01); // WBGLOG AND
+
+        assert!(!ppu.is_pixel_masked_by_window(40, 0)); // In W1 only
+        assert!(ppu.is_pixel_masked_by_window(70, 0)); // In both W1 and W2
+        assert!(!ppu.is_pixel_masked_by_window(100, 0)); // In W2 only
+        assert!(!ppu.is_pixel_masked_by_window(20, 0)); // In neither
+
+        // Test XOR logic - masked if in exactly one window
+        ppu.write_register(0x212A, 0x02); // WBGLOG XOR
+
+        assert!(ppu.is_pixel_masked_by_window(40, 0)); // In W1 only
+        assert!(!ppu.is_pixel_masked_by_window(70, 0)); // In both (XOR = false)
+        assert!(ppu.is_pixel_masked_by_window(100, 0)); // In W2 only
+        assert!(!ppu.is_pixel_masked_by_window(20, 0)); // In neither
+
+        // Test XNOR logic - masked if in both or neither
+        ppu.write_register(0x212A, 0x03); // WBGLOG XNOR
+
+        assert!(!ppu.is_pixel_masked_by_window(40, 0)); // In W1 only
+        assert!(ppu.is_pixel_masked_by_window(70, 0)); // In both (XNOR = true)
+        assert!(!ppu.is_pixel_masked_by_window(100, 0)); // In W2 only
+        assert!(ppu.is_pixel_masked_by_window(20, 0)); // In neither (XNOR = true)
     }
 }
