@@ -171,6 +171,12 @@ pub struct Ppu {
     /// This is set during render_scanline() and the flag is actually set during tick()
     /// when we reach the corresponding dot position (X + 2 to account for PPU pipeline).
     sprite_0_hit_pending: Cell<Option<(u16, u16)>>,
+    /// Diagnostic: count consecutive PPUSTATUS reads without sprite 0 hit being set.
+    /// Used to detect games stuck in a sprite 0 hit polling loop.
+    sprite_0_poll_count: Cell<u32>,
+    /// Diagnostic: last frame's sprite 0 info for debugging
+    sprite_0_last_y: Cell<u8>,
+    sprite_0_last_tile: Cell<u8>,
 }
 
 impl fmt::Debug for Ppu {
@@ -232,6 +238,9 @@ impl Ppu {
             frame_counter: Cell::new(0),
             timing_mode,
             sprite_0_hit_pending: Cell::new(None),
+            sprite_0_poll_count: Cell::new(0),
+            sprite_0_last_y: Cell::new(0),
+            sprite_0_last_tile: Cell::new(0),
         }
     }
 
@@ -498,8 +507,10 @@ impl Ppu {
                 let scanline = self.scanline.get();
                 let dot = self.dot.get();
 
-                // Log PPUSTATUS reads that see sprite 0 hit
+                // Diagnostic: track sprite 0 hit polling
                 if self.sprite_0_hit.get() {
+                    // Reset poll counter when hit is detected
+                    self.sprite_0_poll_count.set(0);
                     log(LogCategory::PPU, LogLevel::Info, || {
                         format!(
                             "PPUSTATUS read: ${:02X} (S0H=1) @ scanline {} dot {}",
@@ -508,6 +519,30 @@ impl Ppu {
                             dot
                         )
                     });
+                } else if scanline < 240 && scanline > 0 {
+                    // Increment poll counter when reading during visible scanlines without hit
+                    let count = self.sprite_0_poll_count.get().saturating_add(1);
+                    self.sprite_0_poll_count.set(count);
+                    
+                    // Log diagnostic info periodically when polling seems excessive
+                    // This helps detect games stuck waiting for sprite 0 hit
+                    if count == 1000 || count == 5000 || count == 10000 || count % 50000 == 0 {
+                        let sprite_0_y = self.oam[0];
+                        let sprite_0_tile = self.oam[1];
+                        let sprite_0_attr = self.oam[2];
+                        let sprite_0_x = self.oam[3];
+                        let mask = self.mask;
+                        let bg_enabled = (mask & 0x08) != 0;
+                        let sprites_enabled = (mask & 0x10) != 0;
+                        let v = self.vram_addr.get();
+                        
+                        log(LogCategory::PPU, LogLevel::Warn, || {
+                            format!(
+                                "Sprite 0 hit poll #{}: scanline={} dot={} sprite0=(y={},tile=${:02X},attr=${:02X},x={}) mask=${:02X} bg={} spr={} v=${:04X}",
+                                count, scanline, dot, sprite_0_y, sprite_0_tile, sprite_0_attr, sprite_0_x, mask, bg_enabled, sprites_enabled, v
+                            )
+                        });
+                    }
                 }
 
                 // CRITICAL: PPUSTATUS read behavior (DO NOT CHANGE - required for NMI timing)
@@ -589,10 +624,23 @@ impl Ppu {
                 // Reference: problemkaputt.de everynes.htm - PPU Reset section
                 // Reference: https://www.nesdev.org/wiki/PPU_scrolling
                 if self.first_frame_after_reset.get() {
-                    log(LogCategory::PPU, LogLevel::Trace, || {
-                        "PPU: $2000 write blocked (first frame)".to_string()
+                    log(LogCategory::PPU, LogLevel::Warn, || {
+                        format!("PPU: $2000 write BLOCKED (first frame): val=${:02X}", val)
                     });
                     return;
+                }
+
+                // Diagnostic: log mid-frame PPUCTRL writes (during visible scanlines)
+                let scanline = self.scanline.get();
+                let dot = self.dot.get();
+                if scanline < 240 {
+                    static MID_FRAME_CTRL_LOG: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+                    let count = MID_FRAME_CTRL_LOG.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if count < 50 {
+                        log(LogCategory::PPU, LogLevel::Warn, || {
+                            format!("MID-FRAME PPUCTRL: sl={} dot={} val=${:02X}", scanline, dot, val)
+                        });
+                    }
                 }
 
                 let old_nmi = (self.ctrl & 0x80) != 0;
@@ -765,10 +813,28 @@ impl Ppu {
             7 => {
                 // PPUDATA: write to vram or chr depending on address
                 let addr = self.vram_addr.get() & 0x3FFF;
+                
                 if addr < 0x2000 {
                     // CHR-ROM is typically read-only; only allow writes for CHR-RAM.
                     if self.chr_is_ram && self.chr.len() >= (addr as usize + 1) {
                         self.chr[addr as usize] = val;
+                        // Diagnostic: log first few non-zero CHR RAM writes
+                        static CHR_WRITE_COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+                        let count = CHR_WRITE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        if count < 20 && val != 0 {
+                            log(LogCategory::PPU, LogLevel::Warn, || {
+                                format!("CHR RAM write #{}: addr=${:04X} val=${:02X}", count, addr, val)
+                            });
+                        }
+                    } else if !self.chr_is_ram {
+                        // Diagnostic: log CHR ROM write attempts
+                        static ROM_WRITE_COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+                        let count = ROM_WRITE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        if count < 5 {
+                            log(LogCategory::PPU, LogLevel::Warn, || {
+                                format!("CHR ROM write REJECTED #{}: addr=${:04X} val=${:02X}", count, addr, val)
+                            });
+                        }
                     }
                 } else if addr < 0x3F00 {
                     // Nametable VRAM space with mirroring
@@ -1321,8 +1387,14 @@ impl Ppu {
             // For cycle-accurate sprite 0 hit, we find the first X position where sprite 0
             // overlaps an opaque background and store it for the tick() function to use.
             let mut sprite_0_hit_x: Option<u16> = None;
+            let mut sprite_0_in_buffer = false;
             for x in 0..width as usize {
                 if let Some((sprite_color, behind_bg, sprite_idx)) = sprite_buffer[x] {
+                    // Track if sprite 0 has any opaque pixels in the buffer
+                    if sprite_idx == 0 {
+                        sprite_0_in_buffer = true;
+                    }
+                    
                     // Clip leftmost 8 pixels if PPUMASK bit 2 is clear
                     let should_render_sprite = show_sprites_left || x >= 8;
 
@@ -1340,11 +1412,14 @@ impl Ppu {
                         && x < 255
                         && (show_bg_left && show_sprites_left || x >= 8);
 
+                    // Sprite 0 NO HIT logging disabled - too verbose
+                    // if sprite_idx == 0 && sprite_0_hit_x.is_none() && !is_sprite_0_hit_candidate { ... }
+
                     if is_sprite_0_hit_candidate {
                         sprite_0_hit_x = Some(x as u16);
-                        log(LogCategory::PPU, LogLevel::Debug, || {
+                        log(LogCategory::PPU, LogLevel::Warn, || {
                             format!(
-                                "Sprite 0 hit pending at scanline {} x={} (will trigger at dot {})",
+                                "Sprite 0 hit FOUND at scanline {} x={} (will trigger at dot {})",
                                 y,
                                 x,
                                 x + 2

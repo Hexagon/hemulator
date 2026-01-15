@@ -1090,10 +1090,14 @@ impl<M: Memory6502> Cpu6502<M> {
                     _ => false,
                 };
                 if cond {
+                    let old_pc = self.pc;
                     let rel = offset as i16 as i32;
                     self.pc = ((self.pc as i32).wrapping_add(rel)) as u16;
-                    self.cycles += 3;
-                    3
+                    // Branch taken: 3 cycles, +1 if page boundary crossed
+                    let page_crossed = (old_pc & 0xFF00) != (self.pc & 0xFF00);
+                    let cycles = if page_crossed { 4 } else { 3 };
+                    self.cycles += cycles as u64;
+                    cycles
                 } else {
                     self.cycles += 2;
                     2

@@ -213,4 +213,35 @@ impl Mapper {
             Mapper::Namco118(_) => 206,
         }
     }
+
+    /// Check if this mapper has WRAM at $6000-$7FFF
+    ///
+    /// Most mappers don't have PRG RAM. Those that do include:
+    /// - MMC1 (mapper 1): Optional 8KB PRG RAM
+    /// - MMC3 (mapper 4): Optional 8KB PRG RAM
+    /// - MMC5 (mapper 5): Up to 64KB PRG RAM
+    ///
+    /// Mappers without WRAM should return open bus for $6000-$7FFF reads.
+    /// This is important for games like Battletoads which rely on open bus behavior.
+    pub fn has_wram(&self) -> bool {
+        match self {
+            // Mappers with WRAM
+            Mapper::Mmc1(_) => true,
+            Mapper::Mmc3(_) => true,
+            Mapper::Mmc5(_) => true,
+            // Mappers without WRAM
+            Mapper::Nrom(_) => false,
+            Mapper::Uxrom(_) => false,
+            Mapper::Cnrom(_) => false,
+            Mapper::Axrom(_) => false,
+            Mapper::Mmc2(_) => false,
+            Mapper::Mmc4(_) => false,
+            Mapper::ColorDreams(_) => false,
+            Mapper::Gxrom(_) => false,
+            Mapper::Camerica(_) => false,
+            Mapper::Namco118(_) => false,
+            Mapper::Bnrom(_) => false,
+            Mapper::Nina(_) => false,
+        }
+    }
 }
