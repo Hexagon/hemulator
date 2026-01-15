@@ -320,4 +320,28 @@ mod tests {
         // Cleanup
         fs::remove_file(test_file).ok();
     }
+
+    #[test]
+    fn test_save_load_empty_pc_project() {
+        // Test that a PC project can be saved and loaded even with no mounts
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("test_project_empty.hemu");
+
+        let project = HemuProject::new("pc".to_string());
+        assert!(project.mounts.is_empty());
+
+        // Save empty project
+        project
+            .save(&test_file)
+            .expect("Failed to save empty project");
+
+        // Load it back
+        let loaded = HemuProject::load(&test_file).expect("Failed to load empty project");
+        assert_eq!(loaded.system, "pc");
+        assert!(loaded.mounts.is_empty());
+        assert_eq!(loaded.version, 1);
+
+        // Cleanup
+        fs::remove_file(test_file).ok();
+    }
 }
