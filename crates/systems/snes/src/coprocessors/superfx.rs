@@ -407,8 +407,9 @@ impl SuperFx {
             }
             // BRA - Branch always (relative)
             0x05 => {
-                // Read signed byte offset from PC+1, branch is relative to PC+2
-                let offset = self.read_byte((self.pc() + 1) as u32) as i8;
+                // Read signed byte offset from (PBR << 16) | (PC+1), branch is relative to PC+2
+                let offset_addr = ((self.pbr as u32) << 16) | ((self.pc() + 1) as u32);
+                let offset = self.read_byte(offset_addr) as i8;
                 let new_pc = ((self.pc() + 2) as i32 + offset as i32) as u16;
                 self.set_pc(new_pc);
                 0 // PC already set
@@ -598,8 +599,11 @@ impl SuperFx {
             // IWT Rn (immediate word to register)
             0x80..=0x8F if self.flags_alt1 => {
                 let n = (opcode & 0x0F) as usize;
-                let low = self.read_byte((self.pc() + 1) as u32);
-                let high = self.read_byte((self.pc() + 2) as u32);
+                // Read immediate bytes from (PBR << 16) | (PC+1) and (PBR << 16) | (PC+2)
+                let low_addr = ((self.pbr as u32) << 16) | ((self.pc() + 1) as u32);
+                let high_addr = ((self.pbr as u32) << 16) | ((self.pc() + 2) as u32);
+                let low = self.read_byte(low_addr);
+                let high = self.read_byte(high_addr);
                 self.regs[n] = u16::from_le_bytes([low, high]);
                 self.flags_alt1 = false;
                 3
@@ -638,7 +642,9 @@ impl SuperFx {
             // IBT Rn (immediate byte to register)
             0xC0..=0xCF if self.flags_alt1 => {
                 let n = (opcode & 0x0F) as usize;
-                let val = self.read_byte((self.pc() + 1) as u32);
+                // Read immediate byte from (PBR << 16) | (PC+1)
+                let addr = ((self.pbr as u32) << 16) | ((self.pc() + 1) as u32);
+                let val = self.read_byte(addr);
                 self.regs[n] = val as u16;
                 self.flags_alt1 = false;
                 2
