@@ -925,9 +925,10 @@ impl Ppu {
         let mut frame = Frame::new(frame_width, 224);
 
         // Priority buffer: tracks the priority level of each pixel
-        // Priority levels: 0 (backdrop) to 7 (highest sprite priority)
-        // We use 255 as "unset" since it's higher than any valid priority
-        let mut priority_buffer = vec![255u8; frame_width as usize * 224];
+        // Priority levels: 0 (backdrop/unset) to 7 (highest sprite priority)
+        // Higher values are rendered on top of lower values
+        // We use 0 as "unset" so any layer can render initially
+        let mut priority_buffer = vec![0u8; frame_width as usize * 224];
 
         // NOTE: We render even when screen is blanked (bit 7 set)
         // This is not hardware-accurate but allows commercial ROMs to display
@@ -1231,7 +1232,7 @@ impl Ppu {
         let backdrop_color = self.get_color(0);
         let mut non_backdrop_pixels = 0;
         for (i, &priority) in priority_buffer.iter().enumerate() {
-            if priority == 255 {
+            if priority == 0 {
                 // No layer rendered here - use backdrop color
                 frame.pixels[i] = backdrop_color;
             } else {
@@ -1529,7 +1530,7 @@ impl Ppu {
     #[allow(clippy::too_many_arguments)]
     fn get_tile_pixel_mode0(
         &self,
-        tile_index: u8,
+        tile_index: u16,
         chr_base: usize,
         pixel_x: usize,
         pixel_y: usize,
@@ -1544,9 +1545,11 @@ impl Ppu {
         let actual_row = if flip_y { 7 - pixel_y } else { pixel_y };
         let actual_col = if flip_x { 7 - pixel_x } else { pixel_x };
 
-        // Read two bitplanes for this row
-        let bp0_addr = tile_data_base + actual_row;
-        let bp1_addr = tile_data_base + actual_row + 8;
+        // SNES 2bpp tile format: bitplanes are interleaved
+        // Bytes 0-15: BP0 and BP1 interleaved (row N: BP0 at N*2, BP1 at N*2+1)
+        let row_offset = actual_row * 2;
+        let bp0_addr = tile_data_base + row_offset;
+        let bp1_addr = tile_data_base + row_offset + 1;
 
         let bp0 = if bp0_addr < VRAM_SIZE {
             self.vram[bp0_addr]
@@ -1584,9 +1587,11 @@ impl Ppu {
                 break;
             }
 
-            // Read two bitplanes for this row
-            let bp0_addr = tile_data_base + actual_row;
-            let bp1_addr = tile_data_base + actual_row + 8;
+            // SNES 2bpp tile format: bitplanes are interleaved
+            // Bytes 0-15: BP0 and BP1 interleaved (row N: BP0 at N*2, BP1 at N*2+1)
+            let row_offset = actual_row * 2;
+            let bp0_addr = tile_data_base + row_offset;
+            let bp1_addr = tile_data_base + row_offset + 1;
 
             let bp0 = if bp0_addr < VRAM_SIZE {
                 self.vram[bp0_addr]
@@ -1633,7 +1638,7 @@ impl Ppu {
     #[allow(clippy::too_many_arguments)]
     fn get_tile_pixel_4bpp(
         &self,
-        tile_index: u8,
+        tile_index: u16,
         chr_base: usize,
         pixel_x: usize,
         pixel_y: usize,
@@ -1648,11 +1653,14 @@ impl Ppu {
         let actual_row = if flip_y { 7 - pixel_y } else { pixel_y };
         let actual_col = if flip_x { 7 - pixel_x } else { pixel_x };
 
-        // Read four bitplanes for this row
-        let bp0_addr = tile_data_base + actual_row;
-        let bp1_addr = tile_data_base + actual_row + 8;
-        let bp2_addr = tile_data_base + actual_row + 16;
-        let bp3_addr = tile_data_base + actual_row + 24;
+        // SNES 4bpp tile format: bitplanes are interleaved in pairs
+        // Bytes 0-15: BP0 and BP1 interleaved (row N: BP0 at N*2, BP1 at N*2+1)
+        // Bytes 16-31: BP2 and BP3 interleaved (row N: BP2 at 16+N*2, BP3 at 16+N*2+1)
+        let row_offset = actual_row * 2;
+        let bp0_addr = tile_data_base + row_offset;
+        let bp1_addr = tile_data_base + row_offset + 1;
+        let bp2_addr = tile_data_base + 16 + row_offset;
+        let bp3_addr = tile_data_base + 16 + row_offset + 1;
 
         let bp0 = if bp0_addr < VRAM_SIZE {
             self.vram[bp0_addr]
@@ -1691,7 +1699,7 @@ impl Ppu {
     /// Get tile pixel color in 8bpp mode (256 colors)
     fn get_tile_pixel_8bpp(
         &self,
-        tile_index: u8,
+        tile_index: u16,
         chr_base: usize,
         pixel_x: usize,
         pixel_y: usize,
@@ -1705,15 +1713,20 @@ impl Ppu {
         let actual_row = if flip_y { 7 - pixel_y } else { pixel_y };
         let actual_col = if flip_x { 7 - pixel_x } else { pixel_x };
 
-        // Read eight bitplanes for this row
-        let bp0_addr = tile_data_base + actual_row;
-        let bp1_addr = tile_data_base + actual_row + 8;
-        let bp2_addr = tile_data_base + actual_row + 16;
-        let bp3_addr = tile_data_base + actual_row + 24;
-        let bp4_addr = tile_data_base + actual_row + 32;
-        let bp5_addr = tile_data_base + actual_row + 40;
-        let bp6_addr = tile_data_base + actual_row + 48;
-        let bp7_addr = tile_data_base + actual_row + 56;
+        // SNES 8bpp tile format: 4 pairs of interleaved bitplanes
+        // Bytes 0-15: BP0 and BP1 interleaved (row N: BP0 at N*2, BP1 at N*2+1)
+        // Bytes 16-31: BP2 and BP3 interleaved
+        // Bytes 32-47: BP4 and BP5 interleaved
+        // Bytes 48-63: BP6 and BP7 interleaved
+        let row_offset = actual_row * 2;
+        let bp0_addr = tile_data_base + row_offset;
+        let bp1_addr = tile_data_base + row_offset + 1;
+        let bp2_addr = tile_data_base + 16 + row_offset;
+        let bp3_addr = tile_data_base + 16 + row_offset + 1;
+        let bp4_addr = tile_data_base + 32 + row_offset;
+        let bp5_addr = tile_data_base + 32 + row_offset + 1;
+        let bp6_addr = tile_data_base + 48 + row_offset;
+        let bp7_addr = tile_data_base + 48 + row_offset + 1;
 
         let bp0 = if bp0_addr < VRAM_SIZE {
             self.vram[bp0_addr]
@@ -1866,7 +1879,8 @@ impl Ppu {
                 let tile_low = self.vram[tilemap_addr];
                 let tile_high = self.vram[tilemap_addr + 1];
 
-                let tile_index = tile_low;
+                // Extract full 10-bit tile number: bits 0-1 from tile_high + 8 bits from tile_low
+                let tile_index = (tile_low as u16) | (((tile_high & 0x03) as u16) << 8);
                 let palette = ((tile_high >> 2) & 0x07) as usize;
                 let flip_x = (tile_high & 0x40) != 0;
                 let flip_y = (tile_high & 0x80) != 0;
@@ -1902,9 +1916,9 @@ impl Ppu {
                     continue;
                 }
 
-                // Draw pixel if it has equal or higher priority
+                // Draw pixel if it has equal or higher priority (later layers paint on top)
                 let frame_offset = screen_y * 256 + screen_x;
-                if render_priority <= priority_buffer[frame_offset] {
+                if render_priority >= priority_buffer[frame_offset] {
                     frame.pixels[frame_offset] = self.get_color(color);
                     priority_buffer[frame_offset] = render_priority;
                 }
@@ -1978,7 +1992,8 @@ impl Ppu {
                 let tile_low = self.vram[tilemap_addr];
                 let tile_high = self.vram[tilemap_addr + 1];
 
-                let tile_index = tile_low;
+                // Extract full 10-bit tile number: bits 0-1 from tile_high + 8 bits from tile_low
+                let tile_index = (tile_low as u16) | (((tile_high & 0x03) as u16) << 8);
                 let palette = ((tile_high >> 2) & 0x07) as usize;
                 let flip_x = (tile_high & 0x40) != 0;
                 let flip_y = (tile_high & 0x80) != 0;
@@ -2014,9 +2029,9 @@ impl Ppu {
                     continue;
                 }
 
-                // Draw pixel if it has equal or higher priority
+                // Draw pixel if it has equal or higher priority (later layers paint on top)
                 let frame_offset = screen_y * 256 + screen_x;
-                if render_priority <= priority_buffer[frame_offset] {
+                if render_priority >= priority_buffer[frame_offset] {
                     frame.pixels[frame_offset] = self.get_color(color);
                     priority_buffer[frame_offset] = render_priority;
                 }
@@ -2085,7 +2100,8 @@ impl Ppu {
                 let tile_low = self.vram[tilemap_addr];
                 let tile_high = self.vram[tilemap_addr + 1];
 
-                let tile_index = tile_low;
+                // Extract full 10-bit tile number: bits 0-1 from tile_high + 8 bits from tile_low
+                let tile_index = (tile_low as u16) | (((tile_high & 0x03) as u16) << 8);
                 let flip_x = (tile_high & 0x40) != 0;
                 let flip_y = (tile_high & 0x80) != 0;
                 let priority = if (tile_high & 0x20) != 0 { 1 } else { 0 };
@@ -2118,9 +2134,9 @@ impl Ppu {
                     continue;
                 }
 
-                // Draw pixel if it has equal or higher priority
+                // Draw pixel if it has equal or higher priority (later layers paint on top)
                 let frame_offset = screen_y * 256 + screen_x;
-                if render_priority <= priority_buffer[frame_offset] {
+                if render_priority >= priority_buffer[frame_offset] {
                     frame.pixels[frame_offset] = self.get_color(color);
                     priority_buffer[frame_offset] = render_priority;
                 }
@@ -2245,9 +2261,9 @@ impl Ppu {
                 // Calculate rendering priority
                 let render_priority = if filter_priority == 0 { 1 } else { 3 };
 
-                // Draw pixel if it has equal or higher priority
+                // Draw pixel if it has equal or higher priority (later layers paint on top)
                 let frame_offset = screen_y * 256 + screen_x;
-                if render_priority <= priority_buffer[frame_offset] {
+                if render_priority >= priority_buffer[frame_offset] {
                     frame.pixels[frame_offset] = self.get_color(color);
                     priority_buffer[frame_offset] = render_priority;
                 }
@@ -2318,7 +2334,8 @@ impl Ppu {
                 let tile_low = self.vram[tilemap_addr];
                 let tile_high = self.vram[tilemap_addr + 1];
 
-                let tile_index = tile_low;
+                // Extract full 10-bit tile number: bits 0-1 from tile_high + 8 bits from tile_low
+                let tile_index = (tile_low as u16) | (((tile_high & 0x03) as u16) << 8);
                 let palette = ((tile_high >> 2) & 0x07) as usize;
                 let flip_x = (tile_high & 0x40) != 0;
                 let flip_y = (tile_high & 0x80) != 0;
@@ -2355,7 +2372,7 @@ impl Ppu {
 
                 // Draw pixel at hi-res position
                 let frame_offset = screen_y * 512 + screen_x;
-                if render_priority <= priority_buffer[frame_offset] {
+                if render_priority >= priority_buffer[frame_offset] {
                     frame.pixels[frame_offset] = self.get_color(color);
                     priority_buffer[frame_offset] = render_priority;
                 }
@@ -2418,7 +2435,8 @@ impl Ppu {
                 let tile_low = self.vram[tilemap_addr];
                 let tile_high = self.vram[tilemap_addr + 1];
 
-                let tile_index = tile_low;
+                // Extract full 10-bit tile number: bits 0-1 from tile_high + 8 bits from tile_low
+                let tile_index = (tile_low as u16) | (((tile_high & 0x03) as u16) << 8);
                 let palette = ((tile_high >> 2) & 0x07) as usize;
                 let flip_x = (tile_high & 0x40) != 0;
                 let flip_y = (tile_high & 0x80) != 0;
@@ -2455,7 +2473,7 @@ impl Ppu {
 
                 // Draw pixel at hi-res position
                 let frame_offset = screen_y * 512 + screen_x;
-                if render_priority <= priority_buffer[frame_offset] {
+                if render_priority >= priority_buffer[frame_offset] {
                     frame.pixels[frame_offset] = self.get_color(color);
                     priority_buffer[frame_offset] = render_priority;
                 }
@@ -2727,11 +2745,14 @@ impl Ppu {
                         }
 
                         // Read 4 bitplanes for this pixel
-                        let row_offset = actual_py;
+                        // SNES 4bpp tile format: bitplanes are interleaved in pairs
+                        // Bytes 0-15: BP0 and BP1 interleaved (row N: BP0 at N*2, BP1 at N*2+1)
+                        // Bytes 16-31: BP2 and BP3 interleaved (row N: BP2 at 16+N*2, BP3 at 16+N*2+1)
+                        let row_offset = actual_py * 2;
                         let bp0_addr = tile_addr + row_offset;
-                        let bp1_addr = tile_addr + row_offset + 8;
-                        let bp2_addr = tile_addr + row_offset + 16;
-                        let bp3_addr = tile_addr + row_offset + 24;
+                        let bp1_addr = tile_addr + row_offset + 1;
+                        let bp2_addr = tile_addr + 16 + row_offset;
+                        let bp3_addr = tile_addr + 16 + row_offset + 1;
 
                         let bp0 = if bp0_addr < VRAM_SIZE {
                             self.vram[bp0_addr]
@@ -2776,11 +2797,11 @@ impl Ppu {
                         let cgram_index = (128 + palette * 16 + color_index as usize) as u8;
                         let color = self.get_color(cgram_index);
 
-                        // Draw pixel if it has equal or higher priority
+                        // Draw pixel if it has equal or higher priority (later layers paint on top)
                         let frame_offset =
                             screen_y as usize * frame.width as usize + screen_x as usize;
                         if frame_offset < frame.pixels.len()
-                            && render_priority <= priority_buffer[frame_offset]
+                            && render_priority >= priority_buffer[frame_offset]
                         {
                             frame.pixels[frame_offset] = color;
                             priority_buffer[frame_offset] = render_priority;

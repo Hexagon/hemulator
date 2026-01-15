@@ -28,6 +28,60 @@ impl Debugger for SnesSystem {
         disasm_65c816::disassemble_65c816_with_flags(&memory, address, m_flag, x_flag)
     }
 
+    /// Override disassemble_range to properly track M/X flag changes through REP/SEP instructions.
+    ///
+    /// The 65C816 has variable instruction sizes depending on the M and X flags:
+    /// - M=0: 16-bit accumulator (LDA #$1234 is 3 bytes)
+    /// - M=1: 8-bit accumulator (LDA #$12 is 2 bytes)
+    /// - X=0: 16-bit index registers (LDX #$1234 is 3 bytes)
+    /// - X=1: 8-bit index registers (LDX #$12 is 2 bytes)
+    ///
+    /// Without tracking these changes, disassembling a range produces garbage output
+    /// because instruction boundaries are misaligned after a mode change.
+    fn disassemble_range(&self, address: u32, count: usize) -> Vec<DisassembledInstruction> {
+        let mut result = Vec::new();
+        let mut current_address = address;
+
+        // Get initial CPU flags
+        let cpu = &self.cpu.cpu;
+        let mut m_flag = (cpu.status & 0x20) != 0;
+        let mut x_flag = (cpu.status & 0x10) != 0;
+
+        // In emulation mode, M and X are always 1 (8-bit)
+        if cpu.emulation {
+            m_flag = true;
+            x_flag = true;
+        }
+
+        for _ in 0..count {
+            // Read up to 4 bytes for the instruction (max 65C816 instruction size)
+            let memory = match self.read_memory(current_address, 4) {
+                Some(m) => m,
+                None => break,
+            };
+
+            // Disassemble with current flags and get updated flags
+            let (instruction, new_m, new_x) = match disasm_65c816::disassemble_65c816_tracking_flags(
+                &memory,
+                current_address,
+                m_flag,
+                x_flag,
+            ) {
+                Some(result) => result,
+                None => break,
+            };
+
+            current_address += instruction.len() as u32;
+            result.push(instruction);
+
+            // Update flags for next instruction
+            m_flag = new_m;
+            x_flag = new_x;
+        }
+
+        result
+    }
+
     fn read_memory(&self, address: u32, length: usize) -> Option<Vec<u8>> {
         // 65C816 has 24-bit address space (16MB)
         if address > 0xFF_FFFF {
