@@ -209,22 +209,189 @@ pub struct Ppu {
     /// Window mask designation for sub-screen ($212F)
     tsw: u8,
 
-    // Color math registers
+    // ============================================================================
+    // Color Math Registers ($2130-$2132)
+    // ============================================================================
+    //
+    // The SNES color math system allows blending pixels from the main screen with
+    // either a fixed color or pixels from the sub-screen. This is used for transparency,
+    // fade effects, color blending, and other visual effects.
+    //
+    // CRITICAL IMPLEMENTATION REQUIREMENT: Per-pixel layer tracking
+    // ----------------------------------------------------------------
+    // Color math CANNOT be correctly implemented without tracking which layer
+    // (BG1, BG2, BG3, BG4, OBJ, or backdrop) each pixel came from. This is because:
+    //
+    // 1. CGADSUB enables color math selectively per-layer using bits 0-5
+    //    - Bit 0: BG1, Bit 1: BG2, Bit 2: BG3, Bit 3: BG4, Bit 4: OBJ, Bit 5: Backdrop
+    //    - Only pixels from enabled layers undergo color math
+    //    - Example: If only bit 0 is set, ONLY BG1 pixels are blended
+    //
+    // 2. Priority-based rendering makes this complex:
+    //    - Layers render in priority order (e.g., BG1 priority 1, then OBJ priority 2)
+    //    - The final visible pixel at position (x,y) could be from ANY layer
+    //    - Without tracking the source layer, we cannot determine if color math applies
+    //
+    // 3. Window masking adds another layer of complexity (CGWSEL):
+    //    - Color math can be enabled/disabled based on window regions
+    //    - Different settings for inside/outside window boundaries
+    //
+    // Implementation approach:
+    // ----------------------------------------------------------------
+    // To properly implement color math, the renderer must:
+    //
+    // 1. Add a "layer source" buffer parallel to the priority buffer:
+    //    ```rust
+    //    let mut layer_buffer: Vec<u8> = vec![LAYER_BACKDROP; width * height];
+    //    // Values: LAYER_BG1=0, LAYER_BG2=1, LAYER_BG3=2, LAYER_BG4=3,
+    //    //         LAYER_OBJ=4, LAYER_BACKDROP=5
+    //    ```
+    //
+    // 2. Update layer_buffer when rendering each pixel:
+    //    ```rust
+    //    fn render_bg_layer(..., layer_buffer: &mut [u8], layer_id: u8) {
+    //        // When writing a pixel at position i:
+    //        if priority >= priority_buffer[i] && color_index != 0 {
+    //            frame.pixels[i] = color;
+    //            priority_buffer[i] = priority;
+    //            layer_buffer[i] = layer_id;  // ← Track which layer this pixel is from
+    //        }
+    //    }
+    //    ```
+    //
+    // 3. After all layers rendered, apply color math in post-processing:
+    //    ```rust
+    //    for i in 0..frame.pixels.len() {
+    //        let layer = layer_buffer[i];
+    //
+    //        // Check if color math is enabled for this layer (CGADSUB bits 0-5)
+    //        let layer_bit = 1 << layer;
+    //        if (self.cgadsub & layer_bit) == 0 {
+    //            continue; // Color math disabled for this layer
+    //        }
+    //
+    //        // Check window masking (CGWSEL bits 4-5)
+    //        if !self.is_color_math_enabled_for_pixel(x, y) {
+    //            continue;
+    //        }
+    //
+    //        // Apply color math: blend main screen with sub-screen or fixed color
+    //        let main_color = frame.pixels[i];
+    //        let sub_color = if (self.cgwsel & 0x02) != 0 {
+    //            sub_screen_pixels[i]  // Blend with sub-screen
+    //        } else {
+    //            self.get_fixed_color()  // Blend with fixed color
+    //        };
+    //
+    //        // Add or subtract (CGADSUB bit 7)
+    //        let blended = if (self.cgadsub & 0x80) != 0 {
+    //            subtract_colors(main_color, sub_color)
+    //        } else {
+    //            add_colors(main_color, sub_color)
+    //        };
+    //
+    //        // Apply half color math if enabled (CGADSUB bit 6)
+    //        frame.pixels[i] = if (self.cgadsub & 0x40) != 0 {
+    //            halve_color(blended)
+    //        } else {
+    //            blended
+    //        };
+    //    }
+    //    ```
+    //
+    // Why a simple "apply to all pixels" approach FAILS:
+    // ----------------------------------------------------------------
+    // A naive implementation that applies color math to all pixels regardless of
+    // their source layer will produce incorrect results:
+    //
+    // - If CGADSUB = 0x01 (only BG1), but visible pixels are from BG2 and OBJ,
+    //   those pixels should NOT be affected by color math
+    // - The result would be incorrect blending on layers that should remain unchanged
+    //
+    // Performance considerations:
+    // ----------------------------------------------------------------
+    // - Layer tracking adds one byte per pixel (~57KB for 256x224)
+    // - Post-processing pass adds overhead but allows correct selective application
+    // - Alternative: Track layer during rendering and apply math immediately,
+    //   but this requires sub-screen rendering to happen in parallel
+    //
+    // Reference: https://snes.nesdev.org/wiki/Color_math
+    // ============================================================================
     /// Color math control ($2130) - CGWSEL
-    /// Bits 0-1: Direct color mode for 256-color BGs
-    /// Bits 4-5: Color math enable for windows
-    /// Bit 6: Prevent color math
-    /// Bit 7: Add/subtract select for color window
+    ///
+    /// Controls WHERE and WHEN color math is applied (window masking and global control)
+    ///
+    /// Bit layout:
+    /// - Bits 0-1: Direct color mode for 256-color BGs (Mode 3/4/7)
+    ///   - 00 = Normal color mode (palette lookup)
+    ///   - 01/10/11 = Direct color mode (pixel value is color, not palette index)
+    /// - Bits 2-3: Reserved (unused)
+    /// - Bits 4-5: Color math enable control based on window regions
+    ///   - 00 = Enable color math everywhere (no window masking)
+    ///   - 01 = Enable inside window
+    ///   - 10 = Enable outside window  
+    ///   - 11 = Disable color math everywhere
+    /// - Bit 6: Prevent color math (master disable)
+    ///   - 0 = Color math enabled (subject to other controls)
+    ///   - 1 = Color math disabled globally
+    /// - Bit 7: Add/subtract select for color window
+    ///   - 0 = Add colors in window regions
+    ///   - 1 = Subtract colors in window regions
     cgwsel: u8,
+
     /// Color math designation ($2131) - CGADSUB
-    /// Bits 0-5: Enable color math on BG1-4, OBJ, backdrop
-    /// Bit 6: Half color math
-    /// Bit 7: Add/subtract select (0=add, 1=subtract)
+    ///
+    /// Controls WHICH LAYERS have color math applied and the blend operation
+    ///
+    /// This register is the reason per-pixel layer tracking is REQUIRED.
+    /// Each bit enables color math for a specific layer. Without knowing which
+    /// layer each pixel came from, we cannot selectively apply color math.
+    ///
+    /// Bit layout:
+    /// - Bit 0: Enable color math on BG1 pixels
+    /// - Bit 1: Enable color math on BG2 pixels
+    /// - Bit 2: Enable color math on BG3 pixels
+    /// - Bit 3: Enable color math on BG4 pixels
+    /// - Bit 4: Enable color math on OBJ (sprite) pixels
+    /// - Bit 5: Enable color math on backdrop pixels
+    /// - Bit 6: Half color math result
+    ///   - 0 = Normal: result = (main ± sub)
+    ///   - 1 = Half: result = (main ± sub) / 2
+    /// - Bit 7: Add/subtract select
+    ///   - 0 = Add colors: result = main + sub (clamped to max)
+    ///   - 1 = Subtract colors: result = main - sub (clamped to 0)
+    ///
+    /// Example usage patterns:
+    /// - 0x01: Color math on BG1 only (common for parallax scrolling effects)
+    /// - 0x30: Color math on OBJ and backdrop (sprite transparency/shadows)
+    /// - 0x3F: Color math on all layers (screen-wide fade effects)
+    /// - 0xBF: Subtract color math on all layers (0x3F | 0x80)
     cgadsub: u8,
+
     /// Fixed color data ($2132) - COLDATA
-    /// Color value in 5-bit BGR format (written multiple times for R/G/B)
+    ///
+    /// Defines the fixed color used in color math blending when not using sub-screen.
+    /// Written 1-3 times to set R, G, and/or B components independently.
+    ///
+    /// Bit layout for each write:
+    /// - Bits 0-4: 5-bit color component value (0-31)
+    /// - Bit 5: Write to red component (if set, bits 0-4 update red)
+    /// - Bit 6: Write to green component (if set, bits 0-4 update green)
+    /// - Bit 7: Write to blue component (if set, bits 0-4 update blue)
+    ///
+    /// Example: To set RGB(31, 16, 0):
+    /// - Write 0x3F (bits 5+0-4): red = 31
+    /// - Write 0x50 (bits 6+0-4): green = 16
+    /// - Write 0x80 (bit 7): blue = 0
+    ///
+    /// Common uses:
+    /// - Black (0,0,0): Fade to black effect
+    /// - White (31,31,31): Fade to white / flash effect
+    /// - Custom colors: Tint effects (sepia, night mode, etc.)
     coldata: u8,
+
     /// Fixed color RGB components (extracted from COLDATA writes)
+    /// These are 5-bit values (0-31) that get scaled to 8-bit (0-255) during rendering
     fixed_color_r: u8,
     fixed_color_g: u8,
     fixed_color_b: u8,
@@ -755,25 +922,46 @@ impl Ppu {
             }
 
             // $2130-$2132 - Color math and screen mode registers
+            // NOTE: These registers are stored but color math is NOT YET APPLIED
+            // See detailed explanation in the Ppu struct field comments
             0x2130 => {
                 self.cgwsel = val;
                 log(LogCategory::PPU, LogLevel::Debug, || {
-                    format!("SNES PPU: CGWSEL (Color math control) = ${:02X}", val)
+                    let direct_color = val & 0x03;
+                    let prevent_math = (val & 0x40) != 0;
+                    let clip_mode = (val >> 4) & 0x03;
+                    format!(
+                        "SNES PPU: CGWSEL (Color math control) = ${:02X} [direct_color={}, prevent_math={}, clip={}] (NOT APPLIED - needs layer tracking)",
+                        val, direct_color, prevent_math,
+                        match clip_mode {
+                            0 => "always",
+                            1 => "inside_window",
+                            2 => "outside_window",
+                            3 => "never",
+                            _ => "?",
+                        }
+                    )
                 });
             }
             0x2131 => {
                 self.cgadsub = val;
                 log(LogCategory::PPU, LogLevel::Debug, || {
+                    let half = (val & 0x40) != 0;
+                    let targets = [
+                        if val & 0x01 != 0 { "BG1 " } else { "" },
+                        if val & 0x02 != 0 { "BG2 " } else { "" },
+                        if val & 0x04 != 0 { "BG3 " } else { "" },
+                        if val & 0x08 != 0 { "BG4 " } else { "" },
+                        if val & 0x10 != 0 { "OBJ " } else { "" },
+                        if val & 0x20 != 0 { "backdrop " } else { "" },
+                    ]
+                    .concat();
                     format!(
-                        "SNES PPU: CGADSUB (Color math designation) = ${:02X} ({}, targets: {}{}{}{}{}{})",
+                        "SNES PPU: CGADSUB (Color math designation) = ${:02X} [{}{}, targets: {}] (NOT APPLIED - needs layer tracking)",
                         val,
                         if val & 0x80 != 0 { "subtract" } else { "add" },
-                        if val & 0x20 != 0 { "backdrop " } else { "" },
-                        if val & 0x10 != 0 { "OBJ " } else { "" },
-                        if val & 0x08 != 0 { "BG4 " } else { "" },
-                        if val & 0x04 != 0 { "BG3 " } else { "" },
-                        if val & 0x02 != 0 { "BG2 " } else { "" },
-                        if val & 0x01 != 0 { "BG1 " } else { "" }
+                        if half { ", half" } else { "" },
+                        if targets.is_empty() { "none" } else { targets.trim_end() }
                     )
                 });
             }
@@ -790,9 +978,16 @@ impl Ppu {
                     self.fixed_color_b = val & 0x1F;
                 }
                 log(LogCategory::PPU, LogLevel::Debug, || {
+                    let components = [
+                        if val & 0x20 != 0 { "R" } else { "" },
+                        if val & 0x40 != 0 { "G" } else { "" },
+                        if val & 0x80 != 0 { "B" } else { "" },
+                    ]
+                    .concat();
                     format!(
-                        "SNES PPU: COLDATA (Fixed color) = ${:02X} -> RGB({},{},{})",
-                        val, self.fixed_color_r, self.fixed_color_g, self.fixed_color_b
+                        "SNES PPU: COLDATA (Fixed color) = ${:02X} -> RGB({},{},{}) [updated: {}] (NOT APPLIED - needs layer tracking)",
+                        val, self.fixed_color_r, self.fixed_color_g, self.fixed_color_b,
+                        if components.is_empty() { "none" } else { &components }
                     )
                 });
             }
@@ -1240,12 +1435,56 @@ impl Ppu {
             }
         }
 
-        // NOTE: Color math registers are stored ($2130-$2132) but not yet applied
-        // Proper implementation requires per-pixel layer tracking to apply color math correctly
-        // TODO: Implement color math with per-pixel layer tracking
-        // Color math requires knowing which layer each pixel came from (BG1/BG2/BG3/BG4/OBJ)
-        // to apply selective color math based on CGWSEL/CGADSUB register settings.
-        // Current implementation applies color math to all pixels uniformly.
+        // ============================================================================
+        // COLOR MATH NOT YET IMPLEMENTED
+        // ============================================================================
+        //
+        // CURRENT STATUS: Color math registers ($2130-$2132) are stored and logged,
+        // but the actual color blending is NOT applied during rendering.
+        //
+        // WHY NOT IMPLEMENTED: Correct color math implementation requires per-pixel
+        // layer tracking, which is a significant architectural change to the renderer.
+        //
+        // WHAT'S NEEDED: To implement color math correctly, we need:
+        //
+        // 1. Layer Source Buffer
+        //    - Parallel to priority_buffer, track which layer each pixel came from
+        //    - Values: BG1=0, BG2=1, BG3=2, BG4=3, OBJ=4, Backdrop=5
+        //    - Updated whenever a pixel is written during layer rendering
+        //
+        // 2. Modified Rendering Functions
+        //    - All render_bg_layer_*() and render_sprites_*() functions need an
+        //      additional layer_buffer parameter
+        //    - When writing a pixel: layer_buffer[i] = LAYER_BG1 (or appropriate layer)
+        //    - This adds ~1 line of code to each pixel write site
+        //
+        // 3. Post-Processing Color Math Pass
+        //    - After all layers rendered, iterate through all pixels
+        //    - For each pixel:
+        //      a. Check if color math is enabled for its source layer (CGADSUB bits 0-5)
+        //      b. Check if window masking allows color math at this position (CGWSEL bits 4-6)
+        //      c. Get blend color (sub-screen pixel or fixed color from $2132)
+        //      d. Apply add/subtract operation (CGADSUB bit 7)
+        //      e. Apply half-color if enabled (CGADSUB bit 6)
+        //      f. Clamp result to valid RGB range (0-31 per channel in 15-bit color)
+        //
+        // EXAMPLE: If CGADSUB = 0x01 (color math on BG1 only):
+        //    - Pixels from BG1: undergo color math blending
+        //    - Pixels from BG2/BG3/BG4/OBJ/backdrop: render normally, NO color math
+        //
+        // Without layer tracking, there is NO WAY to know which pixels came from BG1
+        // versus other layers, making selective color math impossible.
+        //
+        // IMPACT OF MISSING COLOR MATH:
+        //    - Most games: Minor visual glitches (missing transparency/fade effects)
+        //    - Some games: Incorrect or missing visual effects
+        //    - Few games: May have gameplay-affecting rendering issues
+        //
+        // For detailed implementation notes, see the comprehensive comment block
+        // above the color math register field declarations in the Ppu struct.
+        //
+        // TODO: Implement per-pixel layer tracking and color math post-processing
+        // ============================================================================
 
         // Apply brightness (bits 0-3 of $2100) ONLY when force blank is OFF
         // This preserves the behavior where we render during force blank for boot sequences
