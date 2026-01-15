@@ -1,7 +1,9 @@
 //! SNES cartridge implementation
 
+use crate::coprocessors::{dsp1::Dsp1, ChipType, EnhancementChip};
 use crate::SnesError;
 use emu_core::logging::{log, LogCategory, LogLevel};
+use std::cell::RefCell;
 
 /// ROM mapping mode
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -21,6 +23,10 @@ pub struct Cartridge {
     header_offset: usize,
     /// Mapping mode (LoROM or HiROM)
     mapping_mode: MappingMode,
+    /// Enhancement chip type
+    chip_type: ChipType,
+    /// Enhancement chip instance (if present and supported)
+    chip: Option<RefCell<Box<dyn EnhancementChip + Send>>>,
 }
 
 impl Cartridge {
@@ -59,12 +65,16 @@ impl Cartridge {
         // SNES ROM header is at $7FC0 (LoROM) or $FFC0 (HiROM)
         let mapping_mode = Self::detect_mapping_mode(rom_data);
 
+        // Detect enhancement chip from header
+        let (chip_type, chip) = Self::detect_chip(rom_data, mapping_mode);
+
         log(LogCategory::Bus, LogLevel::Info, || {
             format!(
-                "SNES Cartridge: Loaded ROM - Size: {} KB, SMC Header: {}, Mapping: {:?}",
+                "SNES Cartridge: Loaded ROM - Size: {} KB, SMC Header: {}, Mapping: {:?}, Chip: {}",
                 rom_data.len() / 1024,
                 if header_offset > 0 { "Yes" } else { "No" },
-                mapping_mode
+                mapping_mode,
+                chip_type.name()
             )
         });
 
@@ -73,6 +83,8 @@ impl Cartridge {
             ram: vec![0; 0x8000], // 32KB SRAM (standard size)
             header_offset,
             mapping_mode,
+            chip_type,
+            chip,
         })
     }
 
@@ -180,7 +192,73 @@ impl Cartridge {
         score
     }
 
+    /// Detect enhancement chip from ROM header
+    fn detect_chip(rom: &[u8], mapping_mode: MappingMode) -> (ChipType, Option<RefCell<Box<dyn EnhancementChip + Send>>>) {
+        // Determine header offset based on mapping mode
+        let header_offset = match mapping_mode {
+            MappingMode::LoROM => 0x7FC0,
+            MappingMode::HiROM | MappingMode::ExHiROM => 0xFFC0,
+        };
+
+        if header_offset + 0x16 >= rom.len() {
+            return (ChipType::None, None);
+        }
+
+        // Read ROM type byte (offset +$16 from header)
+        let rom_type = rom[header_offset + 0x16];
+        let map_mode = rom[header_offset + 0x15];
+
+        // Detect chip type from ROM header
+        let chip_type = ChipType::detect(rom_type, map_mode);
+
+        // Create chip instance if supported
+        let chip: Option<RefCell<Box<dyn EnhancementChip + Send>>> = match chip_type {
+            ChipType::Dsp1 => {
+                log(LogCategory::Bus, LogLevel::Info, || {
+                    "SNES Cartridge: DSP-1 coprocessor detected".to_string()
+                });
+                Some(RefCell::new(Box::new(Dsp1::new())))
+            }
+            ChipType::None => None,
+            _ => {
+                log(LogCategory::Bus, LogLevel::Warn, || {
+                    format!(
+                        "SNES Cartridge: Enhancement chip {} detected but not implemented",
+                        chip_type.name()
+                    )
+                });
+                None
+            }
+        };
+
+        (chip_type, chip)
+    }
+
     pub fn read(&self, addr: u32) -> u8 {
+        // Check if this address should be handled by the enhancement chip
+        // DSP-1 in LoROM: banks $30-$3F at $3000-$3FFF (DR) and $7000-$7FFF (SR)
+        // DSP-1 in HiROM: banks $00-$1F at $6000-$7FFF
+        if let Some(ref chip) = self.chip {
+            let bank = (addr >> 16) as u8;
+            let offset = (addr & 0xFFFF) as u16;
+            
+            match (self.chip_type, self.mapping_mode) {
+                (ChipType::Dsp1, MappingMode::LoROM) => {
+                    // DSP-1 LoROM mapping
+                    if matches!(bank, 0x30..=0x3F) && (offset >= 0x3000) {
+                        return chip.borrow_mut().read(addr);
+                    }
+                }
+                (ChipType::Dsp1, MappingMode::HiROM) => {
+                    // DSP-1 HiROM mapping
+                    if matches!(bank, 0x00..=0x1F) && (0x6000..=0x7FFF).contains(&offset) {
+                        return chip.borrow_mut().read(addr);
+                    }
+                }
+                _ => {}
+            }
+        }
+        
         match self.mapping_mode {
             MappingMode::LoROM => self.read_lorom(addr),
             MappingMode::HiROM => self.read_hirom(addr),
@@ -355,6 +433,30 @@ impl Cartridge {
     }
 
     pub fn write(&mut self, addr: u32, val: u8) {
+        // Check if this address should be handled by the enhancement chip
+        if let Some(ref chip) = self.chip {
+            let bank = (addr >> 16) as u8;
+            let offset = (addr & 0xFFFF) as u16;
+            
+            match (self.chip_type, self.mapping_mode) {
+                (ChipType::Dsp1, MappingMode::LoROM) => {
+                    // DSP-1 LoROM mapping (data register only)
+                    if matches!(bank, 0x30..=0x3F) && (offset >= 0x3000 && offset < 0x7000) {
+                        chip.borrow_mut().write(addr, val);
+                        return;
+                    }
+                }
+                (ChipType::Dsp1, MappingMode::HiROM) => {
+                    // DSP-1 HiROM mapping
+                    if matches!(bank, 0x00..=0x1F) && (0x6000..=0x7FFF).contains(&offset) {
+                        chip.borrow_mut().write(addr, val);
+                        return;
+                    }
+                }
+                _ => {}
+            }
+        }
+        
         match self.mapping_mode {
             MappingMode::LoROM => self.write_lorom(addr, val),
             MappingMode::HiROM => self.write_hirom(addr, val),
@@ -425,6 +527,11 @@ impl Cartridge {
 
     pub fn has_smc_header(&self) -> bool {
         self.header_offset == 512
+    }
+
+    /// Get the enhancement chip type
+    pub fn chip_type(&self) -> ChipType {
+        self.chip_type
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
