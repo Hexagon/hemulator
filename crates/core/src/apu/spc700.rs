@@ -575,8 +575,10 @@ impl AudioChip for Spc700 {
         // Execute one CPU cycle
         self.cpu.step();
 
-        // For now, return silence
-        // TODO: Implement DSP audio generation
+        // DSP audio generation not yet implemented
+        // The SPC700 has a DSP that processes 8 voices with ADPCM samples,
+        // envelope control, and various effects. This requires implementing
+        // the DSP register set and ADPCM decoder.
         0
     }
 
@@ -603,8 +605,7 @@ impl AudioChip for Spc700 {
                 self.cycle_acc -= 1.0;
             }
 
-            // Generate audio sample (silence for now)
-            // TODO: Implement DSP audio generation
+            // DSP audio generation not yet implemented (see step() method)
             samples.push(0);
         }
 

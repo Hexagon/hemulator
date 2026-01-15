@@ -203,7 +203,7 @@ impl PcCpu {
             }
             0x09 => {
                 // Keyboard interrupt - call our emulated handler
-                // TODO: Create handle_hardware_keyboard_interrupt for consistency
+                // Already using handle_int09h which is the hardware keyboard interrupt handler
                 self.handle_int09h();
                 true
             }

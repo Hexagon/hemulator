@@ -109,13 +109,76 @@ impl TileDecoder for GameBoy2BppDecoder {
     }
 }
 
+/// SNES 4bpp planar tile decoder.
+///
+/// Each 8x8 tile is stored in 32 bytes:
+/// - Bytes 0-7: Bitplane 0 (one bit per pixel for 8 rows)
+/// - Bytes 8-15: Bitplane 1 (one bit per pixel for 8 rows)
+/// - Bytes 16-23: Bitplane 2 (one bit per pixel for 8 rows)
+/// - Bytes 24-31: Bitplane 3 (one bit per pixel for 8 rows)
+#[derive(Debug, Clone, Copy)]
+pub struct Snes4BppDecoder;
+
+impl TileDecoder for Snes4BppDecoder {
+    fn decode_pixel(&self, tile_data: &[u8], x: u8, y: u8) -> u8 {
+        if tile_data.len() < 32 || x > 7 || y > 7 {
+            return 0;
+        }
+
+        let bit = 7 - x;
+        let plane0 = (tile_data[y as usize] >> bit) & 1;
+        let plane1 = (tile_data[y as usize + 8] >> bit) & 1;
+        let plane2 = (tile_data[y as usize + 16] >> bit) & 1;
+        let plane3 = (tile_data[y as usize + 24] >> bit) & 1;
+
+        (plane3 << 3) | (plane2 << 2) | (plane1 << 1) | plane0
+    }
+
+    fn tile_size(&self) -> usize {
+        32
+    }
+}
+
+/// Genesis/Mega Drive 4bpp linear tile decoder.
+///
+/// Each 8x8 tile is stored in 32 bytes with linear 4-bit pixels:
+/// - Each pixel is 4 bits (0-15)
+/// - Two pixels per byte (upper nibble first)
+/// - Pixels are stored row by row, left to right
+#[derive(Debug, Clone, Copy)]
+pub struct Genesis4BppDecoder;
+
+impl TileDecoder for Genesis4BppDecoder {
+    fn decode_pixel(&self, tile_data: &[u8], x: u8, y: u8) -> u8 {
+        if tile_data.len() < 32 || x > 7 || y > 7 {
+            return 0;
+        }
+
+        // Each row is 4 bytes (8 pixels * 4 bits / 8 bits)
+        let byte_offset = (y as usize) * 4 + (x as usize) / 2;
+        let byte = tile_data[byte_offset];
+
+        // Upper nibble is first pixel (even x), lower nibble is second (odd x)
+        if x & 1 == 0 {
+            byte >> 4
+        } else {
+            byte & 0x0F
+        }
+    }
+
+    fn tile_size(&self) -> usize {
+        32
+    }
+}
+
 /// Get a tile decoder for the specified format.
 pub fn get_decoder(format: TileFormat) -> Box<dyn TileDecoder> {
     match format {
         TileFormat::Nes2Bpp => Box::new(Nes2BppDecoder),
         TileFormat::GameBoy2Bpp => Box::new(GameBoy2BppDecoder),
         TileFormat::Snes2Bpp => Box::new(Nes2BppDecoder), // Same as NES
-        _ => unimplemented!("Tile format not yet implemented: {:?}", format),
+        TileFormat::Snes4Bpp => Box::new(Snes4BppDecoder),
+        TileFormat::Genesis4Bpp => Box::new(Genesis4BppDecoder),
     }
 }
 
@@ -220,5 +283,71 @@ mod tests {
 
         let decoder = get_decoder(TileFormat::GameBoy2Bpp);
         assert_eq!(decoder.tile_size(), 16);
+
+        let decoder = get_decoder(TileFormat::Snes4Bpp);
+        assert_eq!(decoder.tile_size(), 32);
+
+        let decoder = get_decoder(TileFormat::Genesis4Bpp);
+        assert_eq!(decoder.tile_size(), 32);
+    }
+
+    #[test]
+    fn test_snes4bpp_decoder() {
+        let mut tile_data = vec![0u8; 32];
+
+        // Set up a test pattern in all 4 bitplanes
+        // Pixel at (0,0): plane0=1, plane1=1, plane2=0, plane3=1 = 0b1011 = 11
+        tile_data[0] = 0b10000000; // Plane 0, row 0
+        tile_data[8] = 0b10000000; // Plane 1, row 0
+        tile_data[16] = 0b00000000; // Plane 2, row 0
+        tile_data[24] = 0b10000000; // Plane 3, row 0
+
+        // Pixel at (1,0): plane0=0, plane1=0, plane2=1, plane3=0 = 0b0100 = 4
+        tile_data[16] = 0b01000000; // Plane 2, row 0
+
+        let decoder = Snes4BppDecoder;
+
+        // First pixel should be 11 (0b1011)
+        assert_eq!(decoder.decode_pixel(&tile_data, 0, 0), 11);
+
+        // Second pixel should be 4 (0b0100)
+        assert_eq!(decoder.decode_pixel(&tile_data, 1, 0), 4);
+    }
+
+    #[test]
+    fn test_snes4bpp_decoder_tile_size() {
+        let decoder = Snes4BppDecoder;
+        assert_eq!(decoder.tile_size(), 32);
+    }
+
+    #[test]
+    fn test_genesis4bpp_decoder() {
+        let mut tile_data = vec![0u8; 32];
+
+        // Genesis format: 2 pixels per byte, upper nibble first
+        // Row 0, pixels 0-1: 0xF3 means pixel 0 = 15, pixel 1 = 3
+        tile_data[0] = 0xF3;
+        // Row 0, pixels 2-3: 0x5A means pixel 2 = 5, pixel 3 = 10
+        tile_data[1] = 0x5A;
+
+        let decoder = Genesis4BppDecoder;
+
+        // First pixel should be 15
+        assert_eq!(decoder.decode_pixel(&tile_data, 0, 0), 15);
+
+        // Second pixel should be 3
+        assert_eq!(decoder.decode_pixel(&tile_data, 1, 0), 3);
+
+        // Third pixel should be 5
+        assert_eq!(decoder.decode_pixel(&tile_data, 2, 0), 5);
+
+        // Fourth pixel should be 10
+        assert_eq!(decoder.decode_pixel(&tile_data, 3, 0), 10);
+    }
+
+    #[test]
+    fn test_genesis4bpp_decoder_tile_size() {
+        let decoder = Genesis4BppDecoder;
+        assert_eq!(decoder.tile_size(), 32);
     }
 }
