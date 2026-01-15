@@ -219,7 +219,7 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
     
   - **Current Limitations**:
     - ⏳ Direct color mode not implemented (CGWSEL bits 0-1)
-      - Direct color mode is rarely used (mainly Mode 7 specific effects)
+      - Direct color mode is rarely used (can be enabled for Modes 3, 4, and 7)
       - Normal palette-based rendering works for all common use cases
     
   - **Impact on Game Compatibility**:
