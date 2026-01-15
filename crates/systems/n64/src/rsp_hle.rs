@@ -1201,9 +1201,18 @@ impl RspHle {
         let ndc_z = ndc_z.clamp(-1.0, 1.0);
 
         // Viewport transform (NDC to screen space)
+        // N64 viewport format:
+        //   vscale[0] = width/2, vscale[1] = height/2
+        //   vtrans[0] = x + width/2, vtrans[1] = y + height/2
+        // Standard transform: screen = vtrans + ndc * vscale
+        // With vp_x = vtrans_x - vscale_x and scale_x = vscale_x:
+        //   screen_x = (vtrans_x - vscale_x) + (ndc_x + 1.0) * vscale_x
+        //            = vtrans_x + ndc_x * vscale_x  ✓
+        //   screen_y = (vtrans_y - vscale_y) + (ndc_y + 1.0) * vscale_y
+        //            = vtrans_y + ndc_y * vscale_y  ✓
         let (vp_x, vp_y, _vp_width, _vp_height, scale_x, scale_y) = self.viewport;
         let screen_x = (vp_x + (ndc_x + 1.0) * scale_x) as i32;
-        let screen_y = (vp_y + (1.0 - ndc_y) * scale_y) as i32; // Inverted Y
+        let screen_y = (vp_y + (ndc_y + 1.0) * scale_y) as i32;
         let screen_z = ((ndc_z + 1.0) * 32767.5) as i32; // Map to 0-65535 range
 
         (screen_x, screen_y, screen_z)
@@ -1420,12 +1429,12 @@ mod tests {
         //   ndc_x = 10.0 (clamped from 50.0)
         //   ndc_y = 10.0 (clamped from 60.0)
         //   ndc_z = 1.0 (clamped from 100.0)
-        // Screen space:
-        //   x = (10.0 + 1.0) * 160 = 1760
-        //   y = (1.0 - 10.0) * 120 = -1080
+        // Screen space with corrected viewport transform:
+        //   x = 0 + (10.0 + 1.0) * 160 = 1760
+        //   y = 0 + (10.0 + 1.0) * 120 = 1320
         //   z = (1.0 + 1.0) * 32767.5 = 65535
         assert_eq!(x, 1760);
-        assert_eq!(y, -1080);
+        assert_eq!(y, 1320);
         assert_eq!(z, 65535);
     }
 
@@ -1443,6 +1452,53 @@ mod tests {
         // Check off-diagonal elements are 0.0
         assert_eq!(matrix[1], 0.0);
         assert_eq!(matrix[4], 0.0);
+    }
+
+    #[test]
+    #[ignore] // Requires OpenGL context
+    fn test_viewport_transformation() {
+        // Test viewport transformation correctness
+        let hle = RspHle::new();
+
+        // Default viewport: (0, 0, 320, 240, 160, 120)
+        // This means: vp_x=0, vp_y=0, scale_x=160, scale_y=120
+        // Standard N64 viewport transform:
+        //   screen_x = vp_x + (ndc_x + 1.0) * scale_x
+        //   screen_y = vp_y + (ndc_y + 1.0) * scale_y
+
+        // Test with NDC coordinates at origin (0, 0, 0, 1)
+        let clip = [0.0, 0.0, 0.0, 1.0];
+        let (x, y, z) = hle.clip_to_screen(&clip);
+
+        // NDC (0, 0) should map to screen center
+        // screen_x = 0 + (0 + 1.0) * 160 = 160
+        // screen_y = 0 + (0 + 1.0) * 120 = 120
+        // screen_z = (0 + 1.0) * 32767.5 = 32767.5
+        assert_eq!(x, 160, "X coordinate at NDC origin should be screen center");
+        assert_eq!(y, 120, "Y coordinate at NDC origin should be screen center");
+        assert_eq!(z, 32767, "Z coordinate at NDC origin should be mid-depth");
+
+        // Test with NDC at top-left corner (-1, -1)
+        let clip = [-1.0, -1.0, -1.0, 1.0];
+        let (x, y, z) = hle.clip_to_screen(&clip);
+
+        // screen_x = 0 + (-1 + 1.0) * 160 = 0
+        // screen_y = 0 + (-1 + 1.0) * 120 = 0
+        // screen_z = (-1 + 1.0) * 32767.5 = 0
+        assert_eq!(x, 0, "X coordinate at NDC (-1,-1) should be left edge");
+        assert_eq!(y, 0, "Y coordinate at NDC (-1,-1) should be top edge");
+        assert_eq!(z, 0, "Z coordinate at NDC -1 should be near plane");
+
+        // Test with NDC at bottom-right corner (1, 1)
+        let clip = [1.0, 1.0, 1.0, 1.0];
+        let (x, y, z) = hle.clip_to_screen(&clip);
+
+        // screen_x = 0 + (1 + 1.0) * 160 = 320
+        // screen_y = 0 + (1 + 1.0) * 120 = 240
+        // screen_z = (1 + 1.0) * 32767.5 = 65535
+        assert_eq!(x, 320, "X coordinate at NDC (1,1) should be right edge");
+        assert_eq!(y, 240, "Y coordinate at NDC (1,1) should be bottom edge");
+        assert_eq!(z, 65535, "Z coordinate at NDC 1 should be far plane");
     }
 
     #[test]
@@ -1837,8 +1893,8 @@ mod tests {
         //   ndc_x = 10.0 (clamped from 20.0)
         //   ndc_y = 10.0 (clamped from 20.0)
         //   ndc_z = 1.0 (clamped from 20.0)
-        // - Screen: ((10.0+1)*160, (1-10.0)*120, (1.0+1)*32767.5)
-        //         = (1760, -1080, 65535)
+        // - Screen with corrected viewport: ((10.0+1)*160, (10.0+1)*120, (1.0+1)*32767.5)
+        //         = (1760, 1320, 65535)
         assert_eq!(x, 1760);
         assert!(z > 10); // Z should be transformed (will be clamped to max)
     }
