@@ -5464,7 +5464,7 @@ fn main() {
                     match system_name.as_str() {
                         "NES" => {
                             sys = EmulatorSystem::NES(Box::default());
-                            rom_loaded = false;
+                            rom_loaded = true; // Mark system as created even without ROM
                             rom_hash = None;
                             runtime_state.clear_mounts();
                             egui_app.property_pane.system_name = "NES".to_string();
@@ -5478,7 +5478,7 @@ fn main() {
                         }
                         "Game Boy" => {
                             sys = EmulatorSystem::GameBoy(Box::new(emu_gb::GbSystem::new()));
-                            rom_loaded = false;
+                            rom_loaded = true; // Mark system as created even without ROM
                             rom_hash = None;
                             runtime_state.clear_mounts();
                             egui_app.property_pane.system_name = "Game Boy".to_string();
@@ -5494,7 +5494,7 @@ fn main() {
                             sys = EmulatorSystem::Atari2600(Box::new(create_atari2600_system(
                                 &settings,
                             )));
-                            rom_loaded = false;
+                            rom_loaded = true; // Mark system as created even without ROM
                             rom_hash = None;
                             runtime_state.clear_mounts();
                             egui_app.property_pane.system_name = "Atari 2600".to_string();
@@ -5508,7 +5508,7 @@ fn main() {
                         }
                         "PC" => {
                             sys = EmulatorSystem::PC(Box::new(emu_pc::PcSystem::new()));
-                            rom_loaded = false;
+                            rom_loaded = true; // Mark system as created even without ROM
                             rom_hash = None;
                             runtime_state.clear_mounts();
                             egui_app.property_pane.system_name = "PC".to_string();
@@ -5522,7 +5522,7 @@ fn main() {
                         }
                         "SNES" => {
                             sys = EmulatorSystem::SNES(Box::new(emu_snes::SnesSystem::new()));
-                            rom_loaded = false;
+                            rom_loaded = true; // Mark system as created even without ROM
                             rom_hash = None;
                             runtime_state.clear_mounts();
                             egui_app.property_pane.system_name = "SNES".to_string();
@@ -5539,7 +5539,7 @@ fn main() {
                             match create_n64_system(gl_ctx, &settings) {
                                 Ok(n64_sys) => {
                                     sys = EmulatorSystem::N64(Box::new(n64_sys));
-                                    rom_loaded = false;
+                                    rom_loaded = true; // Mark system as created even without ROM
                                     rom_hash = None;
                                     runtime_state.clear_mounts();
                                     egui_app.property_pane.system_name = "N64".to_string();
@@ -5560,7 +5560,7 @@ fn main() {
                         }
                         "SMS" => {
                             sys = EmulatorSystem::SMS(Box::new(emu_sms::SmsSystem::new()));
-                            rom_loaded = false;
+                            rom_loaded = true; // Mark system as created even without ROM
                             rom_hash = None;
                             runtime_state.clear_mounts();
                             egui_app.property_pane.system_name = "SMS".to_string();
@@ -5574,7 +5574,7 @@ fn main() {
                         }
                         "CHIP-8" => {
                             sys = EmulatorSystem::Chip8(Box::new(emu_chip8::Chip8System::new()));
-                            rom_loaded = false;
+                            rom_loaded = true; // Mark system as created even without ROM
                             rom_hash = None;
                             runtime_state.clear_mounts();
                             egui_app.property_pane.system_name = "CHIP-8".to_string();
@@ -5590,7 +5590,7 @@ fn main() {
                             sys = EmulatorSystem::ColecoVision(Box::new(
                                 emu_colecovision::ColecoVisionSystem::new(),
                             ));
-                            rom_loaded = false;
+                            rom_loaded = true; // Mark system as created even without ROM
                             rom_hash = None;
                             runtime_state.clear_mounts();
                             egui_app.property_pane.system_name = "ColecoVision".to_string();
@@ -5604,7 +5604,7 @@ fn main() {
                         }
                         "SG-1000" => {
                             sys = EmulatorSystem::SG1000(Box::new(emu_sg1000::Sg1000System::new()));
-                            rom_loaded = false;
+                            rom_loaded = true; // Mark system as created even without ROM
                             rom_hash = None;
                             runtime_state.clear_mounts();
                             egui_app.property_pane.system_name = "SG-1000".to_string();
