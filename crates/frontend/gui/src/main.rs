@@ -1034,14 +1034,25 @@ fn save_project(
     runtime_state: &RuntimeState,
     settings: &Settings,
     status_message: &mut String,
+    current_project_path: Option<&PathBuf>,
 ) -> Option<String> {
-    // Show file save dialog
+    // Show file save dialog with default path if available
     let default_name = format!("{}_project.hemu", sys.system_name());
-    if let Some(path) = rfd::FileDialog::new()
-        .add_filter("Hemulator Project", &["hemu"])
-        .set_file_name(&default_name)
-        .save_file()
-    {
+    let mut dialog = rfd::FileDialog::new().add_filter("Hemulator Project", &["hemu"]);
+
+    // If there's a current project path, use it as the default location
+    if let Some(current_path) = current_project_path {
+        if let Some(dir) = current_path.parent() {
+            dialog = dialog.set_directory(dir);
+        }
+        if let Some(file_name) = current_path.file_name() {
+            dialog = dialog.set_file_name(file_name.to_string_lossy().as_ref());
+        }
+    } else {
+        dialog = dialog.set_file_name(&default_name);
+    }
+
+    if let Some(path) = dialog.save_file() {
         let mut project = HemuProject::new(sys.system_name().to_string());
 
         // Copy current mount points from runtime state
@@ -3251,7 +3262,10 @@ fn main() {
             }
 
             // Update mount points from current system
-            if rom_loaded {
+            // For PC systems, show mount points even when rom_loaded is false
+            // because PC can boot from disk images without a ROM file
+            let is_pc_system = matches!(sys, EmulatorSystem::PC(_));
+            if rom_loaded || is_pc_system {
                 use egui_ui::property_pane::MountPoint;
                 let mount_points_info = sys.mount_points();
                 egui_app.property_pane.mount_points = mount_points_info
@@ -5038,6 +5052,9 @@ fn main() {
                                     egui_app
                                         .update_recent_files(settings.get_recent_files().to_vec());
 
+                                    // Track current project path
+                                    runtime_state.set_project_path(path.clone());
+
                                     egui_app.status_bar.set_message(format!(
                                         "Project loaded: {}",
                                         path.file_name().unwrap_or_default().to_string_lossy()
@@ -5059,15 +5076,22 @@ fn main() {
                 MenuAction::SaveProject => {
                     // Save current emulation state to a .hemu project file
                     if rom_loaded {
-                        if let Some(saved_path) =
-                            save_project(&sys, &runtime_state, &settings, &mut status_message)
-                        {
+                        if let Some(saved_path) = save_project(
+                            &sys,
+                            &runtime_state,
+                            &settings,
+                            &mut status_message,
+                            runtime_state.current_project_path.as_ref(),
+                        ) {
                             // Add saved project to recent files
-                            settings.add_recent_file(saved_path);
+                            settings.add_recent_file(saved_path.clone());
                             if let Err(e) = settings.save() {
                                 eprintln!("Warning: Failed to save settings: {}", e);
                             }
                             egui_app.update_recent_files(settings.get_recent_files().to_vec());
+
+                            // Track current project path
+                            runtime_state.set_project_path(PathBuf::from(&saved_path));
                         }
                         egui_app.status_bar.set_message(status_message.clone());
                     } else {
