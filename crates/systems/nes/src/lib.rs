@@ -658,7 +658,9 @@ impl System for NesSystem {
                         };
                         if should_render {
                             if debug_scanline_drift
-                                && (scanline_before < 3 || scanline_before >= 237 || (scanline_before >= 14 && scanline_before <= 20))
+                                && (scanline_before < 3
+                                    || scanline_before >= 237
+                                    || (scanline_before >= 14 && scanline_before <= 20))
                             {
                                 let ppu_dot = b.ppu.get_dot();
                                 let ppu_mask = b.ppu.mask();
@@ -1268,7 +1270,8 @@ mod tests {
             Mirroring::Horizontal,
             TimingMode::Ntsc,
         );
-        sys.setup_cartridge(cart).expect("Failed to load test cartridge");
+        sys.setup_cartridge(cart)
+            .expect("Failed to load test cartridge");
 
         if let Some(bus) = sys.cpu.bus_mut() {
             // Write to start and end of WRAM
@@ -1307,12 +1310,13 @@ mod tests {
         // Create a minimal AxROM cartridge (mapper 7) which does NOT have WRAM
         let cart = Cartridge::new_test(
             vec![0xAB; 0x8000], // 32KB PRG ROM filled with 0xAB
-            vec![0; 0x2000],   // 8KB CHR ROM
+            vec![0; 0x2000],    // 8KB CHR ROM
             7,                  // AxROM mapper
             Mirroring::Horizontal,
             TimingMode::Ntsc,
         );
-        sys.setup_cartridge(cart).expect("Failed to load test cartridge");
+        sys.setup_cartridge(cart)
+            .expect("Failed to load test cartridge");
 
         if let Some(bus) = sys.cpu.bus_mut() {
             // First read from PRG ROM to set the open bus value

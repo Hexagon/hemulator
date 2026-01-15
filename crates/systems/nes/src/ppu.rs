@@ -174,9 +174,6 @@ pub struct Ppu {
     /// Diagnostic: count consecutive PPUSTATUS reads without sprite 0 hit being set.
     /// Used to detect games stuck in a sprite 0 hit polling loop.
     sprite_0_poll_count: Cell<u32>,
-    /// Diagnostic: last frame's sprite 0 info for debugging
-    sprite_0_last_y: Cell<u8>,
-    sprite_0_last_tile: Cell<u8>,
 }
 
 impl fmt::Debug for Ppu {
@@ -239,8 +236,6 @@ impl Ppu {
             timing_mode,
             sprite_0_hit_pending: Cell::new(None),
             sprite_0_poll_count: Cell::new(0),
-            sprite_0_last_y: Cell::new(0),
-            sprite_0_last_tile: Cell::new(0),
         }
     }
 
@@ -514,19 +509,21 @@ impl Ppu {
                     log(LogCategory::PPU, LogLevel::Info, || {
                         format!(
                             "PPUSTATUS read: ${:02X} (S0H=1) @ scanline {} dot {}",
-                            status,
-                            scanline,
-                            dot
+                            status, scanline, dot
                         )
                     });
                 } else if scanline < 240 && scanline > 0 {
                     // Increment poll counter when reading during visible scanlines without hit
                     let count = self.sprite_0_poll_count.get().saturating_add(1);
                     self.sprite_0_poll_count.set(count);
-                    
+
                     // Log diagnostic info periodically when polling seems excessive
                     // This helps detect games stuck waiting for sprite 0 hit
-                    if count == 1000 || count == 5000 || count == 10000 || count % 50000 == 0 {
+                    if count == 1000
+                        || count == 5000
+                        || count == 10000
+                        || count.is_multiple_of(50000)
+                    {
                         let sprite_0_y = self.oam[0];
                         let sprite_0_tile = self.oam[1];
                         let sprite_0_attr = self.oam[2];
@@ -535,7 +532,7 @@ impl Ppu {
                         let bg_enabled = (mask & 0x08) != 0;
                         let sprites_enabled = (mask & 0x10) != 0;
                         let v = self.vram_addr.get();
-                        
+
                         log(LogCategory::PPU, LogLevel::Warn, || {
                             format!(
                                 "Sprite 0 hit poll #{}: scanline={} dot={} sprite0=(y={},tile=${:02X},attr=${:02X},x={}) mask=${:02X} bg={} spr={} v=${:04X}",
@@ -634,11 +631,16 @@ impl Ppu {
                 let scanline = self.scanline.get();
                 let dot = self.dot.get();
                 if scanline < 240 {
-                    static MID_FRAME_CTRL_LOG: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-                    let count = MID_FRAME_CTRL_LOG.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    static MID_FRAME_CTRL_LOG: std::sync::atomic::AtomicU32 =
+                        std::sync::atomic::AtomicU32::new(0);
+                    let count =
+                        MID_FRAME_CTRL_LOG.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     if count < 50 {
                         log(LogCategory::PPU, LogLevel::Warn, || {
-                            format!("MID-FRAME PPUCTRL: sl={} dot={} val=${:02X}", scanline, dot, val)
+                            format!(
+                                "MID-FRAME PPUCTRL: sl={} dot={} val=${:02X}",
+                                scanline, dot, val
+                            )
                         });
                     }
                 }
@@ -800,10 +802,7 @@ impl Ppu {
                     log(LogCategory::PPU, LogLevel::Info, || {
                         format!(
                             "$2006 lo-write: ${:02X} @ scanline {} dot {} => v=${:04X}",
-                            val,
-                            scanline,
-                            dot,
-                            new_t
+                            val, scanline, dot, new_t
                         )
                     });
 
@@ -813,26 +812,36 @@ impl Ppu {
             7 => {
                 // PPUDATA: write to vram or chr depending on address
                 let addr = self.vram_addr.get() & 0x3FFF;
-                
+
                 if addr < 0x2000 {
                     // CHR-ROM is typically read-only; only allow writes for CHR-RAM.
                     if self.chr_is_ram && self.chr.len() >= (addr as usize + 1) {
                         self.chr[addr as usize] = val;
                         // Diagnostic: log first few non-zero CHR RAM writes
-                        static CHR_WRITE_COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-                        let count = CHR_WRITE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        static CHR_WRITE_COUNT: std::sync::atomic::AtomicU32 =
+                            std::sync::atomic::AtomicU32::new(0);
+                        let count =
+                            CHR_WRITE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         if count < 20 && val != 0 {
                             log(LogCategory::PPU, LogLevel::Warn, || {
-                                format!("CHR RAM write #{}: addr=${:04X} val=${:02X}", count, addr, val)
+                                format!(
+                                    "CHR RAM write #{}: addr=${:04X} val=${:02X}",
+                                    count, addr, val
+                                )
                             });
                         }
                     } else if !self.chr_is_ram {
                         // Diagnostic: log CHR ROM write attempts
-                        static ROM_WRITE_COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-                        let count = ROM_WRITE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        static ROM_WRITE_COUNT: std::sync::atomic::AtomicU32 =
+                            std::sync::atomic::AtomicU32::new(0);
+                        let count =
+                            ROM_WRITE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         if count < 5 {
                             log(LogCategory::PPU, LogLevel::Warn, || {
-                                format!("CHR ROM write REJECTED #{}: addr=${:04X} val=${:02X}", count, addr, val)
+                                format!(
+                                    "CHR ROM write REJECTED #{}: addr=${:04X} val=${:02X}",
+                                    count, addr, val
+                                )
                             });
                         }
                     }

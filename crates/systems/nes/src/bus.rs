@@ -230,7 +230,12 @@ impl Bus for NesBus {
                 // Otherwise return open bus (last value read from data bus)
                 // This is critical for games like Battletoads that rely on open bus behavior
                 // Reference: https://www.nesdev.org/wiki/Open_bus_behavior
-                if self.mapper.as_ref().map(|m| m.borrow().has_wram()).unwrap_or(false) {
+                if self
+                    .mapper
+                    .as_ref()
+                    .map(|m| m.borrow().has_wram())
+                    .unwrap_or(false)
+                {
                     let off = (addr - 0x6000) as usize;
                     self.wram[off]
                 } else {
@@ -309,7 +314,12 @@ impl Bus for NesBus {
             }
             0x6000..=0x7FFF => {
                 // Only write to WRAM if the mapper has WRAM
-                if self.mapper.as_ref().map(|m| m.borrow().has_wram()).unwrap_or(false) {
+                if self
+                    .mapper
+                    .as_ref()
+                    .map(|m| m.borrow().has_wram())
+                    .unwrap_or(false)
+                {
                     let off = (addr - 0x6000) as usize;
                     self.wram[off] = val;
                 }

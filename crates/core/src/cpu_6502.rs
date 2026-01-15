@@ -3632,4 +3632,58 @@ mod tests {
         assert_eq!(cpu7.step(), 5); // Base 4 cycles + 1 for page crossing
         assert_eq!(cpu7.status & 0x01, 0x01); // Carry set (A >= M)
     }
+
+    #[test]
+    fn test_branch_page_crossing_penalty() {
+        // Test that branch instructions add +1 cycle when crossing page boundary
+
+        // Test BEQ with NO page crossing
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu6502::new(mem);
+        // BEQ forward by 10 bytes (stays in same page)
+        cpu.memory.load_program(0x8000, &[0xA9, 0x00, 0xF0, 0x0A]);
+        cpu.reset();
+        assert_eq!(cpu.step(), 2); // LDA #0 (sets Z flag)
+        let cycles = cpu.step(); // BEQ +10 (branch taken, no page cross)
+        assert_eq!(cycles, 3); // Base 3 cycles for taken branch, no page crossing
+        assert_eq!(cpu.pc, 0x800E); // PC should be at 0x8004 + 10 = 0x800E
+
+        // Test BNE with page crossing (backward)
+        // Position BNE at $80FE so PC after fetch is $8100, branch back to $80FF
+        let mem2 = ArrayMemory::new();
+        let mut cpu2 = Cpu6502::new(mem2);
+        cpu2.memory.load_program(0x80FC, &[0xA9, 0x01, 0xD0, 0xFF]);
+        cpu2.reset();
+        cpu2.pc = 0x80FC;
+        assert_eq!(cpu2.step(), 2); // LDA #1 (clears Z flag) -> PC now at $80FE
+                                    // BNE at $80FE: fetch opcode->$80FF, fetch offset->$8100 (old_pc for calc)
+        let cycles = cpu2.step(); // BNE -1 (branch taken, crosses page backward)
+        assert_eq!(cycles, 4); // Base 3 cycles + 1 for page crossing
+                               // target = $8100 + (-1) = $80FF
+        assert_eq!(cpu2.pc, 0x80FF);
+
+        // Test BEQ with page crossing (forward)
+        // Position BEQ so PC after fetch is $80FF, branch forward to $8101
+        let mem3 = ArrayMemory::new();
+        let mut cpu3 = Cpu6502::new(mem3);
+        cpu3.memory.load_program(0x80FB, &[0xA9, 0x00, 0xF0, 0x02]);
+        cpu3.reset();
+        cpu3.pc = 0x80FB;
+        assert_eq!(cpu3.step(), 2); // LDA #0 (sets Z flag) -> PC now at $80FD
+                                    // BEQ at $80FD: fetch opcode->$80FE, fetch offset->$80FF (old_pc for calc)
+        let cycles = cpu3.step(); // BEQ +2 (branch taken, crosses page forward)
+        assert_eq!(cycles, 4); // Base 3 cycles + 1 for page crossing
+                               // target = $80FF + 2 = $8101
+        assert_eq!(cpu3.pc, 0x8101);
+
+        // Test BNE with branch NOT taken (no extra cycles)
+        let mem4 = ArrayMemory::new();
+        let mut cpu4 = Cpu6502::new(mem4);
+        cpu4.memory.load_program(0x8000, &[0xA9, 0x00, 0xD0, 0x10]);
+        cpu4.reset();
+        assert_eq!(cpu4.step(), 2); // LDA #0 (sets Z flag)
+        let cycles = cpu4.step(); // BNE +16 (branch NOT taken because Z=1)
+        assert_eq!(cycles, 2); // Only 2 cycles for branch not taken
+        assert_eq!(cpu4.pc, 0x8004); // PC advances past the branch instruction
+    }
 }
