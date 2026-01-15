@@ -1476,12 +1476,22 @@ impl Ppu {
             // Set VBlank flag
             let was_vblank = self.vblank.replace(true);
 
-            // COMPATIBILITY FIX: Clear sprite 0 hit at VBlank start
-            // Hardware behavior: sprite 0 hit is cleared at pre-render scanline dot 1 (261/311).
-            // However, games that poll sprite 0 hit during vblank can see stale flags from
-            // the previous frame, causing visual glitches (e.g., Battletoads screen jumping).
-            // Clearing at vblank start prevents games from reading stale sprite 0 hit flags.
-            // This matches the behavior of some other emulators for compatibility.
+            // COMPATIBILITY FIX: Clear sprite 0 hit at VBlank start.
+            //
+            // Hardware-accurate behavior is to clear sprite 0 hit on the pre-render scanline
+            // at dot 1 (261/311). This implementation still performs that hardware-timed clear
+            // on the pre-render line; this earlier clear at VBlank start is *in addition* to
+            // that, not a replacement.
+            //
+            // Rationale: some games poll the sprite 0 hit flag during VBlank. If we only clear
+            // on the pre-render scanline, those games can observe a "stale" hit flag from the
+            // previous frame (e.g., Battletoads screen jumping). Clearing at VBlank start
+            // prevents such games from reading stale state while still allowing the pre-render
+            // clear to occur at the hardware-accurate time before the next visible frame.
+            //
+            // Double-clearing here is intentional and safe: the flag is simply guaranteed to be
+            // false throughout VBlank, and it will be cleared again on the pre-render scanline
+            // for correctness with code that assumes the hardware timing.
             // NOTE: This is a deviation from strict hardware accuracy for better game compatibility.
             self.sprite_0_hit.set(false);
             self.sprite_0_hit_pending.set(None);
