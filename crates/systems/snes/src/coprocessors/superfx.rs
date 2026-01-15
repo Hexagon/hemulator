@@ -934,9 +934,9 @@ mod tests {
     fn test_mult_instruction() {
         let mut sfx = SuperFx::new();
         sfx.regs[6] = 10;
-        sfx.regs[8] = 20;
+        sfx.regs[2] = 20;
 
-        sfx.execute_instruction(0x08); // MULT R8
+        sfx.execute_instruction(0x0A); // MULT R2
         assert_eq!(sfx.regs[4], 200); // Low word
         assert_eq!(sfx.regs[5], 0); // High word
     }
