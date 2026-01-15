@@ -836,7 +836,11 @@ impl EnhancementChip for SuperFx {
     }
 
     fn chip_type(&self) -> ChipType {
-        ChipType::SuperFx
+        if self.is_superfx2 {
+            ChipType::SuperFx2
+        } else {
+            ChipType::SuperFx
+        }
     }
 
     fn save_state(&self) -> Result<String, String> {
@@ -961,5 +965,154 @@ mod tests {
 
         // Check X was incremented
         assert_eq!(sfx.regs[1], 11);
+    }
+
+    #[test]
+    fn test_enhancement_chip_trait_read_write() {
+        let mut sfx = SuperFx::new();
+
+        // Test register read/write through EnhancementChip trait
+        // Write to R1 via SNES CPU (bank $00, offset $3002-$3003)
+        sfx.write(0x003002, 0x34); // Low byte
+        sfx.write(0x003003, 0x12); // High byte
+        assert_eq!(sfx.read(0x003002), 0x34);
+        assert_eq!(sfx.read(0x003003), 0x12);
+
+        // Test GSU RAM access (bank $70)
+        sfx.write(0x700100, 0xAB);
+        assert_eq!(sfx.read(0x700100), 0xAB);
+    }
+
+    #[test]
+    fn test_save_load_state() {
+        let mut sfx = SuperFx::new();
+        sfx.regs[0] = 0x1234;
+        sfx.regs[15] = 0x8000; // PC
+        sfx.colr = 0x42;
+        sfx.flags_g = true;
+
+        // Save state
+        let state = sfx.save_state().expect("Save should succeed");
+        assert!(!state.is_empty());
+
+        // Modify chip
+        sfx.regs[0] = 0;
+        sfx.colr = 0;
+        sfx.flags_g = false;
+
+        // Load state
+        sfx.load_state(&state).expect("Load should succeed");
+        assert_eq!(sfx.regs[0], 0x1234);
+        assert_eq!(sfx.regs[15], 0x8000);
+        assert_eq!(sfx.colr, 0x42);
+        assert!(sfx.flags_g);
+    }
+
+    #[test]
+    fn test_reset() {
+        let mut sfx = SuperFx::new();
+        sfx.regs[0] = 0x1234;
+        sfx.colr = 0x42;
+        sfx.flags_g = true;
+
+        sfx.reset();
+
+        assert_eq!(sfx.regs[0], 0);
+        assert_eq!(sfx.colr, 0);
+        assert!(!sfx.flags_g);
+    }
+
+    #[test]
+    fn test_chip_type() {
+        let sfx = SuperFx::new();
+        assert_eq!(sfx.chip_type(), ChipType::SuperFx);
+
+        let sfx2 = SuperFx::new_superfx2();
+        assert_eq!(sfx2.chip_type(), ChipType::SuperFx2);
+    }
+
+    #[test]
+    fn test_with_instruction() {
+        let mut sfx = SuperFx::new();
+        assert_eq!(sfx.sreg(), 0); // Default R0
+
+        sfx.execute_instruction(0x25); // WITH R5
+        assert_eq!(sfx.sreg(), 5);
+        assert_eq!(sfx.dreg(), 5);
+    }
+
+    #[test]
+    fn test_getc_instruction() {
+        let mut sfx = SuperFx::new();
+        let test_rom = vec![0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0];
+        sfx.set_rom(test_rom);
+
+        sfx.rombr = 0x00;
+        sfx.regs[14] = 0x0002; // Point to third byte
+
+        sfx.execute_instruction(0xB0); // GETC
+
+        assert_eq!(sfx.rom_buffer, 0x56);
+        assert_eq!(sfx.regs[14], 0x0003); // R14 incremented
+        assert!(sfx.flags_r); // ROM buffer valid flag set
+    }
+
+    #[test]
+    fn test_rpix_instruction_superfx2() {
+        let mut sfx2 = SuperFx::new_superfx2();
+
+        // Set up a pixel in RAM
+        sfx2.regs[1] = 10; // X
+        sfx2.regs[2] = 20; // Y
+        let addr = (20 * 256 + 10) as usize;
+        sfx2.ram[addr] = 0x42;
+
+        sfx2.flags_alt1 = true;
+        sfx2.execute_instruction(0x4D); // RPIX (SWAP with ALT1 on SuperFX2)
+
+        assert_eq!(sfx2.colr, 0x42);
+        assert!(!sfx2.flags_alt1); // ALT1 should be cleared
+    }
+
+    #[test]
+    fn test_branch_instructions_pc() {
+        let mut sfx = SuperFx::new();
+        // Set up a simple test ROM with BRA instruction
+        let test_rom = vec![
+            0x05, 0x02, // BRA +2 (skip next 2 bytes)
+            0x00, 0x00, // (skipped)
+            0x01, // NOP (target)
+        ];
+        sfx.set_rom(test_rom);
+
+        sfx.set_pc(0); // Start at beginning
+
+        // Execute BRA
+        let bytes = sfx.execute_instruction(0x05);
+        assert_eq!(bytes, 0); // Branch sets PC explicitly, returns 0
+
+        // PC should be at offset 4 (PC was 0, +2 for instruction size, +2 for offset)
+        assert_eq!(sfx.pc(), 4);
+    }
+
+    #[test]
+    fn test_immediate_instructions_pc() {
+        let mut sfx = SuperFx::new();
+        // Test IWT (immediate word to register)
+        let test_rom = vec![
+            0x3D, // ALT1
+            0x81, // IWT R1
+            0x34, 0x12, // Immediate value 0x1234
+        ];
+        sfx.set_rom(test_rom);
+
+        sfx.set_pc(0);
+        sfx.execute_instruction(0x3D); // ALT1
+        assert!(sfx.flags_alt1);
+
+        sfx.set_pc(1);
+        let bytes = sfx.execute_instruction(0x81); // IWT R1
+        assert_eq!(bytes, 3); // Consumes 3 bytes (opcode + 2 immediate)
+        assert_eq!(sfx.regs[1], 0x1234);
     }
 }

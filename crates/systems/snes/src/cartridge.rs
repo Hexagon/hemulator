@@ -222,11 +222,21 @@ impl Cartridge {
                 });
                 Some(RefCell::new(Box::new(Dsp1::new())))
             }
-            ChipType::SuperFx | ChipType::SuperFx2 => {
+            ChipType::SuperFx => {
                 log(LogCategory::Bus, LogLevel::Info, || {
                     format!("SNES Cartridge: {} coprocessor detected", chip_type.name())
                 });
-                Some(RefCell::new(Box::new(SuperFx::new())))
+                let mut sfx = SuperFx::new();
+                sfx.set_rom(rom.to_vec());
+                Some(RefCell::new(Box::new(sfx)))
+            }
+            ChipType::SuperFx2 => {
+                log(LogCategory::Bus, LogLevel::Info, || {
+                    format!("SNES Cartridge: {} coprocessor detected", chip_type.name())
+                });
+                let mut sfx = SuperFx::new_superfx2();
+                sfx.set_rom(rom.to_vec());
+                Some(RefCell::new(Box::new(sfx)))
             }
             ChipType::None => None,
             _ => {
