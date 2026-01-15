@@ -433,9 +433,9 @@ impl SuperFx {
                 self.update_zs_flags(self.regs[self.dreg()]);
                 1
             }
-            // MULT Rn (0x08-0x0F) - Multiply R6 by Rn
+            // MULT Rn (0x08-0x0F) - Multiply R6 by R(opcode - 0x08), i.e. R0-R7
             0x08..=0x0F => {
-                let n = (opcode & 0x0F) as usize;
+                let n = (opcode - 0x08) as usize;
                 let r6 = self.regs[6] as i16;
                 let rn = self.regs[n] as i16;
                 self.mult_result = ((r6 as i32) * (rn as i32)) as u32;
