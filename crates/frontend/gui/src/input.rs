@@ -105,6 +105,10 @@ impl ControllerProfile {
             .for_device(InputDeviceType::Keyboard)
             .map(VirtualButton::A, InputSource::KeyboardKey("Z".to_string()))
             .map(VirtualButton::B, InputSource::KeyboardKey("X".to_string()))
+            .map(VirtualButton::X, InputSource::KeyboardKey("A".to_string()))
+            .map(VirtualButton::Y, InputSource::KeyboardKey("S".to_string()))
+            .map(VirtualButton::L, InputSource::KeyboardKey("Q".to_string()))
+            .map(VirtualButton::R, InputSource::KeyboardKey("W".to_string()))
             .map(
                 VirtualButton::Select,
                 InputSource::KeyboardKey("LeftShift".to_string()),
@@ -137,6 +141,10 @@ impl ControllerProfile {
             .for_device(InputDeviceType::Keyboard)
             .map(VirtualButton::A, InputSource::KeyboardKey("U".to_string()))
             .map(VirtualButton::B, InputSource::KeyboardKey("O".to_string()))
+            .map(VirtualButton::X, InputSource::KeyboardKey("Y".to_string()))
+            .map(VirtualButton::Y, InputSource::KeyboardKey("H".to_string()))
+            .map(VirtualButton::L, InputSource::KeyboardKey("T".to_string()))
+            .map(VirtualButton::R, InputSource::KeyboardKey("R".to_string()))
             .map(
                 VirtualButton::Select,
                 InputSource::KeyboardKey("RightShift".to_string()),

@@ -58,10 +58,10 @@ impl Default for KeyMapping {
         Self {
             a: "Z".to_string(),
             b: "X".to_string(),
-            x: String::new(), // Not mapped by default
-            y: String::new(), // Not mapped by default
-            l: String::new(), // Not mapped by default
-            r: String::new(), // Not mapped by default
+            x: "A".to_string(),
+            y: "S".to_string(),
+            l: "Q".to_string(),
+            r: "W".to_string(),
             select: "LeftShift".to_string(),
             start: "Enter".to_string(),
             up: "Up".to_string(),
@@ -78,10 +78,10 @@ impl KeyMapping {
         Self {
             a: "U".to_string(),
             b: "O".to_string(),
-            x: String::new(),
-            y: String::new(),
-            l: String::new(),
-            r: String::new(),
+            x: "Y".to_string(),
+            y: "H".to_string(),
+            l: "T".to_string(),
+            r: "R".to_string(),
             select: "RightShift".to_string(),
             start: "P".to_string(), // P key (single key on right side)
             up: "I".to_string(),
