@@ -1387,14 +1387,8 @@ impl Ppu {
             // For cycle-accurate sprite 0 hit, we find the first X position where sprite 0
             // overlaps an opaque background and store it for the tick() function to use.
             let mut sprite_0_hit_x: Option<u16> = None;
-            let mut sprite_0_in_buffer = false;
             for x in 0..width as usize {
                 if let Some((sprite_color, behind_bg, sprite_idx)) = sprite_buffer[x] {
-                    // Track if sprite 0 has any opaque pixels in the buffer
-                    if sprite_idx == 0 {
-                        sprite_0_in_buffer = true;
-                    }
-                    
                     // Clip leftmost 8 pixels if PPUMASK bit 2 is clear
                     let should_render_sprite = show_sprites_left || x >= 8;
 
