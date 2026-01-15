@@ -416,8 +416,9 @@ impl SuperFx {
             // BGE/BLT - Branch on sign flag
             0x06 => {
                 if !self.flags_s {
-                    // Read signed byte offset from PC+1, branch is relative to PC+2
-                    let offset = self.read_byte((self.pc() + 1) as u32) as i8;
+                    // Read signed byte offset from (PBR << 16) | (PC+1), branch is relative to PC+2
+                    let offset_addr = ((self.pbr as u32) << 16) | ((self.pc() + 1) as u32);
+                    let offset = self.read_byte(offset_addr) as i8;
                     let new_pc = ((self.pc() + 2) as i32 + offset as i32) as u16;
                     self.set_pc(new_pc);
                     0 // PC already set
