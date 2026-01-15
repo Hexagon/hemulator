@@ -45,12 +45,6 @@ const OAM_SIZE: usize = 544; // 512 bytes main OAM + 32 bytes high table
 // Layer identification constants for per-pixel layer tracking
 // Used in layer_buffer to track which layer each pixel came from
 const LAYER_BG1: u8 = 0;
-#[allow(dead_code)]
-const LAYER_BG2: u8 = 1;
-#[allow(dead_code)]
-const LAYER_BG3: u8 = 2;
-#[allow(dead_code)]
-const LAYER_BG4: u8 = 3;
 const LAYER_OBJ: u8 = 4;
 const LAYER_BACKDROP: u8 = 5;
 
