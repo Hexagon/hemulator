@@ -467,8 +467,10 @@ impl SuperFx {
             0x3C => {
                 self.regs[12] = self.regs[12].wrapping_sub(1);
                 if self.regs[12] != 0 {
-                    // Read signed byte offset from PC+1, branch is relative to PC+2
-                    let offset = self.read_byte((self.pc() + 1) as u32) as i8;
+                    // Read signed byte offset from PC+1 (in current program bank), branch is relative to PC+2
+                    let pc = self.pc();
+                    let addr = ((self.pbr as u32) << 16) | (pc.wrapping_add(1) as u32);
+                    let offset = self.read_byte(addr) as i8;
                     let new_pc = ((self.pc() + 2) as i32 + offset as i32) as u16;
                     self.set_pc(new_pc);
                     0 // PC already set
