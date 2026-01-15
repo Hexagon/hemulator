@@ -247,7 +247,8 @@ impl MemoryZ80 for SmsMemory {
             0x3E => {
                 // Memory control register
                 self.memory_control = val;
-                // TODO: Implement memory control features (cartridge slot control, etc.)
+                // Memory control features (cartridge slot control, BIOS disable, etc.)
+                // are currently not implemented - cartridge is always enabled
             }
             _ => {
                 // Ignore writes to other ports

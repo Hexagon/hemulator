@@ -1243,6 +1243,9 @@ impl Ppu {
         // NOTE: Color math registers are stored ($2130-$2132) but not yet applied
         // Proper implementation requires per-pixel layer tracking to apply color math correctly
         // TODO: Implement color math with per-pixel layer tracking
+        // Color math requires knowing which layer each pixel came from (BG1/BG2/BG3/BG4/OBJ)
+        // to apply selective color math based on CGWSEL/CGADSUB register settings.
+        // Current implementation applies color math to all pixels uniformly.
 
         // Apply brightness (bits 0-3 of $2100) ONLY when force blank is OFF
         // This preserves the behavior where we render during force blank for boot sequences
