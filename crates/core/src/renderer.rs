@@ -68,10 +68,21 @@ pub trait Renderer: Send {
     fn get_frame(&self) -> &Frame;
 
     /// Get mutable access to the framebuffer (for direct pixel manipulation)
+    ///
+    /// # Note
+    /// This is an optional method with a default implementation that panics.
+    /// Most renderers don't need to override this - it's primarily used by
+    /// systems that need direct pixel access (e.g., PC video adapter).
+    ///
+    /// # Panics
+    /// The default implementation panics with a descriptive error message.
+    /// Override this method if your renderer needs mutable frame access.
     fn get_frame_mut(&mut self) -> &mut Frame {
-        // Default implementation - systems can override if they manage frame differently
-        // This is a workaround since we can't return &mut from &self
-        unimplemented!("get_frame_mut requires override")
+        panic!(
+            "get_frame_mut() called on renderer '{}' which doesn't support mutable frame access. \
+             This is likely a bug - most renderers should use clear() or other rendering methods instead.",
+            self.name()
+        )
     }
 
     /// Clear the framebuffer with a solid color
