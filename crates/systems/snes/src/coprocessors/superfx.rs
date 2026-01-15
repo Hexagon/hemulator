@@ -663,12 +663,6 @@ impl SuperFx {
             }
         };
 
-        // Clear ALT flags after instruction (if not explicitly set)
-        if opcode != 0x3D && opcode != 0x3E && opcode != 0x3F {
-            self.flags_alt1 = false;
-            self.flags_alt2 = false;
-        }
-
         // Increment cycle counter
         self.cycles += 1;
 
