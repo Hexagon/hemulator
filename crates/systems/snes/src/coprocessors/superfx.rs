@@ -181,27 +181,30 @@ pub struct SuperFx {
     /// Clock Select Register (CLSR) - Clock speed select
     clsr: u8,
 
-    /// 512-byte instruction cache
+    /// 512-byte instruction cache (currently unused for simplicity)
     #[serde(with = "BigArray")]
     cache: [u8; 512],
 
-    /// GSU RAM (256 KB max, acts as frame buffer)
+    /// GSU RAM (128 KB default, up to 256 KB; acts as frame buffer)
     ram: Vec<u8>,
 
-    /// Pixel cache buffer for plot operations
-    pixel_cache: [u8; 8],
+    /// ROM data (passed from cartridge for instruction fetching and GETC)
+    rom: Vec<u8>,
 
-    /// Current pixel cache position
-    pixel_cache_pos: u8,
-
-    /// ROM buffer for ROM reads
+    /// ROM buffer for ROM reads (GETC result)
     rom_buffer: u8,
+
+    /// Current source/destination register (set by WITH instruction)
+    sreg_dreg: usize,
 
     /// Multiplication result (32-bit)
     mult_result: u32,
 
     /// Cycle counter for timing
     cycles: u64,
+
+    /// Chip variant (false = SuperFX/GSU-1, true = SuperFX2/GSU-2)
+    is_superfx2: bool,
 }
 
 impl Default for SuperFx {
@@ -232,11 +235,12 @@ impl Default for SuperFx {
             clsr: 0,
             cache: [0; 512],
             ram: vec![0; 128 * 1024], // 128 KB default
-            pixel_cache: [0; 8],
-            pixel_cache_pos: 0,
+            rom: Vec::new(),
             rom_buffer: 0,
+            sreg_dreg: 0, // Default to R0
             mult_result: 0,
             cycles: 0,
+            is_superfx2: false,
         }
     }
 }
@@ -245,6 +249,19 @@ impl SuperFx {
     /// Create a new SuperFX instance
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Create a new SuperFX2 instance
+    pub fn new_superfx2() -> Self {
+        Self {
+            is_superfx2: true,
+            ..Default::default()
+        }
+    }
+
+    /// Set ROM data for instruction fetching and GETC operations
+    pub fn set_rom(&mut self, rom: Vec<u8>) {
+        self.rom = rom;
     }
 
     /// Get flags as Flags struct for easier manipulation
@@ -291,23 +308,30 @@ impl SuperFx {
         self.regs[15] = val;
     }
 
-    /// Get source register (R0 by default, or last used)
+    /// Get source register (R0 by default, or last set by WITH)
     fn sreg(&self) -> usize {
-        // In SuperFX, the source register is typically R0
-        // Some instructions modify this
-        0
+        self.sreg_dreg
     }
 
-    /// Get destination register (typically same as source)
+    /// Get destination register (same as source)
     fn dreg(&self) -> usize {
-        self.sreg()
+        self.sreg_dreg
     }
 
-    /// Read a byte from GSU address space
-    fn read_byte(&mut self, addr: u32) -> u8 {
-        // GSU has its own address space separate from SNES
-        // This is a simplified implementation
+    /// Read a byte from GSU address space (ROM or RAM)
+    fn read_byte(&self, addr: u32) -> u8 {
+        // GSU has its own address space
+        // For simplicity, treat lower addresses as ROM and high addresses as RAM
+        // Real implementation would use banking registers properly
         let addr = addr as usize;
+
+        // Try ROM first (mirrored if needed)
+        if !self.rom.is_empty() && addr < 0x800000 {
+            let rom_addr = addr % self.rom.len();
+            return self.rom[rom_addr];
+        }
+
+        // Fall back to RAM
         if addr < self.ram.len() {
             self.ram[addr]
         } else {
@@ -343,24 +367,24 @@ impl SuperFx {
         self.flags_s = (val & 0x8000) != 0;
     }
 
-    /// Execute a single instruction
-    fn execute_instruction(&mut self, opcode: u8) {
+    /// Execute a single instruction, returning the number of bytes to advance PC
+    fn execute_instruction(&mut self, opcode: u8) -> u16 {
         // Simplified instruction execution
         // Full implementation would handle all 98 opcodes
 
-        match opcode {
+        let pc_increment = match opcode {
             // STOP - Stop GSU
             0x00 => {
                 self.flags_g = false;
+                1
             }
             // NOP - No operation
-            0x01 => {
-                // Do nothing
-            }
+            0x01 => 1,
             // CACHE - Load cache
             0x02 => {
                 // Simplified: just set flag
                 self.flags_r = true;
+                1
             }
             // LSR - Logical shift right
             0x03 => {
@@ -369,6 +393,7 @@ impl SuperFx {
                 self.flags_cy = (val & 1) != 0;
                 self.regs[src] = val >> 1;
                 self.update_zs_flags(self.regs[src]);
+                1
             }
             // ROL - Rotate left
             0x04 => {
@@ -378,20 +403,26 @@ impl SuperFx {
                 self.flags_cy = (val & 0x8000) != 0;
                 self.regs[src] = (val << 1) | cy;
                 self.update_zs_flags(self.regs[src]);
+                1
             }
             // BRA - Branch always (relative)
             0x05 => {
-                // Read signed byte offset
-                let offset = self.read_byte(self.pc() as u32) as i8;
-                let new_pc = (self.pc() as i32 + offset as i32) as u16;
+                // Read signed byte offset from PC+1, branch is relative to PC+2
+                let offset = self.read_byte((self.pc() + 1) as u32) as i8;
+                let new_pc = ((self.pc() + 2) as i32 + offset as i32) as u16;
                 self.set_pc(new_pc);
+                0 // PC already set
             }
             // BGE/BLT - Branch on sign flag
             0x06 => {
                 if !self.flags_s {
-                    let offset = self.read_byte(self.pc() as u32) as i8;
-                    let new_pc = (self.pc() as i32 + offset as i32) as u16;
+                    // Read signed byte offset from PC+1, branch is relative to PC+2
+                    let offset = self.read_byte((self.pc() + 1) as u32) as i8;
+                    let new_pc = ((self.pc() + 2) as i32 + offset as i32) as u16;
                     self.set_pc(new_pc);
+                    0 // PC already set
+                } else {
+                    2 // Skip branch, advance past opcode and offset
                 }
             }
             // MERGE - Merge registers
@@ -400,6 +431,7 @@ impl SuperFx {
                 let r8 = self.regs[8];
                 self.regs[self.dreg()] = (r7 & 0xFF00) | (r8 >> 8);
                 self.update_zs_flags(self.regs[self.dreg()]);
+                1
             }
             // MULT Rn (0x08-0x0F) - Multiply R6 by Rn
             0x08..=0x0F => {
@@ -410,16 +442,18 @@ impl SuperFx {
                 self.regs[4] = (self.mult_result & 0xFFFF) as u16;
                 self.regs[5] = ((self.mult_result >> 16) & 0xFFFF) as u16;
                 self.update_zs_flags(self.regs[4]);
+                1
             }
             // TO Rn (0x10-0x1F) - Move to register
             0x10..=0x1F => {
                 let n = (opcode & 0x0F) as usize;
                 self.regs[n] = self.regs[self.sreg()];
+                1
             }
             // WITH Rn (0x20-0x2F) - Set source/dest register
             0x20..=0x2F => {
-                // This sets the default source/destination register
-                // Simplified: we just track R0 by default
+                self.sreg_dreg = (opcode & 0x0F) as usize;
+                1
             }
             // STW (Rn) (0x30-0x3B) - Store word to RAM
             0x30..=0x3B => {
@@ -427,28 +461,36 @@ impl SuperFx {
                 let addr = self.regs[n] as u32;
                 let val = self.regs[self.sreg()];
                 self.write_word(addr, val);
+                1
             }
             // LOOP (0x3C) - Decrement R12 and branch if not zero
             0x3C => {
                 self.regs[12] = self.regs[12].wrapping_sub(1);
                 if self.regs[12] != 0 {
-                    let offset = self.read_byte(self.pc() as u32) as i8;
-                    let new_pc = (self.pc() as i32 + offset as i32) as u16;
+                    // Read signed byte offset from PC+1, branch is relative to PC+2
+                    let offset = self.read_byte((self.pc() + 1) as u32) as i8;
+                    let new_pc = ((self.pc() + 2) as i32 + offset as i32) as u16;
                     self.set_pc(new_pc);
+                    0 // PC already set
+                } else {
+                    2 // Skip branch, advance past opcode and offset
                 }
             }
             // ALT1 (0x3D) - Set ALT1 prefix
             0x3D => {
                 self.flags_alt1 = true;
+                1
             }
             // ALT2 (0x3E) - Set ALT2 prefix
             0x3E => {
                 self.flags_alt2 = true;
+                1
             }
             // ALT3 (0x3F) - Set both ALT1 and ALT2
             0x3F => {
                 self.flags_alt1 = true;
                 self.flags_alt2 = true;
+                1
             }
             // LDW (Rn) (0x40-0x4B) - Load word from RAM
             0x40..=0x4B => {
@@ -457,6 +499,7 @@ impl SuperFx {
                 let val = self.read_word(addr);
                 self.regs[self.dreg()] = val;
                 self.update_zs_flags(val);
+                1
             }
             // PLOT (0x4C) - Plot pixel
             0x4C => {
@@ -475,6 +518,22 @@ impl SuperFx {
 
                 // Increment R1 for next pixel
                 self.regs[1] = self.regs[1].wrapping_add(1);
+                1
+            }
+            // RPIX (0x4D with ALT1, SuperFX2 only) - Read pixel
+            0x4D if self.flags_alt1 && self.is_superfx2 => {
+                // Read pixel at (R1, R2) into COLR
+                let x = self.regs[1];
+                let y = self.regs[2];
+
+                // Calculate pixel position in frame buffer
+                let addr = (y as u32 * 256 + x as u32) as usize;
+                if addr < self.ram.len() {
+                    self.colr = self.ram[addr];
+                }
+
+                self.flags_alt1 = false;
+                1
             }
             // SWAP (0x4D) - Swap bytes
             0x4D => {
@@ -482,6 +541,7 @@ impl SuperFx {
                 let val = self.regs[src];
                 self.regs[src] = ((val & 0xFF) << 8) | ((val >> 8) & 0xFF);
                 self.update_zs_flags(self.regs[src]);
+                1
             }
             // COLOR (0x4E) - Set plot color
             0x4E => {
@@ -492,12 +552,14 @@ impl SuperFx {
                     // COLOR - Set color from source register
                     self.colr = (self.regs[self.sreg()] & 0xFF) as u8;
                 }
+                1
             }
             // NOT (0x4F) - Bitwise NOT
             0x4F => {
                 let src = self.sreg();
                 self.regs[src] = !self.regs[src];
                 self.update_zs_flags(self.regs[src]);
+                1
             }
             // ADD Rn (0x50-0x5F) - Add register
             0x50..=0x5F => {
@@ -508,6 +570,7 @@ impl SuperFx {
                 self.flags_ov = ((self.regs[src] ^ result) & (self.regs[n] ^ result) & 0x8000) != 0;
                 self.regs[src] = result;
                 self.update_zs_flags(result);
+                1
             }
             // SUB Rn (0x60-0x6F) - Subtract register
             0x60..=0x6F => {
@@ -519,6 +582,7 @@ impl SuperFx {
                     ((self.regs[src] ^ self.regs[n]) & (self.regs[src] ^ result) & 0x8000) != 0;
                 self.regs[src] = result;
                 self.update_zs_flags(result);
+                1
             }
             // AND Rn (0x70-0x7F) - Bitwise AND
             0x70..=0x7F => {
@@ -526,15 +590,16 @@ impl SuperFx {
                 let src = self.sreg();
                 self.regs[src] &= self.regs[n];
                 self.update_zs_flags(self.regs[src]);
+                1
             }
             // IWT Rn (immediate word to register)
             0x80..=0x8F if self.flags_alt1 => {
                 let n = (opcode & 0x0F) as usize;
-                let low = self.read_byte(self.pc() as u32);
-                let high = self.read_byte((self.pc() + 1) as u32);
+                let low = self.read_byte((self.pc() + 1) as u32);
+                let high = self.read_byte((self.pc() + 2) as u32);
                 self.regs[n] = u16::from_le_bytes([low, high]);
-                self.set_pc(self.pc().wrapping_add(2));
                 self.flags_alt1 = false;
+                3
             }
             // OR Rn (0x80-0x8F) - Bitwise OR (when not ALT1)
             0x80..=0x8F => {
@@ -542,32 +607,38 @@ impl SuperFx {
                 let src = self.sreg();
                 self.regs[src] |= self.regs[n];
                 self.update_zs_flags(self.regs[src]);
+                1
             }
             // INC Rn (0x90-0x9F) - Increment register
             0x90..=0x9F => {
                 let n = (opcode & 0x0F) as usize;
                 self.regs[n] = self.regs[n].wrapping_add(1);
                 self.update_zs_flags(self.regs[n]);
+                1
             }
             // DEC Rn (0xA0-0xAF) - Decrement register
             0xA0..=0xAF => {
                 let n = (opcode & 0x0F) as usize;
                 self.regs[n] = self.regs[n].wrapping_sub(1);
                 self.update_zs_flags(self.regs[n]);
+                1
             }
             // GETC (0xB0-0xBF) - Get byte from ROM
             0xB0..=0xBF => {
-                // Simplified ROM read
-                self.rom_buffer = 0;
+                // Read byte from ROM at (ROMBR:R14)
+                let addr = ((self.rombr as u32) << 16) | (self.regs[14] as u32);
+                self.rom_buffer = self.read_byte(addr);
+                self.regs[14] = self.regs[14].wrapping_add(1);
                 self.flags_r = true;
+                1
             }
             // IBT Rn (immediate byte to register)
             0xC0..=0xCF if self.flags_alt1 => {
                 let n = (opcode & 0x0F) as usize;
-                let val = self.read_byte(self.pc() as u32);
+                let val = self.read_byte((self.pc() + 1) as u32);
                 self.regs[n] = val as u16;
-                self.set_pc(self.pc().wrapping_add(1));
                 self.flags_alt1 = false;
+                2
             }
             // XOR Rn (0xC0-0xCF) - Bitwise XOR (when not ALT1)
             0xC0..=0xCF => {
@@ -575,6 +646,7 @@ impl SuperFx {
                 let src = self.sreg();
                 self.regs[src] ^= self.regs[n];
                 self.update_zs_flags(self.regs[src]);
+                1
             }
             // MOVE Rn (0xD0-0xDF) - Move from register (alternate encoding)
             0xD0..=0xDF => {
@@ -582,12 +654,14 @@ impl SuperFx {
                 let dest = self.dreg();
                 self.regs[dest] = self.regs[n];
                 self.update_zs_flags(self.regs[dest]);
+                1
             }
             // Unimplemented opcodes
             _ => {
                 // For now, treat as NOP
+                1
             }
-        }
+        };
 
         // Clear ALT flags after instruction (if not explicitly set)
         if opcode != 0x3D && opcode != 0x3E && opcode != 0x3F {
@@ -595,11 +669,10 @@ impl SuperFx {
             self.flags_alt2 = false;
         }
 
-        // Increment PC
-        self.set_pc(self.pc().wrapping_add(1));
-
         // Increment cycle counter
         self.cycles += 1;
+
+        pc_increment
     }
 
     /// Run GSU for a number of cycles
@@ -609,7 +682,8 @@ impl SuperFx {
         while self.flags_g && (self.cycles - start_cycles) < target_cycles {
             let pc = self.pc() as u32;
             let opcode = self.read_byte(pc);
-            self.execute_instruction(opcode);
+            let pc_increment = self.execute_instruction(opcode);
+            self.set_pc(self.pc().wrapping_add(pc_increment));
         }
     }
 
