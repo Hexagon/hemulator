@@ -3284,43 +3284,46 @@ impl Ppu {
         let clip_mode = (self.cgwsel >> 4) & 0x03;
 
         // Apply color math to each pixel
+        let width = frame.width as usize;
+        let mut x = 0usize;
         for (i, &layer) in layer_buffer.iter().enumerate().take(frame.pixels.len()) {
             // Check if color math is enabled for this layer (CGADSUB bits 0-5)
             let layer_bit = 1 << layer;
-            if (self.cgadsub & layer_bit) == 0 {
-                continue; // Color math disabled for this layer
+
+            // Only apply color math when enabled for this layer and allowed by window clipping
+            if (self.cgadsub & layer_bit) != 0
+                && self.is_color_math_enabled_at_position(x, clip_mode)
+            {
+                // Get the main screen pixel color
+                let main_pixel = frame.pixels[i];
+
+                // Choose blend source: sub-screen or fixed color
+                let blend_color = if use_subscreen {
+                    sub_frame.pixels[i]
+                } else {
+                    fixed_color
+                };
+
+                // Apply color math: add or subtract
+                let result = if subtract_mode {
+                    self.subtract_colors(main_pixel, blend_color)
+                } else {
+                    self.add_colors(main_pixel, blend_color)
+                };
+
+                // Apply half-color if enabled
+                frame.pixels[i] = if half_math {
+                    self.halve_color(result)
+                } else {
+                    result
+                };
             }
 
-            // Check window-based color math clipping
-            // Calculate x position for window checking
-            let x = i % frame.width as usize;
-            if !self.is_color_math_enabled_at_position(x, clip_mode) {
-                continue; // Color math disabled by window clipping
+            // Advance x position, wrapping at the end of the scanline
+            x += 1;
+            if x == width {
+                x = 0;
             }
-
-            // Get the main screen pixel color
-            let main_pixel = frame.pixels[i];
-
-            // Choose blend source: sub-screen or fixed color
-            let blend_color = if use_subscreen {
-                sub_frame.pixels[i]
-            } else {
-                fixed_color
-            };
-
-            // Apply color math: add or subtract
-            let result = if subtract_mode {
-                self.subtract_colors(main_pixel, blend_color)
-            } else {
-                self.add_colors(main_pixel, blend_color)
-            };
-
-            // Apply half-color if enabled
-            frame.pixels[i] = if half_math {
-                self.halve_color(result)
-            } else {
-                result
-            };
         }
     }
 
