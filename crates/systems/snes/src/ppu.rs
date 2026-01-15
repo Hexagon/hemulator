@@ -3286,7 +3286,7 @@ impl Ppu {
         // Apply color math to each pixel
         let width = frame.width as usize;
         let mut x = 0usize;
-        for (i, &layer) in layer_buffer.iter().enumerate().take(frame.pixels.len()) {
+        for (i, &layer) in layer_buffer.iter().enumerate() {
             // Check if color math is enabled for this layer (CGADSUB bits 0-5)
             let layer_bit = 1 << layer;
 
