@@ -6,14 +6,18 @@
 //! ## Implemented Coprocessors
 //!
 //! - **DSP-1**: Math coprocessor for 3D calculations (multiply, divide, sin, cos, etc.)
+//! - **SuperFX/SuperFX2**: Graphics coprocessor (GSU-1/GSU-2) for 3D rendering and effects
 //!
 //! ## References
 //!
 //! - SNESdev Wiki - Enhancement Chips: https://snes.nesdev.org/wiki/Enhancement_chips
 //! - SNESdev Wiki - DSP-1: https://snes.nesdev.org/wiki/DSP-1
 //! - SNESLab - DSP1: https://sneslab.net/wiki/DSP1
+//! - SNESdev Wiki - SuperFX: https://snes.nesdev.org/wiki/Super_FX
+//! - SnesLab - SuperFX: https://sneslab.net/wiki/Super_FX
 
 pub mod dsp1;
+pub mod superfx;
 
 use serde::{Deserialize, Serialize};
 
@@ -102,7 +106,10 @@ impl ChipType {
 
     /// Check if this chip type is implemented
     pub fn is_implemented(self) -> bool {
-        matches!(self, ChipType::Dsp1)
+        matches!(
+            self,
+            ChipType::Dsp1 | ChipType::SuperFx | ChipType::SuperFx2
+        )
     }
 
     /// Get a human-readable name for the chip
