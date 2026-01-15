@@ -1,6 +1,6 @@
 //! SNES cartridge implementation
 
-use crate::coprocessors::{dsp1::Dsp1, ChipType, EnhancementChip};
+use crate::coprocessors::{dsp1::Dsp1, superfx::SuperFx, ChipType, EnhancementChip};
 use crate::SnesError;
 use emu_core::logging::{log, LogCategory, LogLevel};
 use std::cell::RefCell;
@@ -222,6 +222,22 @@ impl Cartridge {
                 });
                 Some(RefCell::new(Box::new(Dsp1::new())))
             }
+            ChipType::SuperFx => {
+                log(LogCategory::Bus, LogLevel::Info, || {
+                    format!("SNES Cartridge: {} coprocessor detected", chip_type.name())
+                });
+                let mut sfx = SuperFx::new();
+                sfx.set_rom(rom.to_vec());
+                Some(RefCell::new(Box::new(sfx)))
+            }
+            ChipType::SuperFx2 => {
+                log(LogCategory::Bus, LogLevel::Info, || {
+                    format!("SNES Cartridge: {} coprocessor detected", chip_type.name())
+                });
+                let mut sfx = SuperFx::new_superfx2();
+                sfx.set_rom(rom.to_vec());
+                Some(RefCell::new(Box::new(sfx)))
+            }
             ChipType::None => None,
             _ => {
                 log(LogCategory::Bus, LogLevel::Warn, || {
@@ -255,6 +271,18 @@ impl Cartridge {
                 (ChipType::Dsp1, MappingMode::HiROM) => {
                     // DSP-1 HiROM mapping
                     if matches!(bank, 0x00..=0x1F) && (0x6000..=0x7FFF).contains(&offset) {
+                        return chip.borrow_mut().read(addr);
+                    }
+                }
+                (ChipType::SuperFx | ChipType::SuperFx2, _) => {
+                    // SuperFX register mapping: $3000-$32FF in banks $00-$3F, $80-$BF
+                    if matches!(bank, 0x00..=0x3F | 0x80..=0xBF)
+                        && (0x3000..=0x32FF).contains(&offset)
+                    {
+                        return chip.borrow_mut().read(addr);
+                    }
+                    // SuperFX RAM: banks $70-$71 (128 KB) or $70-$73 (256 KB)
+                    if matches!(bank, 0x70..=0x73) {
                         return chip.borrow_mut().read(addr);
                     }
                 }
@@ -452,6 +480,20 @@ impl Cartridge {
                 (ChipType::Dsp1, MappingMode::HiROM) => {
                     // DSP-1 HiROM mapping
                     if matches!(bank, 0x00..=0x1F) && (0x6000..=0x7FFF).contains(&offset) {
+                        chip.borrow_mut().write(addr, val);
+                        return;
+                    }
+                }
+                (ChipType::SuperFx | ChipType::SuperFx2, _) => {
+                    // SuperFX register mapping: $3000-$32FF in banks $00-$3F, $80-$BF
+                    if matches!(bank, 0x00..=0x3F | 0x80..=0xBF)
+                        && (0x3000..=0x32FF).contains(&offset)
+                    {
+                        chip.borrow_mut().write(addr, val);
+                        return;
+                    }
+                    // SuperFX RAM: banks $70-$71 (128 KB) or $70-$73 (256 KB)
+                    if matches!(bank, 0x70..=0x73) {
                         chip.borrow_mut().write(addr, val);
                         return;
                     }

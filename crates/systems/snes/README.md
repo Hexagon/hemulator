@@ -171,10 +171,19 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
 #### Other Features
 - ✅ **Save States** - Full system state serialization
 - ✅ **Logging** - Comprehensive debug logging for CPU, PPU, DMA, interrupts
-- ✅ **Enhancement Chips** - DSP-1 math coprocessor partially implemented
+- ✅ **Enhancement Chips** - DSP-1 math coprocessor partially implemented, SuperFX coprocessor implemented
   - Automatic detection from ROM header
   - Support for most DSP-1 games (Pilotwings, Super Mario Kart)
   - Implemented commands: Multiply, Inverse, Gyrate, Distance, Radius, Range, Project, Polar
+  - SuperFX/SuperFX2 (GSU-1/GSU-2) graphics coprocessor implemented
+    - 16-bit RISC processor with 16 general-purpose registers
+    - Complete ALU instruction set (ADD, SUB, MULT, AND, OR, XOR, etc.)
+    - Pixel plotting and graphics operations (PLOT, COLOR for GSU-1; RPIX for GSU-2)
+    - Control flow operations (branches, loops, jumps)
+    - Memory access (load/store word, register moves)
+    - WITH register tracking for source/destination selection
+    - GETC ROM reading with ROMBR and R14 pointer
+    - Used in Star Fox, Yoshi's Island, and Doom
   - **Known Limitations**:
     - Attitude command (0x08) is incomplete - outputs only partial rotation matrix
     - Target command (0x20) not implemented - returns zeros
@@ -260,8 +269,24 @@ The emulator now includes a framework for enhancement chip (coprocessor) support
   - Save state support included
   - Reference: [DSP-1](https://snes.nesdev.org/wiki/DSP-1), [SNESLab DSP1](https://sneslab.net/wiki/DSP1)
 
+- ✅ **SuperFX/SuperFX2 (GSU-1/GSU-2)** - Graphics coprocessor (core functionality implemented)
+  - Used in ~10 popular games including Star Fox, Yoshi's Island, Doom
+  - Custom 16-bit RISC processor with 16 general-purpose registers
+  - Pixel plotting operations: PLOT, COLOR (GSU-1), RPIX (GSU-2)
+  - Complete ALU: ADD, SUB, MULT, AND, OR, XOR, NOT, INC, DEC
+  - Control flow: branches, loops, jumps with correct PC handling
+  - Memory operations: load/store word, register moves, WITH register selection
+  - ROM reading: GETC with ROMBR bank and R14 pointer
+  - Register mapping at $3000-$32FF in banks $00-$3F, $80-$BF
+  - GSU RAM at $700000-$71FFFF (128 KB) for frame buffer
+  - Save state support included
+  - **Known Limitations**:
+    - Instruction cache allocated but not used (no performance impact)
+    - Simplified timing (not cycle-accurate)
+    - Basic pixel operations (no advanced screen modes)
+  - Reference: [SuperFX](https://snes.nesdev.org/wiki/Super_FX), [SnesLab SuperFX](https://sneslab.net/wiki/Super_FX)
+
 - ❌ **Not Yet Implemented**
-  - SuperFX/SuperFX2 (GSU-1/GSU-2) - Graphics coprocessor (Star Fox, Yoshi's Island, Doom)
   - SA-1 - CPU coprocessor with additional 65C816 (Super Mario RPG, Kirby's Dream Land 3)
   - DSP-2 - Math coprocessor variant (Dungeon Master)
   - DSP-3 - Math coprocessor variant (SD Gundam GX)
@@ -276,11 +301,20 @@ The emulator now includes a framework for enhancement chip (coprocessor) support
 
 **Current Status**
 - ⚠️ **DSP-1** - Partially implemented (missing Attitude/Target/Rotate)
+- ✅ **SuperFX/SuperFX2** - Core functionality implemented (PC bugs fixed, WITH/GETC/RPIX added)
 
-**Priority 1 - Complete Existing Chip**
+**Priority 1 - Complete Existing Chips**
 1. **DSP-1 Completion** - Finish Attitude, Target, and Rotate commands
    - Requires proper 3x3 rotation matrix implementation for Attitude
    - Reference bsnes implementation for accuracy
+2. **SuperFX Enhancements** - Add advanced features and optimize
+   - Implement instruction cache for performance (currently allocated but unused)
+   - Add cycle-accurate timing based on CLSR register
+   - Implement advanced screen modes and proper SCBR/SCMR handling
+   - Test extensively with commercial games (Star Fox, Yoshi's Island, Doom)
+
+**Priority 2 - Most Common Chips (High Impact)**
+3. **SA-1** - CPU coprocessor, ~30 games including Super Mario RPG
    - Add comprehensive tests for all commands
 
 **Priority 2 - Most Common Chips (High Impact)**
@@ -386,7 +420,8 @@ SnesSystem
               ├── ROM banks (LoROM: 32KB chunks, HiROM/ExHiROM: 64KB linear)
               ├── 32KB SRAM
               └── Enhancement Chip (optional)
-                  └── DSP-1 (math coprocessor) - RefCell for interior mutability
+                  ├── DSP-1 (math coprocessor) - RefCell for interior mutability
+                  └── SuperFX/SuperFX2 (graphics coprocessor) - RefCell for interior mutability
 ```
 
 ### Key Files
@@ -398,6 +433,7 @@ SnesSystem
 - `src/cartridge.rs` - ROM loading, mapping, and enhancement chip integration
 - `src/coprocessors/mod.rs` - Enhancement chip framework and chip type detection
 - `src/coprocessors/dsp1.rs` - DSP-1 math coprocessor implementation
+- `src/coprocessors/superfx.rs` - SuperFX graphics coprocessor implementation
 
 ## Testing
 
@@ -423,9 +459,10 @@ Games known to work:
 - 🔧 **Tales of Phantasia** - ExHiROM support implemented, should work (not tested)
 - ✅ **Pilotwings** - Should work with DSP-1 support (not tested)
 - ✅ **Super Mario Kart** - Should work with DSP-1 support (not tested)
+- 🔧 **Star Fox** - SuperFX chip implemented, should work (needs testing)
+- 🔧 **Yoshi's Island** - SuperFX2 chip implemented, should work (needs testing)
+- 🔧 **Doom** - SuperFX chip implemented, should work (needs testing)
 - ❌ **Super Mario RPG** - Requires SA-1 chip (not yet implemented)
-- ❌ **Star Fox** - Requires SuperFX chip (not yet implemented)
-- ❌ **Yoshi's Island** - Requires SuperFX2 chip (not yet implemented)
 - ❌ **Star Ocean** - Requires S-DD1 chip (not yet implemented)
 - ❌ **Mega Man X2/X3** - Requires CX4 chip (not yet implemented)
 
