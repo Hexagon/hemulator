@@ -1124,13 +1124,13 @@ impl Ppu {
             }
 
             // V-Blank is lines 144-153
-            // 
+            //
             // # Hardware Timing Note
             // This implementation triggers VBlank at the transition to line 144 (scanline-accurate).
             // Real hardware triggers the VBlank interrupt on the first M-cycle of line 144.
             // This implementation uses frame-based rendering (not cycle-accurate within scanlines),
             // so VBlank timing is approximate but sufficient for ~99% of games.
-            // 
+            //
             // Games that rely on precise cycle-level VBlank timing may have edge cases.
             if self.ly == 144 {
                 vblank_started = true;

@@ -176,7 +176,10 @@ impl Vdp {
         // Return current scanline (simplified)
         let vcounter = (self.scanline & 0xFF) as u8;
         log(LogCategory::PPU, LogLevel::Debug, || {
-            format!("SMS VDP: V-counter read = ${:02X} (scanline={})", vcounter, self.scanline)
+            format!(
+                "SMS VDP: V-counter read = ${:02X} (scanline={})",
+                vcounter, self.scanline
+            )
         });
         vcounter
     }
