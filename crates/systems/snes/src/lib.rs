@@ -994,3 +994,53 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod cartridge_info_tests {
+    use super::*;
+
+    #[test]
+    fn test_get_cartridge_info_lorom() {
+        let mut sys = SnesSystem::new();
+        
+        // Load a test ROM
+        let rom_data = include_bytes!("../../../../test_roms/snes/test.sfc");
+        sys.mount("Cartridge", rom_data).expect("Failed to mount cartridge");
+        
+        // Get cartridge info
+        let info = sys.get_cartridge_info().expect("No cartridge info available");
+        
+        // Verify basic info
+        assert_eq!(info.rom_size, 32768); // 32 KB ROM
+        assert_eq!(info.has_smc_header, false);
+        assert_eq!(info.mapping_mode, "LoROM");
+        assert_eq!(info.chip_type, "None");
+        
+        // CRC32 should be calculated
+        assert_ne!(info.crc32, 0);
+    }
+
+    #[test]
+    fn test_get_cartridge_info_none_before_mount() {
+        let sys = SnesSystem::new();
+        assert!(sys.get_cartridge_info().is_none());
+    }
+
+    #[test]
+    fn test_get_cartridge_info_cleared_after_unmount() {
+        let mut sys = SnesSystem::new();
+        
+        // Load a test ROM
+        let rom_data = include_bytes!("../../../../test_roms/snes/test.sfc");
+        sys.mount("Cartridge", rom_data).expect("Failed to mount cartridge");
+        
+        // Verify info is available
+        assert!(sys.get_cartridge_info().is_some());
+        
+        // Unmount
+        sys.unmount("Cartridge").expect("Failed to unmount");
+        
+        // Verify info is cleared
+        assert!(sys.get_cartridge_info().is_none());
+    }
+}
