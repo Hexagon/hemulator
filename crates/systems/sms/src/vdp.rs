@@ -80,15 +80,28 @@ impl Vdp {
             self.code_register = (data >> 6) & 0x03;
             self.write_latch = false;
 
-            // Check if this is a register write (code = 0x02)
-            if self.code_register == 0x02 {
-                let reg = data & 0x0F;
-                if (reg as usize) < self.registers.len() {
-                    let value = (self.address_register & 0xFF) as u8;
-                    self.registers[reg as usize] = value;
-                    log(LogCategory::PPU, LogLevel::Info, || {
-                        format!("SMS VDP: Register R{} = ${:02X}", reg, value)
-                    });
+            // Handle different code modes
+            match self.code_register {
+                0x00 => {
+                    // VRAM read - perform read-ahead into buffer
+                    // This is crucial: the first byte at the address is loaded immediately
+                    self.read_buffer = self.vram[(self.address_register & 0x3FFF) as usize];
+                    self.address_register = self.address_register.wrapping_add(1);
+                }
+                0x02 => {
+                    // Register write
+                    let reg = data & 0x0F;
+                    if (reg as usize) < self.registers.len() {
+                        let value = (self.address_register & 0xFF) as u8;
+                        self.registers[reg as usize] = value;
+                        log(LogCategory::PPU, LogLevel::Info, || {
+                            format!("SMS VDP: Register R{} = ${:02X}", reg, value)
+                        });
+                    }
+                }
+                _ => {
+                    // 0x01 = VRAM write mode, 0x03 = CRAM write mode
+                    // No immediate action needed, address is set for subsequent data writes
                 }
             }
         }
@@ -161,7 +174,11 @@ impl Vdp {
     /// Read vertical counter
     pub fn read_vcounter(&self) -> u8 {
         // Return current scanline (simplified)
-        (self.scanline & 0xFF) as u8
+        let vcounter = (self.scanline & 0xFF) as u8;
+        log(LogCategory::PPU, LogLevel::Debug, || {
+            format!("SMS VDP: V-counter read = ${:02X} (scanline={})", vcounter, self.scanline)
+        });
+        vcounter
     }
 
     /// Step VDP by one scanline
@@ -617,7 +634,8 @@ impl Renderer for Vdp {
         self.line_counter = 0;
         self.sprite_overflow = false;
         self.sprite_collision = false;
-        self.scanline = 0;
+        // Set to end of frame so first set_scanline(0) will properly render frame
+        self.scanline = 262;
         self.clear(0xFF000000);
     }
 
