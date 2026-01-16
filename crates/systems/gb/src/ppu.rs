@@ -1299,10 +1299,115 @@ mod tests {
     }
 
     #[test]
+    fn test_vram_access_restrictions() {
+        let mut ppu = Ppu::new();
+        ppu.lcdc = LCDC_ENABLE; // Enable LCD
+
+        // Write test data to VRAM when accessible
+        ppu.stat = 0x00; // Mode 0 (HBlank) - VRAM accessible
+        ppu.write_vram(0x1000, 0x42);
+        assert_eq!(ppu.read_vram(0x1000), 0x42, "VRAM should be accessible in Mode 0");
+
+        // Mode 1 (VBlank) - VRAM accessible
+        ppu.stat = 0x01;
+        ppu.write_vram(0x1001, 0x43);
+        assert_eq!(ppu.read_vram(0x1001), 0x43, "VRAM should be accessible in Mode 1");
+
+        // Mode 2 (OAM Search) - VRAM accessible
+        ppu.stat = 0x02;
+        ppu.write_vram(0x1002, 0x44);
+        assert_eq!(ppu.read_vram(0x1002), 0x44, "VRAM should be accessible in Mode 2");
+
+        // Mode 3 (Pixel Transfer) - VRAM inaccessible
+        ppu.stat = 0x03;
+        ppu.write_vram(0x1003, 0x45); // This write should be ignored
+        assert_eq!(
+            ppu.read_vram(0x1003),
+            0xFF,
+            "VRAM reads should return 0xFF in Mode 3"
+        );
+        // Verify the write was actually ignored
+        ppu.stat = 0x00; // Switch to Mode 0 to check
+        assert_eq!(
+            ppu.read_vram(0x1003),
+            0x00,
+            "VRAM write should be ignored in Mode 3"
+        );
+
+        // LCD disabled - VRAM always accessible
+        ppu.lcdc = 0x00; // Disable LCD
+        ppu.stat = 0x03; // Mode 3
+        ppu.write_vram(0x1004, 0x46);
+        assert_eq!(
+            ppu.read_vram(0x1004),
+            0x46,
+            "VRAM should be accessible when LCD is off"
+        );
+    }
+
+    #[test]
     fn test_oam_read_write() {
         let mut ppu = Ppu::new();
         ppu.write_oam(0x10, 0x42);
         assert_eq!(ppu.read_oam(0x10), 0x42);
+    }
+
+    #[test]
+    fn test_oam_access_restrictions() {
+        let mut ppu = Ppu::new();
+        ppu.lcdc = LCDC_ENABLE; // Enable LCD
+
+        // Write test data to OAM when accessible
+        ppu.stat = 0x00; // Mode 0 (HBlank) - OAM accessible
+        ppu.write_oam(0x10, 0x42);
+        assert_eq!(ppu.read_oam(0x10), 0x42, "OAM should be accessible in Mode 0");
+
+        // Mode 1 (VBlank) - OAM accessible
+        ppu.stat = 0x01;
+        ppu.write_oam(0x11, 0x43);
+        assert_eq!(ppu.read_oam(0x11), 0x43, "OAM should be accessible in Mode 1");
+
+        // Mode 2 (OAM Search) - OAM inaccessible
+        ppu.stat = 0x02;
+        ppu.write_oam(0x12, 0x44); // This write should be ignored
+        assert_eq!(
+            ppu.read_oam(0x12),
+            0xFF,
+            "OAM reads should return 0xFF in Mode 2"
+        );
+        // Verify the write was actually ignored
+        ppu.stat = 0x00; // Switch to Mode 0 to check
+        assert_eq!(
+            ppu.read_oam(0x12),
+            0x00,
+            "OAM write should be ignored in Mode 2"
+        );
+
+        // Mode 3 (Pixel Transfer) - OAM inaccessible
+        ppu.stat = 0x03;
+        ppu.write_oam(0x13, 0x45); // This write should be ignored
+        assert_eq!(
+            ppu.read_oam(0x13),
+            0xFF,
+            "OAM reads should return 0xFF in Mode 3"
+        );
+        // Verify the write was actually ignored
+        ppu.stat = 0x00; // Switch to Mode 0 to check
+        assert_eq!(
+            ppu.read_oam(0x13),
+            0x00,
+            "OAM write should be ignored in Mode 3"
+        );
+
+        // LCD disabled - OAM always accessible
+        ppu.lcdc = 0x00; // Disable LCD
+        ppu.stat = 0x02; // Mode 2
+        ppu.write_oam(0x14, 0x46);
+        assert_eq!(
+            ppu.read_oam(0x14),
+            0x46,
+            "OAM should be accessible when LCD is off"
+        );
     }
 
     #[test]
