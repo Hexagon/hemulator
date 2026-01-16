@@ -103,11 +103,11 @@ After installation:
 
 1. **Launch Hemulator** - Double-click the executable
 2. **Load a ROM** - Press `Ctrl+O` or use **File > Open ROM**
-3. **Start Playing** - Use keyboard controls (see [User Manual](user/manual.html))
+3. **Start Playing** - Use keyboard controls (see [User Manual](user/index.html))
 
 ## Need Help?
 
-- **📖 [User Manual](user/manual.html)** - Complete usage guide
+- **📖 [User Manual](user/index.html)** - Complete usage guide
 - **🐛 [Report Issues](https://github.com/Hexagon/hemulator/issues)** - Bug reports and feature requests
 - **💬 [Discussions](https://github.com/Hexagon/hemulator/discussions)** - Community support
 
