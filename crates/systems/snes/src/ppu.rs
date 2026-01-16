@@ -24,12 +24,15 @@
 //! - Mode 7 rotation/scaling matrix transformation (M7A-M7D, M7X, M7Y, M7SEL registers)
 //! - Offset-per-tile scrolling for Modes 2, 4, 6
 //! - True hi-res 512px rendering for Modes 5-6
+//! - Complete color math system ($2130-$2132):
+//!   - Sub-screen rendering and blending ($212D)
+//!   - Window-based color math clipping
+//!   - Fixed color blending
+//!   - Add/subtract/half operations
 //!
 //! **NOT Implemented** (future enhancements):
-//! - Windows and color windows ($2123-$212B)
+//! - Direct color mode (CGWSEL bits 0-1)
 //! - Mosaic effects ($2106)
-//! - Color math ($2130-$2132)
-//! - Sub-screen support ($212D)
 
 use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::types::Frame;
@@ -38,6 +41,15 @@ use std::cell::Cell;
 const VRAM_SIZE: usize = 0x10000; // 64KB VRAM
 const CGRAM_SIZE: usize = 512; // 256 colors * 2 bytes per color
 const OAM_SIZE: usize = 544; // 512 bytes main OAM + 32 bytes high table
+
+// Layer identification constants for per-pixel layer tracking
+// Used in layer_buffer to track which layer each pixel came from
+const LAYER_BG1: u8 = 0;
+const LAYER_BG2: u8 = 1;
+const LAYER_BG3: u8 = 2;
+const LAYER_BG4: u8 = 3;
+const LAYER_OBJ: u8 = 4;
+const LAYER_BACKDROP: u8 = 5;
 
 /// Parameters for rendering a single tile
 struct TileRenderParams {
@@ -209,22 +221,189 @@ pub struct Ppu {
     /// Window mask designation for sub-screen ($212F)
     tsw: u8,
 
-    // Color math registers
+    // ============================================================================
+    // Color Math Registers ($2130-$2132)
+    // ============================================================================
+    //
+    // The SNES color math system allows blending pixels from the main screen with
+    // either a fixed color or pixels from the sub-screen. This is used for transparency,
+    // fade effects, color blending, and other visual effects.
+    //
+    // CRITICAL IMPLEMENTATION REQUIREMENT: Per-pixel layer tracking
+    // ----------------------------------------------------------------
+    // Color math CANNOT be correctly implemented without tracking which layer
+    // (BG1, BG2, BG3, BG4, OBJ, or backdrop) each pixel came from. This is because:
+    //
+    // 1. CGADSUB enables color math selectively per-layer using bits 0-5
+    //    - Bit 0: BG1, Bit 1: BG2, Bit 2: BG3, Bit 3: BG4, Bit 4: OBJ, Bit 5: Backdrop
+    //    - Only pixels from enabled layers undergo color math
+    //    - Example: If only bit 0 is set, ONLY BG1 pixels are blended
+    //
+    // 2. Priority-based rendering makes this complex:
+    //    - Layers render in priority order (e.g., BG1 priority 1, then OBJ priority 2)
+    //    - The final visible pixel at position (x,y) could be from ANY layer
+    //    - Without tracking the source layer, we cannot determine if color math applies
+    //
+    // 3. Window masking adds another layer of complexity (CGWSEL):
+    //    - Color math can be enabled/disabled based on window regions
+    //    - Different settings for inside/outside window boundaries
+    //
+    // Implementation approach:
+    // ----------------------------------------------------------------
+    // To properly implement color math, the renderer must:
+    //
+    // 1. Add a "layer source" buffer parallel to the priority buffer:
+    //    ```rust
+    //    let mut layer_buffer: Vec<u8> = vec![LAYER_BACKDROP; width * height];
+    //    // Values: LAYER_BG1=0, LAYER_BG2=1, LAYER_BG3=2, LAYER_BG4=3,
+    //    //         LAYER_OBJ=4, LAYER_BACKDROP=5
+    //    ```
+    //
+    // 2. Update layer_buffer when rendering each pixel:
+    //    ```rust
+    //    fn render_bg_layer(..., layer_buffer: &mut [u8], layer_id: u8) {
+    //        // When writing a pixel at position i:
+    //        if priority >= priority_buffer[i] && color_index != 0 {
+    //            frame.pixels[i] = color;
+    //            priority_buffer[i] = priority;
+    //            layer_buffer[i] = layer_id;  // ← Track which layer this pixel is from
+    //        }
+    //    }
+    //    ```
+    //
+    // 3. After all layers rendered, apply color math in post-processing:
+    //    ```rust
+    //    for i in 0..frame.pixels.len() {
+    //        let layer = layer_buffer[i];
+    //
+    //        // Check if color math is enabled for this layer (CGADSUB bits 0-5)
+    //        let layer_bit = 1 << layer;
+    //        if (self.cgadsub & layer_bit) == 0 {
+    //            continue; // Color math disabled for this layer
+    //        }
+    //
+    //        // Check window masking (CGWSEL bits 4-5)
+    //        if !self.is_color_math_enabled_for_pixel(x, y) {
+    //            continue;
+    //        }
+    //
+    //        // Apply color math: blend main screen with sub-screen or fixed color
+    //        let main_color = frame.pixels[i];
+    //        let sub_color = if (self.cgwsel & 0x02) != 0 {
+    //            sub_screen_pixels[i]  // Blend with sub-screen
+    //        } else {
+    //            self.get_fixed_color()  // Blend with fixed color
+    //        };
+    //
+    //        // Add or subtract (CGADSUB bit 7)
+    //        let blended = if (self.cgadsub & 0x80) != 0 {
+    //            subtract_colors(main_color, sub_color)
+    //        } else {
+    //            add_colors(main_color, sub_color)
+    //        };
+    //
+    //        // Apply half color math if enabled (CGADSUB bit 6)
+    //        frame.pixels[i] = if (self.cgadsub & 0x40) != 0 {
+    //            halve_color(blended)
+    //        } else {
+    //            blended
+    //        };
+    //    }
+    //    ```
+    //
+    // Why a simple "apply to all pixels" approach FAILS:
+    // ----------------------------------------------------------------
+    // A naive implementation that applies color math to all pixels regardless of
+    // their source layer will produce incorrect results:
+    //
+    // - If CGADSUB = 0x01 (only BG1), but visible pixels are from BG2 and OBJ,
+    //   those pixels should NOT be affected by color math
+    // - The result would be incorrect blending on layers that should remain unchanged
+    //
+    // Performance considerations:
+    // ----------------------------------------------------------------
+    // - Layer tracking adds one byte per pixel (~57KB for 256x224)
+    // - Post-processing pass adds overhead but allows correct selective application
+    // - Alternative: Track layer during rendering and apply math immediately,
+    //   but this requires sub-screen rendering to happen in parallel
+    //
+    // Reference: https://snes.nesdev.org/wiki/Color_math
+    // ============================================================================
     /// Color math control ($2130) - CGWSEL
-    /// Bits 0-1: Direct color mode for 256-color BGs
-    /// Bits 4-5: Color math enable for windows
-    /// Bit 6: Prevent color math
-    /// Bit 7: Add/subtract select for color window
+    ///
+    /// Controls WHERE and WHEN color math is applied (window masking and global control)
+    ///
+    /// Bit layout:
+    /// - Bits 0-1: Direct color mode for 256-color BGs (Mode 3/4/7)
+    ///   - 00 = Normal color mode (palette lookup)
+    ///   - 01/10/11 = Direct color mode (pixel value is color, not palette index)
+    /// - Bits 2-3: Reserved (unused)
+    /// - Bits 4-5: Color math enable control based on window regions
+    ///   - 00 = Enable color math everywhere (no window masking)
+    ///   - 01 = Enable inside window
+    ///   - 10 = Enable outside window  
+    ///   - 11 = Disable color math everywhere
+    /// - Bit 6: Prevent color math (master disable)
+    ///   - 0 = Color math enabled (subject to other controls)
+    ///   - 1 = Color math disabled globally
+    /// - Bit 7: Add/subtract select for color window
+    ///   - 0 = Add colors in window regions
+    ///   - 1 = Subtract colors in window regions
     cgwsel: u8,
+
     /// Color math designation ($2131) - CGADSUB
-    /// Bits 0-5: Enable color math on BG1-4, OBJ, backdrop
-    /// Bit 6: Half color math
-    /// Bit 7: Add/subtract select (0=add, 1=subtract)
+    ///
+    /// Controls WHICH LAYERS have color math applied and the blend operation
+    ///
+    /// This register is the reason per-pixel layer tracking is REQUIRED.
+    /// Each bit enables color math for a specific layer. Without knowing which
+    /// layer each pixel came from, we cannot selectively apply color math.
+    ///
+    /// Bit layout:
+    /// - Bit 0: Enable color math on BG1 pixels
+    /// - Bit 1: Enable color math on BG2 pixels
+    /// - Bit 2: Enable color math on BG3 pixels
+    /// - Bit 3: Enable color math on BG4 pixels
+    /// - Bit 4: Enable color math on OBJ (sprite) pixels
+    /// - Bit 5: Enable color math on backdrop pixels
+    /// - Bit 6: Half color math result
+    ///   - 0 = Normal: result = (main ± sub)
+    ///   - 1 = Half: result = (main ± sub) / 2
+    /// - Bit 7: Add/subtract select
+    ///   - 0 = Add colors: result = main + sub (clamped to max)
+    ///   - 1 = Subtract colors: result = main - sub (clamped to 0)
+    ///
+    /// Example usage patterns:
+    /// - 0x01: Color math on BG1 only (common for parallax scrolling effects)
+    /// - 0x30: Color math on OBJ and backdrop (sprite transparency/shadows)
+    /// - 0x3F: Color math on all layers (screen-wide fade effects)
+    /// - 0xBF: Subtract color math on all layers (0x3F | 0x80)
     cgadsub: u8,
+
     /// Fixed color data ($2132) - COLDATA
-    /// Color value in 5-bit BGR format (written multiple times for R/G/B)
+    ///
+    /// Defines the fixed color used in color math blending when not using sub-screen.
+    /// Written 1-3 times to set R, G, and/or B components independently.
+    ///
+    /// Bit layout for each write:
+    /// - Bits 0-4: 5-bit color component value (0-31)
+    /// - Bit 5: Write to red component (if set, bits 0-4 update red)
+    /// - Bit 6: Write to green component (if set, bits 0-4 update green)
+    /// - Bit 7: Write to blue component (if set, bits 0-4 update blue)
+    ///
+    /// Example: To set RGB(31, 16, 0):
+    /// - Write 0x3F (bits 5+0-4): red = 31
+    /// - Write 0x50 (bits 6+0-4): green = 16
+    /// - Write 0x80 (bit 7): blue = 0
+    ///
+    /// Common uses:
+    /// - Black (0,0,0): Fade to black effect
+    /// - White (31,31,31): Fade to white / flash effect
+    /// - Custom colors: Tint effects (sepia, night mode, etc.)
     coldata: u8,
+
     /// Fixed color RGB components (extracted from COLDATA writes)
+    /// These are 5-bit values (0-31) that get scaled to 8-bit (0-255) during rendering
     fixed_color_r: u8,
     fixed_color_g: u8,
     fixed_color_b: u8,
@@ -755,25 +934,49 @@ impl Ppu {
             }
 
             // $2130-$2132 - Color math and screen mode registers
+            // Color math is now fully implemented with per-pixel layer tracking
             0x2130 => {
                 self.cgwsel = val;
                 log(LogCategory::PPU, LogLevel::Debug, || {
-                    format!("SNES PPU: CGWSEL (Color math control) = ${:02X}", val)
+                    let direct_color = val & 0x03;
+                    let prevent_math = (val & 0x40) != 0;
+                    let clip_mode = (val >> 4) & 0x03;
+                    format!(
+                        "SNES PPU: CGWSEL (Color math control) = ${:02X} [direct_color={}, prevent_math={}, clip={}]",
+                        val, direct_color, prevent_math,
+                        match clip_mode {
+                            0 => "always",
+                            1 => "inside_window",
+                            2 => "outside_window",
+                            3 => "never",
+                            _ => "?",
+                        }
+                    )
                 });
             }
             0x2131 => {
                 self.cgadsub = val;
                 log(LogCategory::PPU, LogLevel::Debug, || {
+                    let half = (val & 0x40) != 0;
+                    let targets = [
+                        if val & 0x01 != 0 { "BG1 " } else { "" },
+                        if val & 0x02 != 0 { "BG2 " } else { "" },
+                        if val & 0x04 != 0 { "BG3 " } else { "" },
+                        if val & 0x08 != 0 { "BG4 " } else { "" },
+                        if val & 0x10 != 0 { "OBJ " } else { "" },
+                        if val & 0x20 != 0 { "backdrop " } else { "" },
+                    ]
+                    .concat();
                     format!(
-                        "SNES PPU: CGADSUB (Color math designation) = ${:02X} ({}, targets: {}{}{}{}{}{})",
+                        "SNES PPU: CGADSUB (Color math designation) = ${:02X} [{}{}, targets: {}]",
                         val,
                         if val & 0x80 != 0 { "subtract" } else { "add" },
-                        if val & 0x20 != 0 { "backdrop " } else { "" },
-                        if val & 0x10 != 0 { "OBJ " } else { "" },
-                        if val & 0x08 != 0 { "BG4 " } else { "" },
-                        if val & 0x04 != 0 { "BG3 " } else { "" },
-                        if val & 0x02 != 0 { "BG2 " } else { "" },
-                        if val & 0x01 != 0 { "BG1 " } else { "" }
+                        if half { ", half" } else { "" },
+                        if targets.is_empty() {
+                            "none"
+                        } else {
+                            targets.trim_end()
+                        }
                     )
                 });
             }
@@ -790,9 +993,23 @@ impl Ppu {
                     self.fixed_color_b = val & 0x1F;
                 }
                 log(LogCategory::PPU, LogLevel::Debug, || {
+                    let components = [
+                        if val & 0x20 != 0 { "R" } else { "" },
+                        if val & 0x40 != 0 { "G" } else { "" },
+                        if val & 0x80 != 0 { "B" } else { "" },
+                    ]
+                    .concat();
                     format!(
-                        "SNES PPU: COLDATA (Fixed color) = ${:02X} -> RGB({},{},{})",
-                        val, self.fixed_color_r, self.fixed_color_g, self.fixed_color_b
+                        "SNES PPU: COLDATA (Fixed color) = ${:02X} -> RGB({},{},{}) [updated: {}]",
+                        val,
+                        self.fixed_color_r,
+                        self.fixed_color_g,
+                        self.fixed_color_b,
+                        if components.is_empty() {
+                            "none"
+                        } else {
+                            &components
+                        }
                     )
                 });
             }
@@ -930,6 +1147,16 @@ impl Ppu {
         // We use 0 as "unset" so any layer can render initially
         let mut priority_buffer = vec![0u8; frame_width as usize * 224];
 
+        // Layer buffer: tracks which layer each pixel came from
+        // Used for color math and debugging
+        let mut layer_buffer = vec![LAYER_BACKDROP; frame_width as usize * 224];
+
+        // Sub-screen frame and buffers for color math blending
+        // Sub-screen is rendered with layers enabled in TS register ($212D)
+        let mut sub_frame = Frame::new(frame_width, 224);
+        let mut sub_priority_buffer = vec![0u8; frame_width as usize * 224];
+        let mut sub_layer_buffer = vec![LAYER_BACKDROP; frame_width as usize * 224];
+
         // NOTE: We render even when screen is blanked (bit 7 set)
         // This is not hardware-accurate but allows commercial ROMs to display
         // something during boot sequences before they unblank the screen
@@ -937,295 +1164,24 @@ impl Ppu {
         // Get BG mode (bits 0-2 of BGMODE register)
         let bg_mode = self.bgmode & 0x07;
 
-        match bg_mode {
-            // Mode 0: 4 BG layers, 2bpp each (4 colors per layer)
-            0 => {
-                // Priority-based rendering order:
-                // 1. BG layers with priority=0 (back to front: BG4->BG3->BG2->BG1)
-                // 2. Sprites with priority=0-1
-                // 3. BG layers with priority=1 (back to front: BG4->BG3->BG2->BG1)
-                // 4. Sprites with priority=2-3
+        // Render main screen (layers enabled in TM register $212C)
+        self.render_screen_layers(
+            bg_mode,
+            &mut frame,
+            &mut priority_buffer,
+            &mut layer_buffer,
+            self.tm, // Use main screen enable mask
+        );
 
-                // Render priority 0 BG layers
-                if self.tm & 0x08 != 0 {
-                    self.render_bg_layer_2bpp_priority(&mut frame, &mut priority_buffer, 3, 0);
-                }
-                if self.tm & 0x04 != 0 {
-                    self.render_bg_layer_2bpp_priority(&mut frame, &mut priority_buffer, 2, 0);
-                }
-                if self.tm & 0x02 != 0 {
-                    self.render_bg_layer_2bpp_priority(&mut frame, &mut priority_buffer, 1, 0);
-                }
-                if self.tm & 0x01 != 0 {
-                    self.render_bg_layer_2bpp_priority(&mut frame, &mut priority_buffer, 0, 0);
-                }
-
-                // Render sprites with priority 0-1
-                if self.tm & 0x10 != 0 {
-                    self.render_sprites_priority(&mut frame, &mut priority_buffer, 0, 1);
-                }
-
-                // Render priority 1 BG layers
-                if self.tm & 0x08 != 0 {
-                    self.render_bg_layer_2bpp_priority(&mut frame, &mut priority_buffer, 3, 1);
-                }
-                if self.tm & 0x04 != 0 {
-                    self.render_bg_layer_2bpp_priority(&mut frame, &mut priority_buffer, 2, 1);
-                }
-                if self.tm & 0x02 != 0 {
-                    self.render_bg_layer_2bpp_priority(&mut frame, &mut priority_buffer, 1, 1);
-                }
-                if self.tm & 0x01 != 0 {
-                    self.render_bg_layer_2bpp_priority(&mut frame, &mut priority_buffer, 0, 1);
-                }
-
-                // Render sprites with priority 2-3
-                if self.tm & 0x10 != 0 {
-                    self.render_sprites_priority(&mut frame, &mut priority_buffer, 2, 3);
-                }
-            }
-            // Mode 1: 2 BG layers (4bpp) + 1 BG layer (2bpp)
-            1 => {
-                // Check BG3 priority toggle (bit 3 of BGMODE)
-                let bg3_priority_high = (self.bgmode & 0x08) != 0;
-
-                // Priority-based rendering order for Mode 1:
-                // If BG3 priority toggle is off:
-                //   1. BG layers with priority=0 (BG3->BG2->BG1)
-                //   2. Sprites with priority=0-1
-                //   3. BG layers with priority=1 (BG3->BG2->BG1)
-                //   4. Sprites with priority=2-3
-                // If BG3 priority toggle is on:
-                //   BG3 renders above ALL sprites (last)
-
-                if !bg3_priority_high {
-                    // Normal priority mode
-                    // Render priority 0 BG layers
-                    if self.tm & 0x04 != 0 {
-                        self.render_bg_layer_2bpp_priority(&mut frame, &mut priority_buffer, 2, 0);
-                    }
-                    if self.tm & 0x02 != 0 {
-                        self.render_bg_layer_4bpp_priority(&mut frame, &mut priority_buffer, 1, 0);
-                    }
-                    if self.tm & 0x01 != 0 {
-                        self.render_bg_layer_4bpp_priority(&mut frame, &mut priority_buffer, 0, 0);
-                    }
-
-                    // Render sprites with priority 0-1
-                    if self.tm & 0x10 != 0 {
-                        self.render_sprites_priority(&mut frame, &mut priority_buffer, 0, 1);
-                    }
-
-                    // Render priority 1 BG layers
-                    if self.tm & 0x04 != 0 {
-                        self.render_bg_layer_2bpp_priority(&mut frame, &mut priority_buffer, 2, 1);
-                    }
-                    if self.tm & 0x02 != 0 {
-                        self.render_bg_layer_4bpp_priority(&mut frame, &mut priority_buffer, 1, 1);
-                    }
-                    if self.tm & 0x01 != 0 {
-                        self.render_bg_layer_4bpp_priority(&mut frame, &mut priority_buffer, 0, 1);
-                    }
-
-                    // Render sprites with priority 2-3
-                    if self.tm & 0x10 != 0 {
-                        self.render_sprites_priority(&mut frame, &mut priority_buffer, 2, 3);
-                    }
-                } else {
-                    // BG3 priority toggle mode: BG3 renders above all sprites
-                    // Render priority 0 BG1 and BG2
-                    if self.tm & 0x02 != 0 {
-                        self.render_bg_layer_4bpp_priority(&mut frame, &mut priority_buffer, 1, 0);
-                    }
-                    if self.tm & 0x01 != 0 {
-                        self.render_bg_layer_4bpp_priority(&mut frame, &mut priority_buffer, 0, 0);
-                    }
-
-                    // Render sprites with priority 0-1
-                    if self.tm & 0x10 != 0 {
-                        self.render_sprites_priority(&mut frame, &mut priority_buffer, 0, 1);
-                    }
-
-                    // Render priority 1 BG1 and BG2
-                    if self.tm & 0x02 != 0 {
-                        self.render_bg_layer_4bpp_priority(&mut frame, &mut priority_buffer, 1, 1);
-                    }
-                    if self.tm & 0x01 != 0 {
-                        self.render_bg_layer_4bpp_priority(&mut frame, &mut priority_buffer, 0, 1);
-                    }
-
-                    // Render sprites with priority 2-3
-                    if self.tm & 0x10 != 0 {
-                        self.render_sprites_priority(&mut frame, &mut priority_buffer, 2, 3);
-                    }
-
-                    // Render BG3 last (above all sprites)
-                    if self.tm & 0x04 != 0 {
-                        // Use a very high priority value to ensure BG3 is always on top
-                        self.render_bg_layer_2bpp_priority(&mut frame, &mut priority_buffer, 2, 7);
-                    }
-                }
-            }
-            // Mode 2: 2 BG layers, both 4bpp, offset-per-tile capability
-            2 => {
-                // Render priority 0 BG layers
-                if self.tm & 0x02 != 0 {
-                    self.render_bg_layer_4bpp_priority(&mut frame, &mut priority_buffer, 1, 0);
-                }
-                if self.tm & 0x01 != 0 {
-                    self.render_bg_layer_4bpp_priority(&mut frame, &mut priority_buffer, 0, 0);
-                }
-
-                // Render sprites with priority 0-1
-                if self.tm & 0x10 != 0 {
-                    self.render_sprites_priority(&mut frame, &mut priority_buffer, 0, 1);
-                }
-
-                // Render priority 1 BG layers
-                if self.tm & 0x02 != 0 {
-                    self.render_bg_layer_4bpp_priority(&mut frame, &mut priority_buffer, 1, 1);
-                }
-                if self.tm & 0x01 != 0 {
-                    self.render_bg_layer_4bpp_priority(&mut frame, &mut priority_buffer, 0, 1);
-                }
-
-                // Render sprites with priority 2-3
-                if self.tm & 0x10 != 0 {
-                    self.render_sprites_priority(&mut frame, &mut priority_buffer, 2, 3);
-                }
-            }
-            // Mode 3: BG1 8bpp (256 colors), BG2 4bpp (16 colors)
-            3 => {
-                // Render priority 0 BG layers
-                if self.tm & 0x02 != 0 {
-                    self.render_bg_layer_4bpp_priority(&mut frame, &mut priority_buffer, 1, 0);
-                }
-                if self.tm & 0x01 != 0 {
-                    self.render_bg_layer_8bpp_priority(&mut frame, &mut priority_buffer, 0, 0);
-                }
-
-                // Render sprites with priority 0-1
-                if self.tm & 0x10 != 0 {
-                    self.render_sprites_priority(&mut frame, &mut priority_buffer, 0, 1);
-                }
-
-                // Render priority 1 BG layers
-                if self.tm & 0x02 != 0 {
-                    self.render_bg_layer_4bpp_priority(&mut frame, &mut priority_buffer, 1, 1);
-                }
-                if self.tm & 0x01 != 0 {
-                    self.render_bg_layer_8bpp_priority(&mut frame, &mut priority_buffer, 0, 1);
-                }
-
-                // Render sprites with priority 2-3
-                if self.tm & 0x10 != 0 {
-                    self.render_sprites_priority(&mut frame, &mut priority_buffer, 2, 3);
-                }
-            }
-            // Mode 4: BG1 8bpp (256 colors), BG2 2bpp (4 colors), offset-per-tile capability
-            4 => {
-                // Render priority 0 BG layers
-                if self.tm & 0x02 != 0 {
-                    self.render_bg_layer_2bpp_priority(&mut frame, &mut priority_buffer, 1, 0);
-                }
-                if self.tm & 0x01 != 0 {
-                    self.render_bg_layer_8bpp_priority(&mut frame, &mut priority_buffer, 0, 0);
-                }
-
-                // Render sprites with priority 0-1
-                if self.tm & 0x10 != 0 {
-                    self.render_sprites_priority(&mut frame, &mut priority_buffer, 0, 1);
-                }
-
-                // Render priority 1 BG layers
-                if self.tm & 0x02 != 0 {
-                    self.render_bg_layer_2bpp_priority(&mut frame, &mut priority_buffer, 1, 1);
-                }
-                if self.tm & 0x01 != 0 {
-                    self.render_bg_layer_8bpp_priority(&mut frame, &mut priority_buffer, 0, 1);
-                }
-
-                // Render sprites with priority 2-3
-                if self.tm & 0x10 != 0 {
-                    self.render_sprites_priority(&mut frame, &mut priority_buffer, 2, 3);
-                }
-            }
-            // Mode 5: 2 BG layers, hi-res (512px wide), BG1 4bpp, BG2 2bpp
-            5 => {
-                // Render priority 0 BG layers using hi-res functions
-                if self.tm & 0x02 != 0 {
-                    self.render_bg_layer_2bpp_hires(&mut frame, &mut priority_buffer, 1, 0);
-                }
-                if self.tm & 0x01 != 0 {
-                    self.render_bg_layer_4bpp_hires(&mut frame, &mut priority_buffer, 0, 0);
-                }
-
-                // Render sprites with priority 0-1
-                if self.tm & 0x10 != 0 {
-                    self.render_sprites_priority(&mut frame, &mut priority_buffer, 0, 1);
-                }
-
-                // Render priority 1 BG layers
-                if self.tm & 0x02 != 0 {
-                    self.render_bg_layer_2bpp_hires(&mut frame, &mut priority_buffer, 1, 1);
-                }
-                if self.tm & 0x01 != 0 {
-                    self.render_bg_layer_4bpp_hires(&mut frame, &mut priority_buffer, 0, 1);
-                }
-
-                // Render sprites with priority 2-3
-                if self.tm & 0x10 != 0 {
-                    self.render_sprites_priority(&mut frame, &mut priority_buffer, 2, 3);
-                }
-            }
-            // Mode 6: 1 BG layer, hi-res (512px wide), 4bpp, offset-per-tile capability
-            6 => {
-                // Render priority 0 BG layer using hi-res function
-                if self.tm & 0x01 != 0 {
-                    self.render_bg_layer_4bpp_hires(&mut frame, &mut priority_buffer, 0, 0);
-                }
-
-                // Render sprites with priority 0-1
-                if self.tm & 0x10 != 0 {
-                    self.render_sprites_priority(&mut frame, &mut priority_buffer, 0, 1);
-                }
-
-                // Render priority 1 BG layer
-                if self.tm & 0x01 != 0 {
-                    self.render_bg_layer_4bpp_hires(&mut frame, &mut priority_buffer, 0, 1);
-                }
-
-                // Render sprites with priority 2-3
-                if self.tm & 0x10 != 0 {
-                    self.render_sprites_priority(&mut frame, &mut priority_buffer, 2, 3);
-                }
-            }
-            // Mode 7: 1 BG layer, 8bpp (256 colors), rotation/scaling
-            7 => {
-                // Render Mode 7 with matrix transformation
-                if self.tm & 0x01 != 0 {
-                    self.render_mode7(&mut frame, &mut priority_buffer, 0);
-                }
-
-                // Render sprites with priority 0-1
-                if self.tm & 0x10 != 0 {
-                    self.render_sprites_priority(&mut frame, &mut priority_buffer, 0, 1);
-                }
-
-                // Render priority 1 Mode 7
-                if self.tm & 0x01 != 0 {
-                    self.render_mode7(&mut frame, &mut priority_buffer, 1);
-                }
-
-                // Render sprites with priority 2-3
-                if self.tm & 0x10 != 0 {
-                    self.render_sprites_priority(&mut frame, &mut priority_buffer, 2, 3);
-                }
-            }
-            _ => {
-                // Invalid mode - leave frame blank
-            }
-        }
+        // Render sub-screen (layers enabled in TS register $212D)
+        // Sub-screen uses the same rendering logic but with ts instead of tm
+        self.render_screen_layers(
+            bg_mode,
+            &mut sub_frame,
+            &mut sub_priority_buffer,
+            &mut sub_layer_buffer,
+            self.ts, // Use sub-screen enable mask
+        );
 
         // Fill backdrop color for all pixels that weren't rendered
         // SNES backdrop is CGRAM color 0 (not transparent)
@@ -1235,14 +1191,32 @@ impl Ppu {
             if priority == 0 {
                 // No layer rendered here - use backdrop color
                 frame.pixels[i] = backdrop_color;
+                // layer_buffer already initialized to LAYER_BACKDROP, no need to update
             } else {
                 non_backdrop_pixels += 1;
             }
         }
 
-        // NOTE: Color math registers are stored ($2130-$2132) but not yet applied
-        // Proper implementation requires per-pixel layer tracking to apply color math correctly
-        // TODO: Implement color math with per-pixel layer tracking
+        // Fill backdrop color for sub-screen pixels that weren't rendered
+        for (i, &priority) in sub_priority_buffer.iter().enumerate() {
+            if priority == 0 {
+                sub_frame.pixels[i] = backdrop_color;
+            }
+        }
+
+        // ============================================================================
+        // COLOR MATH POST-PROCESSING
+        // ============================================================================
+        // Apply color math effects based on CGWSEL ($2130) and CGADSUB ($2131) registers
+        // Now that we have per-pixel layer tracking, we can implement this correctly!
+
+        // Check if color math is globally disabled
+        let color_math_prevented = (self.cgwsel & 0x40) != 0;
+
+        if !color_math_prevented && self.cgadsub != 0 {
+            self.apply_color_math(&mut frame, &layer_buffer, &sub_frame);
+        }
+        // ============================================================================
 
         // Apply brightness (bits 0-3 of $2100) ONLY when force blank is OFF
         // This preserves the behavior where we render during force blank for boot sequences
@@ -1290,6 +1264,323 @@ impl Ppu {
         });
 
         frame
+    }
+
+    /// Helper method to render layers for main or sub-screen
+    /// This avoids code duplication between main and sub-screen rendering
+    fn render_screen_layers(
+        &self,
+        bg_mode: u8,
+        frame: &mut Frame,
+        priority_buffer: &mut [u8],
+        layer_buffer: &mut [u8],
+        layer_enable: u8, // TM for main screen, TS for sub-screen
+    ) {
+        match bg_mode {
+            // Mode 0: 4 BG layers, 2bpp each
+            0 => {
+                // Render priority 0 BG layers
+                if layer_enable & 0x08 != 0 {
+                    self.render_bg_layer_2bpp_priority(frame, priority_buffer, layer_buffer, 3, 0);
+                }
+                if layer_enable & 0x04 != 0 {
+                    self.render_bg_layer_2bpp_priority(frame, priority_buffer, layer_buffer, 2, 0);
+                }
+                if layer_enable & 0x02 != 0 {
+                    self.render_bg_layer_2bpp_priority(frame, priority_buffer, layer_buffer, 1, 0);
+                }
+                if layer_enable & 0x01 != 0 {
+                    self.render_bg_layer_2bpp_priority(frame, priority_buffer, layer_buffer, 0, 0);
+                }
+
+                // Render sprites with priority 0-1
+                if layer_enable & 0x10 != 0 {
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 0, 1);
+                }
+
+                // Render priority 1 BG layers
+                if layer_enable & 0x08 != 0 {
+                    self.render_bg_layer_2bpp_priority(frame, priority_buffer, layer_buffer, 3, 1);
+                }
+                if layer_enable & 0x04 != 0 {
+                    self.render_bg_layer_2bpp_priority(frame, priority_buffer, layer_buffer, 2, 1);
+                }
+                if layer_enable & 0x02 != 0 {
+                    self.render_bg_layer_2bpp_priority(frame, priority_buffer, layer_buffer, 1, 1);
+                }
+                if layer_enable & 0x01 != 0 {
+                    self.render_bg_layer_2bpp_priority(frame, priority_buffer, layer_buffer, 0, 1);
+                }
+
+                // Render sprites with priority 2-3
+                if layer_enable & 0x10 != 0 {
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 2, 3);
+                }
+            }
+            // Mode 1: 2 BG layers (4bpp) + 1 BG layer (2bpp)
+            1 => {
+                let bg3_priority = (self.bgmode & 0x08) != 0;
+
+                if bg3_priority {
+                    // BG3 high priority mode - render BG3 with all sprites
+                    if layer_enable & 0x04 != 0 {
+                        self.render_bg_layer_2bpp_priority(
+                            frame,
+                            priority_buffer,
+                            layer_buffer,
+                            2,
+                            0,
+                        );
+                    }
+                    if layer_enable & 0x02 != 0 {
+                        self.render_bg_layer_4bpp_priority(
+                            frame,
+                            priority_buffer,
+                            layer_buffer,
+                            1,
+                            0,
+                        );
+                    }
+                    if layer_enable & 0x01 != 0 {
+                        self.render_bg_layer_4bpp_priority(
+                            frame,
+                            priority_buffer,
+                            layer_buffer,
+                            0,
+                            0,
+                        );
+                    }
+
+                    if layer_enable & 0x10 != 0 {
+                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 0, 1);
+                    }
+
+                    if layer_enable & 0x04 != 0 {
+                        self.render_bg_layer_2bpp_priority(
+                            frame,
+                            priority_buffer,
+                            layer_buffer,
+                            2,
+                            1,
+                        );
+                    }
+                    if layer_enable & 0x02 != 0 {
+                        self.render_bg_layer_4bpp_priority(
+                            frame,
+                            priority_buffer,
+                            layer_buffer,
+                            1,
+                            1,
+                        );
+                    }
+                    if layer_enable & 0x01 != 0 {
+                        self.render_bg_layer_4bpp_priority(
+                            frame,
+                            priority_buffer,
+                            layer_buffer,
+                            0,
+                            1,
+                        );
+                    }
+
+                    if layer_enable & 0x10 != 0 {
+                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 2, 3);
+                    }
+                } else {
+                    // Normal priority mode
+                    if layer_enable & 0x02 != 0 {
+                        self.render_bg_layer_4bpp_priority(
+                            frame,
+                            priority_buffer,
+                            layer_buffer,
+                            1,
+                            0,
+                        );
+                    }
+                    if layer_enable & 0x01 != 0 {
+                        self.render_bg_layer_4bpp_priority(
+                            frame,
+                            priority_buffer,
+                            layer_buffer,
+                            0,
+                            0,
+                        );
+                    }
+
+                    if layer_enable & 0x10 != 0 {
+                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 0, 1);
+                    }
+
+                    if layer_enable & 0x02 != 0 {
+                        self.render_bg_layer_4bpp_priority(
+                            frame,
+                            priority_buffer,
+                            layer_buffer,
+                            1,
+                            1,
+                        );
+                    }
+                    if layer_enable & 0x01 != 0 {
+                        self.render_bg_layer_4bpp_priority(
+                            frame,
+                            priority_buffer,
+                            layer_buffer,
+                            0,
+                            1,
+                        );
+                    }
+
+                    if layer_enable & 0x10 != 0 {
+                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 2, 3);
+                    }
+
+                    if layer_enable & 0x04 != 0 {
+                        self.render_bg_layer_2bpp_priority(
+                            frame,
+                            priority_buffer,
+                            layer_buffer,
+                            2,
+                            7,
+                        );
+                    }
+                }
+            }
+            // Mode 2: 2 BG layers, both 4bpp
+            2 => {
+                if layer_enable & 0x02 != 0 {
+                    self.render_bg_layer_4bpp_priority(frame, priority_buffer, layer_buffer, 1, 0);
+                }
+                if layer_enable & 0x01 != 0 {
+                    self.render_bg_layer_4bpp_priority(frame, priority_buffer, layer_buffer, 0, 0);
+                }
+
+                if layer_enable & 0x10 != 0 {
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 0, 1);
+                }
+
+                if layer_enable & 0x02 != 0 {
+                    self.render_bg_layer_4bpp_priority(frame, priority_buffer, layer_buffer, 1, 1);
+                }
+                if layer_enable & 0x01 != 0 {
+                    self.render_bg_layer_4bpp_priority(frame, priority_buffer, layer_buffer, 0, 1);
+                }
+
+                if layer_enable & 0x10 != 0 {
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 2, 3);
+                }
+            }
+            // Mode 3: BG1 8bpp, BG2 4bpp
+            3 => {
+                if layer_enable & 0x02 != 0 {
+                    self.render_bg_layer_4bpp_priority(frame, priority_buffer, layer_buffer, 1, 0);
+                }
+                if layer_enable & 0x01 != 0 {
+                    self.render_bg_layer_8bpp_priority(frame, priority_buffer, layer_buffer, 0, 0);
+                }
+
+                if layer_enable & 0x10 != 0 {
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 0, 1);
+                }
+
+                if layer_enable & 0x02 != 0 {
+                    self.render_bg_layer_4bpp_priority(frame, priority_buffer, layer_buffer, 1, 1);
+                }
+                if layer_enable & 0x01 != 0 {
+                    self.render_bg_layer_8bpp_priority(frame, priority_buffer, layer_buffer, 0, 1);
+                }
+
+                if layer_enable & 0x10 != 0 {
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 2, 3);
+                }
+            }
+            // Mode 4: BG1 8bpp, BG2 2bpp
+            4 => {
+                if layer_enable & 0x02 != 0 {
+                    self.render_bg_layer_2bpp_priority(frame, priority_buffer, layer_buffer, 1, 0);
+                }
+                if layer_enable & 0x01 != 0 {
+                    self.render_bg_layer_8bpp_priority(frame, priority_buffer, layer_buffer, 0, 0);
+                }
+
+                if layer_enable & 0x10 != 0 {
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 0, 1);
+                }
+
+                if layer_enable & 0x02 != 0 {
+                    self.render_bg_layer_2bpp_priority(frame, priority_buffer, layer_buffer, 1, 1);
+                }
+                if layer_enable & 0x01 != 0 {
+                    self.render_bg_layer_8bpp_priority(frame, priority_buffer, layer_buffer, 0, 1);
+                }
+
+                if layer_enable & 0x10 != 0 {
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 2, 3);
+                }
+            }
+            // Mode 5: 2 BG layers, hi-res
+            5 => {
+                if layer_enable & 0x02 != 0 {
+                    self.render_bg_layer_2bpp_hires(frame, priority_buffer, layer_buffer, 1, 0);
+                }
+                if layer_enable & 0x01 != 0 {
+                    self.render_bg_layer_4bpp_hires(frame, priority_buffer, layer_buffer, 0, 0);
+                }
+
+                if layer_enable & 0x10 != 0 {
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 0, 1);
+                }
+
+                if layer_enable & 0x02 != 0 {
+                    self.render_bg_layer_2bpp_hires(frame, priority_buffer, layer_buffer, 1, 1);
+                }
+                if layer_enable & 0x01 != 0 {
+                    self.render_bg_layer_4bpp_hires(frame, priority_buffer, layer_buffer, 0, 1);
+                }
+
+                if layer_enable & 0x10 != 0 {
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 2, 3);
+                }
+            }
+            // Mode 6: 1 BG layer, hi-res
+            6 => {
+                if layer_enable & 0x01 != 0 {
+                    self.render_bg_layer_4bpp_hires(frame, priority_buffer, layer_buffer, 0, 0);
+                }
+
+                if layer_enable & 0x10 != 0 {
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 0, 1);
+                }
+
+                if layer_enable & 0x01 != 0 {
+                    self.render_bg_layer_4bpp_hires(frame, priority_buffer, layer_buffer, 0, 1);
+                }
+
+                if layer_enable & 0x10 != 0 {
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 2, 3);
+                }
+            }
+            // Mode 7: 1 BG layer, 8bpp
+            7 => {
+                if layer_enable & 0x01 != 0 {
+                    self.render_mode7(frame, priority_buffer, layer_buffer, 0);
+                }
+
+                if layer_enable & 0x10 != 0 {
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 0, 1);
+                }
+
+                if layer_enable & 0x01 != 0 {
+                    self.render_mode7(frame, priority_buffer, layer_buffer, 1);
+                }
+
+                if layer_enable & 0x10 != 0 {
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 2, 3);
+                }
+            }
+            _ => {
+                // Invalid mode - leave frame blank
+            }
+        }
     }
 
     /// Get VRAM address increment amount based on VMAIN register
@@ -1829,6 +2120,7 @@ impl Ppu {
         &self,
         frame: &mut Frame,
         priority_buffer: &mut [u8],
+        layer_buffer: &mut [u8],
         bg_index: usize,
         filter_priority: u8,
     ) {
@@ -1847,6 +2139,15 @@ impl Ppu {
             2 => (self.bg3_hofs, self.bg3_vofs),
             3 => (self.bg4_hofs, self.bg4_vofs),
             _ => (0, 0),
+        };
+
+        // Determine layer ID for tracking
+        let layer_id = match bg_index {
+            0 => LAYER_BG1,
+            1 => LAYER_BG2,
+            2 => LAYER_BG3,
+            3 => LAYER_BG4,
+            _ => LAYER_BACKDROP,
         };
 
         // Render all visible tiles
@@ -1921,6 +2222,7 @@ impl Ppu {
                 if render_priority >= priority_buffer[frame_offset] {
                     frame.pixels[frame_offset] = self.get_color(color);
                     priority_buffer[frame_offset] = render_priority;
+                    layer_buffer[frame_offset] = layer_id; // Track which layer this pixel came from
                 }
             }
         }
@@ -1931,6 +2233,7 @@ impl Ppu {
         &self,
         frame: &mut Frame,
         priority_buffer: &mut [u8],
+        layer_buffer: &mut [u8],
         bg_index: usize,
         filter_priority: u8,
     ) {
@@ -1950,6 +2253,9 @@ impl Ppu {
             3 => (self.bg4_hofs, self.bg4_vofs),
             _ => (0, 0),
         };
+
+        // Determine layer ID for tracking
+        let layer_id = bg_index as u8;
 
         // Render all visible tiles
         for screen_y in 0..224 {
@@ -2034,6 +2340,7 @@ impl Ppu {
                 if render_priority >= priority_buffer[frame_offset] {
                     frame.pixels[frame_offset] = self.get_color(color);
                     priority_buffer[frame_offset] = render_priority;
+                    layer_buffer[frame_offset] = layer_id; // Track which layer this pixel came from
                 }
             }
         }
@@ -2044,9 +2351,11 @@ impl Ppu {
         &self,
         frame: &mut Frame,
         priority_buffer: &mut [u8],
+        layer_buffer: &mut [u8],
         bg_index: usize,
         filter_priority: u8,
     ) {
+        let layer_id = bg_index as u8;
         // Get tilemap and CHR base addresses for this BG
         let (tilemap_base, chr_base) = self.get_bg_addresses(bg_index);
 
@@ -2139,13 +2448,21 @@ impl Ppu {
                 if render_priority >= priority_buffer[frame_offset] {
                     frame.pixels[frame_offset] = self.get_color(color);
                     priority_buffer[frame_offset] = render_priority;
+                    layer_buffer[frame_offset] = layer_id;
                 }
             }
         }
     }
 
     /// Render Mode 7 layer with matrix transformation
-    fn render_mode7(&self, frame: &mut Frame, priority_buffer: &mut [u8], filter_priority: u8) {
+    fn render_mode7(
+        &self,
+        frame: &mut Frame,
+        priority_buffer: &mut [u8],
+        layer_buffer: &mut [u8],
+        filter_priority: u8,
+    ) {
+        let layer_id = LAYER_BG1;
         // Mode 7 uses BG1's scroll values
         let hofs = self.bg1_hofs as i32;
         let vofs = self.bg1_vofs as i32;
@@ -2266,6 +2583,7 @@ impl Ppu {
                 if render_priority >= priority_buffer[frame_offset] {
                     frame.pixels[frame_offset] = self.get_color(color);
                     priority_buffer[frame_offset] = render_priority;
+                    layer_buffer[frame_offset] = layer_id;
                 }
             }
         }
@@ -2277,9 +2595,11 @@ impl Ppu {
         &self,
         frame: &mut Frame,
         priority_buffer: &mut [u8],
+        layer_buffer: &mut [u8],
         bg_index: usize,
         filter_priority: u8,
     ) {
+        let layer_id = bg_index as u8;
         // Get tilemap and CHR base addresses for this BG
         let (tilemap_base, chr_base) = self.get_bg_addresses(bg_index);
 
@@ -2375,6 +2695,7 @@ impl Ppu {
                 if render_priority >= priority_buffer[frame_offset] {
                     frame.pixels[frame_offset] = self.get_color(color);
                     priority_buffer[frame_offset] = render_priority;
+                    layer_buffer[frame_offset] = layer_id;
                 }
             }
         }
@@ -2386,9 +2707,11 @@ impl Ppu {
         &self,
         frame: &mut Frame,
         priority_buffer: &mut [u8],
+        layer_buffer: &mut [u8],
         bg_index: usize,
         filter_priority: u8,
     ) {
+        let layer_id = bg_index as u8;
         // Get tilemap and CHR base addresses for this BG
         let (tilemap_base, chr_base) = self.get_bg_addresses(bg_index);
 
@@ -2476,6 +2799,7 @@ impl Ppu {
                 if render_priority >= priority_buffer[frame_offset] {
                     frame.pixels[frame_offset] = self.get_color(color);
                     priority_buffer[frame_offset] = render_priority;
+                    layer_buffer[frame_offset] = layer_id;
                 }
             }
         }
@@ -2486,6 +2810,7 @@ impl Ppu {
         &self,
         frame: &mut Frame,
         priority_buffer: &mut [u8],
+        layer_buffer: &mut [u8],
         min_priority: u8,
         max_priority: u8,
     ) {
@@ -2633,6 +2958,7 @@ impl Ppu {
             self.render_sprite_priority(
                 frame,
                 priority_buffer,
+                layer_buffer,
                 x,
                 y,
                 tile,
@@ -2677,6 +3003,7 @@ impl Ppu {
         &self,
         frame: &mut Frame,
         priority_buffer: &mut [u8],
+        layer_buffer: &mut [u8],
         x: i16,
         y: i16,
         tile: u8,
@@ -2690,6 +3017,7 @@ impl Ppu {
         flip_x: bool,
         flip_y: bool,
     ) {
+        let layer_id = LAYER_OBJ;
         // Sprites use 4bpp (16 colors per tile)
         // Each 8x8 tile is 32 bytes (8 rows * 4 bytes per row)
         let tiles_wide = width / 8;
@@ -2805,6 +3133,7 @@ impl Ppu {
                         {
                             frame.pixels[frame_offset] = color;
                             priority_buffer[frame_offset] = render_priority;
+                            layer_buffer[frame_offset] = layer_id;
                             pixels_drawn += 1;
 
                             // Log first few pixels for the first sprite
@@ -2931,6 +3260,204 @@ impl Ppu {
 
         // Return as ARGB (0xAARRGGBB)
         0xFF000000 | ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
+    }
+
+    /// Apply color math post-processing to the frame
+    /// This implements the SNES color math system for transparency and blending effects
+    fn apply_color_math(&self, frame: &mut Frame, layer_buffer: &[u8], sub_frame: &Frame) {
+        // Get fixed color for blending (from $2132 COLDATA register)
+        // Convert 5-bit components to 8-bit
+        let fixed_r = (self.fixed_color_r << 3) as u32;
+        let fixed_g = (self.fixed_color_g << 3) as u32;
+        let fixed_b = (self.fixed_color_b << 3) as u32;
+        let fixed_color = 0xFF000000 | (fixed_r << 16) | (fixed_g << 8) | fixed_b;
+
+        // Get color math control flags
+        let subtract_mode = (self.cgadsub & 0x80) != 0; // Bit 7: 0=add, 1=subtract
+        let half_math = (self.cgadsub & 0x40) != 0; // Bit 6: half the result
+
+        // CGWSEL bit 1: 0=use fixed color, 1=use sub-screen
+        let use_subscreen = (self.cgwsel & 0x02) != 0;
+
+        // CGWSEL bits 4-5: Color math enable control based on window regions
+        // 00 = Enable everywhere
+        // 01 = Enable inside window
+        // 10 = Enable outside window
+        // 11 = Disable everywhere
+        let clip_mode = (self.cgwsel >> 4) & 0x03;
+
+        // Apply color math to each pixel
+        let width = frame.width as usize;
+        let mut x = 0usize;
+        for (i, &layer) in layer_buffer.iter().enumerate() {
+            // Ensure layer value is within the valid range before using it as a bit index
+            if layer > LAYER_BACKDROP {
+                continue;
+            }
+            // Check if color math is enabled for this layer (CGADSUB bits 0-5)
+            let layer_bit = 1u8 << layer;
+
+            // Only apply color math when enabled for this layer and allowed by window clipping
+            if (self.cgadsub & layer_bit) != 0
+                && self.is_color_math_enabled_at_position(x, clip_mode)
+            {
+                // Get the main screen pixel color
+                let main_pixel = frame.pixels[i];
+
+                // Choose blend source: sub-screen or fixed color
+                let blend_color = if use_subscreen {
+                    sub_frame.pixels[i]
+                } else {
+                    fixed_color
+                };
+
+                // Apply color math: add or subtract
+                let result = if subtract_mode {
+                    self.subtract_colors(main_pixel, blend_color)
+                } else {
+                    self.add_colors(main_pixel, blend_color)
+                };
+
+                // Apply half-color if enabled
+                frame.pixels[i] = if half_math {
+                    self.halve_color(result)
+                } else {
+                    result
+                };
+            }
+
+            // Advance x position, wrapping at the end of the scanline
+            x += 1;
+            if x == width {
+                x = 0;
+            }
+        }
+    }
+
+    /// Check if color math is enabled at a specific X position based on window clipping
+    fn is_color_math_enabled_at_position(&self, x: usize, clip_mode: u8) -> bool {
+        match clip_mode {
+            0 => true, // Always enabled
+            1 => {
+                // Enable inside color window
+                self.is_inside_color_window(x)
+            }
+            2 => {
+                // Enable outside color window
+                !self.is_inside_color_window(x)
+            }
+            3 => false, // Always disabled
+            _ => true,
+        }
+    }
+
+    /// Check if a pixel is inside the color window
+    /// Color window is defined by wobjlog ($212B) similar to layer windows
+    fn is_inside_color_window(&self, x: usize) -> bool {
+        // Window enable bits for color math are in wobjsel ($2125) bits 4-7
+        // Bit 4-5: Window 1 enable and inversion
+        // Bit 6-7: Window 2 enable and inversion
+        let win1_enable = (self.wobjsel & 0x10) != 0;
+        let win1_invert = (self.wobjsel & 0x20) != 0;
+        let win2_enable = (self.wobjsel & 0x40) != 0;
+        let win2_invert = (self.wobjsel & 0x80) != 0;
+
+        if !win1_enable && !win2_enable {
+            return false; // No windows enabled for color math
+        }
+
+        // Check if x is inside window 1
+        let in_win1 = if win1_enable {
+            let left = self.wh0 as usize;
+            let right = self.wh1 as usize;
+            // Handle window wraparound: if left > right, window wraps around screen edges
+            let inside = if self.wh0 <= self.wh1 {
+                x >= left && x <= right
+            } else {
+                x >= left || x <= right
+            };
+            if win1_invert {
+                !inside
+            } else {
+                inside
+            }
+        } else {
+            false
+        };
+
+        // Check if x is inside window 2
+        let in_win2 = if win2_enable {
+            let left = self.wh2 as usize;
+            let right = self.wh3 as usize;
+            // Handle window wraparound: if left > right, window wraps around screen edges
+            let inside = if self.wh2 <= self.wh3 {
+                x >= left && x <= right
+            } else {
+                x >= left || x <= right
+            };
+            if win2_invert {
+                !inside
+            } else {
+                inside
+            }
+        } else {
+            false
+        };
+
+        // Apply window logic from wobjlog register bits 0-1 (for color window)
+        let logic = self.wobjlog & 0x03;
+        match logic {
+            0 => in_win1 || in_win2,    // OR
+            1 => in_win1 && in_win2,    // AND
+            2 => in_win1 ^ in_win2,     // XOR
+            3 => !(in_win1 || in_win2), // XNOR
+            _ => false,
+        }
+    }
+
+    /// Add two colors with clamping (for color math)
+    fn add_colors(&self, color1: u32, color2: u32) -> u32 {
+        let r1 = (color1 >> 16) & 0xFF;
+        let g1 = (color1 >> 8) & 0xFF;
+        let b1 = color1 & 0xFF;
+
+        let r2 = (color2 >> 16) & 0xFF;
+        let g2 = (color2 >> 8) & 0xFF;
+        let b2 = color2 & 0xFF;
+
+        // Add and clamp to 255
+        let r = std::cmp::min(r1 + r2, 255);
+        let g = std::cmp::min(g1 + g2, 255);
+        let b = std::cmp::min(b1 + b2, 255);
+
+        0xFF000000 | (r << 16) | (g << 8) | b
+    }
+
+    /// Subtract two colors with clamping (for color math)
+    fn subtract_colors(&self, color1: u32, color2: u32) -> u32 {
+        let r1 = ((color1 >> 16) & 0xFF) as i32;
+        let g1 = ((color1 >> 8) & 0xFF) as i32;
+        let b1 = (color1 & 0xFF) as i32;
+
+        let r2 = ((color2 >> 16) & 0xFF) as i32;
+        let g2 = ((color2 >> 8) & 0xFF) as i32;
+        let b2 = (color2 & 0xFF) as i32;
+
+        // Subtract and clamp to 0
+        let r = std::cmp::max(r1 - r2, 0) as u32;
+        let g = std::cmp::max(g1 - g2, 0) as u32;
+        let b = std::cmp::max(b1 - b2, 0) as u32;
+
+        0xFF000000 | (r << 16) | (g << 8) | b
+    }
+
+    /// Halve a color (divide each component by 2)
+    fn halve_color(&self, color: u32) -> u32 {
+        let r = ((color >> 16) & 0xFF) / 2;
+        let g = ((color >> 8) & 0xFF) / 2;
+        let b = (color & 0xFF) / 2;
+
+        0xFF000000 | (r << 16) | (g << 8) | b
     }
 }
 
@@ -3760,7 +4287,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_mode1_typical_commercial_pattern() {
         let mut ppu = Ppu::new();
 

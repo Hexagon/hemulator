@@ -171,6 +171,24 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
 #### Other Features
 - ✅ **Save States** - Full system state serialization
 - ✅ **Logging** - Comprehensive debug logging for CPU, PPU, DMA, interrupts
+- ✅ **Enhancement Chips** - DSP-1 math coprocessor partially implemented, SuperFX coprocessor implemented
+  - Automatic detection from ROM header
+  - Support for most DSP-1 games (Pilotwings, Super Mario Kart)
+  - Implemented commands: Multiply, Inverse, Gyrate, Distance, Radius, Range, Project, Polar
+  - SuperFX/SuperFX2 (GSU-1/GSU-2) graphics coprocessor implemented
+    - 16-bit RISC processor with 16 general-purpose registers
+    - Complete ALU instruction set (ADD, SUB, MULT, AND, OR, XOR, etc.)
+    - Pixel plotting and graphics operations (PLOT, COLOR for GSU-1; RPIX for GSU-2)
+    - Control flow operations (branches, loops, jumps)
+    - Memory access (load/store word, register moves)
+    - WITH register tracking for source/destination selection
+    - GETC ROM reading with ROMBR and R14 pointer
+    - Used in Star Fox, Yoshi's Island, and Doom
+  - **Known Limitations**:
+    - Attitude command (0x08) is incomplete - outputs only partial rotation matrix
+    - Target command (0x20) not implemented - returns zeros
+    - Rotate command (0x24) not implemented - returns zeros
+    - Games heavily using these commands may not work correctly
 
 ### What's Missing
 
@@ -180,15 +198,53 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
   - Window enable, inversion, and logic (OR/AND/XOR/XNOR) fully implemented
   - Applied to all BG layers and sprites
   - Reference: [Windows](https://snes.nesdev.org/wiki/PPU_registers#Windows)
-- ⚠️ **Color Math** - Registers stored but not applied ($2130-$2132)
-  - Registers: CGWSEL, CGADSUB, COLDATA properly stored
-  - Fixed color RGB values extracted from COLDATA writes
-  - Not yet applied in rendering (requires per-pixel layer tracking)
-  - Reference: [Color Math](https://snes.nesdev.org/wiki/PPU_registers#Color_addition)
+
+- ✅ **Color Math** - Fully implemented with per-pixel layer tracking ($2130-$2132)
+  - **Implementation Status**: Complete with sub-screen and fixed color blending
+    - $2130 (CGWSEL): Color math control with prevent-math and window-based clipping
+    - $2131 (CGADSUB): Per-layer enable (BG1-4, OBJ, backdrop) with add/subtract/half modes
+    - $2132 (COLDATA): Fixed color RGB blending source
+    - $212D (TS): Sub-screen layer designation for blending
+  
+  - **Features Implemented**:
+    - ✅ Per-pixel layer tracking (BG1-4, OBJ, backdrop)
+    - ✅ Selective color math based on layer source
+    - ✅ Add and subtract color blending modes
+    - ✅ Half-color math mode (divide result by 2)
+    - ✅ Color component clamping (0-255 range)
+    - ✅ Fixed color blending source
+    - ✅ Sub-screen rendering and blending
+    - ✅ Window-based color math clipping (CGWSEL bits 4-5)
+    
+  - **Technical Details**:
+    - Layer buffer tracks source layer for each pixel (BG1=0, BG2=1, BG3=2, BG4=3, OBJ=4, backdrop=5)
+    - Both main screen and sub-screen rendered independently
+    - Sub-screen layers determined by TS register ($212D)
+    - Color math applied in post-processing pass after all layers rendered
+    - Only pixels from layers enabled in CGADSUB undergo blending
+    - CGWSEL prevent-math bit (bit 6) can globally disable color math
+    - Window-based clipping allows selective color math by screen region
+    - Blending performed in 8-bit RGB color space with proper clamping
+    
+  - **Current Limitations**:
+    - ⏳ Direct color mode not implemented (CGWSEL bits 0-1)
+      - Direct color mode is rarely used (can be enabled for Modes 3, 4, and 7)
+      - Normal palette-based rendering works for all common use cases
+    
+  - **Impact on Game Compatibility**:
+    - Games using color math now work correctly
+    - Fade effects, transparency, and color tinting render properly
+    - Sub-screen blending effects (transparencies, shadows) work correctly
+    - Window-based effects (spotlight, fade regions) work correctly
+    
+  - Reference: [Color Math](https://snes.nesdev.org/wiki/Color_math)
+
 - ❌ **Mosaic** - No mosaic effect ($2106)
-- ⚠️ **Sub-screen** - Register stored but not used ($212D)
-  - TS register properly stored
-  - Sub-screen rendering not implemented
+
+- ✅ **Sub-screen** - Fully implemented for color math ($212D)
+  - TS register controls which layers appear on sub-screen
+  - Sub-screen pixels blended with main screen via color math
+  - Used for transparency, shadows, and other blending effects
 
 #### Audio
 - ❌ **DSP (Digital Signal Processor)** - No sound generation
@@ -198,10 +254,101 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
   - Reference: [DSP](https://snes.nesdev.org/wiki/DSP)
 
 #### Enhancement Chips
-- ❌ **No enhancement chip support**
-  - No SuperFX, SA-1, DSP-1/2/3/4, S-DD1, Cx4, etc.
-  - Games requiring these chips will not work
-  - Reference: [Enhancement Chips](https://snes.nesdev.org/wiki/Enhancement_chips)
+
+The emulator now includes a framework for enhancement chip (coprocessor) support:
+
+- ⚠️ **DSP-1** - Math coprocessor (partially implemented)
+  - Used in ~20 games including Pilotwings, Super Mario Kart, Ace o Nerae!
+  - Provides hardware acceleration for 3D math operations
+  - Implemented operations: multiply, inverse, gyrate (2D rotation), distance, radius, range, project (3D projection), polar to cartesian
+  - **Incomplete operations**:
+    - Attitude (sin/cos) - only partial implementation, missing full 3x3 rotation matrix
+    - Target - coordinate transformation not implemented
+    - Rotate - 3D rotation not implemented
+  - Both LoROM and HiROM memory mappings supported
+  - Save state support included
+  - Reference: [DSP-1](https://snes.nesdev.org/wiki/DSP-1), [SNESLab DSP1](https://sneslab.net/wiki/DSP1)
+
+- ✅ **SuperFX/SuperFX2 (GSU-1/GSU-2)** - Graphics coprocessor (core functionality implemented)
+  - Used in ~10 popular games including Star Fox, Yoshi's Island, Doom
+  - Custom 16-bit RISC processor with 16 general-purpose registers
+  - Pixel plotting operations: PLOT, COLOR (GSU-1), RPIX (GSU-2)
+  - Complete ALU: ADD, SUB, MULT, AND, OR, XOR, NOT, INC, DEC
+  - Control flow: branches, loops, jumps with correct PC handling
+  - Memory operations: load/store word, register moves, WITH register selection
+  - ROM reading: GETC with ROMBR bank and R14 pointer
+  - Register mapping at $3000-$32FF in banks $00-$3F, $80-$BF
+  - GSU RAM at $700000-$71FFFF (128 KB) for frame buffer
+  - Save state support included
+  - **Known Limitations**:
+    - Instruction cache allocated but not used (no performance impact)
+    - Simplified timing (not cycle-accurate)
+    - Basic pixel operations (no advanced screen modes)
+  - Reference: [SuperFX](https://snes.nesdev.org/wiki/Super_FX), [SnesLab SuperFX](https://sneslab.net/wiki/Super_FX)
+
+- ❌ **Not Yet Implemented**
+  - SA-1 - CPU coprocessor with additional 65C816 (Super Mario RPG, Kirby's Dream Land 3)
+  - DSP-2 - Math coprocessor variant (Dungeon Master)
+  - DSP-3 - Math coprocessor variant (SD Gundam GX)
+  - DSP-4 - Math coprocessor variant (Top Gear 3000)
+  - S-DD1 - Decompression chip (Star Ocean, Street Fighter Alpha 2)
+  - CX4 - Coprocessor (Mega Man X2, Mega Man X3)
+  - SPC7110 - Data decompression (Far East of Eden Zero)
+  - ST010/ST011/ST018 - Various coprocessors (F1 ROC II, Hayazashi Nidan Morita Shougi)
+  - OBC-1 - Coprocessor (Metal Combat: Falcon's Revenge)
+
+### Enhancement Chip Roadmap
+
+**Current Status**
+- ⚠️ **DSP-1** - Partially implemented (missing Attitude/Target/Rotate)
+- ✅ **SuperFX/SuperFX2** - Core functionality implemented (PC bugs fixed, WITH/GETC/RPIX added)
+
+**Priority 1 - Complete Existing Chips**
+1. **DSP-1 Completion** - Finish Attitude, Target, and Rotate commands
+   - Requires proper 3x3 rotation matrix implementation for Attitude
+   - Reference bsnes implementation for accuracy
+2. **SuperFX Enhancements** - Add advanced features and optimize
+   - Implement instruction cache for performance (currently allocated but unused)
+   - Add cycle-accurate timing based on CLSR register
+   - Implement advanced screen modes and proper SCBR/SCMR handling
+   - Test extensively with commercial games (Star Fox, Yoshi's Island, Doom)
+
+**Priority 2 - Most Common Chips (High Impact)**
+3. **SA-1** - CPU coprocessor, ~30 games including Super Mario RPG
+   - Add comprehensive tests for all commands
+
+**Priority 2 - Most Common Chips (High Impact)**
+2. **SuperFX** - Graphics coprocessor, ~10 popular games (Star Fox, Yoshi's Island)
+3. **SA-1** - CPU coprocessor, ~30 games including Super Mario RPG
+
+**Priority 3 - Moderately Common**
+4. **S-DD1** - Decompression chip, ~5 games including Star Ocean
+5. **CX4** - Used in Mega Man X2/X3
+
+**Priority 4 - Less Common**
+6. **DSP-2/3/4** - Math coprocessor variants (few games each)
+7. **SPC7110** - Decompression chip (few games)
+8. **OBC-1** - Rare coprocessor (1-2 games)
+9. **ST010/ST011/ST018** - Very rare (1-2 games each)
+
+**Implementation Notes:**
+- Enhancement chips are detected automatically from ROM header (byte $FFD6)
+- Chips are instantiated during cartridge load if detected and implemented
+- Memory mapping is handled transparently by the cartridge module
+- Interior mutability (RefCell) allows chip state updates during memory reads
+- Save state support implemented via EnhancementChip trait
+- Unimplemented chips are detected but log warnings and don't instantiate
+
+**Known Issues:**
+- DSP-1 Attitude command incomplete (missing full 3x3 rotation matrix)
+- DSP-1 Target and Rotate commands not implemented
+- Games heavily relying on these commands may malfunction
+
+**References:**
+- [Enhancement Chips Overview](https://snes.nesdev.org/wiki/Enhancement_chips)
+- [List of SNES Enhancement Chips](https://en.wikipedia.org/wiki/List_of_Super_NES_enhancement_chips)
+- [SNES Coprocessors Blog Post](https://jsgroth.dev/blog/posts/snes-coprocessors-part-1/)
+
 
 #### Other Missing Features
 - ❌ **IRQ** - H/V timer interrupts not implemented
@@ -271,7 +418,10 @@ SnesSystem
           │   └── 2bpp/4bpp/8bpp tile support
           └── Cartridge (LoROM/HiROM/ExHiROM auto-detect)
               ├── ROM banks (LoROM: 32KB chunks, HiROM/ExHiROM: 64KB linear)
-              └── 32KB SRAM
+              ├── 32KB SRAM
+              └── Enhancement Chip (optional)
+                  ├── DSP-1 (math coprocessor) - RefCell for interior mutability
+                  └── SuperFX/SuperFX2 (graphics coprocessor) - RefCell for interior mutability
 ```
 
 ### Key Files
@@ -280,7 +430,10 @@ SnesSystem
 - `src/bus.rs` - Memory bus with all hardware registers
 - `src/ppu.rs` - Complete PPU implementation (modes 0-7)
 - `src/ppu_renderer.rs` - Rendering backend
-- `src/cartridge.rs` - ROM loading and mapping
+- `src/cartridge.rs` - ROM loading, mapping, and enhancement chip integration
+- `src/coprocessors/mod.rs` - Enhancement chip framework and chip type detection
+- `src/coprocessors/dsp1.rs` - DSP-1 math coprocessor implementation
+- `src/coprocessors/superfx.rs` - SuperFX graphics coprocessor implementation
 
 ## Testing
 
@@ -304,9 +457,14 @@ Games known to work:
 - ✅ **F-Zero** - Now works with Mode 7 rotation/scaling
 - ⚠️ **Donkey Kong Country** - Graphics work (no audio)
 - 🔧 **Tales of Phantasia** - ExHiROM support implemented, should work (not tested)
-- ❌ **Super Mario RPG** - Requires SA-1 chip
-- ❌ **Star Fox** - Requires SuperFX chip
-- ❌ **Star Ocean** - Requires SDD-1 chip (different from ExHiROM)
+- ✅ **Pilotwings** - Should work with DSP-1 support (not tested)
+- ✅ **Super Mario Kart** - Should work with DSP-1 support (not tested)
+- 🔧 **Star Fox** - SuperFX chip implemented, should work (needs testing)
+- 🔧 **Yoshi's Island** - SuperFX2 chip implemented, should work (needs testing)
+- 🔧 **Doom** - SuperFX chip implemented, should work (needs testing)
+- ❌ **Super Mario RPG** - Requires SA-1 chip (not yet implemented)
+- ❌ **Star Ocean** - Requires S-DD1 chip (not yet implemented)
+- ❌ **Mega Man X2/X3** - Requires CX4 chip (not yet implemented)
 
 ## Development
 
@@ -342,6 +500,15 @@ cargo run -- game.sfc --log-bus debug
 2. **Timing** - Frame-based, not cycle-accurate
    - Good enough for most games
    - Some timing-sensitive effects may not work
+
+3. **Enhancement Chips** - Most chips not yet implemented
+   - DSP-1 is partially implemented with known limitations:
+     - Attitude command (0x08) incomplete - missing full rotation matrix
+     - Target command (0x20) not implemented
+     - Rotate command (0x24) not implemented
+   - SuperFX, SA-1, S-DD1, CX4, and other chips not yet implemented
+   - Games requiring unimplemented chips will not work properly
+   - See Enhancement Chip Roadmap section for planned implementations
 
 ## Additional Documentation
 

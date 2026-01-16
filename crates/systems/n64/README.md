@@ -66,6 +66,12 @@ The N64 emulator is a **basic implementation** with functional RDP graphics proc
 
 ### Recent Improvements (January 2026)
 
+- ✅ **Viewport Y-Axis Transformation Fix** (January 15, 2026) - Corrected viewport transformation in RSP HLE
+  - Fixed incorrect Y-axis calculation in `clip_to_screen` function
+  - Changed from `vp_y + (1.0 - ndc_y) * scale_y` to `vp_y + (ndc_y + 1.0) * scale_y`
+  - Aligns with N64 standard viewport transformation: `screen = vtrans + ndc * vscale`
+  - Fixes vertical positioning and orientation of rendered 3D triangles
+  - Added comprehensive viewport transformation tests
 - ✅ **TLB/MMU Integration** (January 13, 2026) - CP0 TLB instructions fully implemented and operational
   - **TLBWI** (TLB Write Indexed) - Write TLB entries at specific index
   - **TLBWR** (TLB Write Random) - Write TLB entries at random index  

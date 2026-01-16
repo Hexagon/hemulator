@@ -402,6 +402,30 @@ impl TabManager {
         self.pending_debug_action.take()
     }
 
+    /// Clear all debug and inspector state
+    ///
+    /// This prevents stale debug data from a previous system/ROM from being displayed
+    /// in inspector panels. Clears:
+    /// - CPU debug info (registers, flags)
+    /// - Enhanced debug state (disassembly, memory maps)
+    /// - System-specific tile/graphics data (NES CHR, GB tiles, etc.)
+    /// - PC BIOS data area information
+    /// - Cartridge metadata
+    /// - Memory viewer cache and position
+    ///
+    /// Call this when switching systems or loading a new ROM.
+    pub fn clear_debug_state(&mut self) {
+        self.debug_info = None;
+        self.enhanced_debug_state = None;
+        self.system_tile_data = None;
+        self.pc_bda_data = None;
+        self.cartridge_data = None;
+        self.cached_memory.clear();
+        self.cached_memory_start = 0;
+        self.selected_memory_region_index = 0;
+        self.memory_view_address = 0;
+    }
+
     pub fn ui(
         &mut self,
         ui: &mut Ui,
@@ -514,91 +538,42 @@ impl TabManager {
                     .fit_to_exact_size(egui::vec2(display_width, display_height));
                 ui.add(image);
             } else {
-                // Welcome screen when no ROM is loaded
+                // Welcome screen when no system is loaded
                 ui.vertical_centered(|ui| {
-                    ui.add_space(40.0);
+                    ui.add_space(60.0);
                     ui.heading(
                         egui::RichText::new("🎮 Welcome to Hemulator")
-                            .size(28.0)
+                            .size(32.0)
                             .strong(),
                     );
-                    ui.add_space(10.0);
+                    ui.add_space(15.0);
                     ui.label(
                         egui::RichText::new("Multi-System Console Emulator")
-                            .size(16.0)
+                            .size(18.0)
                             .weak(),
                     );
-                    ui.add_space(30.0);
+                    ui.add_space(50.0);
 
-                    // Quick start instructions
-                    ui.label(egui::RichText::new("Quick Start").size(18.0).strong());
-                    ui.add_space(10.0);
+                    // Simple call-to-action
+                    ui.label(egui::RichText::new("Get Started").size(22.0).strong());
+                    ui.add_space(20.0);
 
                     egui::Frame::new()
                         .fill(egui::Color32::from_rgb(30, 30, 30))
                         .corner_radius(8.0)
-                        .inner_margin(15.0)
+                        .inner_margin(20.0)
                         .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.label(egui::RichText::new("1.").strong().size(16.0));
-                                ui.label("Press F3 or use File → Open ROM to load a game");
-                            });
-                            ui.add_space(5.0);
-                            ui.horizontal(|ui| {
-                                ui.label(egui::RichText::new("2.").strong().size(16.0));
-                                ui.label("Or use File → New Project to create a new system");
-                            });
-                            ui.add_space(5.0);
-                            ui.horizontal(|ui| {
-                                ui.label(egui::RichText::new("3.").strong().size(16.0));
+                            ui.vertical_centered(|ui| {
+                                ui.label(egui::RichText::new("📁 File → New Project").size(16.0));
+                                ui.add_space(5.0);
                                 ui.label(
-                                    "Use the property pane on the right to configure settings",
+                                    egui::RichText::new("Create a new system or load a ROM").weak(),
                                 );
+                                ui.add_space(15.0);
+                                ui.label(egui::RichText::new("📁 File → Open Project").size(16.0));
+                                ui.add_space(5.0);
+                                ui.label(egui::RichText::new("Load a saved .hemu project").weak());
                             });
-                        });
-
-                    ui.add_space(20.0);
-
-                    // Keyboard shortcuts
-                    ui.label(
-                        egui::RichText::new("Keyboard Shortcuts")
-                            .size(18.0)
-                            .strong(),
-                    );
-                    ui.add_space(10.0);
-
-                    egui::Grid::new("shortcuts_grid")
-                        .num_columns(2)
-                        .spacing([20.0, 5.0])
-                        .striped(true)
-                        .show(ui, |ui| {
-                            ui.label(egui::RichText::new("F3").strong());
-                            ui.label("Open ROM");
-                            ui.end_row();
-
-                            ui.label(egui::RichText::new("F2").strong());
-                            ui.label("Reset system");
-                            ui.end_row();
-
-                            ui.label(egui::RichText::new("P").strong());
-                            ui.label("Pause/Resume");
-                            ui.end_row();
-
-                            ui.label(egui::RichText::new("F4").strong());
-                            ui.label("Take screenshot");
-                            ui.end_row();
-
-                            ui.label(egui::RichText::new("F11").strong());
-                            ui.label("Fullscreen");
-                            ui.end_row();
-
-                            ui.label(egui::RichText::new("F5-F9").strong());
-                            ui.label("Save state (slots 1-5)");
-                            ui.end_row();
-
-                            ui.label(egui::RichText::new("Shift+F5-F9").strong());
-                            ui.label("Load state (slots 1-5)");
-                            ui.end_row();
                         });
                 });
             }
@@ -1027,7 +1002,9 @@ impl TabManager {
 
             ui.add_space(10.0);
             ui.label("Click a system to create a new blank project.");
-            ui.label("After creating, load ROMs/disks via File > Open ROM.");
+            ui.label(
+                "After creating, use File → New Project → 🔍 Auto Detect from ROM... to load a ROM into your project.",
+            );
         });
     }
 
@@ -1049,77 +1026,38 @@ impl TabManager {
                 // File Operations
                 ui.heading(egui::RichText::new("📁 File Operations").strong());
                 ui.add_space(5.0);
-                egui::Grid::new("file_ops_grid")
-                    .num_columns(2)
-                    .spacing([15.0, 5.0])
-                    .striped(true)
-                    .show(ui, |ui| {
-                        ui.label(egui::RichText::new("F3").strong().monospace());
-                        ui.label("Open ROM or disk image");
-                        ui.end_row();
-
-                        ui.label(egui::RichText::new("ESC").strong().monospace());
-                        ui.label("Exit emulator");
-                        ui.end_row();
-                    });
+                ui.label("Use File → New Project to create a new system or load a ROM");
+                ui.label("Use File → Open Project to load a saved .hemu project");
                 ui.add_space(10.0);
 
                 // Emulation Control
                 ui.heading(egui::RichText::new("🎮 Emulation Control").strong());
                 ui.add_space(5.0);
-                egui::Grid::new("emulation_grid")
-                    .num_columns(2)
-                    .spacing([15.0, 5.0])
-                    .striped(true)
-                    .show(ui, |ui| {
-                        ui.label(egui::RichText::new("F2").strong().monospace());
-                        ui.label("Reset system");
-                        ui.end_row();
-
-                        ui.label(egui::RichText::new("P").strong().monospace());
-                        ui.label("Pause/Resume emulation");
-                        ui.end_row();
-                    });
+                ui.label("Use the Emulation menu to control emulation:");
+                ui.label("• Reset - Reset the emulated system");
+                ui.label("• Pause - Pause emulation");
+                ui.label("• Resume - Resume emulation");
+                ui.label("• Step - Step one instruction when paused");
                 ui.add_space(10.0);
 
                 // Save States
                 ui.heading(egui::RichText::new("💾 Save States").strong());
                 ui.add_space(5.0);
-                egui::Grid::new("save_states_grid")
-                    .num_columns(2)
-                    .spacing([15.0, 5.0])
-                    .striped(true)
-                    .show(ui, |ui| {
-                        ui.label(egui::RichText::new("F5-F9").strong().monospace());
-                        ui.label("Quick save to slots 1-5");
-                        ui.end_row();
-
-                        ui.label(egui::RichText::new("Shift+F5-F9").strong().monospace());
-                        ui.label("Quick load from slots 1-5");
-                        ui.end_row();
-                    });
+                ui.label("Use the Property Pane on the right to manage save states:");
+                ui.label("• 5 save slots available per game");
+                ui.label("• Save and Load buttons for each slot");
+                ui.label("• States are automatically saved to disk");
                 ui.add_space(10.0);
 
                 // View Options
                 ui.heading(egui::RichText::new("👁️ View Options").strong());
                 ui.add_space(5.0);
-                egui::Grid::new("view_grid")
-                    .num_columns(2)
-                    .spacing([15.0, 5.0])
-                    .striped(true)
-                    .show(ui, |ui| {
-                        ui.label(egui::RichText::new("F4").strong().monospace());
-                        ui.label("Take screenshot");
-                        ui.end_row();
-
-                        ui.label(egui::RichText::new("F11").strong().monospace());
-                        ui.label("Toggle fullscreen (no GUI)");
-                        ui.end_row();
-
-                        ui.label(egui::RichText::new("Host+F11").strong().monospace());
-                        ui.label("Toggle fullscreen (with GUI)");
-                        ui.end_row();
-                    });
+                ui.label("Use the View menu to control display settings:");
+                ui.label("• Scaling - Choose between Original, Fit, or Stretch");
+                ui.label("• Fullscreen - Toggle fullscreen mode");
+                ui.label("• Fullscreen with GUI - Toggle fullscreen with GUI visible");
+                ui.label("• Inspector - Toggle the Inspector panel");
+                ui.label("• Screenshot - Capture the current frame");
                 ui.add_space(10.0);
 
                 // Default Game Controls

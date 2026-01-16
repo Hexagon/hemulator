@@ -99,6 +99,11 @@ impl EguiApp {
         self.menu_bar.set_recent_files(recent_files);
     }
 
+    /// Update whether a system is currently loaded
+    pub fn set_system_loaded(&mut self, loaded: bool) {
+        self.menu_bar.set_system_loaded(loaded);
+    }
+
     /// Render the UI
     pub fn ui(&mut self, ctx: &Context, scaling_mode: ScalingMode) {
         // Set brighter text color globally
