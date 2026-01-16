@@ -300,7 +300,9 @@ impl GbBus {
 
         // Destination: HDMA3:HDMA4 + 0x8000, lower 4 bits of HDMA4 are ignored
         // Destination is always in VRAM (0x8000-0x9FFF)
-        let dest = 0x8000 | (((self.hdma3 as u16) << 8) | ((self.hdma4 as u16) & 0xF0)) & 0x1FFF;
+        // HDMA3 is pre-masked to 0x1F (bits 0-4) during write, so the final address
+        // is automatically in the 0x8000-0x9FFF range
+        let dest = 0x8000 | (((self.hdma3 as u16) << 8) | ((self.hdma4 as u16) & 0xF0));
 
         self.hdma_source = source;
         self.hdma_dest = dest;
