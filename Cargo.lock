@@ -976,6 +976,7 @@ dependencies = [
 name = "emu_snes"
 version = "0.1.0"
 dependencies = [
+ "crc32fast",
  "emu_core",
  "serde",
  "serde-big-array",
