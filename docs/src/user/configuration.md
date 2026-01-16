@@ -31,10 +31,10 @@ Located in the same directory as the executable, this file stores your preferenc
     "player1": {
       "a": "Z",
       "b": "X",
-      "x": "",
-      "y": "",
-      "l": "",
-      "r": "",
+      "x": "A",
+      "y": "S",
+      "l": "Q",
+      "r": "W",
       "select": "LeftShift",
       "start": "Enter",
       "up": "Up",
@@ -45,10 +45,10 @@ Located in the same directory as the executable, this file stores your preferenc
     "player2": {
       "a": "U",
       "b": "O",
-      "x": "",
-      "y": "",
-      "l": "",
-      "r": "",
+      "x": "Y",
+      "y": "H",
+      "l": "T",
+      "r": "R",
       "select": "RightShift",
       "start": "P",
       "up": "I",
@@ -83,6 +83,25 @@ Located in the same directory as the executable, this file stores your preferenc
 - Adjust `mouse_sensitivity` to control mouse movement speed (default: 1.0)
 - Change `video_backend` to `"opengl"` for hardware-accelerated rendering
 - Set `display_filter` to `"Scanlines"`, `"Phosphor"`, or `"CRTMonitor"` for visual effects
+
+**Default Button Mappings**:
+
+**Player 1** (designed for right-handed play with arrow keys):
+- **Action buttons**: Z (A), X (B), A (X), S (Y)
+- **Shoulder buttons**: Q (L), W (R)
+- **D-pad**: Arrow keys
+- **System buttons**: Left Shift (Select), Enter (Start)
+
+**Player 2** (designed for two-player games):
+- **Action buttons**: U (A), O (B), Y (X), H (Y)
+- **Shoulder buttons**: T (L), R (R)
+- **D-pad**: I (Up), K (Down), J (Left), L (Right)
+- **System buttons**: Right Shift (Select), P (Start)
+
+These mappings work for all systems:
+- **NES/Game Boy**: Uses A, B, Select, Start, and D-pad
+- **SNES**: Uses all buttons including X, Y, L, R
+- **Other systems**: May use subsets of these buttons
 
 **Advanced Input Configuration with Controller Profiles**:
 
