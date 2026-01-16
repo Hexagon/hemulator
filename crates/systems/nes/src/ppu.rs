@@ -4290,7 +4290,7 @@ mod tests {
         // Set position to scanline 241, dot 0 (just before VBlank event)
         ppu.scanline.set(241);
         ppu.dot.set(0);
-        assert_eq!(ppu.vblank_flag(), true, "VBlank still set from power-on at 241,0");
+        assert!(ppu.vblank_flag(), "VBlank still set from power-on at 241,0");
         
         // Tick: position advances from (241,0) to (241,1), no event yet
         ppu.tick();
