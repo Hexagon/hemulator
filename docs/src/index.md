@@ -19,7 +19,6 @@ Hemulator is a modern, modular emulator supporting multiple classic gaming syste
 
 - **[Download & Install](download.md)** - Get the latest release for Windows or Linux
 - **[User Manual](user/index.md)** - Getting started, controls, features, and system-specific information
-- **[System Guides](systems/index.md)** - Detailed information about each emulated system
 
 **Get Help & Contribute**:
 - **[🐛 Report a Bug](https://github.com/Hexagon/hemulator/issues/new?template=bug_report.yml)** - Found a problem? Let us know!
@@ -44,7 +43,7 @@ Hemulator is a modern, modular emulator supporting multiple classic gaming syste
 
 ## Features
 
-- 🎮 **Multiple Systems**: NES, Game Boy, Atari 2600, SNES, N64, SMS, ColecoVision, SG-1000, CHIP-8, PC/DOS - [See all systems](systems/index.md)
+- 🎮 **Multiple Systems**: NES, Game Boy, Atari 2600, SNES, N64, SMS, ColecoVision, SG-1000, CHIP-8, PC/DOS - [See all systems](user/systems.md)
 - 💾 **Save States**: 5 slots per game with instant save/load
 - ⚙️ **Persistent Settings**: Customizable controls and window scaling
 - 🖥️ **Cross-Platform**: Windows, Linux, and macOS support

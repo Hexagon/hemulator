@@ -178,18 +178,18 @@ A-Z, Space, Enter, LeftShift, RightShift, LeftCtrl, RightCtrl, Up, Down, Left, R
 
 **Mount Points**: The emulator supports multiple media slots per system. Each system defines mount points (e.g., NES has "Cartridge", PC has "BIOS", "FloppyA", "FloppyB", "HardDrive"). 
 
-When you press **F3** (Select Mount Points):
+When you use **File → Mount Points**:
 - A mount point selector always appears showing all available slots for the current system
 - Select a slot (1-9) to open a file browser for that mount point
 - Even single-mount systems (NES, Game Boy) show the selector for consistency
 
 **Project Files (.hemu)**: Project files save your complete setup including mounts, display settings, and input configuration:
-- **F7** (Load Project): Load a `.hemu` project file
+- **File → Open Project**: Load a `.hemu` project file
   - Restores all mount points
   - Applies display settings (window size, CRT filter)
   - Can override input key mappings per-project
   - Works for all systems (NES, PC, Game Boy, etc.)
-- **F8** (Save Project): Save current configuration to `.hemu` file
+- **File → Save Project**: Save current configuration to `.hemu` file
   - Saves only relevant mount points for the system
   - Saves current window size and CRT filter settings
   - Can be used by all systems, not just PC
@@ -205,20 +205,20 @@ When you press **F3** (Select Mount Points):
 Save states are stored in `saves/<rom_hash>/states.json`:
 - Each game gets its own directory based on ROM hash
 - 5 slots available per game
-- **F5** opens the save slot selector - press 1-5 to select a slot (only for console systems)
-- **F6** opens the load slot selector - press 1-5 to select a slot (shows which slots have saves)
+- Use **State → Save State** menu to save - select slot 1-5 (only for console systems)
+- Use **State → Load State** menu to load - select slot 1-5 (shows which slots have saves)
 - States are portable and can be backed up or transferred between systems
 - **Important**: Save states do NOT include ROM/cartridge data - they only save emulator state
 - The emulator verifies that the correct ROM is loaded before allowing state load
 - If you try to load a state with a different ROM mounted, you'll get an error
 
 **Save State Support by System**:
-- **NES**: Fully supported - save and load states with F5-F6 when a cartridge is loaded
-- **Atari 2600**: Fully supported - save and load states with F5-F6
-- **Game Boy**: Fully supported - save and load states with F5-F6
+- **NES**: Fully supported - save and load states via State menu when a cartridge is loaded
+- **Atari 2600**: Fully supported - save and load states via State menu
+- **Game Boy**: Fully supported - save and load states via State menu
 - **PC/DOS**: Not supported - PC systems use **Project files** (.hemu) instead
-  - **F8** saves the current VM configuration to a `.hemu` project file
-  - **F7** loads a `.hemu` project file to restore all settings
+  - **File → Save Project** saves the current VM configuration to a `.hemu` project file
+  - **File → Open Project** loads a `.hemu` project file to restore all settings
   - VM files include all mounted disk images, BIOS, and boot priority settings
   - Disk state is preserved in the disk image files themselves (as in a real PC)
   - This approach matches how real PCs work - state persists on disks, not in memory snapshots

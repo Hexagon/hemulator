@@ -17,6 +17,5 @@ Welcome to Hemulator, a cross-platform multi-system console emulator supporting 
 - **[Supported Systems](systems.md)** - NES, Game Boy, Atari 2600, SNES, N64, SMS, CHIP-8, PC/DOS
 - **[Advanced Features](advanced.md)** - Command-line debugging and tracing tools
 - **[Troubleshooting](troubleshooting.md)** - Common issues and solutions
-- **[Additional Information](additional.md)** - Legal notice, support, and getting help
 
 **For Developers**: See [Developer Manual](../developer/) for build instructions, architecture details, and implementation specifics.
