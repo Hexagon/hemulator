@@ -2,7 +2,7 @@
 title: "Download & Install"
 description: "Download Hemulator - Multi-system console emulator for Windows and Linux. Get the latest release and start playing retro games."
 keywords: "download hemulator, install emulator, hemulator releases, windows emulator, linux emulator"
-nav_order: 3
+nav_order: 2
 ---
 
 # Download & Install

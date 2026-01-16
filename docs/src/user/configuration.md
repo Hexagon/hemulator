@@ -6,20 +6,23 @@ nav_order: 3
 
 # Configuration
 
-## Debug Information (F10)
+## Inspector Panel
 
-When a ROM is loaded, press **F10** to display the debug information overlay.
+The Inspector is a dockable panel at the bottom of the window that provides debugging tools and system information. Toggle it with **View → Inspector** from the menu.
 
-**For NES games**, this shows:
-- **Mapper**: The cartridge mapper number and name
-- **PRG**: Number of PRG ROM banks (16KB each)
-- **CHR**: Number of CHR ROM banks (8KB each) or "RAM" if using CHR-RAM
-- **Timing**: NTSC or PAL timing mode (auto-detected from ROM header)
-- **FPS**: Current frame rate
+The Inspector provides several tabs with debugging information:
 
-**For Atari 2600 games**, debug information is currently limited. Future versions will show cartridge banking information.
+**Generic Tabs** (available for all systems):
+- **Log**: Live message capture with level controls (error, warn, info, debug, trace)
+- **Debug**: CPU state, memory viewer, disassembly (3-panel comprehensive view)
+- **Memory**: Memory regions and hex dump viewer
 
-This information is useful for troubleshooting compatibility issues or understanding ROM specifications.
+**System-Specific Tabs** (automatically shown based on loaded ROM):
+- **NES**: Tiles, Palettes, Nametables
+- **PC**: BDA/EBDA (BIOS Data Area)
+- Additional tabs appear for other systems as appropriate
+
+The Inspector helps with troubleshooting compatibility issues, understanding ROM specifications, and debugging emulation behavior.
 
 ### Settings File (`config.json`)
 

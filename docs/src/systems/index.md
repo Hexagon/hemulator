@@ -17,6 +17,8 @@ Hemulator supports multiple classic gaming systems. Each system has its own impl
 | [Game Boy](#game-boy) | ✅ Fully Functional | LR35902 | PPU | APU | ~99% of games |
 | [CHIP-8](#chip-8) | ✅ Fully Working | VM | Multi-mode | Beep | Complete |
 | [SMS](#sega-master-system) | ✅ Functional | Z80 | VDP | PSG | Testing needed |
+| [ColecoVision](#colecovision) | ✅ Functional | Z80 | TMS9918A | SN76489 | Testing needed |
+| [SG-1000](#sg-1000) | ✅ Functional | Z80 | TMS9918A | SN76489 | Testing needed |
 | [Atari 2600](#atari-2600) | 🚧 In Development | 6502 | TIA | TIA | Rendering WIP |
 | [PC/DOS](#pcdos) | ⚠️ Experimental | 8086-80386 | CGA/EGA/VGA | ❌ | Basic support |
 | [SNES](#snes) | 🚧 In Development | 65C816 | PPU | SPC700 | No audio output |
@@ -84,6 +86,37 @@ Hemulator supports multiple classic gaming systems. Each system has its own impl
 - Full VDP implementation
 - Complete PSG (SN76489) audio
 - Cartridge banking support
+- Save state support
+
+### ColecoVision
+
+**ColecoVision** - Functional with full hardware emulation, needs game testing.
+
+- **Architecture**: [ColecoVision README](https://github.com/Hexagon/hemulator/blob/master/crates/systems/colecovision/README.md)
+- **Status**: Functional
+- **Supported Formats**: .col
+
+**Key Features**:
+- Complete Z80 CPU (3.579545 MHz)
+- TMS9918A VDP with 4 graphics modes
+- SN76489 PSG audio chip
+- 32 hardware sprites with collision detection
+- 8 KB BIOS ROM support (required)
+- Save state support
+
+### SG-1000
+
+**Sega SG-1000** - Functional with full hardware emulation, needs game testing.
+
+- **Architecture**: [SG-1000 README](https://github.com/Hexagon/hemulator/blob/master/crates/systems/sg1000/README.md)
+- **Status**: Functional
+- **Supported Formats**: .sg, .sc
+
+**Key Features**:
+- Complete Z80 CPU (3.579545 MHz)
+- TMS9918A VDP (shared with ColecoVision)
+- SN76489 PSG audio chip
+- No BIOS required (boots directly from cartridge)
 - Save state support
 
 ### Atari 2600

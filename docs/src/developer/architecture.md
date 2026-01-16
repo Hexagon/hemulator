@@ -70,7 +70,7 @@ Each system (`crates/systems/*/`) combines:
 - Cartridge/ROM management
 
 **System Documentation**:
-- [System Overview](../systems/) - Status and features for each system
+- [System Overview](../systems/index.md) - Status and features for each system
 - Individual system READMEs in `crates/systems/*/README.md`
 
 ## Key Design Patterns
@@ -104,5 +104,5 @@ Please refer to the **[complete ARCHITECTURE.md](https://github.com/Hexagon/hemu
 
 **Related Documentation**:
 - [Contributing Guide](contributing.md) - Development workflow
-- [System Documentation](../systems/) - Individual system details
-- [CPU References](../references/) - CPU implementation references
+- [System Documentation](../systems/index.md) - Individual system details
+- [CPU References](../references/index.md) - CPU implementation references
