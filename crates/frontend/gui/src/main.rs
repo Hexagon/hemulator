@@ -3478,6 +3478,9 @@ fn main() {
                             nes_db_mapper_override: cart_info.db_mapper_override,
                             nes_db_mirroring_override: cart_info.db_mirroring_override,
                             nes_board_name: cart_info.board_name,
+                            snes_has_smc_header: None,
+                            snes_mapping_mode: None,
+                            snes_chip_type: None,
                         };
                         egui_app.tab_manager.update_cartridge_data(cart_data);
                     }
@@ -3530,6 +3533,32 @@ fn main() {
                         screen_enabled: snes_data.screen_enabled,
                     });
                     egui_app.tab_manager.update_system_tile_data(tile_data);
+
+                    // Update cartridge info
+                    if let Some(cart_info) = s.get_cartridge_info() {
+                        let cart_data = egui_ui::CartridgeData {
+                            system_name: "SNES".to_string(),
+                            crc32: cart_info.crc32,
+                            rom_size: cart_info.rom_size,
+                            nes_mapper: None,
+                            nes_submapper: None,
+                            nes_mapper_name: None,
+                            nes_mirroring: None,
+                            nes_timing: None,
+                            nes_prg_size: None,
+                            nes_chr_size: None,
+                            nes_header_mapper: None,
+                            nes_header_submapper: None,
+                            nes_header_mirroring: None,
+                            nes_db_mapper_override: false,
+                            nes_db_mirroring_override: false,
+                            nes_board_name: None,
+                            snes_has_smc_header: Some(cart_info.has_smc_header),
+                            snes_mapping_mode: Some(cart_info.mapping_mode),
+                            snes_chip_type: Some(cart_info.chip_type),
+                        };
+                        egui_app.tab_manager.update_cartridge_data(cart_data);
+                    }
                 }
                 EmulatorSystem::Atari2600(s) => {
                     if let Some(inspector_data) = s.get_inspector_data() {

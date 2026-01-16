@@ -54,6 +54,11 @@ pub struct CartridgeData {
     pub nes_db_mapper_override: bool,
     pub nes_db_mirroring_override: bool,
     pub nes_board_name: Option<String>,
+
+    // SNES-specific fields (optional, only populated for SNES)
+    pub snes_has_smc_header: Option<bool>,
+    pub snes_mapping_mode: Option<String>,
+    pub snes_chip_type: Option<String>,
 }
 
 /// NES tile viewer data

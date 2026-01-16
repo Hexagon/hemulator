@@ -82,6 +82,21 @@ pub struct TileViewerData {
     pub screen_enabled: bool,
 }
 
+/// Cartridge information for the inspector tab
+#[derive(Debug, Clone)]
+pub struct CartridgeInfo {
+    /// CRC32 checksum of the ROM file
+    pub crc32: u32,
+    /// ROM size in bytes
+    pub rom_size: usize,
+    /// Whether the ROM has an SMC header
+    pub has_smc_header: bool,
+    /// Mapping mode (LoROM, HiROM, or ExHiROM)
+    pub mapping_mode: String,
+    /// Enhancement chip type
+    pub chip_type: String,
+}
+
 /// SNES system implementation
 pub struct SnesSystem {
     cpu: SnesCpu,
@@ -94,6 +109,8 @@ pub struct SnesSystem {
     pub(crate) instruction_tracer: emu_core::instruction_tracer::InstructionTracer,
     /// Breakpoint manager for debugging
     pub(crate) breakpoint_manager: emu_core::breakpoints::BreakpointManager,
+    /// Cartridge information cache (populated when cartridge is mounted)
+    cartridge_info: Option<CartridgeInfo>,
 }
 
 // SNES timing constants (NTSC)
@@ -113,6 +130,7 @@ impl SnesSystem {
             renderer: Box::new(SoftwareSnesPpuRenderer::new()),
             instruction_tracer: emu_core::instruction_tracer::InstructionTracer::new(),
             breakpoint_manager: emu_core::breakpoints::BreakpointManager::new(),
+            cartridge_info: None,
         }
     }
 
@@ -175,6 +193,11 @@ impl SnesSystem {
     /// Get tile viewer data for debugging
     pub fn get_tile_viewer_data(&self) -> TileViewerData {
         self.cpu.bus().ppu().get_tile_viewer_data()
+    }
+
+    /// Get cartridge information for the inspector tab
+    pub fn get_cartridge_info(&self) -> Option<CartridgeInfo> {
+        self.cartridge_info.clone()
     }
 }
 
@@ -405,7 +428,26 @@ impl System for SnesSystem {
         log(LogCategory::Bus, LogLevel::Info, || {
             format!("SNES: Mounting cartridge ({} bytes)", data.len())
         });
+
+        // Load the cartridge first
         self.cpu.bus_mut().load_cartridge(data)?;
+
+        // Calculate CRC32 checksum
+        let crc32 = crc32fast::hash(data);
+
+        // Get cartridge information from the bus
+        let bus = self.cpu.bus();
+        let cart_info = CartridgeInfo {
+            crc32,
+            rom_size: bus.get_rom_size(),
+            has_smc_header: bus.has_smc_header(),
+            mapping_mode: bus.get_mapping_mode(),
+            chip_type: bus.get_chip_type(),
+        };
+
+        // Store cartridge info for inspector
+        self.cartridge_info = Some(cart_info);
+
         self.reset();
         Ok(())
     }
@@ -422,6 +464,7 @@ impl System for SnesSystem {
             "SNES: Unmounting cartridge".to_string()
         });
         self.cpu.bus_mut().unload_cartridge();
+        self.cartridge_info = None;
         Ok(())
     }
 
