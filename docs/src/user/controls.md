@@ -76,7 +76,6 @@ When running PC/DOS programs, the emulator provides full keyboard passthrough by
 
 To access emulator controls while running a PC program, hold the **Right Ctrl** key (the host modifier) while pressing function keys or using shortcuts. For example:
 - **Right Ctrl + F4**: Take screenshot
-- **Right Ctrl + F10**: Toggle debug info
 - **Right Ctrl + Ctrl+P**: Pause/Resume
 - **Right Ctrl + Esc**: Exit the emulator
 
@@ -124,7 +123,7 @@ The emulator features a menu bar at the top and a status bar at the bottom of th
 
 **View Menu:**
 - Take Screenshot (F4) - Capture current frame to PNG
-- Debug Info (F10) - Toggle debug overlay
+- Inspector - Toggle Inspector panel with debugging tools
 - CRT Filter (F11) - Cycle through CRT filter options
 - Start/Stop Logging - Enable/disable debug logging to log.txt
 
@@ -147,7 +146,6 @@ Modern keyboard shortcuts for common actions:
 | Ctrl+Shift+1-5 | Load State (slots 1-5) |
 | F1 | Help Overlay |
 | F4 | Screenshot |
-| F10 | Debug Info |
 | F11 | CRT Filter |
 | Esc | Exit/Close |
 

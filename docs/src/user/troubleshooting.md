@@ -34,7 +34,7 @@ nav_order: 7
 ### Settings not saving
 - Verify you have write permissions in the emulator directory
 - Check that `config.json` isn't marked as read-only
-- Settings save automatically when changed (e.g., F11 for CRT filter, F3 for ROM)
+- Settings save automatically when changed (e.g., View → CRT Filter, File → Open ROM)
 
 ### Save states not working
 - Ensure you've loaded a ROM first
@@ -42,7 +42,7 @@ nav_order: 7
 - Check file system permissions in the emulator directory
 
 ### Performance issues
-- Try disabling CRT filters (F11 to cycle to "None")
+- Try disabling CRT filters (View → CRT Filter to cycle to "None")
 - Close other resource-intensive applications
 - Ensure your graphics drivers are up to date
 

@@ -124,7 +124,7 @@ The emulator supports the following cartridge banking schemes:
 - 16-key hexadecimal keypad
 - Sound and delay timers (60Hz)
 - 16-level stack for subroutines
-- Save states (F5-F9) with mode and resolution preservation
+- Save states with mode and resolution preservation (State → Save State menu)
 - Runs at ~700 instructions per second (original CHIP-8 speed)
 
 **Keyboard Layout**: The 16-key CHIP-8 hex keypad is mapped to QWERTY:
@@ -227,7 +227,7 @@ For more technical information, see [crates/systems/chip8/README.md](../crates/s
 - VBlank and Timer interrupts
 - **Audio**: Full APU with 4 sound channels (Pulse 1/2, Wave, Noise)
 - Audio integrated with frontend (44.1 kHz stereo output)
-- Save states (F5-F9)
+- Save states (State → Save State menu)
 - Frame-based timing (~59.73 Hz)
 
 **Known Limitations**:
@@ -739,11 +739,11 @@ For N64 games, the standard controller mappings apply with these button equivale
   - Boot sector loading with boot priority (floppy first, hard drive first, etc.)
 - **CGA video** (640x400 text mode)
 - **Keyboard input** with full passthrough
-- **Virtual Machine State Saving**: PC systems use F8 to save VM configuration
+- **Virtual Machine State Saving**: PC systems use File → Save Project to save VM configuration
   - Instead of save states, PC mode saves the current VM configuration to a `.hemu` project file
   - Includes all mounted disk images, BIOS, boot priority settings, CPU model, memory size, and video mode
-  - Press F8 to open a save dialog and choose where to save the VM file
-  - Load the VM file later via F3 to restore all mount points and configuration
+  - Use File → Save Project to open a save dialog and choose where to save the VM file
+  - Load the VM file later via File → Open Project to restore all mount points and configuration
   - Disk state is preserved in the disk image files themselves (as in a real PC)
 
 **Virtual PC Configuration (.hemu files)**:
@@ -818,12 +818,12 @@ Example configuration file:
 **Creating .hemu Files**:
 
 1. **Manual Creation**: Create a text file with the JSON structure above
-2. **Save from GUI**: Press F8 while running a PC system to save current configuration
+2. **Save from GUI**: Use File → Save Project while running a PC system to save current configuration
 3. **Edit Existing**: Open any .hemu file in a text editor and modify the settings
 
 **Loading .hemu Files**:
 
-1. Press F3 in the emulator
+1. Use File → Open Project in the emulator
 2. Select your `.hemu` file
 3. All disks will be mounted and configuration will be applied
 4. System will reset and boot with the configured settings
@@ -833,8 +833,8 @@ Example configuration file:
 
 There are two ways to mount disk images and BIOS:
 
-1. **GUI Method** (F3 key):
-   - Press F3 to open mount point selector
+1. **GUI Method** (File → Mount Points):
+   - Use File → Mount Points to open mount point selector
    - Select the desired slot (BIOS, FloppyA, FloppyB, or HardDrive)
    - Choose the file to mount
 

@@ -270,7 +270,7 @@ Expected performance: **~60 FPS** (usable for development and testing)
 When working on performance-sensitive code (CPU emulation, PPU rendering, mapper logic):
 
 1. Always test with `--release` for accurate performance measurements
-2. Use the debug overlay (F10) to monitor FPS in real-time
+2. Use the Inspector panel (View → Inspector) to monitor FPS in real-time
 3. Profile with `cargo flamegraph` or `perf` if investigating specific hotspots
 4. Ensure changes don't significantly impact frame times
 
