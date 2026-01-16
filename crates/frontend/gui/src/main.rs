@@ -1697,6 +1697,22 @@ fn create_atari2600_system(_settings: &Settings) -> emu_atari2600::Atari2600Syst
     emu_atari2600::Atari2600System::new()
 }
 
+/// Helper to configure UI state after system creation
+/// This consolidates common state updates that happen for all systems
+fn configure_system_ui(
+    egui_app: &mut egui_ui::EguiApp,
+    sys: &EmulatorSystem,
+    system_name: &str,
+    rom_loaded: &mut bool,
+    status_message: &str,
+) {
+    *rom_loaded = true;
+    egui_app.property_pane.system_name = system_name.to_string();
+    egui_app.property_pane.rendering_backend = sys.get_current_renderer_name();
+    egui_app.property_pane.available_renderers = sys.get_available_renderers();
+    egui_app.status_bar.set_message(status_message.to_string());
+}
+
 /// Helper function to create EnhancedDebugState from a Debugger
 fn create_enhanced_debug_state(
     system_name: &str,
@@ -3647,152 +3663,126 @@ fn main() {
                             let gl_ctx = egui_backend.gl_context();
                             let nes_sys = create_nes_system(&settings.video_backend, gl_ctx);
                             sys = EmulatorSystem::NES(Box::new(nes_sys));
-                            rom_loaded = true;
-                            egui_app.property_pane.system_name = "NES".to_string();
-                            egui_app.property_pane.rendering_backend =
-                                sys.get_current_renderer_name();
-                            egui_app.property_pane.available_renderers =
-                                sys.get_available_renderers();
-                            egui_app.set_system_loaded(true);
-                            egui_app
-                                .status_bar
-                                .set_message("Created new NES system".to_string());
+                            configure_system_ui(
+                                &mut egui_app,
+                                &sys,
+                                "NES",
+                                &mut rom_loaded,
+                                "Created new NES system",
+                            );
                         }
                         "Game Boy" => {
                             sys = EmulatorSystem::GameBoy(Box::new(emu_gb::GbSystem::new()));
-                            rom_loaded = true;
-                            egui_app.property_pane.system_name = "Game Boy".to_string();
-                            egui_app.property_pane.rendering_backend =
-                                sys.get_current_renderer_name();
-                            egui_app.property_pane.available_renderers =
-                                sys.get_available_renderers();
-                            egui_app.set_system_loaded(true);
-                            egui_app
-                                .status_bar
-                                .set_message("Created new Game Boy system".to_string());
+                            configure_system_ui(
+                                &mut egui_app,
+                                &sys,
+                                "Game Boy",
+                                &mut rom_loaded,
+                                "Created new Game Boy system",
+                            );
                         }
                         "Atari 2600" => {
                             sys = EmulatorSystem::Atari2600(Box::new(create_atari2600_system(
                                 &settings,
                             )));
-                            rom_loaded = true;
-                            egui_app.property_pane.system_name = "Atari 2600".to_string();
-                            egui_app.property_pane.rendering_backend =
-                                sys.get_current_renderer_name();
-                            egui_app.property_pane.available_renderers =
-                                sys.get_available_renderers();
-                            egui_app.set_system_loaded(true);
-                            egui_app
-                                .status_bar
-                                .set_message("Created new Atari 2600 system".to_string());
+                            configure_system_ui(
+                                &mut egui_app,
+                                &sys,
+                                "Atari 2600",
+                                &mut rom_loaded,
+                                "Created new Atari 2600 system",
+                            );
                         }
                         "SMS" => {
                             sys = EmulatorSystem::SMS(Box::new(emu_sms::SmsSystem::new()));
-                            rom_loaded = true;
-                            egui_app.property_pane.system_name = "SMS".to_string();
-                            egui_app.property_pane.rendering_backend =
-                                sys.get_current_renderer_name();
-                            egui_app.property_pane.available_renderers =
-                                sys.get_available_renderers();
-                            egui_app.set_system_loaded(true);
-                            egui_app
-                                .status_bar
-                                .set_message("Created new SMS system".to_string());
+                            configure_system_ui(
+                                &mut egui_app,
+                                &sys,
+                                "SMS",
+                                &mut rom_loaded,
+                                "Created new SMS system",
+                            );
                         }
                         "ColecoVision" => {
                             sys = EmulatorSystem::ColecoVision(Box::new(
                                 emu_colecovision::ColecoVisionSystem::new(),
                             ));
-                            rom_loaded = true;
-                            egui_app.property_pane.system_name = "ColecoVision".to_string();
-                            egui_app.property_pane.rendering_backend =
-                                sys.get_current_renderer_name();
-                            egui_app.property_pane.available_renderers =
-                                sys.get_available_renderers();
-                            egui_app.set_system_loaded(true);
-                            egui_app
-                                .status_bar
-                                .set_message("Created new ColecoVision system".to_string());
+                            configure_system_ui(
+                                &mut egui_app,
+                                &sys,
+                                "ColecoVision",
+                                &mut rom_loaded,
+                                "Created new ColecoVision system",
+                            );
                         }
                         "SG-1000" => {
                             sys = EmulatorSystem::SG1000(Box::new(emu_sg1000::Sg1000System::new()));
-                            rom_loaded = true;
-                            egui_app.property_pane.system_name = "SG-1000".to_string();
-                            egui_app.property_pane.rendering_backend =
-                                sys.get_current_renderer_name();
-                            egui_app.property_pane.available_renderers =
-                                sys.get_available_renderers();
-                            egui_app.set_system_loaded(true);
-                            egui_app
-                                .status_bar
-                                .set_message("Created new SG-1000 system".to_string());
+                            configure_system_ui(
+                                &mut egui_app,
+                                &sys,
+                                "SG-1000",
+                                &mut rom_loaded,
+                                "Created new SG-1000 system",
+                            );
                         }
                         "CHIP-8" => {
                             sys = EmulatorSystem::Chip8(Box::new(emu_chip8::Chip8System::new()));
-                            rom_loaded = true;
-                            egui_app.property_pane.system_name = "CHIP-8".to_string();
-                            egui_app.property_pane.rendering_backend =
-                                sys.get_current_renderer_name();
-                            egui_app.property_pane.available_renderers =
-                                sys.get_available_renderers();
-                            egui_app.set_system_loaded(true);
-                            egui_app
-                                .status_bar
-                                .set_message("Created new CHIP-8 system".to_string());
+                            configure_system_ui(
+                                &mut egui_app,
+                                &sys,
+                                "CHIP-8",
+                                &mut rom_loaded,
+                                "Created new CHIP-8 system",
+                            );
                         }
                         "SNES" => {
                             sys = EmulatorSystem::SNES(Box::new(emu_snes::SnesSystem::new()));
-                            rom_loaded = true;
-                            egui_app.property_pane.system_name = "SNES".to_string();
-                            egui_app.property_pane.rendering_backend =
-                                sys.get_current_renderer_name();
-                            egui_app.property_pane.available_renderers =
-                                sys.get_available_renderers();
-                            egui_app.set_system_loaded(true);
-                            egui_app
-                                .status_bar
-                                .set_message("Created new SNES system".to_string());
+                            configure_system_ui(
+                                &mut egui_app,
+                                &sys,
+                                "SNES",
+                                &mut rom_loaded,
+                                "Created new SNES system",
+                            );
                         }
                         "N64" => {
                             let gl_ctx = egui_backend.gl_context();
                             match create_n64_system(gl_ctx, &settings) {
                                 Ok(n64_sys) => {
                                     sys = EmulatorSystem::N64(Box::new(n64_sys));
-                                    rom_loaded = true;
-                                    egui_app.property_pane.system_name = "N64".to_string();
-                                    egui_app.property_pane.rendering_backend =
-                                        sys.get_current_renderer_name();
-                                    egui_app.property_pane.available_renderers =
-                                        sys.get_available_renderers();
-                                    egui_app.set_system_loaded(true);
-                                    egui_app
-                                        .status_bar
-                                        .set_message("Created new N64 system".to_string());
+                                    configure_system_ui(
+                                        &mut egui_app,
+                                        &sys,
+                                        "N64",
+                                        &mut rom_loaded,
+                                        "Created new N64 system",
+                                    );
                                 }
                                 Err(e) => {
                                     egui_app
                                         .status_bar
-                                        .set_message(format!("Failed to create N64 system: {}", e));
+                                        .set_error(format!("Failed to create N64 system: {}", e));
+                                    // Ensure rom_loaded stays false on error
+                                    // (already set to false at line 3637)
                                 }
                             }
                         }
                         "PC" => {
                             sys = EmulatorSystem::PC(Box::new(emu_pc::PcSystem::new()));
-                            rom_loaded = true;
-                            egui_app.property_pane.system_name = "PC".to_string();
-                            egui_app.property_pane.rendering_backend =
-                                sys.get_current_renderer_name();
-                            egui_app.property_pane.available_renderers =
-                                sys.get_available_renderers();
-                            egui_app.set_system_loaded(true);
-                            egui_app
-                                .status_bar
-                                .set_message("Created new PC system".to_string());
+                            configure_system_ui(
+                                &mut egui_app,
+                                &sys,
+                                "PC",
+                                &mut rom_loaded,
+                                "Created new PC system",
+                            );
                         }
                         _ => {
                             egui_app
                                 .status_bar
                                 .set_error(format!("Unknown system: {}", system_name));
+                            // Ensure rom_loaded stays false for unknown systems
+                            // (already set to false at line 3637)
                         }
                     }
                 }

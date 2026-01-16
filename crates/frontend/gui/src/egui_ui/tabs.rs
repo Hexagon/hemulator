@@ -403,7 +403,17 @@ impl TabManager {
     }
 
     /// Clear all debug and inspector state
-    /// Call this when switching systems or loading a new ROM
+    ///
+    /// This prevents stale debug data from a previous system/ROM from being displayed
+    /// in inspector panels. Clears:
+    /// - CPU debug info (registers, flags)
+    /// - Enhanced debug state (disassembly, memory maps)
+    /// - System-specific tile/graphics data (NES CHR, GB tiles, etc.)
+    /// - PC BIOS data area information
+    /// - Cartridge metadata
+    /// - Memory viewer cache and position
+    ///
+    /// Call this when switching systems or loading a new ROM.
     pub fn clear_debug_state(&mut self) {
         self.debug_info = None;
         self.enhanced_debug_state = None;
