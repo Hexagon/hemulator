@@ -270,6 +270,20 @@ mod tests {
     }
 
     #[test]
+    fn test_keyboard_player2() {
+        let profile = ControllerProfile::keyboard_player2();
+        assert_eq!(profile.name, "Keyboard (Player 2)");
+        assert_eq!(profile.device_type, Some(InputDeviceType::Keyboard));
+        assert!(profile.mappings.contains_key(&VirtualButton::A));
+        assert!(profile.mappings.contains_key(&VirtualButton::Up));
+        // Verify x, y, l, r buttons are mapped for Player 2
+        assert!(profile.mappings.contains_key(&VirtualButton::X));
+        assert!(profile.mappings.contains_key(&VirtualButton::Y));
+        assert!(profile.mappings.contains_key(&VirtualButton::L));
+        assert!(profile.mappings.contains_key(&VirtualButton::R));
+    }
+
+    #[test]
     fn test_input_mapper_creation() {
         let mapper = InputMapper::new();
         assert_eq!(mapper.profiles.len(), 4);
