@@ -284,7 +284,7 @@ impl System for SnesSystem {
         }
 
         // Render frame at end of visible scanlines
-        self.renderer.render_frame(self.cpu.bus().ppu());
+        self.renderer.render_frame(self.cpu.bus_mut().ppu_mut());
 
         // Enter VBlank and trigger NMI if enabled
         self.cpu.bus_mut().ppu_mut().set_vblank(true);

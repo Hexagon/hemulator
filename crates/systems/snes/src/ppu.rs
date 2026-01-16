@@ -106,6 +106,13 @@ pub struct Ppu {
     /// H/V-blank flag and joypad status ($4212)
     hvbjoy: u8,
 
+    /// Sprite overflow flags for STAT77 register ($213E)
+    /// Bit 7: Time over flag - set when more than 34 8x8 tiles on any scanline
+    /// Bit 6: Range over flag - set when more than 32 sprites on any scanline
+    /// These flags are set during sprite rendering and cleared at VBlank
+    sprite_time_over: bool,
+    sprite_range_over: bool,
+
     /// Screen display register ($2100) - bit 7 = force blank, bits 0-3 = brightness
     screen_display: u8,
 
@@ -433,6 +440,8 @@ impl Ppu {
             nmi_pending: false,
             nmi_enable: false,
             hvbjoy: 0,
+            sprite_time_over: false,
+            sprite_range_over: false,
             screen_display: 0x80, // Start with screen blanked
             bgmode: 0,
             bg1sc: 0,
@@ -1109,12 +1118,14 @@ impl Ppu {
             // $213D - OPVCT - Vertical Counter (stub)
             0x213D => 0,
 
-            // $213E - STAT77 - PPU Status (stub)
+            // $213E - STAT77 - PPU Status
             0x213E => {
-                // Bit 7: Time over flag
-                // Bit 6: Range over flag
+                // Bit 7: Time over flag - more than 34 8x8 tiles on any scanline
+                // Bit 6: Range over flag - more than 32 sprites on any scanline
                 // Bits 0-5: PPU version
-                0x01 // Version 1
+                let time_over = if self.sprite_time_over { 0x80 } else { 0x00 };
+                let range_over = if self.sprite_range_over { 0x40 } else { 0x00 };
+                time_over | range_over | 0x01 // Version 1
             }
 
             // $213F - STAT78 - PPU Status and NMI Flag
@@ -1149,7 +1160,7 @@ impl Ppu {
     }
 
     /// Render a frame
-    pub fn render_frame(&self) -> Frame {
+    pub fn render_frame(&mut self) -> Frame {
         // Determine frame width based on BG mode
         // Modes 5 and 6 support hi-res (512px wide)
         let bg_mode = self.bgmode & 0x07;
@@ -1289,7 +1300,7 @@ impl Ppu {
     /// Helper method to render layers for main or sub-screen
     /// This avoids code duplication between main and sub-screen rendering
     fn render_screen_layers(
-        &self,
+        &mut self,
         bg_mode: u8,
         frame: &mut Frame,
         priority_buffer: &mut [u8],
@@ -1623,6 +1634,9 @@ impl Ppu {
             }
         } else {
             self.hvbjoy &= !0x80; // Clear V-blank bit
+                                  // Clear sprite overflow flags at start of new frame
+            self.sprite_time_over = false;
+            self.sprite_range_over = false;
         }
     }
 
@@ -2838,7 +2852,7 @@ impl Ppu {
 
     /// Render sprites with priority filtering
     fn render_sprites_priority(
-        &self,
+        &mut self,
         frame: &mut Frame,
         priority_buffer: &mut [u8],
         layer_buffer: &mut [u8],
@@ -2959,21 +2973,31 @@ impl Ppu {
 
             // Check if rendering this sprite would exceed scanline limits
             let mut can_render = true;
+            let mut range_over_triggered = false;
+            let mut time_over_triggered = false;
             for scanline in start_y..end_y {
                 if sprites_per_scanline[scanline] >= 32 {
                     can_render = false;
+                    range_over_triggered = true;
                     break;
                 }
                 // Each row of the sprite adds tiles_wide to the scanline
                 if tiles_per_scanline[scanline] + tiles_wide > 34 {
                     can_render = false;
+                    time_over_triggered = true;
                     break;
                 }
             }
 
-            // Skip if limits exceeded
+            // Skip if limits exceeded and set hardware overflow flags
             if !can_render {
                 sprites_scanline_limited += 1;
+                if range_over_triggered {
+                    self.sprite_range_over = true;
+                }
+                if time_over_triggered {
+                    self.sprite_time_over = true;
+                }
                 continue;
             }
 
