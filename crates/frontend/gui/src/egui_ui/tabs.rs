@@ -993,7 +993,7 @@ impl TabManager {
             ui.add_space(10.0);
             ui.label("Click a system to create a new blank project.");
             ui.label(
-                "After creating, use File → New Project → Auto Detect from ROM to load content.",
+                "After creating, use File → New Project → 🔍 Auto Detect from ROM... to load a ROM into your project.",
             );
         });
     }
