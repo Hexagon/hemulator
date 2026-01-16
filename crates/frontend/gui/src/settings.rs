@@ -58,10 +58,10 @@ impl Default for KeyMapping {
         Self {
             a: "Z".to_string(),
             b: "X".to_string(),
-            x: String::new(), // Not mapped by default
-            y: String::new(), // Not mapped by default
-            l: String::new(), // Not mapped by default
-            r: String::new(), // Not mapped by default
+            x: "A".to_string(),
+            y: "S".to_string(),
+            l: "Q".to_string(),
+            r: "W".to_string(),
             select: "LeftShift".to_string(),
             start: "Enter".to_string(),
             up: "Up".to_string(),
@@ -78,10 +78,10 @@ impl KeyMapping {
         Self {
             a: "U".to_string(),
             b: "O".to_string(),
-            x: String::new(),
-            y: String::new(),
-            l: String::new(),
-            r: String::new(),
+            x: "Y".to_string(),
+            y: "H".to_string(),
+            l: "T".to_string(),
+            r: "R".to_string(),
             select: "RightShift".to_string(),
             start: "P".to_string(), // P key (single key on right side)
             up: "I".to_string(),
@@ -328,8 +328,17 @@ mod tests {
         let settings = Settings::default();
         assert_eq!(settings.input.player1.a, "Z");
         assert_eq!(settings.input.player1.b, "X");
+        // Verify x, y, l, r buttons are mapped by default
+        assert_eq!(settings.input.player1.x, "A");
+        assert_eq!(settings.input.player1.y, "S");
+        assert_eq!(settings.input.player1.l, "Q");
+        assert_eq!(settings.input.player1.r, "W");
         assert_eq!(settings.input.player2.a, "U");
         assert_eq!(settings.input.player2.b, "O");
+        assert_eq!(settings.input.player2.x, "Y");
+        assert_eq!(settings.input.player2.y, "H");
+        assert_eq!(settings.input.player2.l, "T");
+        assert_eq!(settings.input.player2.r, "R");
         assert_eq!(settings.input.host_modifier, "RightCtrl");
         assert_eq!(settings.window_width, 512);
         assert_eq!(settings.window_height, 480);

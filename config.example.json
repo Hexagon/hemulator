@@ -8,6 +8,10 @@
     "player1": {
       "a": "Z",
       "b": "X",
+      "x": "A",
+      "y": "S",
+      "l": "Q",
+      "r": "W",
       "select": "LeftShift",
       "start": "Enter",
       "up": "Up",
