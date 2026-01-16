@@ -17,6 +17,10 @@ Hemulator supports up to 4 players for systems that support multiple controllers
 | Arrow Keys | D-pad | Up/Down/Left/Right |
 | Z | A button | Confirm/Jump |
 | X | B button | Back/Action |
+| A | X button | SNES X button |
+| S | Y button | SNES Y button |
+| Q | L button | SNES L shoulder |
+| W | R button | SNES R shoulder |
 | Enter | Start | Pause menu |
 | Left Shift | Select | Menu navigation |
 
@@ -27,6 +31,10 @@ Hemulator supports up to 4 players for systems that support multiple controllers
 | I/J/K/L | D-pad | I=Up, K=Down, J=Left, L=Right |
 | U | A button | Confirm/Jump |
 | O | B button | Back/Action |
+| Y | X button | SNES X button |
+| H | Y button | SNES Y button |
+| T | L button | SNES L shoulder |
+| R | R button | SNES R shoulder |
 | P | Start | Pause menu |
 | Right Shift | Select | Menu navigation |
 
