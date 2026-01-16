@@ -3763,7 +3763,6 @@ fn main() {
                                         .status_bar
                                         .set_error(format!("Failed to create N64 system: {}", e));
                                     // Ensure rom_loaded stays false on error
-                                    // (already set to false at line 3637)
                                 }
                             }
                         }
@@ -3782,7 +3781,6 @@ fn main() {
                                 .status_bar
                                 .set_error(format!("Unknown system: {}", system_name));
                             // Ensure rom_loaded stays false for unknown systems
-                            // (already set to false at line 3637)
                         }
                     }
                 }
