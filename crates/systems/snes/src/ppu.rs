@@ -72,10 +72,10 @@ pub struct Ppu {
     oam: Vec<u8>,
 
     /// VRAM address register ($2116/$2117)
-    /// Uses Cell for interior mutability as VRAM reads auto-increment the address
+    /// Uses Cell for interior mutability as VRAM reads auto-increment after high byte read
     vram_addr: Cell<u16>,
     /// VRAM address increment mode ($2115)
-    /// Bit 7: Increment on high byte write (0) or low byte write (1)
+    /// Bit 7: Increment after high byte write (1) or low byte write (0)
     /// Bits 0-1: Address increment amount (00=1, 01=32, 10/11=128)
     vmain: u8,
     /// VRAM read buffer (hardware prefetch) - stores the word read on address set
@@ -428,7 +428,7 @@ impl Ppu {
             cgram: vec![0; CGRAM_SIZE],
             oam: vec![0; OAM_SIZE],
             vram_addr: Cell::new(0),
-            vmain: 0x80, // Default: increment on high byte access
+            vmain: 0x80, // Default: bit 7 = 1, increment after high byte write
             vram_read_buffer: Cell::new(0),
             cgram_addr: 0,
             cgram_write_latch: false,
