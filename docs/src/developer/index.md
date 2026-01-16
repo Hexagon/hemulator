@@ -15,12 +15,6 @@ This section contains documentation for developers contributing to Hemulator or 
 - **[Architecture Overview](architecture.md)** - High-level system architecture and design patterns
 - **[Contributing Guide](contributing.md)** - Development workflow, pre-commit checks, and contribution guidelines
 
-## System-Specific Documentation
-
-- **[N64 Development Status](n64-status.md)** - Nintendo 64 implementation progress and roadmap
-- **[SMS Implementation Guide](sms-guide.md)** - Sega Master System implementation details
-- **[Next Emulator Recommendation](next-emulator.md)** - Guidance for choosing the next system to implement
-
 ## Additional Resources
 
 For complete architecture documentation including detailed design patterns and implementation specifics, see:
