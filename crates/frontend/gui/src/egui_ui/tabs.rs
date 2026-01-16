@@ -11,7 +11,6 @@ const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Emulator,
-    NewProject,
     Help,
     About,
 }
@@ -290,8 +289,6 @@ pub struct TabManager {
     pub pc_bda_data: Option<PcBdaData>,
     pub cartridge_data: Option<CartridgeData>,
     pub mount_info: Vec<MountInfo>,
-    pub new_project_visible: bool,
-    pub selected_system: String,
     pub pending_action: Option<TabAction>,
     pub pending_debug_action: Option<DebugAction>,
     pub selected_memory_region_index: usize,
@@ -318,8 +315,6 @@ impl TabManager {
             pc_bda_data: None,
             cartridge_data: None,
             mount_info: Vec::new(),
-            new_project_visible: false,
-            selected_system: "NES".to_string(),
             pending_action: None,
             pending_debug_action: None,
             selected_memory_region_index: 0,
@@ -363,19 +358,6 @@ impl TabManager {
     pub fn show_about_tab(&mut self) {
         self.about_visible = true;
         self.active_tab = Tab::About;
-    }
-
-    pub fn show_new_project_tab(&mut self) {
-        self.new_project_visible = true;
-        self.active_tab = Tab::NewProject;
-    }
-
-    pub fn close_new_project_tab(&mut self) {
-        self.new_project_visible = false;
-        // If currently viewing the New Project tab, switch to Emulator tab
-        if self.active_tab == Tab::NewProject {
-            self.active_tab = Tab::Emulator;
-        }
     }
 
     pub fn update_debug_info(&mut self, info: SystemDebugInfo) {
@@ -436,25 +418,6 @@ impl TabManager {
         ui.horizontal(|ui| {
             ui.selectable_value(&mut self.active_tab, Tab::Emulator, "🎮 Emulator");
 
-            if self.new_project_visible {
-                ui.selectable_value(&mut self.active_tab, Tab::NewProject, "➕ New Project");
-                // Use a colored button for the close icon to ensure visibility
-                let close_button = egui::Button::new(
-                    egui::RichText::new("✖").color(egui::Color32::from_rgb(220, 220, 220)),
-                )
-                .small();
-                if ui
-                    .add(close_button)
-                    .on_hover_text("Close New Project tab")
-                    .clicked()
-                {
-                    self.new_project_visible = false;
-                    if self.active_tab == Tab::NewProject {
-                        self.active_tab = Tab::Emulator;
-                    }
-                }
-            }
-
             if self.help_visible {
                 ui.selectable_value(&mut self.active_tab, Tab::Help, "❓ Help");
                 // Use a colored button for the close icon to ensure visibility
@@ -499,7 +462,6 @@ impl TabManager {
         // Tab content
         match self.active_tab {
             Tab::Emulator => self.render_emulator_tab(ui, emulator_texture, scaling_mode),
-            Tab::NewProject => self.render_new_project_tab(ui),
             Tab::Help => self.render_help_tab(ui),
             Tab::About => self.render_about_tab(ui),
         }
@@ -564,10 +526,15 @@ impl TabManager {
                         .inner_margin(20.0)
                         .show(ui, |ui| {
                             ui.vertical_centered(|ui| {
-                                ui.label(egui::RichText::new("📁 File → New Project").size(16.0));
+                                ui.label(
+                                    egui::RichText::new(
+                                        "📁 File → New Project → Auto Detect from ROM...",
+                                    )
+                                    .size(16.0),
+                                );
                                 ui.add_space(5.0);
                                 ui.label(
-                                    egui::RichText::new("Create a new system or load a ROM").weak(),
+                                    egui::RichText::new("Load a ROM to start emulating").weak(),
                                 );
                                 ui.add_space(15.0);
                                 ui.label(egui::RichText::new("📁 File → Open Project").size(16.0));
@@ -893,121 +860,6 @@ impl TabManager {
         });
     }
 
-    fn render_new_project_tab(&mut self, ui: &mut Ui) {
-        ui.vertical_centered(|ui| {
-            ui.add_space(20.0);
-            ui.heading("Create New Project");
-            ui.add_space(10.0);
-            ui.label("Select the system you want to emulate:");
-            ui.add_space(10.0);
-
-            // Scrollable area for system selection boxes
-            ScrollArea::vertical()
-                .auto_shrink([false; 2])
-                .show(ui, |ui| {
-                    // Define systems with their descriptions
-                    let systems = vec![
-                        (
-                            "NES",
-                            "Nintendo Entertainment System",
-                            "Classic 8-bit console with extensive game library",
-                        ),
-                        (
-                            "Game Boy",
-                            "Game Boy / Game Boy Color",
-                            "Portable gaming system with monochrome and color support",
-                        ),
-                        (
-                            "Atari 2600",
-                            "Atari 2600",
-                            "Pioneering home video game console from 1977",
-                        ),
-                        (
-                            "SMS",
-                            "Sega Master System",
-                            "8-bit console with tile-based graphics and Z80 CPU",
-                        ),
-                        (
-                            "ColecoVision",
-                            "ColecoVision",
-                            "Advanced 1982 console with arcade-quality graphics",
-                        ),
-                        (
-                            "SG-1000",
-                            "Sega SG-1000",
-                            "Sega's first home console released in 1983",
-                        ),
-                        (
-                            "CHIP-8",
-                            "CHIP-8",
-                            "Classic interpreted programming language for vintage computers",
-                        ),
-                        (
-                            "SNES",
-                            "Super Nintendo Entertainment System",
-                            "16-bit console with advanced graphics and sound",
-                        ),
-                        (
-                            "N64",
-                            "Nintendo 64",
-                            "First Nintendo console with 3D graphics capabilities",
-                        ),
-                        (
-                            "PC",
-                            "IBM PC/XT Compatible",
-                            "DOS-based personal computer emulation",
-                        ),
-                    ];
-
-                    for (system_id, system_name, description) in systems {
-                        let is_selected = self.selected_system == system_id;
-
-                        // Create a clickable frame for each system
-                        let frame = egui::Frame::new()
-                            .fill(if is_selected {
-                                ui.visuals().selection.bg_fill
-                            } else {
-                                ui.visuals().window_fill()
-                            })
-                            .stroke(if is_selected {
-                                ui.visuals().selection.stroke
-                            } else {
-                                ui.visuals().widgets.noninteractive.bg_stroke
-                            })
-                            .corner_radius(4.0)
-                            .inner_margin(12.0);
-
-                        let response = frame.show(ui, |ui| {
-                            ui.set_min_width(ui.available_width());
-                            ui.vertical(|ui| {
-                                ui.heading(system_name);
-                                ui.add_space(4.0);
-                                ui.label(description);
-                            });
-                        });
-
-                        // Make the entire frame clickable
-                        if response.response.interact(egui::Sense::click()).clicked() {
-                            self.selected_system = system_id.to_string();
-                            // Immediately create the project when a system is clicked
-                            self.pending_action =
-                                Some(TabAction::CreateNewProject(system_id.to_string()));
-                            self.new_project_visible = false;
-                            self.active_tab = Tab::Emulator;
-                        }
-
-                        ui.add_space(8.0);
-                    }
-                });
-
-            ui.add_space(10.0);
-            ui.label("Click a system to create a new blank project.");
-            ui.label(
-                "After creating, use File → New Project → 🔍 Auto Detect from ROM... to load a ROM into your project.",
-            );
-        });
-    }
-
     fn render_help_tab(&self, ui: &mut Ui) {
         ScrollArea::vertical()
             .auto_shrink([false; 2])
@@ -1026,7 +878,7 @@ impl TabManager {
                 // File Operations
                 ui.heading(egui::RichText::new("📁 File Operations").strong());
                 ui.add_space(5.0);
-                ui.label("Use File → New Project to create a new system or load a ROM");
+                ui.label("Use File → New Project → Auto Detect from ROM... to load a ROM");
                 ui.label("Use File → Open Project to load a saved .hemu project");
                 ui.add_space(10.0);
 
