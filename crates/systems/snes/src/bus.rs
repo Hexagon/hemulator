@@ -366,6 +366,28 @@ impl SnesBus {
         }
     }
 
+    pub fn get_mapping_mode(&self) -> String {
+        if let Some(ref cart) = self.cartridge {
+            if cart.is_exhirom() {
+                "ExHiROM".to_string()
+            } else if cart.is_hirom() {
+                "HiROM".to_string()
+            } else {
+                "LoROM".to_string()
+            }
+        } else {
+            "Unknown".to_string()
+        }
+    }
+
+    pub fn get_chip_type(&self) -> String {
+        if let Some(ref cart) = self.cartridge {
+            cart.chip_type().name().to_string()
+        } else {
+            "Unknown".to_string()
+        }
+    }
+
     /// Perform DMA transfer for specified channels
     /// Returns number of cycles consumed
     pub fn do_dma(&mut self, channels: u8) -> u32 {
