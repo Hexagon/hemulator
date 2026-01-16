@@ -163,11 +163,7 @@ impl MenuBar {
                         ui.close();
                     }
 
-                    if ui
-                        .button("🎮 N64")
-                        .on_hover_text("Nintendo 64")
-                        .clicked()
-                    {
+                    if ui.button("🎮 N64").on_hover_text("Nintendo 64").clicked() {
                         self.pending_action = Some(MenuAction::NewProjectSystem("N64".to_string()));
                         ui.close();
                     }

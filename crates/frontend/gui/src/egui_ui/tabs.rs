@@ -531,11 +531,7 @@ impl TabManager {
                     ui.add_space(50.0);
 
                     // Simple call-to-action
-                    ui.label(
-                        egui::RichText::new("Get Started")
-                            .size(22.0)
-                            .strong(),
-                    );
+                    ui.label(egui::RichText::new("Get Started").size(22.0).strong());
                     ui.add_space(20.0);
 
                     egui::Frame::new()
@@ -544,25 +540,15 @@ impl TabManager {
                         .inner_margin(20.0)
                         .show(ui, |ui| {
                             ui.vertical_centered(|ui| {
-                                ui.label(
-                                    egui::RichText::new("📁 File → New Project")
-                                        .size(16.0),
-                                );
+                                ui.label(egui::RichText::new("📁 File → New Project").size(16.0));
                                 ui.add_space(5.0);
                                 ui.label(
-                                    egui::RichText::new("Create a new system or load a ROM")
-                                        .weak(),
+                                    egui::RichText::new("Create a new system or load a ROM").weak(),
                                 );
                                 ui.add_space(15.0);
-                                ui.label(
-                                    egui::RichText::new("📁 File → Open Project")
-                                        .size(16.0),
-                                );
+                                ui.label(egui::RichText::new("📁 File → Open Project").size(16.0));
                                 ui.add_space(5.0);
-                                ui.label(
-                                    egui::RichText::new("Load a saved .hemu project")
-                                        .weak(),
-                                );
+                                ui.label(egui::RichText::new("Load a saved .hemu project").weak());
                             });
                         });
                 });
@@ -992,7 +978,9 @@ impl TabManager {
 
             ui.add_space(10.0);
             ui.label("Click a system to create a new blank project.");
-            ui.label("After creating, use File → New Project → Auto Detect from ROM to load content.");
+            ui.label(
+                "After creating, use File → New Project → Auto Detect from ROM to load content.",
+            );
         });
     }
 

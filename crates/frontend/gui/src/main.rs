@@ -3072,6 +3072,7 @@ fn main() {
     // Initialize egui app
     let mut egui_app = EguiApp::new();
     egui_app.property_pane.system_name = sys.system_name().to_string();
+    egui_app.set_system_loaded(rom_loaded); // Initialize menu state based on whether system is loaded
 
     // Upgrade renderer to OpenGL if settings request it and system was loaded
     // Note: OpenGL renderer upgrade temporarily disabled due to GL context refactoring
@@ -3620,6 +3621,9 @@ fn main() {
             egui_app.tab_manager.update_mount_info(mount_info);
         }
 
+        // Update menu bar system loaded state before rendering UI
+        egui_app.set_system_loaded(rom_loaded);
+
         // Render egui UI
         egui_app.ui(egui_backend.egui_ctx(), settings.scaling_mode);
 
@@ -3627,21 +3631,190 @@ fn main() {
         if let Some(action) = egui_app.menu_bar.take_action() {
             use egui_ui::menu_bar::MenuAction;
             match action {
-                MenuAction::NewProject => {
-                    egui_app.tab_manager.show_new_project_tab();
+                MenuAction::NewProjectSystem(system_name) => {
+                    // Create a new system based on the selected type
+                    // Clear any existing system state
+                    rom_loaded = false;
+                    rom_hash = None;
+                    runtime_state.clear_mounts();
+                    _game_saves = GameSaves::default();
+
+                    match system_name.as_str() {
+                        "NES" => {
+                            let gl_ctx = egui_backend.gl_context();
+                            let nes_sys = create_nes_system(&settings.video_backend, gl_ctx);
+                            sys = EmulatorSystem::NES(Box::new(nes_sys));
+                            rom_loaded = true;
+                            egui_app.property_pane.system_name = "NES".to_string();
+                            egui_app.property_pane.rendering_backend =
+                                sys.get_current_renderer_name();
+                            egui_app.property_pane.available_renderers =
+                                sys.get_available_renderers();
+                            egui_app.set_system_loaded(true);
+                            egui_app
+                                .status_bar
+                                .set_message("Created new NES system".to_string());
+                        }
+                        "Game Boy" => {
+                            sys = EmulatorSystem::GameBoy(Box::new(emu_gb::GbSystem::new()));
+                            rom_loaded = true;
+                            egui_app.property_pane.system_name = "Game Boy".to_string();
+                            egui_app.property_pane.rendering_backend =
+                                sys.get_current_renderer_name();
+                            egui_app.property_pane.available_renderers =
+                                sys.get_available_renderers();
+                            egui_app.set_system_loaded(true);
+                            egui_app
+                                .status_bar
+                                .set_message("Created new Game Boy system".to_string());
+                        }
+                        "Atari 2600" => {
+                            sys = EmulatorSystem::Atari2600(Box::new(create_atari2600_system(
+                                &settings,
+                            )));
+                            rom_loaded = true;
+                            egui_app.property_pane.system_name = "Atari 2600".to_string();
+                            egui_app.property_pane.rendering_backend =
+                                sys.get_current_renderer_name();
+                            egui_app.property_pane.available_renderers =
+                                sys.get_available_renderers();
+                            egui_app.set_system_loaded(true);
+                            egui_app
+                                .status_bar
+                                .set_message("Created new Atari 2600 system".to_string());
+                        }
+                        "SMS" => {
+                            sys = EmulatorSystem::SMS(Box::new(emu_sms::SmsSystem::new()));
+                            rom_loaded = true;
+                            egui_app.property_pane.system_name = "SMS".to_string();
+                            egui_app.property_pane.rendering_backend =
+                                sys.get_current_renderer_name();
+                            egui_app.property_pane.available_renderers =
+                                sys.get_available_renderers();
+                            egui_app.set_system_loaded(true);
+                            egui_app
+                                .status_bar
+                                .set_message("Created new SMS system".to_string());
+                        }
+                        "ColecoVision" => {
+                            sys = EmulatorSystem::ColecoVision(Box::new(
+                                emu_colecovision::ColecoVisionSystem::new(),
+                            ));
+                            rom_loaded = true;
+                            egui_app.property_pane.system_name = "ColecoVision".to_string();
+                            egui_app.property_pane.rendering_backend =
+                                sys.get_current_renderer_name();
+                            egui_app.property_pane.available_renderers =
+                                sys.get_available_renderers();
+                            egui_app.set_system_loaded(true);
+                            egui_app
+                                .status_bar
+                                .set_message("Created new ColecoVision system".to_string());
+                        }
+                        "SG-1000" => {
+                            sys = EmulatorSystem::SG1000(Box::new(emu_sg1000::Sg1000System::new()));
+                            rom_loaded = true;
+                            egui_app.property_pane.system_name = "SG-1000".to_string();
+                            egui_app.property_pane.rendering_backend =
+                                sys.get_current_renderer_name();
+                            egui_app.property_pane.available_renderers =
+                                sys.get_available_renderers();
+                            egui_app.set_system_loaded(true);
+                            egui_app
+                                .status_bar
+                                .set_message("Created new SG-1000 system".to_string());
+                        }
+                        "CHIP-8" => {
+                            sys = EmulatorSystem::Chip8(Box::new(emu_chip8::Chip8System::new()));
+                            rom_loaded = true;
+                            egui_app.property_pane.system_name = "CHIP-8".to_string();
+                            egui_app.property_pane.rendering_backend =
+                                sys.get_current_renderer_name();
+                            egui_app.property_pane.available_renderers =
+                                sys.get_available_renderers();
+                            egui_app.set_system_loaded(true);
+                            egui_app
+                                .status_bar
+                                .set_message("Created new CHIP-8 system".to_string());
+                        }
+                        "SNES" => {
+                            sys = EmulatorSystem::SNES(Box::new(emu_snes::SnesSystem::new()));
+                            rom_loaded = true;
+                            egui_app.property_pane.system_name = "SNES".to_string();
+                            egui_app.property_pane.rendering_backend =
+                                sys.get_current_renderer_name();
+                            egui_app.property_pane.available_renderers =
+                                sys.get_available_renderers();
+                            egui_app.set_system_loaded(true);
+                            egui_app
+                                .status_bar
+                                .set_message("Created new SNES system".to_string());
+                        }
+                        "N64" => {
+                            let gl_ctx = egui_backend.gl_context();
+                            match create_n64_system(gl_ctx, &settings) {
+                                Ok(n64_sys) => {
+                                    sys = EmulatorSystem::N64(Box::new(n64_sys));
+                                    rom_loaded = true;
+                                    egui_app.property_pane.system_name = "N64".to_string();
+                                    egui_app.property_pane.rendering_backend =
+                                        sys.get_current_renderer_name();
+                                    egui_app.property_pane.available_renderers =
+                                        sys.get_available_renderers();
+                                    egui_app.set_system_loaded(true);
+                                    egui_app
+                                        .status_bar
+                                        .set_message("Created new N64 system".to_string());
+                                }
+                                Err(e) => {
+                                    egui_app
+                                        .status_bar
+                                        .set_message(format!("Failed to create N64 system: {}", e));
+                                }
+                            }
+                        }
+                        "PC" => {
+                            sys = EmulatorSystem::PC(Box::new(emu_pc::PcSystem::new()));
+                            rom_loaded = true;
+                            egui_app.property_pane.system_name = "PC".to_string();
+                            egui_app.property_pane.rendering_backend =
+                                sys.get_current_renderer_name();
+                            egui_app.property_pane.available_renderers =
+                                sys.get_available_renderers();
+                            egui_app.set_system_loaded(true);
+                            egui_app
+                                .status_bar
+                                .set_message("Created new PC system".to_string());
+                        }
+                        _ => {
+                            egui_app
+                                .status_bar
+                                .set_message(format!("Unknown system: {}", system_name));
+                        }
+                    }
                 }
-                MenuAction::OpenRom => {
+                MenuAction::NewProjectAutoDetect => {
                     // Track whether a ROM was successfully loaded in this handler
                     let rom_loaded_before = rom_loaded;
-                    // Open ROM file dialog
+                    // Open ROM file dialog with comprehensive extension support
                     if let Some(path) = rfd::FileDialog::new()
                         .add_filter(
-                            "ROM Files",
+                            "All ROM Files",
                             &[
-                                "nes", "gb", "gbc", "bin", "a26", "smc", "sfc", "z64", "n64",
-                                "com", "exe", "sms", "ch8", "c8",
+                                "nes", "unf", "gb", "gbc", "bin", "a26", "smc", "sfc", "z64",
+                                "n64", "v64", "com", "exe", "sms", "ch8", "c8", "col", "sg", "sc",
                             ],
                         )
+                        .add_filter("NES ROMs", &["nes", "unf"])
+                        .add_filter("Game Boy ROMs", &["gb", "gbc"])
+                        .add_filter("Atari 2600 ROMs", &["a26", "bin"])
+                        .add_filter("SNES ROMs", &["smc", "sfc", "bin"])
+                        .add_filter("N64 ROMs", &["z64", "n64", "v64", "bin"])
+                        .add_filter("SMS ROMs", &["sms", "bin"])
+                        .add_filter("ColecoVision ROMs", &["col", "bin"])
+                        .add_filter("SG-1000 ROMs", &["sg", "sc", "bin"])
+                        .add_filter("CHIP-8 Programs", &["ch8", "c8"])
+                        .add_filter("PC Executables", &["com", "exe", "bin"])
                         .add_filter("All Files", &["*"])
                         .pick_file()
                     {
