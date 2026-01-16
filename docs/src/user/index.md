@@ -14,7 +14,7 @@ Welcome to Hemulator, a cross-platform multi-system console emulator supporting 
 - **[Controls](controls.md)** - Keyboard, gamepad, and system-specific input
 - **[Configuration](configuration.md)** - Settings, Inspector panel, and mount points
 - **[Save States](save-states.md)** - Saving and loading game progress
-- **[Supported Systems](systems.md)** - NES, Game Boy, Atari 2600, SNES, N64, SMS, CHIP-8, PC/DOS
+- **[Supported Systems](systems.md)** - NES, Game Boy, Atari 2600, SNES, N64, SMS, ColecoVision, SG-1000, CHIP-8, PC/DOS
 - **[Advanced Features](advanced.md)** - Command-line debugging and tracing tools
 - **[Troubleshooting](troubleshooting.md)** - Common issues and solutions
 
