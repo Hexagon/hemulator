@@ -4289,6 +4289,124 @@ mod tests {
     }
 
     #[test]
+    fn test_vram_write_protection() {
+        let mut ppu = Ppu::new();
+
+        // Test 1: VRAM writes should fail during active display (screen enabled, not in blanking)
+        ppu.write_register(0x2100, 0x0F); // Enable screen, full brightness
+        ppu.set_vblank(false);
+        ppu.set_hblank(false);
+
+        // Try to write to VRAM during active display
+        ppu.write_register(0x2116, 0x00);
+        ppu.write_register(0x2117, 0x10);
+        ppu.write_register(0x2118, 0xAA); // Should be ignored
+        ppu.write_register(0x2119, 0xBB); // Should be ignored
+
+        // Data should NOT have been written
+        assert_eq!(ppu.vram[0x1000 * 2], 0x00);
+        assert_eq!(ppu.vram[0x1000 * 2 + 1], 0x00);
+
+        // Test 2: VRAM writes should succeed during V-blank
+        ppu.set_vblank(true);
+        ppu.write_register(0x2118, 0xCC);
+        ppu.write_register(0x2119, 0xDD);
+
+        // Data should have been written
+        assert_eq!(ppu.vram[0x1000 * 2], 0xCC);
+        assert_eq!(ppu.vram[0x1000 * 2 + 1], 0xDD);
+
+        // Test 3: VRAM writes should succeed during H-blank
+        ppu.set_vblank(false);
+        ppu.set_hblank(true);
+        ppu.write_register(0x2116, 0x00);
+        ppu.write_register(0x2117, 0x20);
+        ppu.write_register(0x2118, 0xEE);
+        ppu.write_register(0x2119, 0xFF);
+
+        // Data should have been written
+        assert_eq!(ppu.vram[0x2000 * 2], 0xEE);
+        assert_eq!(ppu.vram[0x2000 * 2 + 1], 0xFF);
+
+        // Test 4: VRAM writes should succeed when screen is force-blanked
+        ppu.write_register(0x2100, 0x80); // Force blank
+        ppu.set_vblank(false);
+        ppu.set_hblank(false);
+        ppu.write_register(0x2116, 0x00);
+        ppu.write_register(0x2117, 0x30);
+        ppu.write_register(0x2118, 0x11);
+        ppu.write_register(0x2119, 0x22);
+
+        // Data should have been written
+        assert_eq!(ppu.vram[0x3000 * 2], 0x11);
+        assert_eq!(ppu.vram[0x3000 * 2 + 1], 0x22);
+    }
+
+    #[test]
+    fn test_sprite_overflow_flags() {
+        let mut ppu = Ppu::new();
+
+        // Initially no overflow flags should be set
+        let stat77 = ppu.read_register(0x213E);
+        assert_eq!(stat77 & 0x80, 0x00); // Time over clear
+        assert_eq!(stat77 & 0x40, 0x00); // Range over clear
+
+        // Simulate sprite overflow by setting the flags directly
+        ppu.sprite_time_over = true;
+        ppu.sprite_range_over = true;
+
+        let stat77_overflow = ppu.read_register(0x213E);
+        assert_eq!(stat77_overflow & 0x80, 0x80); // Time over set
+        assert_eq!(stat77_overflow & 0x40, 0x40); // Range over set
+
+        // Flags should be cleared at VBlank
+        ppu.set_vblank(false); // Clearing VBlank (start of frame) clears overflow flags
+        assert!(!ppu.sprite_time_over);
+        assert!(!ppu.sprite_range_over);
+
+        let stat77_cleared = ppu.read_register(0x213E);
+        assert_eq!(stat77_cleared & 0x80, 0x00); // Time over cleared
+        assert_eq!(stat77_cleared & 0x40, 0x00); // Range over cleared
+    }
+
+    #[test]
+    fn test_sprite_tile_address_calculation() {
+        let mut ppu = Ppu::new();
+
+        // Test OBSEL register parsing
+        // Mode 0: small=8x8, large=16x16, base=$0000, gap=$2000
+        ppu.write_register(0x2101, 0x00);
+        assert_eq!(ppu.get_sprite_sizes(), ((8, 8), (16, 16)));
+        assert_eq!(ppu.get_obj_base_address(), 0x0000);
+        assert_eq!(ppu.get_obj_nameselect_gap(), 0x2000);
+
+        // Mode 1: small=8x8, large=32x32, base=$0000, gap=$2000
+        ppu.write_register(0x2101, 0x20); // Bits 5-7 = 001
+        assert_eq!(ppu.get_sprite_sizes(), ((8, 8), (32, 32)));
+
+        // Mode 2: small=8x8, large=64x64, base=$0000, gap=$2000
+        ppu.write_register(0x2101, 0x40); // Bits 5-7 = 010
+        assert_eq!(ppu.get_sprite_sizes(), ((8, 8), (64, 64)));
+
+        // Test different base addresses
+        ppu.write_register(0x2101, 0x03); // Bits 0-2 = 011
+        assert_eq!(ppu.get_obj_base_address(), 0x3 << 14); // 0xC000
+
+        // Test different gaps
+        ppu.write_register(0x2101, 0x18); // Bits 3-4 = 11
+        assert_eq!(ppu.get_obj_nameselect_gap(), (3 + 1) << 13); // 0x8000
+
+        // Test nameselect addressing
+        // Base at $4000, gap $4000, nameselect on
+        ppu.write_register(0x2101, 0x09); // base=1, gap=1
+        let base = ppu.get_obj_base_address();
+        let gap = ppu.get_obj_nameselect_gap();
+        assert_eq!(base, 0x4000);
+        assert_eq!(gap, 0x4000);
+        // With nameselect, address would be $4000 + $4000 = $8000
+    }
+
+    #[test]
     fn test_window_registers_stub() {
         let mut ppu = Ppu::new();
 
