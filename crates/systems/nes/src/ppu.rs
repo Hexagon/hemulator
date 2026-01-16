@@ -1406,26 +1406,6 @@ impl Ppu {
             // Set VBlank flag
             let was_vblank = self.vblank.replace(true);
 
-            // COMPATIBILITY FIX: Clear sprite 0 hit at VBlank start.
-            //
-            // Hardware-accurate behavior is to clear sprite 0 hit on the pre-render scanline
-            // at dot 1 (261/311). This implementation still performs that hardware-timed clear
-            // on the pre-render line; this earlier clear at VBlank start is *in addition* to
-            // that, not a replacement.
-            //
-            // Rationale: some games poll the sprite 0 hit flag during VBlank. If we only clear
-            // on the pre-render scanline, those games can observe a "stale" hit flag from the
-            // previous frame (e.g., Battletoads screen jumping). Clearing at VBlank start
-            // prevents such games from reading stale state while still allowing the pre-render
-            // clear to occur at the hardware-accurate time before the next visible frame.
-            //
-            // Double-clearing here is intentional and safe: the flag is simply guaranteed to be
-            // false throughout VBlank, and it will be cleared again on the pre-render scanline
-            // for correctness with code that assumes the hardware timing.
-            // NOTE: This is a deviation from strict hardware accuracy for better game compatibility.
-            self.sprite_0_hit.set(false);
-            self.sprite_0_hit_pending.set(None);
-
             // If VBlank just started and NMI is enabled, trigger NMI
             if !was_vblank && self.nmi_enabled() {
                 log(LogCategory::PPU, LogLevel::Trace, || {
@@ -1640,10 +1620,16 @@ impl Ppu {
         self.frame_counter.get()
     }
 
-    /// Check if currently in VBlank region (scanlines 241-260)
+    /// Check if currently in VBlank region
+    /// NTSC: scanlines 241-260
+    /// PAL: scanlines 241-310
     pub fn is_in_vblank_region(&self) -> bool {
         let scanline = self.scanline.get();
-        scanline >= 241 && scanline <= 260
+        let vblank_end = match self.timing_mode {
+            TimingMode::Ntsc => 260,
+            TimingMode::Pal => 310,
+        };
+        scanline >= 241 && scanline <= vblank_end
     }
 
     /// Check if currently in visible region (scanlines 0-239)
@@ -4290,5 +4276,218 @@ mod tests {
                 "CHR reads should be in low/high bitplane pairs"
             );
         }
+    }
+
+    #[test]
+    fn test_vblank_timing_ntsc() {
+        // Test NTSC VBlank timing - starts at scanline 241, dot 1
+        // Ends at scanline 261, dot 1 (pre-render scanline)
+        let ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
+        
+        // VBlank should start true (hardware power-on state)
+        assert!(ppu.vblank_flag(), "VBlank should be set at power-on");
+        
+        // Set position to scanline 241, dot 0 (just before VBlank event)
+        ppu.scanline.set(241);
+        ppu.dot.set(0);
+        assert_eq!(ppu.vblank_flag(), true, "VBlank still set from power-on at 241,0");
+        
+        // Tick: position advances from (241,0) to (241,1), no event yet
+        ppu.tick();
+        assert_eq!(ppu.scanline.get(), 241);
+        assert_eq!(ppu.dot.get(), 1);
+        assert!(ppu.vblank_flag(), "VBlank still set after advancing to 241,1");
+        
+        // Tick again: now AT (241,1), VBlank event fires, then advance to (241,2)
+        ppu.tick();
+        assert_eq!(ppu.scanline.get(), 241);
+        assert_eq!(ppu.dot.get(), 2);
+        assert!(ppu.vblank_flag(), "VBlank should remain set after event at 241,1");
+        
+        // VBlank should remain set through scanline 260
+        ppu.scanline.set(260);
+        ppu.dot.set(340);
+        assert!(ppu.vblank_flag(), "VBlank should remain set at scanline 260");
+        
+        // Set position to scanline 261, dot 0 (just before clear event)
+        ppu.scanline.set(261);
+        ppu.dot.set(0);
+        assert!(ppu.vblank_flag(), "VBlank should still be set at scanline 261, dot 0");
+        
+        // Tick: position advances from (261,0) to (261,1), no event yet
+        ppu.tick();
+        assert_eq!(ppu.scanline.get(), 261);
+        assert_eq!(ppu.dot.get(), 1);
+        assert!(ppu.vblank_flag(), "VBlank still set after advancing to 261,1");
+        
+        // Tick again: now AT (261,1), clear event fires, then advance to (261,2)
+        ppu.tick();
+        assert_eq!(ppu.scanline.get(), 261);
+        assert_eq!(ppu.dot.get(), 2);
+        assert!(!ppu.vblank_flag(), "VBlank should be cleared after event at 261,1");
+    }
+
+    #[test]
+    fn test_vblank_timing_pal() {
+        // Test PAL VBlank timing - starts at scanline 241, dot 1
+        // Ends at scanline 311, dot 1 (pre-render scanline)
+        let ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Pal);
+        
+        // VBlank should start true (hardware power-on state)
+        assert!(ppu.vblank_flag(), "VBlank should be set at power-on");
+        
+        // Set position to scanline 241, dot 0 (just before VBlank event)
+        ppu.scanline.set(241);
+        ppu.dot.set(0);
+        
+        // Tick twice to reach and process event at 241,1
+        ppu.tick(); // Advance to 241,1
+        ppu.tick(); // At 241,1, event fires, advance to 241,2
+        assert_eq!(ppu.scanline.get(), 241);
+        assert_eq!(ppu.dot.get(), 2);
+        assert!(ppu.vblank_flag(), "VBlank should be set after event at scanline 241, dot 1");
+        
+        // VBlank should remain set through scanline 310 (longer than NTSC)
+        ppu.scanline.set(310);
+        ppu.dot.set(340);
+        assert!(ppu.vblank_flag(), "VBlank should remain set at scanline 310 (PAL)");
+        
+        // Set position to scanline 311, dot 0 (just before clear event)
+        ppu.scanline.set(311);
+        ppu.dot.set(0);
+        assert!(ppu.vblank_flag(), "VBlank should still be set at scanline 311, dot 0");
+        
+        // Tick twice to reach and process event at 311,1
+        ppu.tick(); // Advance to 311,1
+        assert!(ppu.vblank_flag(), "VBlank still set after advancing to 311,1");
+        ppu.tick(); // At 311,1, event fires, advance to 311,2
+        assert_eq!(ppu.scanline.get(), 311);
+        assert_eq!(ppu.dot.get(), 2);
+        assert!(!ppu.vblank_flag(), "VBlank should be cleared after event at scanline 311, dot 1 (PAL)");
+    }
+
+    #[test]
+    fn test_sprite_0_hit_persists_through_vblank() {
+        // Test hardware-accurate behavior: sprite 0 hit flag should persist through VBlank
+        // and only be cleared at the pre-render scanline
+        let ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
+        ppu.clear_first_frame_lock();
+        
+        // Manually set sprite 0 hit as if it was detected during rendering
+        ppu.sprite_0_hit.set(true);
+        
+        // Advance to scanline 240 (post-render)
+        ppu.scanline.set(240);
+        ppu.dot.set(0);
+        assert!(ppu.sprite_0_hit.get(), "Sprite 0 hit should persist at scanline 240");
+        
+        // Advance to scanline 241, dot 0 (just before VBlank starts)
+        ppu.scanline.set(241);
+        ppu.dot.set(0);
+        assert!(ppu.sprite_0_hit.get(), "Sprite 0 hit should persist before VBlank starts");
+        
+        // Tick twice to process VBlank start event at scanline 241, dot 1
+        ppu.tick(); // Advance to 241,1
+        ppu.tick(); // At 241,1, VBlank event fires, advance to 241,2
+        assert_eq!(ppu.scanline.get(), 241);
+        assert_eq!(ppu.dot.get(), 2);
+        assert!(ppu.vblank_flag(), "VBlank should be set");
+        // Hardware-accurate: sprite 0 hit is NOT cleared when VBlank starts
+        assert!(ppu.sprite_0_hit.get(), "Sprite 0 hit should persist when VBlank starts (hardware-accurate)");
+        
+        // Sprite 0 hit should remain set through entire VBlank period
+        ppu.scanline.set(260);
+        ppu.dot.set(340);
+        assert!(ppu.sprite_0_hit.get(), "Sprite 0 hit should persist through VBlank");
+        
+        // Set position to scanline 261, dot 0 (just before pre-render clear event)
+        ppu.scanline.set(261);
+        ppu.dot.set(0);
+        assert!(ppu.sprite_0_hit.get(), "Sprite 0 hit should persist until pre-render scanline");
+        
+        // Tick twice to process pre-render clear event at scanline 261, dot 1
+        ppu.tick(); // Advance to 261,1
+        ppu.tick(); // At 261,1, clear event fires, advance to 261,2
+        assert_eq!(ppu.scanline.get(), 261);
+        assert_eq!(ppu.dot.get(), 2);
+        assert!(!ppu.sprite_0_hit.get(), "Sprite 0 hit should be cleared after event at pre-render scanline dot 1");
+    }
+
+    #[test]
+    fn test_sprite_overflow_cleared_at_pre_render() {
+        // Test that sprite overflow flag is cleared at pre-render scanline, not at VBlank
+        let ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
+        ppu.clear_first_frame_lock();
+        
+        // Manually set sprite overflow
+        ppu.sprite_overflow.set(true);
+        
+        // Advance to VBlank start and process event
+        ppu.scanline.set(241);
+        ppu.dot.set(0);
+        ppu.tick(); // Advance to 241,1
+        ppu.tick(); // At 241,1, VBlank event fires, advance to 241,2
+        assert!(ppu.vblank_flag(), "VBlank should be set");
+        assert!(ppu.sprite_overflow.get(), "Sprite overflow should persist when VBlank starts");
+        
+        // Should persist through VBlank
+        ppu.scanline.set(260);
+        ppu.dot.set(340);
+        assert!(ppu.sprite_overflow.get(), "Sprite overflow should persist through VBlank");
+        
+        // At pre-render scanline, should be cleared
+        ppu.scanline.set(261);
+        ppu.dot.set(0);
+        ppu.tick(); // Advance to 261,1
+        ppu.tick(); // At 261,1, clear event fires, advance to 261,2
+        assert!(!ppu.sprite_overflow.get(), "Sprite overflow should be cleared after event at pre-render scanline dot 1");
+    }
+
+    #[test]
+    fn test_is_in_vblank_region_ntsc() {
+        // Test that is_in_vblank_region works correctly for NTSC
+        let ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
+        
+        // Scanline 240 (post-render) - not in VBlank
+        ppu.scanline.set(240);
+        assert!(!ppu.is_in_vblank_region(), "Scanline 240 should not be in VBlank region");
+        
+        // Scanline 241 - start of VBlank
+        ppu.scanline.set(241);
+        assert!(ppu.is_in_vblank_region(), "Scanline 241 should be in VBlank region (NTSC)");
+        
+        // Scanline 260 - last VBlank scanline
+        ppu.scanline.set(260);
+        assert!(ppu.is_in_vblank_region(), "Scanline 260 should be in VBlank region (NTSC)");
+        
+        // Scanline 261 - pre-render, not in VBlank
+        ppu.scanline.set(261);
+        assert!(!ppu.is_in_vblank_region(), "Scanline 261 should not be in VBlank region");
+    }
+
+    #[test]
+    fn test_is_in_vblank_region_pal() {
+        // Test that is_in_vblank_region works correctly for PAL
+        let ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Pal);
+        
+        // Scanline 240 (post-render) - not in VBlank
+        ppu.scanline.set(240);
+        assert!(!ppu.is_in_vblank_region(), "Scanline 240 should not be in VBlank region");
+        
+        // Scanline 241 - start of VBlank (same as NTSC)
+        ppu.scanline.set(241);
+        assert!(ppu.is_in_vblank_region(), "Scanline 241 should be in VBlank region (PAL)");
+        
+        // Scanline 260 - still in VBlank (unlike NTSC which ends here)
+        ppu.scanline.set(260);
+        assert!(ppu.is_in_vblank_region(), "Scanline 260 should be in VBlank region (PAL)");
+        
+        // Scanline 310 - last VBlank scanline for PAL
+        ppu.scanline.set(310);
+        assert!(ppu.is_in_vblank_region(), "Scanline 310 should be in VBlank region (PAL)");
+        
+        // Scanline 311 - pre-render, not in VBlank
+        ppu.scanline.set(311);
+        assert!(!ppu.is_in_vblank_region(), "Scanline 311 should not be in VBlank region (PAL)");
     }
 }
