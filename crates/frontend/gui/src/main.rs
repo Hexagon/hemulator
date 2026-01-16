@@ -3639,6 +3639,9 @@ fn main() {
                     runtime_state.clear_mounts();
                     _game_saves = GameSaves::default();
 
+                    // Clear debug and inspector state when switching systems
+                    egui_app.tab_manager.clear_debug_state();
+
                     match system_name.as_str() {
                         "NES" => {
                             let gl_ctx = egui_backend.gl_context();
@@ -3830,6 +3833,10 @@ fn main() {
                                 } else {
                                     None
                                 };
+
+                                // Clear debug and inspector state when loading a new ROM
+                                // This handles both system switches and ROM changes within the same system
+                                egui_app.tab_manager.clear_debug_state();
 
                                 match detect_rom_type_with_extension(
                                     &data,
@@ -4418,6 +4425,8 @@ fn main() {
 
                                     // Update POST screen with mount status
                                     pc_sys.update_post_screen();
+                                    // Clear debug and inspector state when loading a project
+                                    egui_app.tab_manager.clear_debug_state();
 
                                     sys = EmulatorSystem::PC(Box::new(pc_sys));
                                     rom_loaded = true;
@@ -4460,6 +4469,9 @@ fn main() {
                                 } else {
                                     None
                                 };
+
+                                // Clear debug and inspector state when loading a new ROM
+                                egui_app.tab_manager.clear_debug_state();
 
                                 match detect_rom_type_with_extension(
                                     &data,
@@ -5208,6 +5220,8 @@ fn main() {
 
                                     // Update POST screen with mount status
                                     pc_sys.update_post_screen();
+                                    // Clear debug and inspector state when loading a project
+                                    egui_app.tab_manager.clear_debug_state();
 
                                     sys = EmulatorSystem::PC(Box::new(pc_sys));
                                     rom_loaded = true;

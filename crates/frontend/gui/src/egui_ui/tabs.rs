@@ -402,6 +402,20 @@ impl TabManager {
         self.pending_debug_action.take()
     }
 
+    /// Clear all debug and inspector state
+    /// Call this when switching systems or loading a new ROM
+    pub fn clear_debug_state(&mut self) {
+        self.debug_info = None;
+        self.enhanced_debug_state = None;
+        self.system_tile_data = None;
+        self.pc_bda_data = None;
+        self.cartridge_data = None;
+        self.cached_memory.clear();
+        self.cached_memory_start = 0;
+        self.selected_memory_region_index = 0;
+        self.memory_view_address = 0;
+    }
+
     pub fn ui(
         &mut self,
         ui: &mut Ui,
