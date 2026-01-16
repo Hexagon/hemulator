@@ -72,11 +72,16 @@ pub struct Ppu {
     oam: Vec<u8>,
 
     /// VRAM address register ($2116/$2117)
-    vram_addr: u16,
+    /// Uses Cell for interior mutability as VRAM reads auto-increment after high byte read
+    vram_addr: Cell<u16>,
     /// VRAM address increment mode ($2115)
-    /// Bit 7: Increment on high byte access (0) or low byte access (1)
+    /// Bit 7: Increment after high byte write (1) or low byte write (0)
     /// Bits 0-1: Address increment amount (00=1, 01=32, 10/11=128)
     vmain: u8,
+    /// VRAM read buffer (hardware prefetch) - stores the word read on address set
+    /// Real hardware prefetches VRAM data, returning the previous read value
+    /// Uses Cell for interior mutability as reads update the buffer
+    vram_read_buffer: Cell<u16>,
     /// CGRAM address register ($2121)
     cgram_addr: u8,
     /// CGRAM write latch (alternates between low and high byte)
@@ -100,6 +105,13 @@ pub struct Ppu {
     pub nmi_enable: bool,
     /// H/V-blank flag and joypad status ($4212)
     hvbjoy: u8,
+
+    /// Sprite overflow flags for STAT77 register ($213E)
+    /// Bit 7: Time over flag - set when more than 34 8x8 tiles on any scanline
+    /// Bit 6: Range over flag - set when more than 32 sprites on any scanline
+    /// These flags are set during sprite rendering and cleared at VBlank
+    sprite_time_over: bool,
+    sprite_range_over: bool,
 
     /// Screen display register ($2100) - bit 7 = force blank, bits 0-3 = brightness
     screen_display: u8,
@@ -415,8 +427,9 @@ impl Ppu {
             vram: vec![0; VRAM_SIZE],
             cgram: vec![0; CGRAM_SIZE],
             oam: vec![0; OAM_SIZE],
-            vram_addr: 0,
-            vmain: 0x80, // Default: increment on high byte access
+            vram_addr: Cell::new(0),
+            vmain: 0x80, // Default: bit 7 = 1, increment after high byte write
+            vram_read_buffer: Cell::new(0),
             cgram_addr: 0,
             cgram_write_latch: false,
             oam_addr: 0,
@@ -427,6 +440,8 @@ impl Ppu {
             nmi_pending: false,
             nmi_enable: false,
             hvbjoy: 0,
+            sprite_time_over: false,
+            sprite_range_over: false,
             screen_display: 0x80, // Start with screen blanked
             bgmode: 0,
             bg1sc: 0,
@@ -722,12 +737,20 @@ impl Ppu {
 
             // $2116 - VMADDL - VRAM Address (low byte)
             0x2116 => {
-                self.vram_addr = (self.vram_addr & 0xFF00) | val as u16;
+                let current = self.vram_addr.get();
+                self.vram_addr.set((current & 0xFF00) | val as u16);
+                // Hardware prefetch: When VRAM address is set, the word at that address
+                // is immediately read into the read buffer
+                self.prefetch_vram();
             }
 
             // $2117 - VMADDH - VRAM Address (high byte)
             0x2117 => {
-                self.vram_addr = (self.vram_addr & 0x00FF) | ((val as u16) << 8);
+                let current = self.vram_addr.get();
+                self.vram_addr.set((current & 0x00FF) | ((val as u16) << 8));
+                // Hardware prefetch: When VRAM address is set, the word at that address
+                // is immediately read into the read buffer
+                self.prefetch_vram();
             }
 
             // $2118 - VMDATAL - VRAM Data Write (low byte)
@@ -737,20 +760,23 @@ impl Ppu {
                     log(LogCategory::PPU, LogLevel::Warn, || {
                         format!(
                             "SNES PPU: VRAM Write L attempted during active display (ignored) - addr ${:04X}",
-                            self.vram_addr
+                            self.vram_addr.get()
                         )
                     });
                     return; // Ignore write during active display
                 }
 
-                let addr = (self.vram_addr as usize) % (VRAM_SIZE / 2);
+                let addr = (self.vram_addr.get() as usize) % (VRAM_SIZE / 2);
                 self.vram[addr * 2] = val;
                 log(LogCategory::PPU, LogLevel::Trace, || {
                     format!("SNES PPU: VRAM Write L ${:04X} = ${:02X}", addr * 2, val)
                 });
-                // Auto-increment VRAM address if VMAIN bit 7 is set (increment on low byte)
-                if self.vmain & 0x80 != 0 {
-                    self.vram_addr = self.vram_addr.wrapping_add(self.get_vram_increment());
+                // Auto-increment VRAM address if VMAIN bit 7 is CLEAR (increment on low byte write)
+                // Hardware: bit 7 = 0 means increment after low byte, bit 7 = 1 means increment after high byte
+                if self.vmain & 0x80 == 0 {
+                    let current = self.vram_addr.get();
+                    self.vram_addr
+                        .set(current.wrapping_add(self.get_vram_increment()));
                 }
             }
 
@@ -761,20 +787,14 @@ impl Ppu {
                     log(LogCategory::PPU, LogLevel::Warn, || {
                         format!(
                             "SNES PPU: VRAM Write H attempted during active display (ignored) - addr ${:04X}",
-                            self.vram_addr
+                            self.vram_addr.get()
                         )
                     });
                     return; // Ignore write during active display
                 }
 
-                let addr = if self.vmain & 0x80 != 0 {
-                    // If incrementing on low byte, high byte write uses current address
-                    (self.vram_addr.wrapping_sub(self.get_vram_increment()) as usize)
-                        % (VRAM_SIZE / 2)
-                } else {
-                    // If incrementing on high byte, use current address
-                    (self.vram_addr as usize) % (VRAM_SIZE / 2)
-                };
+                // For high byte write, always use the current address (no subtraction needed)
+                let addr = (self.vram_addr.get() as usize) % (VRAM_SIZE / 2);
                 self.vram[addr * 2 + 1] = val;
                 log(LogCategory::PPU, LogLevel::Trace, || {
                     format!(
@@ -783,9 +803,12 @@ impl Ppu {
                         val
                     )
                 });
-                // Auto-increment VRAM address if VMAIN bit 7 is clear (increment on high byte)
-                if self.vmain & 0x80 == 0 {
-                    self.vram_addr = self.vram_addr.wrapping_add(self.get_vram_increment());
+                // Auto-increment VRAM address if VMAIN bit 7 is SET (increment on high byte write)
+                // Hardware: bit 7 = 0 means increment after low byte, bit 7 = 1 means increment after high byte
+                if self.vmain & 0x80 != 0 {
+                    let current = self.vram_addr.get();
+                    self.vram_addr
+                        .set(current.wrapping_add(self.get_vram_increment()));
                 }
             }
 
@@ -1063,14 +1086,20 @@ impl Ppu {
 
             // $2139 - VMDATALREAD - VRAM Data Read (low byte)
             0x2139 => {
-                let addr = (self.vram_addr as usize) % (VRAM_SIZE / 2);
-                self.vram[addr * 2]
+                // Return buffered low byte (hardware prefetch behavior)
+                (self.vram_read_buffer.get() & 0xFF) as u8
             }
 
             // $213A - VMDATAHREAD - VRAM Data Read (high byte)
             0x213A => {
-                let addr = (self.vram_addr as usize) % (VRAM_SIZE / 2);
-                self.vram[addr * 2 + 1]
+                // Return buffered high byte
+                let result = (self.vram_read_buffer.get() >> 8) as u8;
+                // Auto-increment address after high byte read and prefetch next word
+                let current = self.vram_addr.get();
+                self.vram_addr
+                    .set(current.wrapping_add(self.get_vram_increment()));
+                self.prefetch_vram();
+                result
             }
 
             // $213B - CGDATAREAD - CGRAM Data Read
@@ -1089,12 +1118,14 @@ impl Ppu {
             // $213D - OPVCT - Vertical Counter (stub)
             0x213D => 0,
 
-            // $213E - STAT77 - PPU Status (stub)
+            // $213E - STAT77 - PPU Status
             0x213E => {
-                // Bit 7: Time over flag
-                // Bit 6: Range over flag
+                // Bit 7: Time over flag - more than 34 8x8 tiles on any scanline
+                // Bit 6: Range over flag - more than 32 sprites on any scanline
                 // Bits 0-5: PPU version
-                0x01 // Version 1
+                let time_over = if self.sprite_time_over { 0x80 } else { 0x00 };
+                let range_over = if self.sprite_range_over { 0x40 } else { 0x00 };
+                time_over | range_over | 0x01 // Version 1
             }
 
             // $213F - STAT78 - PPU Status and NMI Flag
@@ -1129,7 +1160,7 @@ impl Ppu {
     }
 
     /// Render a frame
-    pub fn render_frame(&self) -> Frame {
+    pub fn render_frame(&mut self) -> Frame {
         // Determine frame width based on BG mode
         // Modes 5 and 6 support hi-res (512px wide)
         let bg_mode = self.bgmode & 0x07;
@@ -1269,7 +1300,7 @@ impl Ppu {
     /// Helper method to render layers for main or sub-screen
     /// This avoids code duplication between main and sub-screen rendering
     fn render_screen_layers(
-        &self,
+        &mut self,
         bg_mode: u8,
         frame: &mut Frame,
         priority_buffer: &mut [u8],
@@ -1603,6 +1634,9 @@ impl Ppu {
             }
         } else {
             self.hvbjoy &= !0x80; // Clear V-blank bit
+                                  // Clear sprite overflow flags at start of new frame
+            self.sprite_time_over = false;
+            self.sprite_range_over = false;
         }
     }
 
@@ -1676,6 +1710,17 @@ impl Ppu {
         let in_hblank = (self.hvbjoy & 0x40) != 0;
 
         force_blank || in_vblank || in_hblank
+    }
+
+    /// Prefetch VRAM word at current address into read buffer
+    /// Hardware behavior: When VRAM address is set or after a read, the word at that
+    /// address is immediately loaded into the read buffer for subsequent read operations
+    fn prefetch_vram(&self) {
+        let addr = (self.vram_addr.get() as usize) % (VRAM_SIZE / 2);
+        let low_byte = self.vram.get(addr * 2).copied().unwrap_or(0);
+        let high_byte = self.vram.get(addr * 2 + 1).copied().unwrap_or(0);
+        self.vram_read_buffer
+            .set((low_byte as u16) | ((high_byte as u16) << 8));
     }
 
     /// Get tilemap and CHR base addresses for a BG layer
@@ -2807,7 +2852,7 @@ impl Ppu {
 
     /// Render sprites with priority filtering
     fn render_sprites_priority(
-        &self,
+        &mut self,
         frame: &mut Frame,
         priority_buffer: &mut [u8],
         layer_buffer: &mut [u8],
@@ -2928,21 +2973,31 @@ impl Ppu {
 
             // Check if rendering this sprite would exceed scanline limits
             let mut can_render = true;
+            let mut range_over_triggered = false;
+            let mut time_over_triggered = false;
             for scanline in start_y..end_y {
                 if sprites_per_scanline[scanline] >= 32 {
                     can_render = false;
+                    range_over_triggered = true;
                     break;
                 }
                 // Each row of the sprite adds tiles_wide to the scanline
                 if tiles_per_scanline[scanline] + tiles_wide > 34 {
                     can_render = false;
+                    time_over_triggered = true;
                     break;
                 }
             }
 
-            // Skip if limits exceeded
+            // Skip if limits exceeded and set hardware overflow flags
             if !can_render {
                 sprites_scanline_limited += 1;
+                if range_over_triggered {
+                    self.sprite_range_over = true;
+                }
+                if time_over_triggered {
+                    self.sprite_time_over = true;
+                }
                 continue;
             }
 
@@ -3029,8 +3084,21 @@ impl Ppu {
 
         // Calculate base address for this sprite's tiles
         // If nameselect is set, add the gap to access second sprite page
+        // Validate that the resulting address stays within VRAM bounds
         let sprite_tile_base = if nameselect {
-            obj_base + nameselect_gap
+            let base = obj_base.saturating_add(nameselect_gap);
+            // Ensure we don't overflow VRAM - wrap to stay within 64KB
+            if base >= VRAM_SIZE {
+                log(LogCategory::PPU, LogLevel::Warn, || {
+                    format!(
+                        "OBJ tile base overflow: obj_base=${:04X} + nameselect_gap=${:04X} = ${:04X} >= VRAM_SIZE, wrapping",
+                        obj_base, nameselect_gap, base
+                    )
+                });
+                base % VRAM_SIZE
+            } else {
+                base
+            }
         } else {
             obj_base
         };
@@ -3049,11 +3117,17 @@ impl Ppu {
                 // SNES sprite tile layout: tiles are arranged in a 16-tile wide grid
                 // Character (tile number) provides the base position in this grid
                 // For multi-tile sprites, tiles are adjacent horizontally (+1) and vertically (+16)
+                //
+                // Hardware behavior: The grid is 16 tiles wide (0-15) and wraps vertically
+                // - Horizontal: char_x wraps implicitly via the final & 0x0F mask in tile_index
+                // - Vertical: char_y & 0x0F explicitly wraps to keep y in range 0-15
+                // This means sprites taller than 16 tiles (128 pixels) wrap back to row 0
                 let char_x = (tile as usize & 0x0F) + tx;
                 let char_y = ((tile as usize >> 4) + ty) & 0x0F;
 
                 // Calculate tile address using the grid position
                 // Each tile is 32 bytes (4bpp: 8x8 pixels, 4 bits per pixel = 32 bytes)
+                // SNES sprites are always 4bpp (16 colors), using palettes 128-255
                 let tile_index = (char_y << 4) | (char_x & 0x0F);
                 let tile_addr = sprite_tile_base + (tile_index * 32);
 
@@ -3494,7 +3568,7 @@ mod tests {
         // Check that data was written and address incremented
         assert_eq!(ppu.vram[0x1000 * 2], 0xAA);
         assert_eq!(ppu.vram[0x1000 * 2 + 1], 0xBB);
-        assert_eq!(ppu.vram_addr, 0x1001); // Incremented after low byte write
+        assert_eq!(ppu.vram_addr.get(), 0x1001); // Incremented after low byte write
     }
 
     #[test]
@@ -4030,21 +4104,21 @@ mod tests {
         assert_eq!(ppu.vmain, 0x03);
         assert_eq!(ppu.get_vram_increment(), 128);
 
-        // Test increment on high byte (bit 7 clear)
-        ppu.write_register(0x2115, 0x00);
+        // Test increment on high byte (VMAIN bit 7 SET = increment after high byte write)
+        ppu.write_register(0x2115, 0x80); // Bit 7 = 1: increment on high byte
         ppu.write_register(0x2116, 0x00);
         ppu.write_register(0x2117, 0x10); // Address $1000
         ppu.write_register(0x2118, 0xAA); // Write low byte
-        assert_eq!(ppu.vram_addr, 0x1000); // Should not increment yet
+        assert_eq!(ppu.vram_addr.get(), 0x1000); // Should not increment yet (bit 7=1)
         ppu.write_register(0x2119, 0xBB); // Write high byte
-        assert_eq!(ppu.vram_addr, 0x1001); // Should increment after high byte
+        assert_eq!(ppu.vram_addr.get(), 0x1001); // Should increment after high byte (bit 7=1)
 
-        // Test increment on low byte (bit 7 set)
-        ppu.write_register(0x2115, 0x80);
+        // Test increment on low byte (VMAIN bit 7 CLEAR = increment after low byte write)
+        ppu.write_register(0x2115, 0x00); // Bit 7 = 0: increment on low byte
         ppu.write_register(0x2116, 0x00);
         ppu.write_register(0x2117, 0x20); // Address $2000
         ppu.write_register(0x2118, 0xCC); // Write low byte
-        assert_eq!(ppu.vram_addr, 0x2001); // Should increment after low byte
+        assert_eq!(ppu.vram_addr.get(), 0x2001); // Should increment after low byte (bit 7=0)
     }
 
     #[test]
@@ -4054,18 +4128,85 @@ mod tests {
         // Set up some test data in VRAM
         ppu.vram[0x1000 * 2] = 0xAA;
         ppu.vram[0x1000 * 2 + 1] = 0xBB;
+        ppu.vram[0x1002 * 2] = 0xCC;
+        ppu.vram[0x1002 * 2 + 1] = 0xDD;
 
-        // Set VRAM address to $1000
+        // Set VRAM address to $1000 - this should prefetch $1000
         ppu.write_register(0x2116, 0x00);
         ppu.write_register(0x2117, 0x10);
 
-        // Read low byte
+        // Read low byte - should return prefetched value
         let low = ppu.read_register(0x2139);
         assert_eq!(low, 0xAA);
 
-        // Read high byte
+        // Read high byte - should return prefetched high byte and auto-increment address
         let high = ppu.read_register(0x213A);
         assert_eq!(high, 0xBB);
+
+        // Address should have auto-incremented to $1001 after high byte read
+        assert_eq!(ppu.vram_addr.get(), 0x1001);
+    }
+
+    #[test]
+    fn test_vram_read_buffer_prefetch() {
+        let mut ppu = Ppu::new();
+
+        // Set up test data
+        ppu.vram[0x2000 * 2] = 0x11;
+        ppu.vram[0x2000 * 2 + 1] = 0x22;
+        ppu.vram[0x2001 * 2] = 0x33;
+        ppu.vram[0x2001 * 2 + 1] = 0x44;
+
+        // Set VRAM address - should prefetch $2000 (0x2211)
+        ppu.write_register(0x2116, 0x00);
+        ppu.write_register(0x2117, 0x20);
+
+        // Read both bytes
+        let low1 = ppu.read_register(0x2139);
+        let high1 = ppu.read_register(0x213A);
+        assert_eq!(low1, 0x11);
+        assert_eq!(high1, 0x22);
+
+        // After reading high byte, address increments to $2001 and prefetches
+        // Next read should return prefetched data from $2001
+        let low2 = ppu.read_register(0x2139);
+        let high2 = ppu.read_register(0x213A);
+        assert_eq!(low2, 0x33);
+        assert_eq!(high2, 0x44);
+    }
+
+    #[test]
+    fn test_vram_write_read_consistency() {
+        let mut ppu = Ppu::new();
+
+        // Force blank to allow VRAM writes
+        ppu.write_register(0x2100, 0x80);
+
+        // Write data to VRAM with increment on high byte (VMAIN bit 7 = 1)
+        ppu.write_register(0x2115, 0x80);
+        ppu.write_register(0x2116, 0x00);
+        ppu.write_register(0x2117, 0x30);
+        ppu.write_register(0x2118, 0x12);
+        ppu.write_register(0x2119, 0x34);
+
+        // Address should have incremented to $3001 after high byte write
+        assert_eq!(ppu.vram_addr.get(), 0x3001);
+
+        // Write another word
+        ppu.write_register(0x2118, 0x56);
+        ppu.write_register(0x2119, 0x78);
+
+        // Read back the data - reset address to $3000
+        ppu.write_register(0x2116, 0x00);
+        ppu.write_register(0x2117, 0x30);
+
+        // Read first word
+        assert_eq!(ppu.read_register(0x2139), 0x12);
+        assert_eq!(ppu.read_register(0x213A), 0x34);
+
+        // Read second word (auto-incremented and prefetched)
+        assert_eq!(ppu.read_register(0x2139), 0x56);
+        assert_eq!(ppu.read_register(0x213A), 0x78);
     }
 
     #[test]
@@ -4145,6 +4286,124 @@ mod tests {
         let hvbjoy_hblank = ppu.read_register(0x4212);
         assert_eq!(hvbjoy_hblank & 0x80, 0x00); // V-blank clear
         assert_eq!(hvbjoy_hblank & 0x40, 0x40); // H-blank still set
+    }
+
+    #[test]
+    fn test_vram_write_protection() {
+        let mut ppu = Ppu::new();
+
+        // Test 1: VRAM writes should fail during active display (screen enabled, not in blanking)
+        ppu.write_register(0x2100, 0x0F); // Enable screen, full brightness
+        ppu.set_vblank(false);
+        ppu.set_hblank(false);
+
+        // Try to write to VRAM during active display
+        ppu.write_register(0x2116, 0x00);
+        ppu.write_register(0x2117, 0x10);
+        ppu.write_register(0x2118, 0xAA); // Should be ignored
+        ppu.write_register(0x2119, 0xBB); // Should be ignored
+
+        // Data should NOT have been written
+        assert_eq!(ppu.vram[0x1000 * 2], 0x00);
+        assert_eq!(ppu.vram[0x1000 * 2 + 1], 0x00);
+
+        // Test 2: VRAM writes should succeed during V-blank
+        ppu.set_vblank(true);
+        ppu.write_register(0x2118, 0xCC);
+        ppu.write_register(0x2119, 0xDD);
+
+        // Data should have been written
+        assert_eq!(ppu.vram[0x1000 * 2], 0xCC);
+        assert_eq!(ppu.vram[0x1000 * 2 + 1], 0xDD);
+
+        // Test 3: VRAM writes should succeed during H-blank
+        ppu.set_vblank(false);
+        ppu.set_hblank(true);
+        ppu.write_register(0x2116, 0x00);
+        ppu.write_register(0x2117, 0x20);
+        ppu.write_register(0x2118, 0xEE);
+        ppu.write_register(0x2119, 0xFF);
+
+        // Data should have been written
+        assert_eq!(ppu.vram[0x2000 * 2], 0xEE);
+        assert_eq!(ppu.vram[0x2000 * 2 + 1], 0xFF);
+
+        // Test 4: VRAM writes should succeed when screen is force-blanked
+        ppu.write_register(0x2100, 0x80); // Force blank
+        ppu.set_vblank(false);
+        ppu.set_hblank(false);
+        ppu.write_register(0x2116, 0x00);
+        ppu.write_register(0x2117, 0x30);
+        ppu.write_register(0x2118, 0x11);
+        ppu.write_register(0x2119, 0x22);
+
+        // Data should have been written
+        assert_eq!(ppu.vram[0x3000 * 2], 0x11);
+        assert_eq!(ppu.vram[0x3000 * 2 + 1], 0x22);
+    }
+
+    #[test]
+    fn test_sprite_overflow_flags() {
+        let mut ppu = Ppu::new();
+
+        // Initially no overflow flags should be set
+        let stat77 = ppu.read_register(0x213E);
+        assert_eq!(stat77 & 0x80, 0x00); // Time over clear
+        assert_eq!(stat77 & 0x40, 0x00); // Range over clear
+
+        // Simulate sprite overflow by setting the flags directly
+        ppu.sprite_time_over = true;
+        ppu.sprite_range_over = true;
+
+        let stat77_overflow = ppu.read_register(0x213E);
+        assert_eq!(stat77_overflow & 0x80, 0x80); // Time over set
+        assert_eq!(stat77_overflow & 0x40, 0x40); // Range over set
+
+        // Flags should be cleared at VBlank
+        ppu.set_vblank(false); // Clearing VBlank (start of frame) clears overflow flags
+        assert!(!ppu.sprite_time_over);
+        assert!(!ppu.sprite_range_over);
+
+        let stat77_cleared = ppu.read_register(0x213E);
+        assert_eq!(stat77_cleared & 0x80, 0x00); // Time over cleared
+        assert_eq!(stat77_cleared & 0x40, 0x00); // Range over cleared
+    }
+
+    #[test]
+    fn test_sprite_tile_address_calculation() {
+        let mut ppu = Ppu::new();
+
+        // Test OBSEL register parsing
+        // Mode 0: small=8x8, large=16x16, base=$0000, gap=$2000
+        ppu.write_register(0x2101, 0x00);
+        assert_eq!(ppu.get_sprite_sizes(), ((8, 8), (16, 16)));
+        assert_eq!(ppu.get_obj_base_address(), 0x0000);
+        assert_eq!(ppu.get_obj_nameselect_gap(), 0x2000);
+
+        // Mode 1: small=8x8, large=32x32, base=$0000, gap=$2000
+        ppu.write_register(0x2101, 0x20); // Bits 5-7 = 001
+        assert_eq!(ppu.get_sprite_sizes(), ((8, 8), (32, 32)));
+
+        // Mode 2: small=8x8, large=64x64, base=$0000, gap=$2000
+        ppu.write_register(0x2101, 0x40); // Bits 5-7 = 010
+        assert_eq!(ppu.get_sprite_sizes(), ((8, 8), (64, 64)));
+
+        // Test different base addresses
+        ppu.write_register(0x2101, 0x03); // Bits 0-2 = 011
+        assert_eq!(ppu.get_obj_base_address(), 0x3 << 14); // 0xC000
+
+        // Test different gaps
+        ppu.write_register(0x2101, 0x18); // Bits 3-4 = 11
+        assert_eq!(ppu.get_obj_nameselect_gap(), (3 + 1) << 13); // 0x8000
+
+        // Test nameselect addressing
+        // Base at $4000, gap $4000, nameselect on
+        ppu.write_register(0x2101, 0x09); // base=1, gap=1
+        let base = ppu.get_obj_base_address();
+        let gap = ppu.get_obj_nameselect_gap();
+        assert_eq!(base, 0x4000);
+        assert_eq!(gap, 0x4000);
+        // With nameselect, address would be $4000 + $4000 = $8000
     }
 
     #[test]

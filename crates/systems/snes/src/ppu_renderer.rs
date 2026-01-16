@@ -46,7 +46,7 @@ pub trait SnesPpuRenderer: Renderer {
     ///
     /// # Arguments
     /// * `ppu` - PPU chip state (registers, VRAM, CGRAM)
-    fn render_frame(&mut self, ppu: &Ppu);
+    fn render_frame(&mut self, ppu: &mut Ppu);
 }
 
 /// Software SNES PPU renderer (CPU-based tile/sprite rendering)
@@ -94,7 +94,7 @@ impl Renderer for SoftwareSnesPpuRenderer {
 }
 
 impl SnesPpuRenderer for SoftwareSnesPpuRenderer {
-    fn render_frame(&mut self, ppu: &Ppu) {
+    fn render_frame(&mut self, ppu: &mut Ppu) {
         // Delegate to the PPU's existing render logic and copy the result
         let rendered = ppu.render_frame();
         self.framebuffer = rendered;

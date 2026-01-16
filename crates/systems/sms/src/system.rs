@@ -45,6 +45,7 @@ pub struct SmsSystem {
 
     // Timing
     cycles: u64,
+    total_cycles: u64,
     timing_mode: emu_core::apu::TimingMode,
 
     // Debugging
@@ -73,6 +74,7 @@ impl SmsSystem {
             vdp,
             psg,
             cycles: 0,
+            total_cycles: 0,
             timing_mode: emu_core::apu::TimingMode::Ntsc,
             instruction_tracer: emu_core::instruction_tracer::InstructionTracer::new(),
             breakpoint_manager: emu_core::breakpoints::BreakpointManager::new(),
@@ -194,6 +196,7 @@ impl System for SmsSystem {
         self.vdp.borrow_mut().reset();
         self.psg.borrow_mut().reset();
         self.cycles = 0;
+        self.total_cycles = 0;
 
         log(LogCategory::CPU, LogLevel::Debug, || {
             format!(
@@ -237,6 +240,7 @@ impl System for SmsSystem {
             let pc_before = self.cpu.pc as u32;
             let cpu_cycles = self.cpu.step() as u64;
             self.cycles += cpu_cycles;
+            self.total_cycles += cpu_cycles;
 
             // Record instruction if tracing is enabled
             if self.instruction_tracer.is_enabled() {
@@ -486,6 +490,10 @@ impl System for SmsSystem {
 
     fn debugger(&self) -> Option<&dyn emu_core::debug::Debugger> {
         Some(self)
+    }
+
+    fn get_total_cycles(&self) -> u64 {
+        self.total_cycles
     }
 }
 
