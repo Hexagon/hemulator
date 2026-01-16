@@ -1697,6 +1697,22 @@ fn create_atari2600_system(_settings: &Settings) -> emu_atari2600::Atari2600Syst
     emu_atari2600::Atari2600System::new()
 }
 
+/// Helper to configure UI state after system creation
+/// This consolidates common state updates that happen for all systems
+fn configure_system_ui(
+    egui_app: &mut egui_ui::EguiApp,
+    sys: &EmulatorSystem,
+    system_name: &str,
+    rom_loaded: &mut bool,
+    status_message: &str,
+) {
+    *rom_loaded = true;
+    egui_app.property_pane.system_name = system_name.to_string();
+    egui_app.property_pane.rendering_backend = sys.get_current_renderer_name();
+    egui_app.property_pane.available_renderers = sys.get_available_renderers();
+    egui_app.status_bar.set_message(status_message.to_string());
+}
+
 /// Helper function to create EnhancedDebugState from a Debugger
 fn create_enhanced_debug_state(
     system_name: &str,
@@ -3072,6 +3088,7 @@ fn main() {
     // Initialize egui app
     let mut egui_app = EguiApp::new();
     egui_app.property_pane.system_name = sys.system_name().to_string();
+    egui_app.set_system_loaded(rom_loaded); // Initialize menu state based on whether system is loaded
 
     // Upgrade renderer to OpenGL if settings request it and system was loaded
     // Note: OpenGL renderer upgrade temporarily disabled due to GL context refactoring
@@ -3620,6 +3637,9 @@ fn main() {
             egui_app.tab_manager.update_mount_info(mount_info);
         }
 
+        // Update menu bar system loaded state before rendering UI
+        egui_app.set_system_loaded(rom_loaded);
+
         // Render egui UI
         egui_app.ui(egui_backend.egui_ctx(), settings.scaling_mode);
 
@@ -3627,21 +3647,165 @@ fn main() {
         if let Some(action) = egui_app.menu_bar.take_action() {
             use egui_ui::menu_bar::MenuAction;
             match action {
-                MenuAction::NewProject => {
-                    egui_app.tab_manager.show_new_project_tab();
+                MenuAction::NewProjectSystem(system_name) => {
+                    // Create a new system based on the selected type
+                    // Clear any existing system state
+                    rom_loaded = false;
+                    rom_hash = None;
+                    runtime_state.clear_mounts();
+                    _game_saves = GameSaves::default();
+
+                    // Clear debug and inspector state when switching systems
+                    egui_app.tab_manager.clear_debug_state();
+
+                    match system_name.as_str() {
+                        "NES" => {
+                            let gl_ctx = egui_backend.gl_context();
+                            let nes_sys = create_nes_system(&settings.video_backend, gl_ctx);
+                            sys = EmulatorSystem::NES(Box::new(nes_sys));
+                            configure_system_ui(
+                                &mut egui_app,
+                                &sys,
+                                "NES",
+                                &mut rom_loaded,
+                                "Created new NES system",
+                            );
+                        }
+                        "Game Boy" => {
+                            sys = EmulatorSystem::GameBoy(Box::new(emu_gb::GbSystem::new()));
+                            configure_system_ui(
+                                &mut egui_app,
+                                &sys,
+                                "Game Boy",
+                                &mut rom_loaded,
+                                "Created new Game Boy system",
+                            );
+                        }
+                        "Atari 2600" => {
+                            sys = EmulatorSystem::Atari2600(Box::new(create_atari2600_system(
+                                &settings,
+                            )));
+                            configure_system_ui(
+                                &mut egui_app,
+                                &sys,
+                                "Atari 2600",
+                                &mut rom_loaded,
+                                "Created new Atari 2600 system",
+                            );
+                        }
+                        "SMS" => {
+                            sys = EmulatorSystem::SMS(Box::new(emu_sms::SmsSystem::new()));
+                            configure_system_ui(
+                                &mut egui_app,
+                                &sys,
+                                "SMS",
+                                &mut rom_loaded,
+                                "Created new SMS system",
+                            );
+                        }
+                        "ColecoVision" => {
+                            sys = EmulatorSystem::ColecoVision(Box::new(
+                                emu_colecovision::ColecoVisionSystem::new(),
+                            ));
+                            configure_system_ui(
+                                &mut egui_app,
+                                &sys,
+                                "ColecoVision",
+                                &mut rom_loaded,
+                                "Created new ColecoVision system",
+                            );
+                        }
+                        "SG-1000" => {
+                            sys = EmulatorSystem::SG1000(Box::new(emu_sg1000::Sg1000System::new()));
+                            configure_system_ui(
+                                &mut egui_app,
+                                &sys,
+                                "SG-1000",
+                                &mut rom_loaded,
+                                "Created new SG-1000 system",
+                            );
+                        }
+                        "CHIP-8" => {
+                            sys = EmulatorSystem::Chip8(Box::new(emu_chip8::Chip8System::new()));
+                            configure_system_ui(
+                                &mut egui_app,
+                                &sys,
+                                "CHIP-8",
+                                &mut rom_loaded,
+                                "Created new CHIP-8 system",
+                            );
+                        }
+                        "SNES" => {
+                            sys = EmulatorSystem::SNES(Box::new(emu_snes::SnesSystem::new()));
+                            configure_system_ui(
+                                &mut egui_app,
+                                &sys,
+                                "SNES",
+                                &mut rom_loaded,
+                                "Created new SNES system",
+                            );
+                        }
+                        "N64" => {
+                            let gl_ctx = egui_backend.gl_context();
+                            match create_n64_system(gl_ctx, &settings) {
+                                Ok(n64_sys) => {
+                                    sys = EmulatorSystem::N64(Box::new(n64_sys));
+                                    configure_system_ui(
+                                        &mut egui_app,
+                                        &sys,
+                                        "N64",
+                                        &mut rom_loaded,
+                                        "Created new N64 system",
+                                    );
+                                }
+                                Err(e) => {
+                                    egui_app
+                                        .status_bar
+                                        .set_error(format!("Failed to create N64 system: {}", e));
+                                    // Ensure rom_loaded stays false on error
+                                }
+                            }
+                        }
+                        "PC" => {
+                            sys = EmulatorSystem::PC(Box::new(emu_pc::PcSystem::new()));
+                            configure_system_ui(
+                                &mut egui_app,
+                                &sys,
+                                "PC",
+                                &mut rom_loaded,
+                                "Created new PC system",
+                            );
+                        }
+                        _ => {
+                            egui_app
+                                .status_bar
+                                .set_error(format!("Unknown system: {}", system_name));
+                            // Ensure rom_loaded stays false for unknown systems
+                        }
+                    }
                 }
-                MenuAction::OpenRom => {
+                MenuAction::NewProjectAutoDetect => {
                     // Track whether a ROM was successfully loaded in this handler
                     let rom_loaded_before = rom_loaded;
-                    // Open ROM file dialog
+                    // Open ROM file dialog with comprehensive extension support
                     if let Some(path) = rfd::FileDialog::new()
                         .add_filter(
-                            "ROM Files",
+                            "All ROM Files",
                             &[
-                                "nes", "gb", "gbc", "bin", "a26", "smc", "sfc", "z64", "n64",
-                                "com", "exe", "sms", "ch8", "c8",
+                                "nes", "unf", "gb", "gbc", "bin", "a26", "smc", "sfc", "z64",
+                                "n64", "v64", "com", "exe", "sms", "ch8", "c8", "col", "sg", "sc",
                             ],
                         )
+                        .add_filter("NES ROMs", &["nes", "unf"])
+                        .add_filter("Game Boy ROMs", &["gb", "gbc"])
+                        .add_filter("Atari 2600 ROMs", &["a26", "bin"])
+                        .add_filter("SNES ROMs", &["smc", "sfc", "bin"])
+                        .add_filter("N64 ROMs", &["z64", "n64", "v64", "bin"])
+                        .add_filter("SMS ROMs", &["sms", "bin"])
+                        .add_filter("ColecoVision ROMs", &["col", "bin"])
+                        .add_filter("SG-1000 ROMs", &["sg", "sc", "bin"])
+                        .add_filter("CHIP-8 Programs", &["ch8", "c8"])
+                        .add_filter("PC Executables", &["com", "exe", "bin"])
                         .add_filter("All Files", &["*"])
                         .pick_file()
                     {
@@ -3657,6 +3821,10 @@ fn main() {
                                 } else {
                                     None
                                 };
+
+                                // Clear debug and inspector state when loading a new ROM
+                                // This handles both system switches and ROM changes within the same system
+                                egui_app.tab_manager.clear_debug_state();
 
                                 match detect_rom_type_with_extension(
                                     &data,
@@ -4245,6 +4413,8 @@ fn main() {
 
                                     // Update POST screen with mount status
                                     pc_sys.update_post_screen();
+                                    // Clear debug and inspector state when loading a project
+                                    egui_app.tab_manager.clear_debug_state();
 
                                     sys = EmulatorSystem::PC(Box::new(pc_sys));
                                     rom_loaded = true;
@@ -4287,6 +4457,9 @@ fn main() {
                                 } else {
                                     None
                                 };
+
+                                // Clear debug and inspector state when loading a new ROM
+                                egui_app.tab_manager.clear_debug_state();
 
                                 match detect_rom_type_with_extension(
                                     &data,
@@ -5035,6 +5208,8 @@ fn main() {
 
                                     // Update POST screen with mount status
                                     pc_sys.update_post_screen();
+                                    // Clear debug and inspector state when loading a project
+                                    egui_app.tab_manager.clear_debug_state();
 
                                     sys = EmulatorSystem::PC(Box::new(pc_sys));
                                     rom_loaded = true;

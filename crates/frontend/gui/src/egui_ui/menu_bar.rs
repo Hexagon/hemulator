@@ -6,9 +6,9 @@ use egui::Ui;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MenuAction {
     // File menu
-    NewProject,
-    OpenRom,
-    OpenRecentFile(String), // Path to recent file
+    NewProjectSystem(String), // String is the system name (e.g., "NES", "Game Boy", "PC")
+    NewProjectAutoDetect,     // Auto-detect system from ROM file
+    OpenRecentFile(String),   // Path to recent file
     ClearRecentFiles,
     OpenProject,
     SaveProject,
@@ -37,6 +37,7 @@ pub enum MenuAction {
 pub struct MenuBar {
     pub pending_action: Option<MenuAction>,
     pub recent_files: Vec<String>, // List of recent files to display
+    pub system_loaded: bool,       // Whether a system is currently loaded
 }
 
 impl MenuBar {
@@ -44,6 +45,7 @@ impl MenuBar {
         Self {
             pending_action: None,
             recent_files: Vec::new(),
+            system_loaded: false,
         }
     }
 
@@ -52,27 +54,131 @@ impl MenuBar {
         self.recent_files = files;
     }
 
+    /// Update whether a system is loaded
+    pub fn set_system_loaded(&mut self, loaded: bool) {
+        self.system_loaded = loaded;
+    }
+
     pub fn ui(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
             // File menu
             ui.menu_button("📁 File", |ui| {
-                if ui
-                    .button("➕ New Project...")
-                    .on_hover_text("Create a new emulator system")
-                    .clicked()
-                {
-                    self.pending_action = Some(MenuAction::NewProject);
-                    ui.close();
-                }
+                // New Project submenu with system choices
+                ui.menu_button("➕ New Project", |ui| {
+                    ui.label(
+                        egui::RichText::new("Select System Type")
+                            .strong()
+                            .size(14.0),
+                    );
+                    ui.separator();
+
+                    // Auto-detect from ROM option
+                    if ui
+                        .button("🔍 Auto Detect from ROM...")
+                        .on_hover_text("Load a ROM and automatically detect the system type")
+                        .clicked()
+                    {
+                        self.pending_action = Some(MenuAction::NewProjectAutoDetect);
+                        ui.close();
+                    }
+
+                    ui.separator();
+
+                    // Individual system options
+                    if ui
+                        .button("🎮 NES")
+                        .on_hover_text("Nintendo Entertainment System")
+                        .clicked()
+                    {
+                        self.pending_action = Some(MenuAction::NewProjectSystem("NES".to_string()));
+                        ui.close();
+                    }
+
+                    if ui
+                        .button("🎮 Game Boy")
+                        .on_hover_text("Game Boy / Game Boy Color")
+                        .clicked()
+                    {
+                        self.pending_action =
+                            Some(MenuAction::NewProjectSystem("Game Boy".to_string()));
+                        ui.close();
+                    }
+
+                    if ui
+                        .button("🎮 Atari 2600")
+                        .on_hover_text("Atari 2600")
+                        .clicked()
+                    {
+                        self.pending_action =
+                            Some(MenuAction::NewProjectSystem("Atari 2600".to_string()));
+                        ui.close();
+                    }
+
+                    if ui
+                        .button("🎮 SMS")
+                        .on_hover_text("Sega Master System")
+                        .clicked()
+                    {
+                        self.pending_action = Some(MenuAction::NewProjectSystem("SMS".to_string()));
+                        ui.close();
+                    }
+
+                    if ui
+                        .button("🎮 ColecoVision")
+                        .on_hover_text("ColecoVision")
+                        .clicked()
+                    {
+                        self.pending_action =
+                            Some(MenuAction::NewProjectSystem("ColecoVision".to_string()));
+                        ui.close();
+                    }
+
+                    if ui
+                        .button("🎮 SG-1000")
+                        .on_hover_text("Sega SG-1000")
+                        .clicked()
+                    {
+                        self.pending_action =
+                            Some(MenuAction::NewProjectSystem("SG-1000".to_string()));
+                        ui.close();
+                    }
+
+                    if ui
+                        .button("🎮 CHIP-8")
+                        .on_hover_text("CHIP-8 / Super-CHIP / XO-CHIP")
+                        .clicked()
+                    {
+                        self.pending_action =
+                            Some(MenuAction::NewProjectSystem("CHIP-8".to_string()));
+                        ui.close();
+                    }
+
+                    if ui
+                        .button("🎮 SNES")
+                        .on_hover_text("Super Nintendo Entertainment System")
+                        .clicked()
+                    {
+                        self.pending_action =
+                            Some(MenuAction::NewProjectSystem("SNES".to_string()));
+                        ui.close();
+                    }
+
+                    if ui.button("🎮 N64").on_hover_text("Nintendo 64").clicked() {
+                        self.pending_action = Some(MenuAction::NewProjectSystem("N64".to_string()));
+                        ui.close();
+                    }
+
+                    if ui
+                        .button("💻 PC")
+                        .on_hover_text("IBM PC/XT Compatible")
+                        .clicked()
+                    {
+                        self.pending_action = Some(MenuAction::NewProjectSystem("PC".to_string()));
+                        ui.close();
+                    }
+                });
+
                 ui.separator();
-                if ui
-                    .button("📂 Open ROM... (F3)")
-                    .on_hover_text("Load a game ROM or disk image")
-                    .clicked()
-                {
-                    self.pending_action = Some(MenuAction::OpenRom);
-                    ui.close();
-                }
 
                 // Recent Files submenu
                 ui.menu_button("🕒 Recent Files", |ui| {
@@ -113,17 +219,25 @@ impl MenuBar {
                     self.pending_action = Some(MenuAction::OpenProject);
                     ui.close();
                 }
-                if ui
-                    .button("💾 Save Project...")
-                    .on_hover_text("Save current system configuration to a .hemu project file")
-                    .clicked()
-                {
-                    self.pending_action = Some(MenuAction::SaveProject);
-                    ui.close();
-                }
+
+                ui.add_enabled_ui(self.system_loaded, |ui| {
+                    if ui
+                        .button("💾 Save Project...")
+                        .on_hover_text(if self.system_loaded {
+                            "Save current system configuration to a .hemu project file"
+                        } else {
+                            "No system loaded - create a system first"
+                        })
+                        .clicked()
+                    {
+                        self.pending_action = Some(MenuAction::SaveProject);
+                        ui.close();
+                    }
+                });
+
                 ui.separator();
                 if ui
-                    .button("🚪 Exit (ESC)")
+                    .button("🚪 Exit")
                     .on_hover_text("Quit the emulator")
                     .clicked()
                 {
@@ -132,43 +246,45 @@ impl MenuBar {
                 }
             });
 
-            // Emulation menu
-            ui.menu_button("🎮 Emulation", |ui| {
-                if ui
-                    .button("🔄 Reset (F2)")
-                    .on_hover_text("Reset the emulated system")
-                    .clicked()
-                {
-                    self.pending_action = Some(MenuAction::Reset);
-                    ui.close();
-                }
-                if ui
-                    .button("⏸️ Pause (P)")
-                    .on_hover_text("Pause emulation")
-                    .clicked()
-                {
-                    self.pending_action = Some(MenuAction::Pause);
-                    ui.close();
-                }
-                if ui
-                    .button("▶️ Resume")
-                    .on_hover_text("Resume emulation")
-                    .clicked()
-                {
-                    self.pending_action = Some(MenuAction::Resume);
-                    ui.close();
-                }
-                if ui
-                    .button("⏭️ Step")
-                    .on_hover_text("Step one instruction (when paused)")
-                    .clicked()
-                {
-                    self.pending_action = Some(MenuAction::Step);
-                    ui.close();
-                }
+            // Emulation menu - only enabled when a system is loaded
+            ui.add_enabled_ui(self.system_loaded, |ui| {
+                ui.menu_button("🎮 Emulation", |ui| {
+                    if ui
+                        .button("🔄 Reset")
+                        .on_hover_text("Reset the emulated system")
+                        .clicked()
+                    {
+                        self.pending_action = Some(MenuAction::Reset);
+                        ui.close();
+                    }
+                    if ui
+                        .button("⏸️ Pause")
+                        .on_hover_text("Pause emulation")
+                        .clicked()
+                    {
+                        self.pending_action = Some(MenuAction::Pause);
+                        ui.close();
+                    }
+                    if ui
+                        .button("▶️ Resume")
+                        .on_hover_text("Resume emulation")
+                        .clicked()
+                    {
+                        self.pending_action = Some(MenuAction::Resume);
+                        ui.close();
+                    }
+                    if ui
+                        .button("⏭️ Step")
+                        .on_hover_text("Step one instruction (when paused)")
+                        .clicked()
+                    {
+                        self.pending_action = Some(MenuAction::Step);
+                        ui.close();
+                    }
+                });
             });
 
-            // View menu
+            // View menu - Screenshot only enabled when system is loaded, others always available
             ui.menu_button("👁️ View", |ui| {
                 ui.menu_button("🔍 Scaling", |ui| {
                     if ui
@@ -200,7 +316,7 @@ impl MenuBar {
                 ui.separator();
 
                 if ui
-                    .button("🖼️ Fullscreen (F11)")
+                    .button("🖼️ Fullscreen")
                     .on_hover_text("Toggle fullscreen mode without GUI")
                     .clicked()
                 {
@@ -208,7 +324,7 @@ impl MenuBar {
                     ui.close();
                 }
                 if ui
-                    .button("🖥️ Fullscreen with GUI (Host+F11)")
+                    .button("🖥️ Fullscreen with GUI")
                     .on_hover_text("Toggle fullscreen mode with GUI visible")
                     .clicked()
                 {
@@ -229,14 +345,21 @@ impl MenuBar {
 
                 ui.separator();
 
-                if ui
-                    .button("📸 Screenshot (F4)")
-                    .on_hover_text("Save a screenshot of the current frame")
-                    .clicked()
-                {
-                    self.pending_action = Some(MenuAction::Screenshot);
-                    ui.close();
-                }
+                // Screenshot only enabled when system is loaded
+                ui.add_enabled_ui(self.system_loaded, |ui| {
+                    if ui
+                        .button("📸 Screenshot")
+                        .on_hover_text(if self.system_loaded {
+                            "Save a screenshot of the current frame"
+                        } else {
+                            "No system loaded - nothing to capture"
+                        })
+                        .clicked()
+                    {
+                        self.pending_action = Some(MenuAction::Screenshot);
+                        ui.close();
+                    }
+                });
             });
 
             // Help menu
