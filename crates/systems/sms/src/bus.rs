@@ -198,26 +198,37 @@ impl MemoryZ80 for SmsMemory {
     }
 
     fn io_read(&mut self, port: u8) -> u8 {
+        // SMS I/O port decoding (partial decoding based on bit patterns):
+        // - 0x00-0x3F: Memory control, I/O control, etc.
+        // - 0x40-0x7F: V-counter (even) / H-counter (odd)
+        // - 0x80-0xBF: VDP data (even) / VDP status (odd)
+        // - 0xC0-0xFF: Controller ports (even = port A, odd = port B)
         let value = match port {
-            0x7E | 0x7F => {
-                // V-counter (0x7E) / H-counter (0x7F) - both read VDP vcounter for now
+            // 0x40-0x7F: V-counter (even ports) / H-counter (odd ports)
+            p if (0x40..=0x7F).contains(&p) => {
+                // V-counter on even ports, H-counter on odd ports
+                // Both currently read vcounter for simplicity
                 self.vdp.borrow().read_vcounter()
             }
-            0xBF => {
-                // VDP control/status port
-                self.vdp.borrow_mut().read_status()
+            // 0x80-0xBF: VDP ports (bit 0 determines data vs control)
+            p if (0x80..=0xBF).contains(&p) => {
+                if p & 0x01 == 0 {
+                    // Even port: VDP data
+                    self.vdp.borrow_mut().read_data()
+                } else {
+                    // Odd port: VDP status
+                    self.vdp.borrow_mut().read_status()
+                }
             }
-            0xBE => {
-                // VDP data port
-                self.vdp.borrow_mut().read_data()
-            }
-            0xDC => {
-                // Controller port 1
-                self.controller_1
-            }
-            0xDD => {
-                // Controller port 2
-                self.controller_2
+            // 0xC0-0xFF: Controller ports
+            p if (0xC0..=0xFF).contains(&p) => {
+                if p & 0x01 == 0 {
+                    // Even port: Controller port 1
+                    self.controller_1
+                } else {
+                    // Odd port: Controller port 2
+                    self.controller_2
+                }
             }
             _ => 0xFF,
         };
@@ -231,23 +242,35 @@ impl MemoryZ80 for SmsMemory {
     }
 
     fn io_write(&mut self, port: u8, val: u8) {
+        // SMS I/O port decoding (partial decoding based on bit patterns):
+        // - 0x00-0x3F: Memory control, I/O control, etc.
+        // - 0x40-0x7F: PSG write (directly connected to SN76489)
+        // - 0x80-0xBF: VDP data (even) / VDP control (odd)
+        // - 0xC0-0xFF: Controller ports (directly readable, no writes typically)
         match port {
-            0x7E | 0x7F => {
-                // PSG write
-                self.psg.borrow_mut().write(val);
-            }
-            0xBE => {
-                // VDP data port
-                self.vdp.borrow_mut().write_data(val);
-            }
-            0xBF => {
-                // VDP control port
-                self.vdp.borrow_mut().write_control(val);
-            }
+            // 0x00-0x3F: Memory control registers
             0x3E => {
                 // Memory control register
                 self.memory_control = val;
-                // TODO: Implement memory control features (cartridge slot control, etc.)
+            }
+            0x3F => {
+                // I/O port control (nationalization adapter)
+                // Controls TH pin direction for controller ports
+                // Not implemented yet
+            }
+            // 0x40-0x7F: PSG write
+            p if (0x40..=0x7F).contains(&p) => {
+                self.psg.borrow_mut().write(val);
+            }
+            // 0x80-0xBF: VDP ports (bit 0 determines data vs control)
+            p if (0x80..=0xBF).contains(&p) => {
+                if p & 0x01 == 0 {
+                    // Even port: VDP data
+                    self.vdp.borrow_mut().write_data(val);
+                } else {
+                    // Odd port: VDP control
+                    self.vdp.borrow_mut().write_control(val);
+                }
             }
             _ => {
                 // Ignore writes to other ports
