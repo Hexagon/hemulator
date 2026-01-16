@@ -982,7 +982,7 @@ impl Ppu {
                 for sx in 0..8u8 {
                     // Calculate actual screen X position
                     // OAM X position is offset by 8: X=0 means off-screen left, X=8 means screen X=0
-                    // x_pos = oam_x - 8 (calculated at line 812)
+                    // x_pos = oam_x - 8 (calculated at line 898)
                     // Sprites can be partially visible on left/right edges
                     let screen_x = x_pos.wrapping_add(sx);
 
