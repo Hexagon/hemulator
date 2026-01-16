@@ -3792,7 +3792,7 @@ fn main() {
                         _ => {
                             egui_app
                                 .status_bar
-                                .set_message(format!("Unknown system: {}", system_name));
+                                .set_error(format!("Unknown system: {}", system_name));
                         }
                     }
                 }
