@@ -21,9 +21,7 @@ docs/
 │   ├── developer/         # Developer documentation
 │   │   ├── architecture.md   # Architecture overview (refers to root ARCHITECTURE.md)
 │   │   ├── contributing.md   # Contributing guide
-│   │   ├── n64-status.md     # N64 development status
-│   │   ├── next-emulator.md  # Next system recommendation
-│   │   └── sms-guide.md      # SMS implementation guide
+│   │   └── n64-status.md     # N64 development status
 │   ├── systems/           # System overview
 │   │   └── index.md       # System documentation index
 │   └── references/        # Technical references
