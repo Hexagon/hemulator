@@ -54,7 +54,7 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
   - **Mode 5**: ✅ Complete - BG1 4bpp, BG2 2bpp with true 512px hi-res rendering
   - **Mode 6**: ✅ Complete - BG1 4bpp with true 512px hi-res and offset-per-tile support
   - **Mode 7**: ✅ Complete - 8bpp with full matrix transformation (rotation/scaling)
-  - Reference: [PPU Overview](https://snes.nesdev.org/wiki/PPU_registers)
+  - Reference: [Backgrounds](https://wiki.superfamicom.org/backgrounds), [PPU Overview](https://snes.nesdev.org/wiki/PPU_registers)
 
 - ✅ **Mode 7 Matrix Transformation** - Full rotation and scaling support
   - All Mode 7 registers implemented ($211A-$2120)
@@ -85,7 +85,7 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
   - **Sprite priority rotation** (bit 7 of $2103) - allows dynamic sprite ordering
   - Hardware-accurate 32 sprites/scanline limit
   - 34 tile slots/scanline limit
-  - Reference: [Sprites](https://wiki.superfamicom.org/sprites)
+  - Reference: [Sprites](https://wiki.superfamicom.org/sprites), [SNESdev OAM](https://snes.nesdev.org/wiki/PPU_OAM)
 
 - ✅ **Scrolling** - Full background scrolling support
   - Horizontal and vertical scrolling on all BG layers
@@ -219,6 +219,7 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
     - ✅ **Direct color mode** (CGWSEL bit 0) - for Modes 3, 4, 7
       - Allows 2048 colors (BBGGGRRR + bgr palette bits)
       - Used by some games for enhanced color effects
+      - Reference: [Backgrounds - Direct Color](https://wiki.superfamicom.org/backgrounds#direct-color-mode)
     
   - **Technical Details**:
     - Layer buffer tracks source layer for each pixel (BG1=0, BG2=1, BG3=2, BG4=3, OBJ=4, backdrop=5)
