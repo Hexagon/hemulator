@@ -1462,6 +1462,57 @@ fn render_cartridge_tab(ui: &mut Ui, tab_manager: &mut TabManager) {
                     );
                     ui.label("See crates/systems/nes/src/rom_db.rs to add new ROM database entries.");
                 }
+
+                // SNES-specific information (if available)
+                if cart_data.snes_mapping_mode.is_some() {
+                    ui.add_space(15.0);
+                    ui.separator();
+                    ui.add_space(10.0);
+
+                    ui.heading("SNES Cartridge Configuration");
+                    ui.add_space(5.0);
+
+                    egui::Grid::new("inspector_cart_snes_config_grid")
+                        .num_columns(2)
+                        .spacing([40.0, 8.0])
+                        .striped(true)
+                        .show(ui, |ui| {
+                            if let Some(ref mapping_mode) = cart_data.snes_mapping_mode {
+                                ui.label(egui::RichText::new("Mapping Mode:").strong());
+                                ui.label(mapping_mode);
+                                ui.end_row();
+                            }
+
+                            if let Some(ref chip_type) = cart_data.snes_chip_type {
+                                ui.label(egui::RichText::new("Enhancement Chip:").strong());
+                                ui.label(chip_type);
+                                ui.end_row();
+                            }
+
+                            if let Some(has_smc) = cart_data.snes_has_smc_header {
+                                ui.label(egui::RichText::new("SMC Header:").strong());
+                                if has_smc {
+                                    ui.label("Present (512 bytes)");
+                                } else {
+                                    ui.label("None");
+                                }
+                                ui.end_row();
+                            }
+                        });
+
+                    ui.add_space(15.0);
+                    ui.separator();
+                    ui.add_space(10.0);
+
+                    ui.heading("About");
+                    ui.add_space(5.0);
+                    ui.label(
+                        "The CRC32 checksum is calculated from the entire ROM file (including SMC header if present).",
+                    );
+                    ui.label(
+                        "SMC headers are 512-byte copier headers that are automatically detected and skipped during ROM loading.",
+                    );
+                }
             } else {
                 // No cartridge data available
                 ui.vertical_centered(|ui| {
