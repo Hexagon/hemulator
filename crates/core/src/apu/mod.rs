@@ -39,6 +39,7 @@
 
 pub mod audio_chip;
 pub mod dmc;
+pub mod dsp;
 pub mod envelope;
 pub mod frame_counter;
 pub mod length_counter;
@@ -56,6 +57,7 @@ pub mod wave;
 
 pub use audio_chip::AudioChip;
 pub use dmc::DmcChannel;
+pub use dsp::Dsp;
 pub use envelope::Envelope;
 pub use frame_counter::FrameCounter;
 pub use length_counter::{LengthCounter, LENGTH_TABLE};
