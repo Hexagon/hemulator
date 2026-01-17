@@ -1,6 +1,6 @@
 //! SNES cartridge implementation
 
-use crate::coprocessors::{dsp1::Dsp1, superfx::SuperFx, ChipType, EnhancementChip};
+use crate::coprocessors::{dsp1::Dsp1, sa1::Sa1, superfx::SuperFx, ChipType, EnhancementChip};
 use crate::SnesError;
 use emu_core::logging::{log, LogCategory, LogLevel};
 use std::cell::RefCell;
@@ -238,6 +238,12 @@ impl Cartridge {
                 sfx.set_rom(rom.to_vec());
                 Some(RefCell::new(Box::new(sfx)))
             }
+            ChipType::Sa1 => {
+                log(LogCategory::Bus, LogLevel::Info, || {
+                    format!("SNES Cartridge: {} coprocessor detected", chip_type.name())
+                });
+                Some(RefCell::new(Box::new(Sa1::new())))
+            }
             ChipType::None => None,
             _ => {
                 log(LogCategory::Bus, LogLevel::Warn, || {
@@ -283,6 +289,22 @@ impl Cartridge {
                     }
                     // SuperFX RAM: banks $70-$71 (128 KB) or $70-$73 (256 KB)
                     if matches!(bank, 0x70..=0x73) {
+                        return chip.borrow_mut().read(addr);
+                    }
+                }
+                (ChipType::Sa1, _) => {
+                    // SA-1 Register space: $2200-$23FF in all banks
+                    if (0x2200..=0x23FF).contains(&offset) {
+                        return chip.borrow_mut().read(addr);
+                    }
+                    // SA-1 I-RAM: $3000-$37FF in banks $00-$1F, $80-$9F
+                    if matches!(bank, 0x00..=0x1F | 0x80..=0x9F)
+                        && (0x3000..=0x37FF).contains(&offset)
+                    {
+                        return chip.borrow_mut().read(addr);
+                    }
+                    // SA-1 BW-RAM: banks $40-$4F, $60-$6F
+                    if matches!(bank, 0x40..=0x4F | 0x60..=0x6F) {
                         return chip.borrow_mut().read(addr);
                     }
                 }
@@ -494,6 +516,25 @@ impl Cartridge {
                     }
                     // SuperFX RAM: banks $70-$71 (128 KB) or $70-$73 (256 KB)
                     if matches!(bank, 0x70..=0x73) {
+                        chip.borrow_mut().write(addr, val);
+                        return;
+                    }
+                }
+                (ChipType::Sa1, _) => {
+                    // SA-1 Register space: $2200-$23FF in all banks
+                    if (0x2200..=0x23FF).contains(&offset) {
+                        chip.borrow_mut().write(addr, val);
+                        return;
+                    }
+                    // SA-1 I-RAM: $3000-$37FF in banks $00-$1F, $80-$9F
+                    if matches!(bank, 0x00..=0x1F | 0x80..=0x9F)
+                        && (0x3000..=0x37FF).contains(&offset)
+                    {
+                        chip.borrow_mut().write(addr, val);
+                        return;
+                    }
+                    // SA-1 BW-RAM: banks $40-$4F, $60-$6F
+                    if matches!(bank, 0x40..=0x4F | 0x60..=0x6F) {
                         chip.borrow_mut().write(addr, val);
                         return;
                     }

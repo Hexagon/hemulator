@@ -17,6 +17,7 @@
 //! - SnesLab - SuperFX: https://sneslab.net/wiki/Super_FX
 
 pub mod dsp1;
+pub mod sa1;
 pub mod superfx;
 
 use serde::{Deserialize, Serialize};
@@ -108,7 +109,7 @@ impl ChipType {
     pub fn is_implemented(self) -> bool {
         matches!(
             self,
-            ChipType::Dsp1 | ChipType::SuperFx | ChipType::SuperFx2
+            ChipType::Dsp1 | ChipType::SuperFx | ChipType::SuperFx2 | ChipType::Sa1
         )
     }
 
