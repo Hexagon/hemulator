@@ -94,15 +94,15 @@ impl Cartridge {
         if !is_nes2 {
             // For iNES 1.0, handle two types of corruption:
 
-            // 1. Check for "DiskDude!" signature (bytes 7-15)
-            //    This old tool left its signature which completely corrupts the header
+            // Type A: "DiskDude!" signature corruption (bytes 7-15)
+            //   This old tool left its signature which completely corrupts the header
             if &header[7..16] == b"DiskDude!" {
                 log(LogCategory::Bus, LogLevel::Info, || {
                     "NES: Cleaning DiskDude! corrupted header".to_string()
                 });
                 header[7..16].fill(0);
             } else {
-                // 2. Check for other garbage data
+                // Type B: Other garbage data corruption
                 let has_corruption_8_15 = header[8..16].iter().any(|&b| b != 0);
 
                 // For iNES 1.0, byte 7 bits 2-3 MUST be 00 (they're used for NES 2.0 identification)
@@ -112,7 +112,9 @@ impl Cartridge {
 
                 // Check if bytes 8-15 are severely corrupted (many non-zero bytes)
                 // If so, byte 7 is also likely corrupted even if bits 2-3 are correct
-                let severe_corruption = header[8..16].iter().filter(|&&b| b != 0).count() >= 4;
+                const SEVERE_CORRUPTION_THRESHOLD: usize = 4;
+                let severe_corruption = header[8..16].iter().filter(|&&b| b != 0).count()
+                    >= SEVERE_CORRUPTION_THRESHOLD;
 
                 if has_corruption_8_15 || byte7_corrupted {
                     log(LogCategory::Bus, LogLevel::Info, || {
@@ -685,7 +687,7 @@ mod tests {
             0x00, // CHR size: 0 (CHR-RAM)
             0x40, // Flags 6: Mapper low nibble = 4
             0xFF, // Flags 7: Garbage data (should be cleaned to 0)
-            0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x11, 0x22, // More garbage
+            0xDE, 0xAD, 0xBE, 0xEF, 0xBA, 0xAD, 0xF0, 0x0D, // Intentional garbage pattern
         ];
         data.extend(vec![0; 16 * 1024]);
 
