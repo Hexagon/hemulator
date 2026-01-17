@@ -18,7 +18,10 @@ nav_order: 1
    - `.sms` for Sega Master System
    - `.a26`/`.bin` for Atari 2600
    - `.gb`/`.gbc` for Game Boy
-   - `.com`/`.exe` for PC/DOS
+   - `.ch8`/`.c8` for CHIP-8/Super-CHIP/XO-CHIP
+   - `.col` for ColecoVision
+   - `.sg`/`.sc` for SG-1000
+   - `.com`/`.exe`/`.img` for PC/DOS
 5. **Start playing!** Use the controls listed in the [Controls](controls.md) section
 
 Alternatively, you can provide a ROM path as an argument:
