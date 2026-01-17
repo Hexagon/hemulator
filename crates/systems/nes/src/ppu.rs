@@ -873,15 +873,15 @@ impl Ppu {
                     self.sprite_overflow.set(true);
 
                     // HARDWARE BUG: Increment BOTH n and m instead of just n
-                    // This causes m to wrap and check wrong bytes
-                    // However, evaluation stops here so we break immediately
-                    // (The m/n increment would happen on real hardware but has no observable effect
-                    // since we break before checking another sprite)
-                    break;
-                } else {
-                    // No match - increment n and reset m
+                    // This causes m to increment when it shouldn't, leading to checking wrong bytes
+                    // NOTE: We continue checking remaining sprites, not break immediately
                     n += 1;
-                    m = 0;
+                    m = (m + 1) & 3; // Wrap m from 3 to 0
+                } else {
+                    // No match - increment n and m
+                    // HARDWARE BUG: m should be reset to 0, but hardware increments it instead
+                    n += 1;
+                    m = (m + 1) & 3; // Wrap m from 3 to 0
                 }
             }
         }
