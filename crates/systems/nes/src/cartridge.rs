@@ -85,16 +85,67 @@ impl Cartridge {
             ));
         }
 
-        // Fix DiskDude! corruption
-        if &header[7..16] == b"DiskDude!" {
-            header[7..16].fill(0);
+        // Check if this is iNES 2.0 format BEFORE cleaning header
+        // NES 2.0 identification: bits 2-3 of byte 7 must be 10 (0x08)
+        let is_nes2 = (header[7] & 0x0C) == 0x08;
+
+        // Clean up corrupted header bytes
+        // Many old ROMs have garbage data in the header from tools like DiskDude!
+        if !is_nes2 {
+            // For iNES 1.0, handle two types of corruption:
+
+            // 1. Check for "DiskDude!" signature (bytes 7-15)
+            //    This old tool left its signature which completely corrupts the header
+            if &header[7..16] == b"DiskDude!" {
+                log(LogCategory::Bus, LogLevel::Info, || {
+                    "NES: Cleaning DiskDude! corrupted header".to_string()
+                });
+                header[7..16].fill(0);
+            } else {
+                // 2. Check for other garbage data
+                let has_corruption_8_15 = header[8..16].iter().any(|&b| b != 0);
+
+                // For iNES 1.0, byte 7 bits 2-3 MUST be 00 (they're used for NES 2.0 identification)
+                // If they're set, the entire byte 7 is likely garbage and should be zeroed
+                let byte7_bits_2_3 = header[7] & 0x0C;
+                let byte7_corrupted = byte7_bits_2_3 != 0;
+
+                // Check if bytes 8-15 are severely corrupted (many non-zero bytes)
+                // If so, byte 7 is also likely corrupted even if bits 2-3 are correct
+                let severe_corruption = header[8..16].iter().filter(|&&b| b != 0).count() >= 4;
+
+                if has_corruption_8_15 || byte7_corrupted {
+                    log(LogCategory::Bus, LogLevel::Info, || {
+                        "NES: Cleaning corrupted iNES 1.0 header (invalid data in bytes 7-15)"
+                            .to_string()
+                    });
+
+                    // Clean bytes 8-15 completely
+                    header[8..16].fill(0);
+
+                    // Zero byte 7 if:
+                    // - Bits 2-3 are set (NES 2.0 identifier in iNES 1.0 ROM)
+                    // - Severe corruption in bytes 8-15 (likely entire header is bad)
+                    if byte7_corrupted || severe_corruption {
+                        header[7] = 0;
+                    }
+                }
+            }
+        } else {
+            // For NES 2.0, only bytes 13-15 should be zero (reserved for future use)
+            // Bytes 7-12 contain valid NES 2.0 metadata (mapper, submapper, sizes, timing)
+            let has_corruption = header[13..16].iter().any(|&b| b != 0);
+            if has_corruption {
+                log(LogCategory::Bus, LogLevel::Info, || {
+                    "NES: Cleaning corrupted NES 2.0 header (bytes 13-15 should be zero)"
+                        .to_string()
+                });
+                header[13..16].fill(0);
+            }
         }
 
         let prg_size = header[4] as usize * 16 * 1024;
         let chr_size = header[5] as usize * 8 * 1024;
-
-        // Check if this is iNES 2.0 format
-        let is_nes2 = (header[7] & 0x0C) == 0x08;
 
         // Parse mapper number (8 bits for iNES 1.0, 12 bits for iNES 2.0)
         let mapper = if is_nes2 {
@@ -622,5 +673,82 @@ mod tests {
         let cart = Cartridge::from_bytes(&data).unwrap();
         assert_eq!(cart.mapper, 0x34); // Mapper 52 (iNES 1.0 format)
         assert_eq!(cart.submapper, 0); // No submapper in iNES 1.0
+    }
+
+    #[test]
+    fn test_ines1_header_cleanup_garbage_bytes() {
+        // Test that garbage data in bytes 7-15 is cleaned up for iNES 1.0 ROMs
+        // This simulates common corruptions from old dumping tools
+        let mut data = vec![
+            0x4E, 0x45, 0x53, 0x1A, // NES<EOF>
+            0x01, // PRG size: 1 unit = 16KB
+            0x00, // CHR size: 0 (CHR-RAM)
+            0x40, // Flags 6: Mapper low nibble = 4
+            0xFF, // Flags 7: Garbage data (should be cleaned to 0)
+            0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x11, 0x22, // More garbage
+        ];
+        data.extend(vec![0; 16 * 1024]);
+
+        let cart = Cartridge::from_bytes(&data).unwrap();
+        // After cleanup, byte 7 should be 0, so mapper should be 0x04 (4), not 0xF4 (244)
+        assert_eq!(cart.mapper, 4);
+        assert_eq!(cart.submapper, 0);
+    }
+
+    #[test]
+    fn test_ines1_header_cleanup_partial_garbage() {
+        // Test cleanup when only some bytes 7-15 contain garbage
+        let mut data = vec![
+            0x4E, 0x45, 0x53, 0x1A, // NES<EOF>
+            0x08, // PRG size: 8 units = 128KB
+            0x10, // CHR size: 16 units = 128KB
+            0x10, // Flags 6: Mapper low nibble = 1
+            0x00, // Flags 7: Clean
+            0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, // Single garbage byte
+        ];
+        data.extend(vec![0; 128 * 1024 + 128 * 1024]);
+
+        let cart = Cartridge::from_bytes(&data).unwrap();
+        // Should still be mapper 1 (MMC1)
+        assert_eq!(cart.mapper, 1);
+    }
+
+    #[test]
+    fn test_nes2_header_cleanup_preserves_valid_bytes() {
+        // Test that NES 2.0 format preserves bytes 7-12 but cleans 13-15
+        let mut data = vec![
+            0x4E, 0x45, 0x53, 0x1A, // NES<EOF>
+            0x01, 0x01, // 16KB PRG, 8KB CHR
+            0x00, // Flags 6: Mapper low nibble = 0
+            0x08, // Flags 7: NES 2.0 format (bits 2-3 = 10), mapper high nibble = 0
+            0x20, // Byte 8: Submapper 2 (bits 4-7), mapper bits 8-11 = 0
+            0x00, 0x00, 0x00, 0x00, // Bytes 9-12: Valid NES 2.0 data
+            0xAA, 0xBB, 0xCC, // Bytes 13-15: Garbage (should be cleaned)
+        ];
+        data.extend(vec![0; 16 * 1024 + 8 * 1024]);
+
+        let cart = Cartridge::from_bytes(&data).unwrap();
+        assert_eq!(cart.mapper, 0); // Mapper 0
+        assert_eq!(cart.submapper, 2); // Submapper 2 (from byte 8, should be preserved)
+    }
+
+    #[test]
+    fn test_bad_dudes_simulated_corruption() {
+        // Simulate the type of corruption seen in Bad Dudes ROMs
+        // TLROM board: mapper 4 (MMC3), horizontal mirroring, 128KB PRG, 128KB CHR
+        let mut data = vec![
+            0x4E, 0x45, 0x53, 0x1A, // NES<EOF>
+            0x08, // PRG size: 8 units = 128KB
+            0x10, // CHR size: 16 units = 128KB
+            0x40, // Flags 6: Mapper low nibble = 4, horizontal mirroring
+            0x50, // Flags 7: Mapper high nibble = 5 due to garbage (should be 0)
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // Garbage in bytes 8-15
+        ];
+        data.extend(vec![0; 128 * 1024 + 128 * 1024]);
+
+        let cart = Cartridge::from_bytes(&data).unwrap();
+        // After cleanup, mapper should be 4 (MMC3), not 0x54 (84)
+        assert_eq!(cart.mapper, 4);
+        assert_eq!(cart.mirroring, Mirroring::Horizontal);
     }
 }
