@@ -886,12 +886,12 @@ mod tests {
     #[test]
     fn test_register_write() {
         let mut sa1 = Sa1::new();
-        
+
         // Write to BWPA register
         sa1.write(0x002228, 0x00);
         assert_eq!(sa1.bwpa, 0x00);
-        
-        // Write to SBWE register  
+
+        // Write to SBWE register
         sa1.write(0x002226, 0x80);
         assert_eq!(sa1.sbwe, 0x80);
     }
