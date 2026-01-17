@@ -314,7 +314,7 @@ impl LogConfig {
             stub_level: AtomicU8::new(LogLevel::Off as u8),
             log_sender: Mutex::new(None),
             file_logging_enabled: AtomicBool::new(false),
-            rate_limiter: RateLimiter::new(60), // Default: 60 logs per second
+            rate_limiter: RateLimiter::new(100), // Default: 100 logs per second
             message_buffer: Mutex::new(VecDeque::with_capacity(1000)),
             gui_capture_enabled: AtomicBool::new(false),
         }

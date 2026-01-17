@@ -380,33 +380,46 @@ fn render_log_tab(ui: &mut Ui) {
                 );
             } else {
                 // Show messages in a scrollable area
-                let available_height = ui.available_height() - 40.0; // Reserve space for button
-                egui::ScrollArea::vertical()
+                let available_height = ui.available_height() - 40.0; // Reserve space for buttons
+                let scroll_area = egui::ScrollArea::vertical()
                     .id_salt("inspector_log_messages_scroll")
                     .auto_shrink([false; 2])
                     .max_height(available_height)
-                    .show(ui, |ui| {
-                        for msg in messages.iter().rev() {
-                            let color = match msg.level {
-                                LogLevel::Error => egui::Color32::from_rgb(255, 100, 100),
-                                LogLevel::Warn => egui::Color32::from_rgb(255, 200, 100),
-                                LogLevel::Info => egui::Color32::from_rgb(150, 200, 255),
-                                LogLevel::Debug => egui::Color32::from_rgb(200, 200, 200),
-                                LogLevel::Trace => egui::Color32::from_rgb(150, 150, 150),
-                                _ => egui::Color32::from_rgb(200, 200, 200),
-                            };
+                    .stick_to_bottom(true); // Auto-scroll to bottom on new messages
 
-                            ui.horizontal(|ui| {
-                                ui.colored_label(color, format!("[{:?}]", msg.category));
-                                ui.label(&msg.message);
-                            });
-                        }
-                    });
+                scroll_area.show(ui, |ui| {
+                    for msg in messages.iter() {
+                        let color = match msg.level {
+                            LogLevel::Error => egui::Color32::from_rgb(255, 100, 100),
+                            LogLevel::Warn => egui::Color32::from_rgb(255, 200, 100),
+                            LogLevel::Info => egui::Color32::from_rgb(150, 200, 255),
+                            LogLevel::Debug => egui::Color32::from_rgb(200, 200, 200),
+                            LogLevel::Trace => egui::Color32::from_rgb(150, 150, 150),
+                            _ => egui::Color32::from_rgb(200, 200, 200),
+                        };
+
+                        ui.horizontal(|ui| {
+                            ui.colored_label(color, format!("[{:?}]", msg.category));
+                            ui.label(&msg.message);
+                        });
+                    }
+                });
 
                 ui.add_space(5.0);
-                if ui.button("Clear Messages").clicked() {
-                    log_config.clear_messages();
-                }
+                ui.horizontal(|ui| {
+                    if ui.button("Clear Messages").clicked() {
+                        log_config.clear_messages();
+                    }
+                    if ui.button("Copy to Clipboard").clicked() {
+                        // Build a formatted string of all log messages
+                        let log_text = messages
+                            .iter()
+                            .map(|msg| format!("[{:?}] {}", msg.category, msg.message))
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        ui.ctx().copy_text(log_text);
+                    }
+                });
             }
         });
     });
