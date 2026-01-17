@@ -54,7 +54,7 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
   - **Mode 5**: ✅ Complete - BG1 4bpp, BG2 2bpp with true 512px hi-res rendering
   - **Mode 6**: ✅ Complete - BG1 4bpp with true 512px hi-res and offset-per-tile support
   - **Mode 7**: ✅ Complete - 8bpp with full matrix transformation (rotation/scaling)
-  - Reference: [PPU Overview](https://snes.nesdev.org/wiki/PPU_registers)
+  - Reference: [Backgrounds](https://wiki.superfamicom.org/backgrounds), [PPU Overview](https://snes.nesdev.org/wiki/PPU_registers)
 
 - ✅ **Mode 7 Matrix Transformation** - Full rotation and scaling support
   - All Mode 7 registers implemented ($211A-$2120)
@@ -82,9 +82,10 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
   - 128 sprites with 4bpp (16 colors per sprite)
   - Multiple size modes (8x8, 16x16, 32x32, 64x64)
   - Priority levels (0-3)
+  - **Sprite priority rotation** (bit 7 of $2103) - allows dynamic sprite ordering
   - Hardware-accurate 32 sprites/scanline limit
   - 34 tile slots/scanline limit
-  - Reference: [Sprites](https://snes.nesdev.org/wiki/PPU_OAM)
+  - Reference: [Sprites](https://wiki.superfamicom.org/sprites), [SNESdev OAM](https://snes.nesdev.org/wiki/PPU_OAM)
 
 - ✅ **Scrolling** - Full background scrolling support
   - Horizontal and vertical scrolling on all BG layers
@@ -232,6 +233,11 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
     - ✅ Color component clamping (0-255 range)
     - ✅ Fixed color blending source
     - ✅ Sub-screen rendering and blending
+    - ✅ Window-based color math clipping (CGWSEL bits 4-5)
+    - ✅ **Direct color mode** (CGWSEL bit 0) - for Modes 3, 4, 7
+      - Allows 2048 colors (BBGGGRRR + bgr palette bits)
+      - Used by some games for enhanced color effects
+      - Reference: [Backgrounds - Direct Color](https://wiki.superfamicom.org/backgrounds#direct-color-mode)
     - ✅ Color clipping to black (CGWSEL bits 6-7) - Applied BEFORE color math
       - 00 = Never clip colors
       - 01 = Clip colors outside color window
@@ -252,17 +258,14 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
     - Only pixels from layers enabled in CGADSUB undergo blending
     - CGWSEL prevent-math bit (bit 6) can globally disable color math
     - Blending performed in 8-bit RGB color space with proper clamping
-    
-  - **Current Limitations**:
-    - ⏳ Direct color mode not implemented (CGWSEL bits 0-1)
-      - Direct color mode is rarely used (can be enabled for Modes 3, 4, and 7)
-      - Normal palette-based rendering works for all common use cases
+    - Direct color: combines tile data (BBGGGRRR) with palette bits (bgr) → Red=RRRr0, Green=GGGg0, Blue=BBb00
     
   - **Impact on Game Compatibility**:
     - Games using color math now work correctly
     - Fade effects, transparency, and color tinting render properly
     - Sub-screen blending effects (transparencies, shadows) work correctly
     - Window-based effects (spotlight, fade regions, color clipping) work correctly
+    - Direct color mode games now have correct color output
     
   - Reference: [Color Math](https://wiki.superfamicom.org/rendering-the-screen#color-math)
 

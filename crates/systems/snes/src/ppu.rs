@@ -98,6 +98,9 @@ pub struct Ppu {
     oam_addr: u16,
     /// OAM write latch
     oam_write_latch: bool,
+    /// Sprite priority rotation enable (bit 7 of $2103)
+    /// When set, sprite at (OAMAddr>>1) gets priority for next frame
+    oam_priority_rotation: bool,
 
     /// PPU1 open bus value (last byte written to $2100-$213F)
     ppu1_open_bus: u8,
@@ -444,6 +447,7 @@ impl Ppu {
             cgram_write_latch: false,
             oam_addr: 0,
             oam_write_latch: false,
+            oam_priority_rotation: false,
             ppu1_open_bus: 0,
             ppu2_open_bus: 0,
             nmi_flag: Cell::new(false),
@@ -543,10 +547,12 @@ impl Ppu {
                 self.oam_write_latch = false;
             }
 
-            // $2103 - OAMADDH - OAM Address (high byte)
+            // $2103 - OAMADDH - OAM Address (high byte) and priority rotation
             0x2103 => {
                 self.oam_addr = (self.oam_addr & 0x00FF) | ((val as u16 & 0x01) << 8);
                 self.oam_write_latch = false;
+                // Bit 7 enables sprite priority rotation
+                self.oam_priority_rotation = (val & 0x80) != 0;
             }
 
             // $2104 - OAMDATA - OAM Data Write
@@ -2658,6 +2664,7 @@ impl Ppu {
 
                 // Extract full 10-bit tile number: bits 0-1 from tile_high + 8 bits from tile_low
                 let base_tile_index = (tile_low as u16) | (((tile_high & 0x03) as u16) << 8);
+                let palette = (tile_high >> 2) & 0x07; // Extract palette for direct color mode
                 let flip_x = (tile_high & 0x40) != 0;
                 let flip_y = (tile_high & 0x80) != 0;
                 let priority = if (tile_high & 0x20) != 0 { 1 } else { 0 };
@@ -2718,7 +2725,11 @@ impl Ppu {
                 // Draw pixel if it has equal or higher priority (later layers paint on top)
                 let frame_offset = screen_y * 256 + screen_x;
                 if render_priority >= priority_buffer[frame_offset] {
-                    frame.pixels[frame_offset] = self.get_color(color);
+                    // Check if direct color mode is enabled (CGWSEL bit 0)
+                    // Direct color only applies to 256-color BGs in Modes 3 and 4
+                    let direct_color = (self.cgwsel & 0x01) != 0;
+                    frame.pixels[frame_offset] =
+                        self.get_color_with_palette(color, palette, direct_color);
                     priority_buffer[frame_offset] = render_priority;
                     layer_buffer[frame_offset] = layer_id;
                 }
@@ -2853,7 +2864,10 @@ impl Ppu {
                 // Draw pixel if it has equal or higher priority (later layers paint on top)
                 let frame_offset = screen_y * 256 + screen_x;
                 if render_priority >= priority_buffer[frame_offset] {
-                    frame.pixels[frame_offset] = self.get_color(color);
+                    // Check if direct color mode is enabled (CGWSEL bit 0)
+                    let direct_color = (self.cgwsel & 0x01) != 0;
+                    frame.pixels[frame_offset] =
+                        self.get_color_with_palette(color, 0, direct_color);
                     priority_buffer[frame_offset] = render_priority;
                     layer_buffer[frame_offset] = layer_id;
                 }
@@ -3164,8 +3178,20 @@ impl Ppu {
         let mut sprites_scanline_limited = 0;
         let mut sprites_rendered = 0;
 
-        // SNES has 128 sprites, rendered in reverse order (127 -> 0) for priority
-        for sprite_index in (0..128).rev() {
+        // Calculate first sprite for priority rotation
+        // If priority rotation is enabled (bit 7 of $2103), the sprite at (OAMAddr & 0xFE) >> 1
+        // gets priority. Otherwise, sprite 0 has priority.
+        let first_sprite = if self.oam_priority_rotation {
+            ((self.oam_addr & 0x1FE) >> 1) as usize
+        } else {
+            0
+        };
+
+        // SNES has 128 sprites, rendered in priority order
+        // Priority goes from first_sprite to first_sprite+127 (wrapping)
+        // We iterate in reverse order so higher priority sprites overwrite lower priority
+        for i in (0..128).rev() {
+            let sprite_index = (first_sprite + i) % 128;
             // Each sprite has 4 bytes in main OAM table
             let oam_offset = sprite_index * 4;
             if oam_offset + 3 >= 512 {
@@ -3633,7 +3659,46 @@ impl Ppu {
     }
 
     /// Get RGB color from CGRAM
+    /// Get color from CGRAM or compute direct color
+    /// For direct color mode (Modes 3, 4, 7), the palette and color values are combined
+    /// to create a direct RGB color instead of indexing CGRAM
     fn get_color(&self, index: u8) -> u32 {
+        self.get_color_with_palette(index, 0, false)
+    }
+
+    /// Get color with optional direct color mode support
+    /// - index: color index from tile data
+    /// - palette: palette number (ppp bits from tilemap, used in direct color mode)
+    /// - direct_color: if true, use direct color mode instead of CGRAM lookup
+    fn get_color_with_palette(&self, index: u8, palette: u8, direct_color: bool) -> u32 {
+        if direct_color {
+            // Direct color mode (CGWSEL bit 0 for Modes 3, 4, 7)
+            // Color format from tile data (BBGGGRRR) combined with palette (bgr)
+            // Final color: Red=RRRr0, Green=GGGg0, Blue=BBb00
+            // where lowercase letters come from palette bits
+
+            let r_high = (index & 0x07) as u32; // RRR
+            let g_high = ((index >> 3) & 0x07) as u32; // GGG
+            let b_high = ((index >> 6) & 0x03) as u32; // BB
+
+            let r_low = (palette & 0x01) as u32; // r
+            let g_low = ((palette >> 1) & 0x01) as u32; // g
+            let b_low = ((palette >> 2) & 0x01) as u32; // b
+
+            // Combine: RRRr0, GGGg0, BBb00
+            let r = (r_high << 2) | (r_low << 1); // 5-bit red
+            let g = (g_high << 2) | (g_low << 1); // 5-bit green
+            let b = (b_high << 3) | (b_low << 2); // 5-bit blue
+
+            // Convert from 5-bit to 8-bit (same as normal CGRAM conversion)
+            let r8 = (r << 3) | (r >> 2);
+            let g8 = (g << 3) | (g >> 2);
+            let b8 = (b << 3) | (b >> 2);
+
+            return 0xFF000000 | (r8 << 16) | (g8 << 8) | b8;
+        }
+
+        // Normal CGRAM lookup
         let addr = (index as usize) * 2;
         if addr + 1 >= CGRAM_SIZE {
             return 0xFF000000; // Black
@@ -5486,5 +5551,123 @@ mod tests {
             "16x16 tile should cover most of the 16x16 area. Found {} non-backdrop pixels, expected ~256",
             pixel_count
         );
+    }
+
+    #[test]
+    fn test_sprite_priority_rotation() {
+        let mut ppu = Ppu::new();
+
+        // Test default: priority rotation disabled
+        assert!(!ppu.oam_priority_rotation);
+
+        // Set OAM address to byte 0x28 (sprite 10 starts at byte 40)
+        ppu.write_register(0x2102, 0x28); // Low byte
+        ppu.write_register(0x2103, 0x00); // High byte, bit 7 = 0 (rotation off)
+        assert_eq!(ppu.oam_addr, 0x28);
+        assert!(!ppu.oam_priority_rotation);
+
+        // Enable priority rotation (bit 7 of $2103)
+        ppu.write_register(0x2103, 0x80); // Bit 7 = 1 (rotation on)
+        assert!(ppu.oam_priority_rotation);
+        // Address should be preserved (bit 0 of value is for bit 8 of address)
+        assert_eq!(ppu.oam_addr, 0x28);
+
+        // Test that address bit 8 works independently
+        ppu.write_register(0x2102, 0x00);
+        ppu.write_register(0x2103, 0x81); // Bit 7 = 1 (rotation), bit 0 = 1 (addr bit 8)
+        assert_eq!(ppu.oam_addr, 0x100);
+        assert!(ppu.oam_priority_rotation);
+
+        // Disable priority rotation again
+        ppu.write_register(0x2103, 0x01); // Bit 7 = 0 (rotation off), bit 0 = 1
+        assert_eq!(ppu.oam_addr, 0x100);
+        assert!(!ppu.oam_priority_rotation);
+    }
+
+    #[test]
+    fn test_direct_color_mode() {
+        let ppu = Ppu::new();
+
+        // Test direct color mode conversion
+        // Color value: BBGGGRRR = 0b11_101_010 = 0xEA
+        // Palette: bgr = 0b101 = 5
+        // Expected: R=RRRr0=010_1_0=10, G=GGGg0=101_0_0=20, B=BBb00=11_1_00=28
+        // In 5-bit: R=10, G=20, B=28
+        // Convert to 8-bit: R=82 (0x52), G=165 (0xA5), B=231 (0xE7)
+
+        let color_index = 0b11_101_010; // BBGGGRRR
+        let palette = 0b101; // bgr
+        let direct_color = true;
+
+        let color = ppu.get_color_with_palette(color_index, palette, direct_color);
+
+        // Extract RGB components
+        let r = (color >> 16) & 0xFF;
+        let g = (color >> 8) & 0xFF;
+        let b = color & 0xFF;
+
+        // Expected values (5-bit to 8-bit conversion)
+        assert_eq!(r, 0x52, "Red component incorrect");
+        assert_eq!(g, 0xA5, "Green component incorrect");
+        assert_eq!(b, 0xE7, "Blue component incorrect");
+
+        // Test that normal CGRAM lookup still works
+        let color_normal = ppu.get_color_with_palette(5, 0, false);
+        // Should return black since CGRAM is all zeros
+        assert_eq!(color_normal, 0xFF000000);
+    }
+
+    #[test]
+    fn test_direct_color_mode_black_handling() {
+        let ppu = Ppu::new();
+
+        // In direct color mode, color 0 is transparent (can't be black)
+        // Test that we can create near-black colors
+        // Color 0x01 = BBGGGRRR = 00_000_001, palette 0 = bgr = 000
+        // R = 001_0_0 = 4 (5-bit) = 33 (8-bit)
+        // G = 000_0_0 = 0 (5-bit) = 0 (8-bit)
+        // B = 00_0_00 = 0 (5-bit) = 0 (8-bit)
+
+        let almost_black_01 = ppu.get_color_with_palette(0x01, 0, true); // BBGGGRRR = 00000001
+        let almost_black_08 = ppu.get_color_with_palette(0x08, 0, true); // BBGGGRRR = 00001000
+        let almost_black_09 = ppu.get_color_with_palette(0x09, 0, true); // BBGGGRRR = 00001001
+
+        // These should all be very dark but not pure black
+        assert_ne!(almost_black_01, 0xFF000000, "Should not be pure black");
+        assert_ne!(almost_black_08, 0xFF000000, "Should not be pure black");
+        assert_ne!(almost_black_09, 0xFF000000, "Should not be pure black");
+
+        // Extract components to verify they're very dark
+        let r01 = (almost_black_01 >> 16) & 0xFF;
+        let g01 = (almost_black_01 >> 8) & 0xFF;
+        let b01 = almost_black_01 & 0xFF;
+
+        // Color 0x01 should have small red component only
+        assert!(
+            r01 > 0 && r01 < 64,
+            "Color 0x01 should have small red: {}",
+            r01
+        );
+        assert_eq!(g01, 0, "Color 0x01 should have no green");
+        assert_eq!(b01, 0, "Color 0x01 should have no blue");
+    }
+
+    #[test]
+    fn test_cgwsel_direct_color_bit() {
+        let mut ppu = Ppu::new();
+
+        // Test that CGWSEL bit 0 can be set
+        ppu.write_register(0x2130, 0x01); // Set direct color mode
+        assert_eq!(ppu.cgwsel & 0x01, 0x01);
+
+        // Test that other bits can be set independently
+        ppu.write_register(0x2130, 0x42); // Set prevent math + no direct color
+        assert_eq!(ppu.cgwsel & 0x01, 0x00, "Direct color should be disabled");
+        assert_eq!(ppu.cgwsel & 0x40, 0x40, "Prevent math should be enabled");
+
+        // Test all combinations
+        ppu.write_register(0x2130, 0x43); // Prevent math + direct color
+        assert_eq!(ppu.cgwsel & 0x01, 0x01, "Direct color should be enabled");
+        assert_eq!(ppu.cgwsel & 0x40, 0x40, "Prevent math should be enabled");
     }
 }
