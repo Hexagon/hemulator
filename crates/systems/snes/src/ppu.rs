@@ -1983,6 +1983,12 @@ impl Ppu {
         let bit1 = (bp1 >> bit) & 1;
         let color_index = (bit1 << 1) | bit0;
 
+        // Color index 0 within any palette is transparent
+        // Return 0 for transparent pixels so the caller can skip them
+        if color_index == 0 {
+            return 0;
+        }
+
         // Return CGRAM index (palette * 4 + color_index)
         // Mode 0: each BG layer has 8 palettes of 4 colors each
         (palette * 4 + color_index as usize) as u8
@@ -2106,6 +2112,12 @@ impl Ppu {
         let bit3 = (bp3 >> bit) & 1;
         let color_index = (bit3 << 3) | (bit2 << 2) | (bit1 << 1) | bit0;
 
+        // Color index 0 within any palette is transparent
+        // Return 0 for transparent pixels so the caller can skip them
+        if color_index == 0 {
+            return 0;
+        }
+
         // Return CGRAM index (palette * 16 + color_index)
         // Mode 1: each BG layer has 8 palettes of 16 colors each
         (palette * 16 + color_index as usize) as u8
@@ -2196,14 +2208,19 @@ impl Ppu {
         let bit7 = (bp7 >> bit) & 1;
 
         // Return CGRAM index directly (8bpp uses all 256 colors)
-        (bit7 << 7)
+        // Color index 0 is still transparent in 8bpp mode
+        let color_index = (bit7 << 7)
             | (bit6 << 6)
             | (bit5 << 5)
             | (bit4 << 4)
             | (bit3 << 3)
             | (bit2 << 2)
             | (bit1 << 1)
-            | bit0
+            | bit0;
+
+        // Return 0 for transparent pixels so the caller can skip them
+        // In 8bpp mode, color 0 is still the transparent color
+        color_index
     }
 
     /// Get sprite sizes based on OBSEL register
@@ -3630,8 +3647,17 @@ impl Ppu {
                 let main_pixel = frame.pixels[i];
 
                 // Choose blend source: sub-screen or fixed color
+                // IMPORTANT: When blending backdrop pixels, always use backdrop color as the
+                // sub-screen source, not whatever was rendered on the sub-screen. This matches
+                // real SNES hardware behavior where backdrop blends with backdrop.
                 let blend_color = if use_subscreen {
-                    sub_frame.pixels[i]
+                    if layer == LAYER_BACKDROP {
+                        // For backdrop pixels, blend with sub-screen backdrop (CGRAM[0])
+                        self.get_color(0)
+                    } else {
+                        // For layer pixels, blend with corresponding sub-screen pixel
+                        sub_frame.pixels[i]
+                    }
                 } else {
                     fixed_color
                 };
