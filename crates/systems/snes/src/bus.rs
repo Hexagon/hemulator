@@ -496,6 +496,7 @@ impl SnesBus {
                         }
                         4 => {
                             // Four consecutive registers: b_addr, b_addr+1, b_addr+2, b_addr+3
+                            // e.g., if b_addr=0x18, accesses $2118, $2119, $211A, $211B
                             0x2100 | ((dma.b_addr as u16) + (i as u16 & 3))
                         }
                         _ => 0x2100 | (dma.b_addr as u16),
@@ -661,7 +662,10 @@ impl SnesBus {
                     1 | 5 => 0x2100 | ((dma.b_addr as u16) + (i as u16 & 1)),
                     2 | 6 => 0x2100 | (dma.b_addr as u16),
                     3 | 7 => 0x2100 | ((dma.b_addr as u16) + ((i as u16 >> 1) & 1)),
-                    4 => 0x2100 | ((dma.b_addr as u16) + (i as u16 & 3)),
+                    4 => {
+                        // Four consecutive registers: b_addr, b_addr+1, b_addr+2, b_addr+3
+                        0x2100 | ((dma.b_addr as u16) + (i as u16 & 3))
+                    }
                     _ => 0x2100 | (dma.b_addr as u16),
                 };
 
