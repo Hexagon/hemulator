@@ -1869,6 +1869,21 @@ impl Ppu {
             palette,
             bg_mode: self.bgmode & 0x07,
             screen_enabled: (self.screen_display & 0x80) == 0,
+            bg1sc: self.bg1sc,
+            bg2sc: self.bg2sc,
+            bg3sc: self.bg3sc,
+            bg4sc: self.bg4sc,
+            bg12nba: self.bg12nba,
+            bg34nba: self.bg34nba,
+            bg1_hofs: self.bg1_hofs,
+            bg1_vofs: self.bg1_vofs,
+            bg2_hofs: self.bg2_hofs,
+            bg2_vofs: self.bg2_vofs,
+            bg3_hofs: self.bg3_hofs,
+            bg3_vofs: self.bg3_vofs,
+            bg4_hofs: self.bg4_hofs,
+            bg4_vofs: self.bg4_vofs,
+            tm: self.tm,
         }
     }
 

@@ -3578,6 +3578,21 @@ fn main() {
                         palette: snes_data.palette,
                         bg_mode: snes_data.bg_mode,
                         screen_enabled: snes_data.screen_enabled,
+                        bg1sc: snes_data.bg1sc,
+                        bg2sc: snes_data.bg2sc,
+                        bg3sc: snes_data.bg3sc,
+                        bg4sc: snes_data.bg4sc,
+                        bg12nba: snes_data.bg12nba,
+                        bg34nba: snes_data.bg34nba,
+                        bg1_hofs: snes_data.bg1_hofs,
+                        bg1_vofs: snes_data.bg1_vofs,
+                        bg2_hofs: snes_data.bg2_hofs,
+                        bg2_vofs: snes_data.bg2_vofs,
+                        bg3_hofs: snes_data.bg3_hofs,
+                        bg3_vofs: snes_data.bg3_vofs,
+                        bg4_hofs: snes_data.bg4_hofs,
+                        bg4_vofs: snes_data.bg4_vofs,
+                        tm: snes_data.tm,
                     });
                     egui_app.tab_manager.update_system_tile_data(tile_data);
 
