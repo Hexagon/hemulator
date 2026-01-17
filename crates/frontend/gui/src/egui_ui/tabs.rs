@@ -4590,9 +4590,14 @@ impl TabManager {
 
                 // Calculate which block we're in
                 let block_index = if tilemap_width == 64 {
+                    // 64x32 (or wider) tilemaps: two blocks horizontally
                     block_y * 2 + block_x
-                } else {
+                } else if tilemap_height == 64 {
+                    // 32x64 (or taller) tilemaps: blocks arranged vertically
                     block_y
+                } else {
+                    // Other configurations: default to first block
+                    0
                 };
 
                 let block_offset = block_index * 32 * 32 * 2; // 2048 bytes per block
