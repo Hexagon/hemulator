@@ -5558,17 +5558,17 @@ mod tests {
         let mut ppu = Ppu::new();
 
         // Test default: priority rotation disabled
-        assert_eq!(ppu.oam_priority_rotation, false);
+        assert!(!ppu.oam_priority_rotation);
 
         // Set OAM address to byte 0x28 (sprite 10 starts at byte 40)
         ppu.write_register(0x2102, 0x28); // Low byte
         ppu.write_register(0x2103, 0x00); // High byte, bit 7 = 0 (rotation off)
         assert_eq!(ppu.oam_addr, 0x28);
-        assert_eq!(ppu.oam_priority_rotation, false);
+        assert!(!ppu.oam_priority_rotation);
 
         // Enable priority rotation (bit 7 of $2103)
         ppu.write_register(0x2103, 0x80); // Bit 7 = 1 (rotation on)
-        assert_eq!(ppu.oam_priority_rotation, true);
+        assert!(ppu.oam_priority_rotation);
         // Address should be preserved (bit 0 of value is for bit 8 of address)
         assert_eq!(ppu.oam_addr, 0x28);
 
@@ -5576,12 +5576,12 @@ mod tests {
         ppu.write_register(0x2102, 0x00);
         ppu.write_register(0x2103, 0x81); // Bit 7 = 1 (rotation), bit 0 = 1 (addr bit 8)
         assert_eq!(ppu.oam_addr, 0x100);
-        assert_eq!(ppu.oam_priority_rotation, true);
+        assert!(ppu.oam_priority_rotation);
 
         // Disable priority rotation again
         ppu.write_register(0x2103, 0x01); // Bit 7 = 0 (rotation off), bit 0 = 1
         assert_eq!(ppu.oam_addr, 0x100);
-        assert_eq!(ppu.oam_priority_rotation, false);
+        assert!(!ppu.oam_priority_rotation);
     }
 
     #[test]
