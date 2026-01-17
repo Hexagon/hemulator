@@ -282,7 +282,7 @@ impl System for SnesSystem {
         // Reference: VBlank starts at scanline $E1 (225) or $F0 (240) depending on $2133 bit 2
         // We use 225 as the standard configuration (224 visible + 1 post-render scanline)
         const VBLANK_START_SCANLINE: u32 = 225;
-        
+
         for scanline in 0..VBLANK_START_SCANLINE {
             let scanline_target = (scanline + 1) * SNES_SCANLINE_CYCLES;
 
