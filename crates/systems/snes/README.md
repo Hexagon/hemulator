@@ -6,13 +6,13 @@ This crate implements Super Nintendo Entertainment System emulation for the Hemu
 
 ## References
 
-This implementation follows specifications from the **SNESdev Wiki**:
+This implementation follows specifications from the **SNESdev Wiki** and **Super Famicom Wiki**:
 - **Main Wiki**: https://snes.nesdev.org/wiki/SNESdev_Wiki
 - **65C816 CPU**: https://snes.nesdev.org/wiki/65c816_reference
 - **PPU Registers**: https://snes.nesdev.org/wiki/PPU_registers
 - **CPU Registers**: https://snes.nesdev.org/wiki/CPU_registers
 - **Memory Map**: https://snes.nesdev.org/wiki/Memory_map
-- **DMA & HDMA**: https://snes.nesdev.org/wiki/DMA_&_HDMA
+- **DMA & HDMA**: https://wiki.superfamicom.org/dma-and-hdma (primary reference)
 - **Timing**: https://snes.nesdev.org/wiki/Timing
 
 ## Current Status
@@ -114,7 +114,7 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
   - Address modes: increment, decrement, fixed
   - Direction: A-bus ↔ B-bus (both directions)
   - Cycle-accurate timing (8 cycles per byte + overhead)
-  - Reference: [DMA](https://snes.nesdev.org/wiki/DMA_&_HDMA#DMA)
+  - Reference: [DMA](https://wiki.superfamicom.org/dma-and-hdma#dma)
 
 - ✅ **HDMA (H-blank DMA)** - Per-scanline updates
   - 8-channel HDMA support (shared channels with DMA)
@@ -123,7 +123,7 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
   - Per-scanline register updates
   - Line counter and repeat mode
   - Automatic table processing
-  - Reference: [HDMA](https://snes.nesdev.org/wiki/DMA_&_HDMA#HDMA)
+  - Reference: [HDMA](https://wiki.superfamicom.org/dma-and-hdma#hdma)
 
 #### CPU I/O Registers
 - ✅ **Interrupt Control**
@@ -550,6 +550,7 @@ cargo run -- game.sfc --log-bus debug
 
 ### Primary References
 - **SNESdev Wiki**: https://snes.nesdev.org/wiki/SNESdev_Wiki
+- **Super Famicom Wiki**: https://wiki.superfamicom.org
 - **Anomie's Register Doc**: https://snes.nesdev.org/wiki/Anomie%27s_Doc
 - **fullsnes**: https://problemkaputt.de/fullsnes.htm
 
@@ -557,7 +558,7 @@ cargo run -- game.sfc --log-bus debug
 - **65C816 CPU**: https://snes.nesdev.org/wiki/65c816_reference
 - **PPU Registers**: https://snes.nesdev.org/wiki/PPU_registers
 - **CPU Registers**: https://snes.nesdev.org/wiki/CPU_registers
-- **DMA/HDMA**: https://snes.nesdev.org/wiki/DMA_&_HDMA
+- **DMA/HDMA**: https://wiki.superfamicom.org/dma-and-hdma (primary reference)
 - **Memory Map**: https://snes.nesdev.org/wiki/Memory_map
 - **Timing**: https://snes.nesdev.org/wiki/Timing
 - **Controllers**: https://snes.nesdev.org/wiki/Input_devices

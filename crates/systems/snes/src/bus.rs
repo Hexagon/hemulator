@@ -390,6 +390,46 @@ impl SnesBus {
 
     /// Perform DMA transfer for specified channels
     /// Returns number of cycles consumed
+    ///
+    /// # DMA Transfer Modes (bits 0-2 of $43x0)
+    ///
+    /// According to https://wiki.superfamicom.org/dma-and-hdma:
+    ///
+    /// - Mode 0 (000): 1 byte to 1 register (write once)
+    ///   - Pattern: b_addr
+    ///   - Used for: Single register updates
+    ///
+    /// - Mode 1 (001): 2 bytes to 2 registers (write once)
+    ///   - Pattern: b_addr, b_addr+1
+    ///   - Used for: Paired register updates (e.g., VMDATAL/VMDATAH)
+    ///
+    /// - Mode 2 (010): 2 bytes to 1 register (write twice)
+    ///   - Pattern: b_addr, b_addr
+    ///   - Used for: Writing 16-bit values to 8-bit registers
+    ///
+    /// - Mode 3 (011): 4 bytes to 2 registers (write twice each)
+    ///   - Pattern: b_addr, b_addr, b_addr+1, b_addr+1
+    ///   - Used for: Two paired register updates
+    ///
+    /// - Mode 4 (100): 4 bytes to 4 registers (write once)
+    ///   - Pattern: b_addr, b_addr+1, b_addr+2, b_addr+3
+    ///   - Used for: Consecutive register updates
+    ///
+    /// Modes 5-7 are mirrors/combinations of the above modes.
+    ///
+    /// # Timing
+    ///
+    /// - 8 master cycles per byte transferred
+    /// - 8 master cycles overhead per channel
+    /// - 12-24 cycles overhead for the whole transfer
+    ///
+    /// # Direction and Addressing
+    ///
+    /// - Bit 7 of $43x0: 0 = A-bus → B-bus, 1 = B-bus → A-bus
+    /// - Bits 3-4 of $43x0: Address adjustment mode
+    ///   - 00: Increment A-bus address after each byte
+    ///   - 01: Fixed (no change)
+    ///   - 10/11: Decrement A-bus address after each byte
     pub fn do_dma(&mut self, channels: u8) -> u32 {
         let mut cycles = 0u32;
 
@@ -480,7 +520,20 @@ impl SnesBus {
         cycles
     }
 
-    /// Initialize HDMA channels at start of frame
+    /// Initialize HDMA channels at start of frame (V=0, H≈6)
+    ///
+    /// According to https://wiki.superfamicom.org/dma-and-hdma:
+    ///
+    /// 1. Copy AAddress ($43x2-4) into internal Address register
+    /// 2. Load $43xA (Line Counter and Repeat flag) from the table
+    /// 3. Load Indirect Address if using indirect mode
+    /// 4. Set Do Transfer flag to true
+    ///
+    /// # Timing
+    ///
+    /// - ~18 master cycles overhead
+    /// - 8 master cycles per channel (direct mode)
+    /// - 24 master cycles per channel (indirect mode)
     pub fn init_hdma(&mut self) {
         for ch in 0..8 {
             if (self.hdma_enable & (1 << ch)) != 0 {
@@ -506,6 +559,29 @@ impl SnesBus {
     }
 
     /// Execute HDMA for all active channels (called during H-blank of each scanline)
+    ///
+    /// According to https://wiki.superfamicom.org/dma-and-hdma:
+    ///
+    /// Per-scanline process (V=0 to V=$E0, H≈$116):
+    ///
+    /// 1. If Do Transfer is false, skip to step 3
+    /// 2. Transfer the appropriate number of bytes for the transfer mode
+    /// 3. Decrement Line Counter
+    /// 4. Set Do Transfer to the Repeat flag value
+    /// 5. If Line Counter is zero:
+    ///    - Read next byte from Address into Line Counter and Repeat
+    ///    - If indirect mode, read 2-byte indirect address
+    ///    - If new Line Counter is 0, terminate channel for this frame
+    ///    - Set Do Transfer to true
+    ///
+    /// # Timing
+    ///
+    /// - ~18 master cycles overhead per scanline (if any channel active)
+    /// - 8 master cycles per active channel
+    /// - 16 master cycles for indirect address load (when needed)
+    /// - 8 master cycles per byte transferred
+    ///
+    /// Maximum: 466 master cycles per scanline (all 8 channels active with indirect addressing)
     pub fn do_hdma(&mut self) -> u32 {
         let mut cycles = 0u32;
 
