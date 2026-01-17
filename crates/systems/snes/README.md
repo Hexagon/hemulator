@@ -17,7 +17,7 @@ This implementation follows specifications from the **SNESdev Wiki** and **Super
 
 ## Current Status
 
-The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HDMA, LoROM, HiROM, and ExHiROM cartridge support, SPC700 APU processor, and complete PPU rendering for all modes 0-7. All background modes now support their advanced features including Mode 7 matrix transformation (rotation/scaling), offset-per-tile rendering (Modes 2, 4, 6), and true hi-res 512px rendering (Modes 5-6). Audio processor (SPC700) is fully implemented but DSP (sound generation) is not, so games run silently.
+The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HDMA, LoROM, HiROM, and ExHiROM cartridge support, SPC700 APU processor, and complete PPU rendering for all modes 0-7. All background modes now support their advanced features including Mode 7 matrix transformation (rotation/scaling), offset-per-tile rendering (Modes 2, 4, 6), and true hi-res 512px rendering (Modes 5-6). Audio processor (SPC700) is fully implemented and DSP (sound generation) has basic infrastructure in place, but needs BRR sample decoding for actual sound output.
 
 ### What Works
 
@@ -150,10 +150,19 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
   - Games can upload audio drivers and communicate with APU
   - Reference: [APU](https://snes.nesdev.org/wiki/APU), [SPC700](https://snes.nesdev.org/wiki/SPC700)
 
-- ❌ **DSP (Digital Signal Processor)** - Not implemented
-  - No audio sample generation
-  - No 8-voice synthesis
-  - Silent gameplay (no sound output)
+- 🚧 **DSP (Digital Signal Processor)** - Partially implemented
+  - ✅ 8-voice synthesis engine (basic structure)
+  - ✅ ADSR envelope generator (simplified curves)
+  - ✅ Voice control (key on/off, volume, pitch registers)
+  - ✅ Voice mixing to stereo output
+  - ✅ Master volume control
+  - ❌ BRR (ADPCM) sample playback from RAM (stub)
+  - ❌ Gaussian interpolation (using linear for now)
+  - ❌ Accurate envelope rates (simplified)
+  - ❌ Echo/reverb FIR filter
+  - ❌ Noise generator
+  - ❌ Pitch modulation
+  - **Status**: Audio infrastructure in place, generates output but needs BRR sample decoding for actual sound
   - Reference: [DSP](https://snes.nesdev.org/wiki/DSP)
 
 #### Timing
@@ -290,10 +299,17 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
   - Reference: [Transparency](https://wiki.superfamicom.org/transparency)
 
 #### Audio
-- ❌ **DSP (Digital Signal Processor)** - No sound generation
+- 🚧 **DSP (Digital Signal Processor)** - Partially implemented
   - SPC700 CPU is fully implemented and functional
-  - DSP registers can be accessed but produce no audio
-  - No 8-voice synthesis, ADPCM playback, or echo effects
+  - ✅ DSP register interface and voice control
+  - ✅ Basic 8-voice synthesis and mixing
+  - ✅ Simplified ADSR envelope generation
+  - ✅ Audio output infrastructure in place
+  - ❌ BRR (ADPCM) sample playback from RAM
+  - ❌ Gaussian interpolation filter
+  - ❌ Accurate envelope rates
+  - ❌ Echo/reverb FIR filter
+  - **Status**: Audio framework complete, needs BRR decoder for actual sound
   - Reference: [DSP](https://snes.nesdev.org/wiki/DSP)
 
 #### Enhancement Chips
@@ -534,11 +550,12 @@ cargo run -- game.sfc --log-bus debug
 
 ## Known Issues
 
-1. **Audio Output** - SPC700 CPU implemented but no sound
+1. **Audio Output** - DSP partially implemented, needs BRR sample decoder
    - SPC700 processor fully functional
    - Games can upload audio drivers
-   - DSP not implemented, so no audio generation
-   - Silent gameplay
+   - DSP infrastructure in place with voice synthesis and mixing
+   - Missing: BRR (ADPCM) sample decoding from RAM, Gaussian interpolation, accurate envelopes
+   - Current status: Framework ready, but no actual sound until BRR decoder is implemented
 
 2. **Timing** - Frame-based, not cycle-accurate
    - Good enough for most games
