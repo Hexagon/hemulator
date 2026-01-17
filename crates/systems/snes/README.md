@@ -555,6 +555,8 @@ cargo run -- game.sfc --log-bus debug
 
 ## Additional Documentation
 
+- `EDGE_CASES_REVIEW.md` - Comprehensive review of hardware edge cases and quirks
+- `DMA_HDMA_REVIEW.md` - Details on DMA/HDMA implementation and fixes
 - `SNES_REGISTER_FIXES.md` - Details on NMI register implementation
 - `SNES_WAI_INVESTIGATION.md` - WAI instruction debugging notes
 
