@@ -470,11 +470,11 @@ impl SnesBus {
             // Transfer loop
             while size > 0 {
                 let bytes_this_transfer = match transfer_mode {
-                    0 => 1,         // Mode 0: 1 byte to 1 register
-                    1 | 5 => 2,     // Mode 1/5: 2 bytes to 2 registers
-                    2 | 6 => 2,     // Mode 2/6: 2 bytes to 1 register (write twice)
-                    3 | 7 => 4,     // Mode 3/7: 4 bytes to 2 registers (write twice each)
-                    4 => 4,         // Mode 4: 4 bytes to 4 registers
+                    0 => 1,     // Mode 0: 1 byte to 1 register
+                    1 | 5 => 2, // Mode 1/5: 2 bytes to 2 registers
+                    2 | 6 => 2, // Mode 2/6: 2 bytes to 1 register (write twice)
+                    3 | 7 => 4, // Mode 3/7: 4 bytes to 2 registers (write twice each)
+                    4 => 4,     // Mode 4: 4 bytes to 4 registers
                     _ => 1,
                 };
 
@@ -637,11 +637,11 @@ impl SnesBus {
             // Perform the transfer
             let transfer_mode = dma.control & 0x07;
             let bytes_to_transfer = match transfer_mode {
-                0 => 1,         // Mode 0: 1 byte
-                1 | 5 => 2,     // Mode 1/5: 2 bytes
-                2 | 6 => 2,     // Mode 2/6: 2 bytes
-                3 | 7 => 4,     // Mode 3/7: 4 bytes
-                4 => 4,         // Mode 4: 4 bytes
+                0 => 1,     // Mode 0: 1 byte
+                1 | 5 => 2, // Mode 1/5: 2 bytes
+                2 | 6 => 2, // Mode 2/6: 2 bytes
+                3 | 7 => 4, // Mode 3/7: 4 bytes
+                4 => 4,     // Mode 4: 4 bytes
                 _ => 1,
             };
 
@@ -1908,6 +1908,9 @@ mod tests {
         let cycles = bus.do_hdma();
 
         // Verify timing: 4 bytes * 8 cycles = 32 cycles
-        assert_eq!(cycles, 32, "Mode 4 HDMA should transfer 4 bytes to 4 registers");
+        assert_eq!(
+            cycles, 32,
+            "Mode 4 HDMA should transfer 4 bytes to 4 registers"
+        );
     }
 }
