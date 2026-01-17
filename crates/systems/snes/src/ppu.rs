@@ -29,12 +29,14 @@
 //!   - Color window for clipping and math control
 //!   - Window combination logic (OR/AND/XOR/XNOR)
 //!   - Window inversion support
+//!   - Reference: <https://wiki.superfamicom.org/windows>
 //! - Complete color math system ($2130-$2132):
 //!   - Sub-screen rendering and blending ($212D)
 //!   - Window-based color clipping (CGWSEL bits 6-7)
 //!   - Window-based color math control (CGWSEL bits 4-5)
 //!   - Fixed color blending
 //!   - Add/subtract/half operations
+//!   - Reference: <https://wiki.superfamicom.org/rendering-the-screen#color-math>
 //!
 //! **NOT Implemented** (future enhancements):
 //! - Direct color mode (CGWSEL bits 0-1)
@@ -3544,6 +3546,8 @@ impl Ppu {
     /// Check if a pixel at the given x coordinate is masked by windows for a given layer
     /// layer: 0=BG1, 1=BG2, 2=BG3, 3=BG4, 4=OBJ
     /// Returns true if the pixel should be masked (not drawn)
+    ///
+    /// Reference: <https://wiki.superfamicom.org/windows>
     fn is_pixel_masked_by_window(&self, x: usize, layer: usize) -> bool {
         // Window masking only applies to main screen layers
 
@@ -3664,6 +3668,8 @@ impl Ppu {
     /// - 01 = Clip colors outside window
     /// - 10 = Clip colors inside window
     /// - 11 = Always clip colors
+    ///
+    /// Reference: <https://wiki.superfamicom.org/rendering-the-screen#color-math>
     fn apply_color_clipping(&self, frame: &mut Frame, clip_mode: u8) {
         let width = frame.width as usize;
         let black = 0xFF000000u32; // Black color (opaque)
@@ -3693,6 +3699,8 @@ impl Ppu {
 
     /// Apply color math post-processing to the frame
     /// This implements the SNES color math system for transparency and blending effects
+    ///
+    /// Reference: <https://wiki.superfamicom.org/rendering-the-screen#color-math>
     fn apply_color_math(&self, frame: &mut Frame, layer_buffer: &[u8], sub_frame: &Frame) {
         // Get fixed color for blending (from $2132 COLDATA register)
         // Convert 5-bit components to 8-bit
@@ -3791,6 +3799,8 @@ impl Ppu {
 
     /// Check if a pixel is inside the color window
     /// Color window is defined by wobjlog ($212B) similar to layer windows
+    ///
+    /// Reference: <https://wiki.superfamicom.org/windows>
     fn is_inside_color_window(&self, x: usize) -> bool {
         // Window enable bits for color math are in wobjsel ($2125) bits 4-7
         // Bit 4-5: Window 1 enable and inversion
