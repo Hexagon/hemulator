@@ -161,8 +161,13 @@ pub struct SnesBus {
 }
 
 impl SnesBus {
-    const SCANLINE_CYCLES: u32 = 341;
-    const HBLANK_CYCLES: u32 = 40;
+    // Timing constants (approximate CPU cycles, see lib.rs for detailed explanation)
+    // Reference: https://wiki.superfamicom.org/timing
+    // - Actual hardware: 1364 master cycles per scanline, 262 scanlines per frame
+    // - CPU cycles are abstract and depend on operation type (IO vs memory access)
+    // - These constants are tuned for the emulator's CPU cycle tracking
+    const SCANLINE_CYCLES: u32 = 341; // Approximate CPU cycles per scanline
+    const HBLANK_CYCLES: u32 = 40; // Approximate CPU cycles during H-blank (~40-60 depending on HDMA)
     pub fn new() -> Self {
         log(LogCategory::Bus, LogLevel::Info, || {
             "SNES Bus: Initializing with stub SPC700 (real SPC700 disabled by default)".to_string()
@@ -316,10 +321,16 @@ impl SnesBus {
     }
 
     /// Check if currently in VBlank period
-    /// VBlank occurs during scanlines 225-261 (after 224 visible scanlines)
-    /// Each scanline is 341 cycles, so:
-    /// - Scanline 0-223 (cycles 0-76,383): Visible display
-    /// - Scanline 224-261 (cycles 76,384-89,341): VBlank period
+    ///
+    /// Hardware behavior (https://wiki.superfamicom.org/timing):
+    /// - VBlank starts at scanline $E1 (225) or $F0 (240) depending on $2133 bit 2
+    /// - VBlank ends at scanline 0 (V=0 H=0)
+    /// - Total of 262 scanlines per frame (NTSC, non-interlace)
+    ///
+    /// Implementation:
+    /// - We use scanline 225 as VBlank start (standard configuration)
+    /// - Scanline 224 is the last fully visible scanline
+    /// - This gives us 262 - 225 = 37 VBlank scanlines
     fn is_in_vblank(&self) -> bool {
         let current_scanline = self.frame_cycle / Self::SCANLINE_CYCLES;
         // VBlank is active during scanlines 225-261 (NTSC has 262 scanlines total)
@@ -329,6 +340,16 @@ impl SnesBus {
     }
 
     /// Check if currently in HBlank period (approximate).
+    ///
+    /// Hardware behavior (https://wiki.superfamicom.org/timing):
+    /// - H-Blank begins at H=274 of every scanline
+    /// - H-Blank ends at H=1 (next scanline)
+    /// - This gives roughly 66-67 dots (264-268 master cycles) for H-Blank
+    /// - HDMA transfers occur during H-Blank starting at dot 278
+    ///
+    /// Implementation:
+    /// - We model H-Blank as the last ~40 CPU cycles of each scanline
+    /// - This is an approximation since CPU cycle timing varies by operation
     ///
     /// We model HBlank as the last ~40 cycles of each scanline.
     fn is_in_hblank(&self) -> bool {

@@ -158,16 +158,28 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
 
 #### Timing
 - ✅ **Frame Timing** - NTSC timing implementation
-  - 89,342 master cycles per frame (~3.58 MHz / 60 Hz)
-  - 341 cycles per scanline
-  - 262 scanlines per frame (224 visible + 38 VBlank)
-  - Reference: [Timing](https://snes.nesdev.org/wiki/Timing)
+  - **Hardware Specifications** (from https://wiki.superfamicom.org/timing):
+    - Master clock: 21.477272 MHz (1.89e9/88 Hz)
+    - Scanline: 1364 master cycles (340 dots × 4 master cycles/dot, with dots 323 and 327 being 6 cycles)
+    - Frame: 262 scanlines = 357,368 master cycles
+    - Frame rate: ~60.0988 Hz
+    - Special case: Scanline $F0 (240) is 1360 cycles every other frame (non-interlace)
+  - **CPU Timing**:
+    - IO operations: 6 master cycles
+    - Memory access: 6, 8, or 12 master cycles (region and $420D dependent)
+    - Effective CPU speed: ~3.58 MHz (for IO operations)
+    - WRAM Refresh: 40 master cycle pause at ~536 master cycles into each scanline
+  - **Implementation**:
+    - Uses approximate CPU cycle counts for timing (~89,342 cycles/frame, ~341 cycles/scanline)
+    - CPU cycles are abstract units returned by the 65C816 core
+    - Timing is tuned for game compatibility rather than hardware accuracy
+  - Reference: [Timing](https://wiki.superfamicom.org/timing), [SNESdev Timing](https://snes.nesdev.org/wiki/Timing)
 
 - ✅ **VBlank/NMI**
-  - VBlank starts at scanline 225
+  - VBlank starts at scanline 225 ($E1) or 240 ($F0) depending on $2133 bit 2
   - NMI triggers if enabled ($4200 bit 7)
   - Proper NMI flag handling ($4210 read-and-clear)
-  - Reference: [NMI](https://snes.nesdev.org/wiki/NMI)
+  - Reference: [NMI](https://snes.nesdev.org/wiki/NMI), [Timing](https://wiki.superfamicom.org/timing)
 
 #### Other Features
 - ✅ **Save States** - Full system state serialization
