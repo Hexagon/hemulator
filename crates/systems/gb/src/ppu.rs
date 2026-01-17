@@ -332,7 +332,30 @@ impl Ppu {
     }
 
     /// Read from VRAM (0x8000-0x9FFF)
+    ///
+    /// # Hardware Accuracy
+    /// VRAM is inaccessible during PPU Mode 3 (Pixel Transfer).
+    /// Reads return 0xFF during Mode 3 to match hardware behavior.
     pub fn read_vram(&self, addr: u16) -> u8 {
+        // Check if LCD is enabled
+        if (self.lcdc & LCDC_ENABLE) == 0 {
+            // LCD is off, VRAM is always accessible
+            let offset = (addr & 0x1FFF) as usize;
+            return if self.vram_bank == 0 {
+                self.vram_bank0[offset]
+            } else {
+                self.vram_bank1[offset]
+            };
+        }
+
+        // Get current PPU mode from STAT register (bits 0-1)
+        let mode = self.stat & 0x03;
+
+        // VRAM is inaccessible during Mode 3 (Pixel Transfer)
+        if mode == 3 {
+            return 0xFF;
+        }
+
         let offset = (addr & 0x1FFF) as usize;
         if self.vram_bank == 0 {
             self.vram_bank0[offset]
@@ -342,7 +365,31 @@ impl Ppu {
     }
 
     /// Write to VRAM (0x8000-0x9FFF)
+    ///
+    /// # Hardware Accuracy
+    /// VRAM is inaccessible during PPU Mode 3 (Pixel Transfer).
+    /// Writes are ignored during Mode 3 to match hardware behavior.
     pub fn write_vram(&mut self, addr: u16, val: u8) {
+        // Check if LCD is enabled
+        if (self.lcdc & LCDC_ENABLE) == 0 {
+            // LCD is off, VRAM is always accessible
+            let offset = (addr & 0x1FFF) as usize;
+            if self.vram_bank == 0 {
+                self.vram_bank0[offset] = val;
+            } else {
+                self.vram_bank1[offset] = val;
+            }
+            return;
+        }
+
+        // Get current PPU mode from STAT register (bits 0-1)
+        let mode = self.stat & 0x03;
+
+        // VRAM is inaccessible during Mode 3 (Pixel Transfer)
+        if mode == 3 {
+            return; // Write ignored
+        }
+
         let offset = (addr & 0x1FFF) as usize;
         if self.vram_bank == 0 {
             self.vram_bank0[offset] = val;
@@ -363,18 +410,57 @@ impl Ppu {
     }
 
     /// Read from OAM (0xFE00-0xFE9F)
+    ///
+    /// # Hardware Accuracy
+    /// OAM is inaccessible during PPU Mode 2 (OAM Search) and Mode 3 (Pixel Transfer).
+    /// Reads return 0xFF during these modes to match hardware behavior.
     pub fn read_oam(&self, addr: u16) -> u8 {
         if addr >= 0xA0 {
             return 0xFF; // Out of bounds
         }
+
+        // Check if LCD is enabled
+        if (self.lcdc & LCDC_ENABLE) == 0 {
+            // LCD is off, OAM is always accessible
+            return self.oam[addr as usize];
+        }
+
+        // Get current PPU mode from STAT register (bits 0-1)
+        let mode = self.stat & 0x03;
+
+        // OAM is inaccessible during Mode 2 (OAM Search) and Mode 3 (Pixel Transfer)
+        if mode == 2 || mode == 3 {
+            return 0xFF;
+        }
+
         self.oam[addr as usize]
     }
 
     /// Write to OAM (0xFE00-0xFE9F)
+    ///
+    /// # Hardware Accuracy
+    /// OAM is inaccessible during PPU Mode 2 (OAM Search) and Mode 3 (Pixel Transfer).
+    /// Writes are ignored during these modes to match hardware behavior.
     pub fn write_oam(&mut self, addr: u16, val: u8) {
         if addr >= 0xA0 {
             return; // Out of bounds
         }
+
+        // Check if LCD is enabled
+        if (self.lcdc & LCDC_ENABLE) == 0 {
+            // LCD is off, OAM is always accessible
+            self.oam[addr as usize] = val;
+            return;
+        }
+
+        // Get current PPU mode from STAT register (bits 0-1)
+        let mode = self.stat & 0x03;
+
+        // OAM is inaccessible during Mode 2 (OAM Search) and Mode 3 (Pixel Transfer)
+        if mode == 2 || mode == 3 {
+            return; // Write ignored
+        }
+
         self.oam[addr as usize] = val;
     }
 
@@ -895,11 +981,16 @@ impl Ppu {
 
                 for sx in 0..8u8 {
                     // Calculate actual screen X position
+                    // OAM X position is offset by 8: X=0 means off-screen left, X=8 means screen X=0
+                    // x_pos = oam_x - 8 (calculated at line 898)
+                    // Sprites can be partially visible on left/right edges
                     let screen_x = x_pos.wrapping_add(sx);
 
                     // Skip pixels that are off-screen
                     // Screen X must be in range [0, 159]
-                    // But due to wrapping, values >= 160 could be either off right edge or off left edge
+                    // Due to wrapping: values >= 160 are off-screen (either left or right edge)
+                    // Example: OAM X=0 → x_pos=248 (wraps) → screen_x=248-255 → filtered out
+                    // Example: OAM X=8 → x_pos=0 → screen_x=0-7 → rendered
                     if screen_x >= 160 {
                         continue;
                     }
@@ -1033,6 +1124,14 @@ impl Ppu {
             }
 
             // V-Blank is lines 144-153
+            //
+            // # Hardware Timing Note
+            // This implementation triggers VBlank at the transition to line 144 (scanline-accurate).
+            // Real hardware triggers the VBlank interrupt on the first M-cycle of line 144.
+            // This implementation uses frame-based rendering (not cycle-accurate within scanlines),
+            // so VBlank timing is approximate but sufficient for ~99% of games.
+            //
+            // Games that rely on precise cycle-level VBlank timing may have edge cases.
             if self.ly == 144 {
                 vblank_started = true;
             }
@@ -1200,10 +1299,135 @@ mod tests {
     }
 
     #[test]
+    fn test_vram_access_restrictions() {
+        let mut ppu = Ppu::new();
+        ppu.lcdc = LCDC_ENABLE; // Enable LCD
+
+        // Write test data to VRAM when accessible
+        ppu.stat = 0x00; // Mode 0 (HBlank) - VRAM accessible
+        ppu.write_vram(0x1000, 0x42);
+        assert_eq!(
+            ppu.read_vram(0x1000),
+            0x42,
+            "VRAM should be accessible in Mode 0"
+        );
+
+        // Mode 1 (VBlank) - VRAM accessible
+        ppu.stat = 0x01;
+        ppu.write_vram(0x1001, 0x43);
+        assert_eq!(
+            ppu.read_vram(0x1001),
+            0x43,
+            "VRAM should be accessible in Mode 1"
+        );
+
+        // Mode 2 (OAM Search) - VRAM accessible
+        ppu.stat = 0x02;
+        ppu.write_vram(0x1002, 0x44);
+        assert_eq!(
+            ppu.read_vram(0x1002),
+            0x44,
+            "VRAM should be accessible in Mode 2"
+        );
+
+        // Mode 3 (Pixel Transfer) - VRAM inaccessible
+        ppu.stat = 0x03;
+        ppu.write_vram(0x1003, 0x45); // This write should be ignored
+        assert_eq!(
+            ppu.read_vram(0x1003),
+            0xFF,
+            "VRAM reads should return 0xFF in Mode 3"
+        );
+        // Verify the write was actually ignored
+        ppu.stat = 0x00; // Switch to Mode 0 to check
+        assert_eq!(
+            ppu.read_vram(0x1003),
+            0x00,
+            "VRAM write should be ignored in Mode 3"
+        );
+
+        // LCD disabled - VRAM always accessible
+        ppu.lcdc = 0x00; // Disable LCD
+        ppu.stat = 0x03; // Mode 3
+        ppu.write_vram(0x1004, 0x46);
+        assert_eq!(
+            ppu.read_vram(0x1004),
+            0x46,
+            "VRAM should be accessible when LCD is off"
+        );
+    }
+
+    #[test]
     fn test_oam_read_write() {
         let mut ppu = Ppu::new();
         ppu.write_oam(0x10, 0x42);
         assert_eq!(ppu.read_oam(0x10), 0x42);
+    }
+
+    #[test]
+    fn test_oam_access_restrictions() {
+        let mut ppu = Ppu::new();
+        ppu.lcdc = LCDC_ENABLE; // Enable LCD
+
+        // Write test data to OAM when accessible
+        ppu.stat = 0x00; // Mode 0 (HBlank) - OAM accessible
+        ppu.write_oam(0x10, 0x42);
+        assert_eq!(
+            ppu.read_oam(0x10),
+            0x42,
+            "OAM should be accessible in Mode 0"
+        );
+
+        // Mode 1 (VBlank) - OAM accessible
+        ppu.stat = 0x01;
+        ppu.write_oam(0x11, 0x43);
+        assert_eq!(
+            ppu.read_oam(0x11),
+            0x43,
+            "OAM should be accessible in Mode 1"
+        );
+
+        // Mode 2 (OAM Search) - OAM inaccessible
+        ppu.stat = 0x02;
+        ppu.write_oam(0x12, 0x44); // This write should be ignored
+        assert_eq!(
+            ppu.read_oam(0x12),
+            0xFF,
+            "OAM reads should return 0xFF in Mode 2"
+        );
+        // Verify the write was actually ignored
+        ppu.stat = 0x00; // Switch to Mode 0 to check
+        assert_eq!(
+            ppu.read_oam(0x12),
+            0x00,
+            "OAM write should be ignored in Mode 2"
+        );
+
+        // Mode 3 (Pixel Transfer) - OAM inaccessible
+        ppu.stat = 0x03;
+        ppu.write_oam(0x13, 0x45); // This write should be ignored
+        assert_eq!(
+            ppu.read_oam(0x13),
+            0xFF,
+            "OAM reads should return 0xFF in Mode 3"
+        );
+        // Verify the write was actually ignored
+        ppu.stat = 0x00; // Switch to Mode 0 to check
+        assert_eq!(
+            ppu.read_oam(0x13),
+            0x00,
+            "OAM write should be ignored in Mode 3"
+        );
+
+        // LCD disabled - OAM always accessible
+        ppu.lcdc = 0x00; // Disable LCD
+        ppu.stat = 0x02; // Mode 2
+        ppu.write_oam(0x14, 0x46);
+        assert_eq!(
+            ppu.read_oam(0x14),
+            0x46,
+            "OAM should be accessible when LCD is off"
+        );
     }
 
     #[test]

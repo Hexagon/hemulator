@@ -99,9 +99,11 @@ impl EguiApp {
         self.menu_bar.set_recent_files(recent_files);
     }
 
-    /// Update whether a system is currently loaded
-    pub fn set_system_loaded(&mut self, loaded: bool) {
+    /// Update whether a system is currently loaded and its name
+    pub fn set_system_loaded(&mut self, loaded: bool, system_name: &str) {
         self.menu_bar.set_system_loaded(loaded);
+        self.tab_manager.system_loaded = loaded;
+        self.tab_manager.system_name = system_name.to_string();
     }
 
     /// Render the UI
@@ -146,26 +148,34 @@ impl EguiApp {
 
                     DockArea::new(&mut self.dock_layout.inspector_state)
                         .style(Style::from_egui(ui.style().as_ref()))
+                        .show_close_buttons(false)
+                        .show_leaf_close_all_buttons(false)
+                        .show_leaf_collapse_buttons(false)
                         .show_inside(ui, &mut inspector_viewer);
                 });
         }
 
-        // Property pane as a dockable right panel
-        egui::SidePanel::right("property_dock")
-            .default_width(300.0)
-            .min_width(200.0)
-            .max_width(500.0)
-            .resizable(true)
-            .frame(egui::Frame::new().fill(color_from_rgb(12, 12, 12)))
-            .show(ctx, |ui| {
-                let mut property_viewer = PropertyTabViewer {
-                    property_pane: &mut self.property_pane,
-                };
+        // Property pane as a dockable right panel (only shown if any section visible)
+        if self.property_pane.any_section_visible() {
+            egui::SidePanel::right("property_dock")
+                .default_width(300.0)
+                .min_width(200.0)
+                .max_width(500.0)
+                .resizable(true)
+                .frame(egui::Frame::new().fill(color_from_rgb(12, 12, 12)))
+                .show(ctx, |ui| {
+                    let mut property_viewer = PropertyTabViewer {
+                        property_pane: &mut self.property_pane,
+                    };
 
-                DockArea::new(&mut self.dock_layout.property_state)
-                    .style(Style::from_egui(ui.style().as_ref()))
-                    .show_inside(ui, &mut property_viewer);
-            });
+                    DockArea::new(&mut self.dock_layout.property_state)
+                        .style(Style::from_egui(ui.style().as_ref()))
+                        .show_close_buttons(false)
+                        .show_leaf_close_all_buttons(false)
+                        .show_leaf_collapse_buttons(false)
+                        .show_inside(ui, &mut property_viewer);
+                });
+        }
 
         // Central panel with main tabs (Emulator, NewProject, Help, About)
         CentralPanel::default()

@@ -16,6 +16,7 @@ mod status_bar;
 mod tabs;
 
 pub use layout::EguiApp;
+pub use menu_bar::MenuAction;
 pub use property_pane::{InputConfigSource, PropertyAction};
 pub use tabs::{
     Atari2600TileData, CartridgeData, Chip8TileData, ColecoVisionTileData, DebugAction, GbTileData,

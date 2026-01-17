@@ -98,6 +98,10 @@ Implements DMG (original Game Boy) and CGB (Game Boy Color) modes with a flexibl
   - **Hardware-accurate scrolling**:
     - SCX/SCY with modulo 256 wrapping
     - Seamless tilemap boundary wrapping
+  - **Hardware-accurate memory access**:
+    - OAM (0xFE00-0xFE9F) inaccessible during Mode 2 (OAM Search) and Mode 3 (Pixel Transfer)
+    - VRAM (0x8000-0x9FFF) inaccessible during Mode 3 (Pixel Transfer)
+    - Reads return 0xFF, writes ignored during restricted modes
   - 10 sprites per scanline limit (hardware accurate)
   - DMG: Monochrome palettes (BGP, OBP0, OBP1)
   - CGB: 15-bit RGB color palettes (8 BG, 8 OBJ)
@@ -181,6 +185,7 @@ See [User Manual](https://hemulator.56k.guru/user/manual.html#game-boy--game-boy
 **Technical Limitations**:
 - **Frame-based timing**: Not cycle-accurate - renders full frames at once rather than scanline-by-scanline. Suitable for ~99% of games.
 - **Mid-scanline effects**: Register changes within a single scanline are not supported. However, scanline split effects (changing registers between scanlines using STAT interrupts) work correctly.
+- **VBlank interrupt timing**: Triggers at scanline-level accuracy (when LY reaches 144) rather than cycle-level accuracy (first M-cycle of line 144). Sufficient for ~99% of games.
 
 **Link Cable Limitations**:
 - Serial transfer registers (0xFF01, 0xFF02) are implemented with loopback mode
@@ -192,6 +197,10 @@ See [User Manual](https://hemulator.56k.guru/user/manual.html#game-boy--game-boy
 - LED control bits (6-7) accessible
 - Actual IR communication hardware not emulated
 - IR-based features (Pokemon Mystery Gift, etc.) won't communicate with external devices
+
+**Mapper-Specific Limitations**:
+- **MBC3 RTC**: Ticks at 60 Hz (not hardware-accurate 32768 Hz crystal-driven). RTC state not persisted across power cycles.
+- **HuC1 IR**: Infrared sensor stubbed - returns fixed 0xC0 value (no signal). Rarely used (<1% of games).
 
 **Unimplemented Mappers** (rare, <3% of games combined):
 - MBC6 (Game Boy Camera only)

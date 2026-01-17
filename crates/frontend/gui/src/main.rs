@@ -289,6 +289,17 @@ impl EmulatorSystem {
         }
     }
 
+    /// Check if all required mount points have media loaded
+    fn has_required_mounts(&self) -> bool {
+        let mount_points = self.mount_points();
+        for mp in mount_points {
+            if mp.required && !self.is_mounted(&mp.id) {
+                return false;
+            }
+        }
+        true
+    }
+
     fn supports_save_states(&self) -> bool {
         match self {
             EmulatorSystem::NES(sys) => sys.supports_save_states(),
@@ -1697,6 +1708,29 @@ fn create_atari2600_system(_settings: &Settings) -> emu_atari2600::Atari2600Syst
     emu_atari2600::Atari2600System::new()
 }
 
+/// Helper to update mount_info in tab_manager after mount/unmount operations
+fn update_tab_mount_info(
+    egui_app: &mut egui_ui::EguiApp,
+    sys: &EmulatorSystem,
+    runtime_state: &RuntimeState,
+) {
+    let mount_points = sys.mount_points();
+    let mount_info: Vec<egui_ui::MountInfo> = mount_points
+        .into_iter()
+        .map(|mp| {
+            let mounted_file = runtime_state.current_mounts.get(&mp.id).cloned();
+            egui_ui::MountInfo {
+                id: mp.id,
+                name: mp.name,
+                extensions: mp.extensions,
+                required: mp.required,
+                mounted_file,
+            }
+        })
+        .collect();
+    egui_app.tab_manager.update_mount_info(mount_info);
+}
+
 /// Helper to configure UI state after system creation
 /// This consolidates common state updates that happen for all systems
 fn configure_system_ui(
@@ -1705,12 +1739,19 @@ fn configure_system_ui(
     system_name: &str,
     rom_loaded: &mut bool,
     status_message: &str,
+    runtime_state: &RuntimeState,
 ) {
     *rom_loaded = true;
     egui_app.property_pane.system_name = system_name.to_string();
     egui_app.property_pane.rendering_backend = sys.get_current_renderer_name();
     egui_app.property_pane.available_renderers = sys.get_available_renderers();
     egui_app.status_bar.set_message(status_message.to_string());
+
+    // Update tab_manager state immediately so welcome screen shows correctly
+    egui_app.set_system_loaded(*rom_loaded, system_name);
+
+    // Update mount_info immediately so the welcome screen can check if cartridge is needed
+    update_tab_mount_info(egui_app, sys, runtime_state);
 }
 
 /// Helper function to create EnhancedDebugState from a Debugger
@@ -3088,7 +3129,7 @@ fn main() {
     // Initialize egui app
     let mut egui_app = EguiApp::new();
     egui_app.property_pane.system_name = sys.system_name().to_string();
-    egui_app.set_system_loaded(rom_loaded); // Initialize menu state based on whether system is loaded
+    egui_app.set_system_loaded(rom_loaded, sys.system_name()); // Initialize menu state based on whether system is loaded
 
     // Upgrade renderer to OpenGL if settings request it and system was loaded
     // Note: OpenGL renderer upgrade temporarily disabled due to GL context refactoring
@@ -3103,7 +3144,8 @@ fn main() {
         "Software".to_string()
     };
     egui_app.property_pane.available_renderers = sys.get_available_renderers();
-    egui_app.property_pane.display_filter = settings.display_filter; // Initialize from settings
+    // Initialize menu bar display filter state from settings
+    egui_app.menu_bar.current_filter = settings.display_filter;
     egui_app.status_bar.set_message(status_message.clone());
     // Initialize recent files menu
     egui_app.update_recent_files(settings.get_recent_files().to_vec());
@@ -3347,6 +3389,16 @@ fn main() {
             if rom_loaded {
                 // PC Config tab is deprecated - removed
             }
+
+            // Update menu bar state for new menu features
+            let mount_points = sys.mount_points();
+            let has_required_mount = mount_points
+                .iter()
+                .any(|mp| mp.required && sys.is_mounted(&mp.id));
+            egui_app.menu_bar.rom_loaded = has_required_mount;
+            egui_app.menu_bar.single_mount_system =
+                mount_points.iter().filter(|mp| mp.required).count() == 1;
+            egui_app.menu_bar.current_speed = egui_app.property_pane.emulation_speed_percent;
         }
 
         // Update debug info if inspector is visible (contains Debug tab)
@@ -3662,7 +3714,7 @@ fn main() {
         }
 
         // Update menu bar system loaded state before rendering UI
-        egui_app.set_system_loaded(rom_loaded);
+        egui_app.set_system_loaded(rom_loaded, sys.system_name());
 
         // Render egui UI
         egui_app.ui(egui_backend.egui_ctx(), settings.scaling_mode);
@@ -3693,6 +3745,7 @@ fn main() {
                                 "NES",
                                 &mut rom_loaded,
                                 "Created new NES system",
+                                &runtime_state,
                             );
                         }
                         "Game Boy" => {
@@ -3703,6 +3756,7 @@ fn main() {
                                 "Game Boy",
                                 &mut rom_loaded,
                                 "Created new Game Boy system",
+                                &runtime_state,
                             );
                         }
                         "Atari 2600" => {
@@ -3715,6 +3769,7 @@ fn main() {
                                 "Atari 2600",
                                 &mut rom_loaded,
                                 "Created new Atari 2600 system",
+                                &runtime_state,
                             );
                         }
                         "SMS" => {
@@ -3725,6 +3780,7 @@ fn main() {
                                 "SMS",
                                 &mut rom_loaded,
                                 "Created new SMS system",
+                                &runtime_state,
                             );
                         }
                         "ColecoVision" => {
@@ -3737,6 +3793,7 @@ fn main() {
                                 "ColecoVision",
                                 &mut rom_loaded,
                                 "Created new ColecoVision system",
+                                &runtime_state,
                             );
                         }
                         "SG-1000" => {
@@ -3747,6 +3804,7 @@ fn main() {
                                 "SG-1000",
                                 &mut rom_loaded,
                                 "Created new SG-1000 system",
+                                &runtime_state,
                             );
                         }
                         "CHIP-8" => {
@@ -3757,6 +3815,7 @@ fn main() {
                                 "CHIP-8",
                                 &mut rom_loaded,
                                 "Created new CHIP-8 system",
+                                &runtime_state,
                             );
                         }
                         "SNES" => {
@@ -3767,6 +3826,7 @@ fn main() {
                                 "SNES",
                                 &mut rom_loaded,
                                 "Created new SNES system",
+                                &runtime_state,
                             );
                         }
                         "N64" => {
@@ -3780,6 +3840,7 @@ fn main() {
                                         "N64",
                                         &mut rom_loaded,
                                         "Created new N64 system",
+                                        &runtime_state,
                                     );
                                 }
                                 Err(e) => {
@@ -3798,6 +3859,7 @@ fn main() {
                                 "PC",
                                 &mut rom_loaded,
                                 "Created new PC system",
+                                &runtime_state,
                             );
                         }
                         _ => {
@@ -4982,6 +5044,135 @@ fn main() {
                         }
                     }
                 }
+                MenuAction::SaveState(slot) => {
+                    if rom_loaded {
+                        if let Some(ref hash) = rom_hash {
+                            if sys.supports_save_states() {
+                                let state = sys.save_state();
+                                let state_json = serde_json::to_string(&state).unwrap_or_default();
+                                if let Err(e) =
+                                    _game_saves.save_slot(slot, state_json.as_bytes(), hash)
+                                {
+                                    egui_app
+                                        .status_bar
+                                        .set_message(format!("Error saving state: {}", e));
+                                } else {
+                                    egui_app
+                                        .status_bar
+                                        .set_message(format!("Saved to slot {}", slot));
+                                    egui_app
+                                        .tab_manager
+                                        .add_log(format!("State saved to slot {}", slot));
+                                }
+                            } else {
+                                egui_app.status_bar.set_message(
+                                    "Save states not supported for this system".to_string(),
+                                );
+                            }
+                        }
+                    } else {
+                        egui_app.status_bar.set_message("No ROM loaded".to_string());
+                    }
+                }
+                MenuAction::LoadState(slot) => {
+                    if rom_loaded {
+                        if let Some(ref hash) = rom_hash {
+                            if sys.supports_save_states() {
+                                match _game_saves.load_slot(slot, hash) {
+                                    Ok(data) => {
+                                        if let Ok(state_str) = String::from_utf8(data) {
+                                            if let Ok(state) = serde_json::from_str(&state_str) {
+                                                if let Err(e) = sys.load_state(&state) {
+                                                    egui_app.status_bar.set_message(format!(
+                                                        "Error loading state: {}",
+                                                        e
+                                                    ));
+                                                } else {
+                                                    egui_app.status_bar.set_message(format!(
+                                                        "Loaded from slot {}",
+                                                        slot
+                                                    ));
+                                                    egui_app.tab_manager.add_log(format!(
+                                                        "State loaded from slot {}",
+                                                        slot
+                                                    ));
+                                                }
+                                            } else {
+                                                egui_app
+                                                    .status_bar
+                                                    .set_message("Invalid state data".to_string());
+                                            }
+                                        } else {
+                                            egui_app
+                                                .status_bar
+                                                .set_message("Invalid state encoding".to_string());
+                                        }
+                                    }
+                                    Err(e) => {
+                                        egui_app
+                                            .status_bar
+                                            .set_message(format!("Error loading state: {}", e));
+                                    }
+                                }
+                            } else {
+                                egui_app.status_bar.set_message(
+                                    "Save states not supported for this system".to_string(),
+                                );
+                            }
+                        }
+                    } else {
+                        egui_app.status_bar.set_message("No ROM loaded".to_string());
+                    }
+                }
+                MenuAction::SetSpeed(speed) => {
+                    settings.emulation_speed = speed as f64 / 100.0;
+                    egui_app.property_pane.emulation_speed_percent = speed;
+                    egui_app.menu_bar.current_speed = speed;
+                    egui_app
+                        .status_bar
+                        .set_message(format!("Speed set to {}%", speed));
+                }
+                MenuAction::EjectCartridge => {
+                    // Find the first required mount point and eject it
+                    let mount_points = sys.mount_points();
+                    if let Some(mp) = mount_points.iter().find(|mp| mp.required) {
+                        if let Err(e) = sys.unmount(&mp.id) {
+                            egui_app
+                                .status_bar
+                                .set_message(format!("Error ejecting: {}", e));
+                        } else {
+                            runtime_state.current_mounts.remove(&mp.id);
+                            rom_hash = None;
+                            egui_app
+                                .status_bar
+                                .set_message("Cartridge ejected".to_string());
+                            egui_app.tab_manager.add_log(format!("Ejected {}", mp.name));
+                            update_tab_mount_info(&mut egui_app, &sys, &runtime_state);
+                        }
+                    }
+                }
+                MenuAction::SetDisplayFilter(filter) => {
+                    settings.display_filter = filter;
+                    egui_app.menu_bar.current_filter = filter;
+                    egui_app
+                        .status_bar
+                        .set_message(format!("Filter: {}", filter.name()));
+                }
+                MenuAction::ToggleMetrics => {
+                    egui_app.property_pane.metrics_visible =
+                        !egui_app.property_pane.metrics_visible;
+                    egui_app.menu_bar.metrics_visible = egui_app.property_pane.metrics_visible;
+                }
+                MenuAction::ToggleControllerSettings => {
+                    egui_app.property_pane.controller_visible =
+                        !egui_app.property_pane.controller_visible;
+                    egui_app.menu_bar.controller_visible =
+                        egui_app.property_pane.controller_visible;
+                }
+                MenuAction::ToggleMountPoints => {
+                    egui_app.property_pane.mounts_visible = !egui_app.property_pane.mounts_visible;
+                    egui_app.menu_bar.mounts_visible = egui_app.property_pane.mounts_visible;
+                }
                 MenuAction::Screenshot => {
                     // Take screenshot of current frame
                     if rom_loaded {
@@ -5286,91 +5477,10 @@ fn main() {
             }
         }
 
-        // Handle property pane actions (save/load states)
+        // Handle property pane actions
         if let Some(action) = egui_app.property_pane.take_action() {
             use egui_ui::property_pane::PropertyAction;
             match action {
-                PropertyAction::SaveState(slot) => {
-                    if rom_loaded {
-                        if let Some(ref hash) = rom_hash {
-                            if sys.supports_save_states() {
-                                let state = sys.save_state();
-                                let state_json = serde_json::to_string(&state).unwrap_or_default();
-                                // save_slot will persist to disk internally
-                                if let Err(e) =
-                                    _game_saves.save_slot(slot, state_json.as_bytes(), hash)
-                                {
-                                    egui_app
-                                        .status_bar
-                                        .set_message(format!("Error saving state: {}", e));
-                                } else {
-                                    egui_app
-                                        .status_bar
-                                        .set_message(format!("Saved to slot {}", slot));
-                                    egui_app
-                                        .tab_manager
-                                        .add_log(format!("State saved to slot {}", slot));
-                                }
-                            } else {
-                                egui_app.status_bar.set_message(
-                                    "Save states not supported for this system".to_string(),
-                                );
-                            }
-                        }
-                    } else {
-                        egui_app.status_bar.set_message("No ROM loaded".to_string());
-                    }
-                }
-                PropertyAction::LoadState(slot) => {
-                    if rom_loaded {
-                        if let Some(ref hash) = rom_hash {
-                            if sys.supports_save_states() {
-                                match _game_saves.load_slot(slot, hash) {
-                                    Ok(data) => {
-                                        if let Ok(state_str) = String::from_utf8(data) {
-                                            if let Ok(state) = serde_json::from_str(&state_str) {
-                                                if let Err(e) = sys.load_state(&state) {
-                                                    egui_app.status_bar.set_message(format!(
-                                                        "Error loading state: {}",
-                                                        e
-                                                    ));
-                                                } else {
-                                                    egui_app.status_bar.set_message(format!(
-                                                        "Loaded from slot {}",
-                                                        slot
-                                                    ));
-                                                    egui_app.tab_manager.add_log(format!(
-                                                        "State loaded from slot {}",
-                                                        slot
-                                                    ));
-                                                }
-                                            } else {
-                                                egui_app
-                                                    .status_bar
-                                                    .set_message("Invalid state data".to_string());
-                                            }
-                                        } else {
-                                            egui_app
-                                                .status_bar
-                                                .set_message("Invalid state encoding".to_string());
-                                        }
-                                    }
-                                    Err(e) => {
-                                        egui_app
-                                            .status_bar
-                                            .set_message(format!("Error loading state: {}", e));
-                                    }
-                                }
-                            } else {
-                                egui_app.status_bar.set_message(
-                                    "Save states not supported for this system".to_string(),
-                                );
-                            }
-                        }
-                    } else {
-                        egui_app.status_bar.set_message("No ROM loaded".to_string());
-                    }
-                }
                 PropertyAction::MountFile(mount_id) => {
                     // Find the mount point info to get allowed extensions
                     let mount_points = sys.mount_points();
@@ -5405,6 +5515,8 @@ fn main() {
                                                 .unwrap_or("file"),
                                             mount_info.name
                                         ));
+                                        // Update mount_info so welcome screen shows emulator
+                                        update_tab_mount_info(&mut egui_app, &sys, &runtime_state);
                                     }
                                 }
                                 Err(e) => {
@@ -5427,6 +5539,8 @@ fn main() {
                         egui_app
                             .tab_manager
                             .add_log(format!("Ejected {}", mount_id));
+                        // Update mount_info so welcome screen shows ready state
+                        update_tab_mount_info(&mut egui_app, &sys, &runtime_state);
                     }
                 }
                 PropertyAction::ConfigureInput => {
@@ -5584,8 +5698,7 @@ fn main() {
         // Handle emulation speed changes from property pane
         settings.emulation_speed = (egui_app.property_pane.emulation_speed_percent as f64) / 100.0;
 
-        // Handle display filter changes from property pane
-        settings.display_filter = egui_app.property_pane.display_filter;
+        // Display filter is now managed via menu, not property pane
 
         // Handle log rate limit changes
         let current_rate_limit = emu_core::logging::LogConfig::global().get_rate_limit();
@@ -5804,6 +5917,61 @@ fn main() {
                         }
                     }
                 }
+                TabAction::SelectCartridge => {
+                    // Find the first required mount point that's not mounted (cartridge/rom)
+                    let mount_points = sys.mount_points();
+                    if let Some(mount_info) = mount_points.iter().find(|mp| {
+                        mp.required
+                            && !sys.is_mounted(&mp.id)
+                            && (mp.id.to_lowercase().contains("cartridge")
+                                || mp.id.to_lowercase().contains("rom"))
+                    }) {
+                        // Create file dialog with appropriate filters
+                        let extensions: Vec<&str> =
+                            mount_info.extensions.iter().map(|s| s.as_str()).collect();
+                        if let Some(path) = rfd::FileDialog::new()
+                            .add_filter(&mount_info.name, &extensions)
+                            .add_filter("All Files", &["*"])
+                            .pick_file()
+                        {
+                            match std::fs::read(&path) {
+                                Ok(data) => {
+                                    rom_hash = Some(GameSaves::rom_hash(&data));
+                                    if let Err(e) = sys.mount(&mount_info.id, &data) {
+                                        egui_app
+                                            .status_bar
+                                            .set_message(format!("Error mounting: {}", e));
+                                        rom_hash = None;
+                                    } else {
+                                        let path_str = path.to_string_lossy().to_string();
+                                        runtime_state
+                                            .set_mount(mount_info.id.clone(), path_str.clone());
+                                        egui_app.status_bar.set_message(format!(
+                                            "Loaded {}",
+                                            path.file_name()
+                                                .and_then(|n| n.to_str())
+                                                .unwrap_or("file")
+                                        ));
+                                        egui_app.tab_manager.add_log(format!(
+                                            "Mounted {} to {}",
+                                            path.file_name()
+                                                .and_then(|n| n.to_str())
+                                                .unwrap_or("file"),
+                                            mount_info.name
+                                        ));
+                                        // Update mount_info so welcome screen shows emulator
+                                        update_tab_mount_info(&mut egui_app, &sys, &runtime_state);
+                                    }
+                                }
+                                Err(e) => {
+                                    egui_app
+                                        .status_bar
+                                        .set_message(format!("Error reading file: {}", e));
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -5887,8 +6055,8 @@ fn main() {
             }
         }
 
-        // Step emulation frame if ROM is loaded and not paused
-        if rom_loaded && settings.emulation_speed > 0.0 {
+        // Step emulation frame if ROM is loaded, all required mounts are satisfied, and not paused
+        if rom_loaded && sys.has_required_mounts() && settings.emulation_speed > 0.0 {
             // Reset timing when emulation becomes active or speed changes
             let is_emulation_active = true;
             let speed_changed = (settings.emulation_speed - previous_emulation_speed).abs()

@@ -1,9 +1,10 @@
 //! Top menu bar
 
+use crate::display_filter::DisplayFilter;
 use egui::Ui;
 
 /// Actions that can be triggered from the menu
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum MenuAction {
     // File menu
     NewProjectSystem(String), // String is the system name (e.g., "NES", "Game Boy", "PC")
@@ -19,6 +20,10 @@ pub enum MenuAction {
     Pause,
     Resume,
     Step,
+    SaveState(u8),  // Slot 1-5
+    LoadState(u8),  // Slot 1-5
+    SetSpeed(i32),  // Speed percentage (25, 50, 100, 200, 400)
+    EjectCartridge, // Eject cartridge/ROM when single mount point
 
     // View menu
     Screenshot,
@@ -27,7 +32,11 @@ pub enum MenuAction {
     ScalingStretch,
     Fullscreen,
     FullscreenWithGui,
-    ShowInspector, // Toggle Inspector dock visibility
+    ShowInspector,                   // Toggle Inspector dock visibility
+    SetDisplayFilter(DisplayFilter), // Set display filter
+    ToggleMetrics,                   // Toggle Metrics section visibility
+    ToggleControllerSettings,        // Toggle Controller Settings section visibility
+    ToggleMountPoints,               // Toggle Mount Points section visibility
 
     // Help menu
     ShowHelp,
@@ -38,6 +47,13 @@ pub struct MenuBar {
     pub pending_action: Option<MenuAction>,
     pub recent_files: Vec<String>, // List of recent files to display
     pub system_loaded: bool,       // Whether a system is currently loaded
+    pub rom_loaded: bool,          // Whether a ROM is mounted
+    pub current_speed: i32,        // Current emulation speed percentage
+    pub current_filter: DisplayFilter, // Current display filter
+    pub metrics_visible: bool,     // Metrics section visibility
+    pub controller_visible: bool,  // Controller section visibility
+    pub mounts_visible: bool,      // Mount points section visibility
+    pub single_mount_system: bool, // Whether system has only one mount point
 }
 
 impl MenuBar {
@@ -46,6 +62,13 @@ impl MenuBar {
             pending_action: None,
             recent_files: Vec::new(),
             system_loaded: false,
+            rom_loaded: false,
+            current_speed: 100,
+            current_filter: DisplayFilter::None,
+            metrics_visible: false,
+            controller_visible: false,
+            mounts_visible: false,
+            single_mount_system: false,
         }
     }
 
@@ -57,6 +80,16 @@ impl MenuBar {
     /// Update whether a system is loaded
     pub fn set_system_loaded(&mut self, loaded: bool) {
         self.system_loaded = loaded;
+    }
+
+    /// Update whether a ROM is mounted
+    pub fn set_rom_loaded(&mut self, loaded: bool) {
+        self.rom_loaded = loaded;
+    }
+
+    /// Update single mount system state
+    pub fn set_single_mount_system(&mut self, single: bool) {
+        self.single_mount_system = single;
     }
 
     pub fn ui(&mut self, ui: &mut Ui) {
@@ -281,6 +314,69 @@ impl MenuBar {
                         self.pending_action = Some(MenuAction::Step);
                         ui.close();
                     }
+
+                    ui.separator();
+
+                    // Eject cartridge - only shown if single mount system and ROM loaded
+                    ui.add_enabled_ui(self.rom_loaded && self.single_mount_system, |ui| {
+                        if ui
+                            .button("⏏️ Eject Cartridge")
+                            .on_hover_text("Eject the current cartridge/ROM")
+                            .clicked()
+                        {
+                            self.pending_action = Some(MenuAction::EjectCartridge);
+                            ui.close();
+                        }
+                    });
+
+                    ui.separator();
+
+                    // Speed submenu
+                    ui.menu_button(format!("⏩ Speed ({}%)", self.current_speed), |ui| {
+                        for speed in [25, 50, 100, 200, 400] {
+                            let label = if speed == self.current_speed {
+                                format!("✓ {}%", speed)
+                            } else {
+                                format!("  {}%", speed)
+                            };
+                            if ui.button(label).clicked() {
+                                self.pending_action = Some(MenuAction::SetSpeed(speed));
+                                ui.close();
+                            }
+                        }
+                    });
+
+                    ui.separator();
+
+                    // Save submenu - only enabled if ROM loaded
+                    ui.add_enabled_ui(self.rom_loaded, |ui| {
+                        ui.menu_button("💾 Save State", |ui| {
+                            for slot in 1..=5 {
+                                if ui
+                                    .button(format!("Slot {} (F{})", slot, slot + 4))
+                                    .clicked()
+                                {
+                                    self.pending_action = Some(MenuAction::SaveState(slot));
+                                    ui.close();
+                                }
+                            }
+                        });
+                    });
+
+                    // Load submenu - only enabled if ROM loaded
+                    ui.add_enabled_ui(self.rom_loaded, |ui| {
+                        ui.menu_button("📂 Load State", |ui| {
+                            for slot in 1..=5 {
+                                if ui
+                                    .button(format!("Slot {} (Shift+F{})", slot, slot + 4))
+                                    .clicked()
+                                {
+                                    self.pending_action = Some(MenuAction::LoadState(slot));
+                                    ui.close();
+                                }
+                            }
+                        });
+                    });
                 });
             });
 
@@ -313,6 +409,45 @@ impl MenuBar {
                     }
                 });
 
+                // Display filters submenu
+                ui.menu_button(
+                    format!("🖼️ Filters ({})", self.current_filter.name()),
+                    |ui| {
+                        let filters = [
+                            (DisplayFilter::None, "None", "No filter, pure pixels"),
+                            (
+                                DisplayFilter::PhosphorPersistence,
+                                "Phosphor Persistence",
+                                "Temporal frame blending",
+                            ),
+                            (
+                                DisplayFilter::SonyTrinitron,
+                                "Sony Trinitron",
+                                "CRT simulation",
+                            ),
+                            (DisplayFilter::Ibm5151, "IBM 5151", "Monochrome monitor"),
+                            (
+                                DisplayFilter::Commodore1702,
+                                "Commodore 1702",
+                                "Color monitor",
+                            ),
+                            (DisplayFilter::SharpLcd, "Sharp LCD", "LCD simulation"),
+                            (DisplayFilter::RcaVictor, "RCA Victor", "CRT television"),
+                        ];
+                        for (filter, name, tooltip) in filters {
+                            let label = if self.current_filter == filter {
+                                format!("✓ {}", name)
+                            } else {
+                                format!("  {}", name)
+                            };
+                            if ui.button(label).on_hover_text(tooltip).clicked() {
+                                self.pending_action = Some(MenuAction::SetDisplayFilter(filter));
+                                ui.close();
+                            }
+                        }
+                    },
+                );
+
                 ui.separator();
 
                 if ui
@@ -340,6 +475,53 @@ impl MenuBar {
                     .clicked()
                 {
                     self.pending_action = Some(MenuAction::ShowInspector);
+                    ui.close();
+                }
+
+                ui.separator();
+
+                // Property pane section toggles
+                ui.label(egui::RichText::new("Property Panels").strong());
+
+                let metrics_label = if self.metrics_visible {
+                    "✓ Metrics"
+                } else {
+                    "  Metrics"
+                };
+                if ui
+                    .button(metrics_label)
+                    .on_hover_text("Toggle Metrics panel")
+                    .clicked()
+                {
+                    self.pending_action = Some(MenuAction::ToggleMetrics);
+                    ui.close();
+                }
+
+                let controller_label = if self.controller_visible {
+                    "✓ Controller Settings"
+                } else {
+                    "  Controller Settings"
+                };
+                if ui
+                    .button(controller_label)
+                    .on_hover_text("Toggle Controller Settings panel")
+                    .clicked()
+                {
+                    self.pending_action = Some(MenuAction::ToggleControllerSettings);
+                    ui.close();
+                }
+
+                let mounts_label = if self.mounts_visible {
+                    "✓ Mount Points"
+                } else {
+                    "  Mount Points"
+                };
+                if ui
+                    .button(mounts_label)
+                    .on_hover_text("Toggle Mount Points panel")
+                    .clicked()
+                {
+                    self.pending_action = Some(MenuAction::ToggleMountPoints);
                     ui.close();
                 }
 

@@ -273,6 +273,7 @@ pub struct MountInfo {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TabAction {
     CreateNewProject(String), // String is the system name
+    SelectCartridge,          // Open file dialog to select cartridge
 }
 
 /// Debug actions that can be triggered from the debug tab
@@ -294,6 +295,8 @@ pub struct TabManager {
     pub pc_bda_data: Option<PcBdaData>,
     pub cartridge_data: Option<CartridgeData>,
     pub mount_info: Vec<MountInfo>,
+    pub system_loaded: bool,
+    pub system_name: String,
     pub pending_action: Option<TabAction>,
     pub pending_debug_action: Option<DebugAction>,
     pub selected_memory_region_index: usize,
@@ -320,6 +323,8 @@ impl TabManager {
             pc_bda_data: None,
             cartridge_data: None,
             mount_info: Vec::new(),
+            system_loaded: false,
+            system_name: String::new(),
             pending_action: None,
             pending_debug_action: None,
             selected_memory_region_index: 0,
@@ -419,50 +424,58 @@ impl TabManager {
         emulator_texture: &Option<TextureHandle>,
         scaling_mode: ScalingMode,
     ) {
-        // Tab bar with improved visual styling
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.active_tab, Tab::Emulator, "🎮 Emulator");
+        // Only show tab bar if there are multiple tabs visible (Help or About)
+        let has_extra_tabs = self.help_visible || self.about_visible;
 
-            if self.help_visible {
-                ui.selectable_value(&mut self.active_tab, Tab::Help, "❓ Help");
-                // Use a colored button for the close icon to ensure visibility
-                let close_button = egui::Button::new(
-                    egui::RichText::new("✖").color(egui::Color32::from_rgb(220, 220, 220)),
-                )
-                .small();
-                if ui
-                    .add(close_button)
-                    .on_hover_text("Close Help tab")
-                    .clicked()
-                {
-                    self.help_visible = false;
-                    if self.active_tab == Tab::Help {
-                        self.active_tab = Tab::Emulator;
+        if has_extra_tabs {
+            // Tab bar with improved visual styling
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut self.active_tab, Tab::Emulator, "🎮 Emulator");
+
+                if self.help_visible {
+                    ui.selectable_value(&mut self.active_tab, Tab::Help, "❓ Help");
+                    // Use a colored button for the close icon to ensure visibility
+                    let close_button = egui::Button::new(
+                        egui::RichText::new("✖").color(egui::Color32::from_rgb(220, 220, 220)),
+                    )
+                    .small();
+                    if ui
+                        .add(close_button)
+                        .on_hover_text("Close Help tab")
+                        .clicked()
+                    {
+                        self.help_visible = false;
+                        if self.active_tab == Tab::Help {
+                            self.active_tab = Tab::Emulator;
+                        }
                     }
                 }
-            }
 
-            if self.about_visible {
-                ui.selectable_value(&mut self.active_tab, Tab::About, "ℹ️ About");
-                // Use a colored button for the close icon to ensure visibility
-                let close_button = egui::Button::new(
-                    egui::RichText::new("✖").color(egui::Color32::from_rgb(220, 220, 220)),
-                )
-                .small();
-                if ui
-                    .add(close_button)
-                    .on_hover_text("Close About tab")
-                    .clicked()
-                {
-                    self.about_visible = false;
-                    if self.active_tab == Tab::About {
-                        self.active_tab = Tab::Emulator;
+                if self.about_visible {
+                    ui.selectable_value(&mut self.active_tab, Tab::About, "ℹ️ About");
+                    // Use a colored button for the close icon to ensure visibility
+                    let close_button = egui::Button::new(
+                        egui::RichText::new("✖").color(egui::Color32::from_rgb(220, 220, 220)),
+                    )
+                    .small();
+                    if ui
+                        .add(close_button)
+                        .on_hover_text("Close About tab")
+                        .clicked()
+                    {
+                        self.about_visible = false;
+                        if self.active_tab == Tab::About {
+                            self.active_tab = Tab::Emulator;
+                        }
                     }
                 }
-            }
-        });
+            });
 
-        ui.separator();
+            ui.separator();
+        } else {
+            // When only Emulator tab is visible, ensure we're on it
+            self.active_tab = Tab::Emulator;
+        }
 
         // Tab content
         match self.active_tab {
@@ -473,13 +486,27 @@ impl TabManager {
     }
 
     fn render_emulator_tab(
-        &self,
+        &mut self,
         ui: &mut Ui,
         emulator_texture: &Option<TextureHandle>,
         scaling_mode: ScalingMode,
     ) {
+        // Check if a system is loaded but needs a cartridge (required mount not satisfied)
+        let needs_cartridge = self.system_loaded
+            && self.mount_info.iter().any(|m| {
+                m.required
+                    && m.mounted_file.is_none()
+                    && (m.id.to_lowercase().contains("cartridge")
+                        || m.id.to_lowercase().contains("rom"))
+            });
+
+        // Show emulator view only if we have a texture AND don't need a cartridge
+        // Otherwise show welcome/ready screen
+        let should_show_emulator = emulator_texture.is_some() && !needs_cartridge;
+
         ui.centered_and_justified(|ui| {
-            if let Some(texture) = emulator_texture {
+            if should_show_emulator {
+                let texture = emulator_texture.as_ref().unwrap();
                 let available_size = ui.available_size();
                 let texture_size = texture.size_vec2();
                 let aspect_ratio = texture_size.x / texture_size.y;
@@ -504,10 +531,65 @@ impl TabManager {
                 let image = egui::Image::from_texture(texture)
                     .fit_to_exact_size(egui::vec2(display_width, display_height));
                 ui.add(image);
-            } else {
-                // Welcome screen when no system is loaded
+            } else if needs_cartridge {
+                // System is loaded but needs a cartridge - show system-specific header
                 ui.vertical_centered(|ui| {
                     ui.add_space(60.0);
+
+                    let system_icon = match self.system_name.as_str() {
+                        "NES" => "🎮",
+                        "SNES" => "🎮",
+                        "Game Boy" => "🎮",
+                        "SMS" => "🎮",
+                        "Atari 2600" => "🕹️",
+                        "N64" => "🎮",
+                        "CHIP-8" => "💻",
+                        "ColecoVision" => "🕹️",
+                        "SG-1000" => "🎮",
+                        _ => "🎮",
+                    };
+                    ui.heading(
+                        egui::RichText::new(format!(
+                            "{} {} Emulator Ready",
+                            system_icon, self.system_name
+                        ))
+                        .size(32.0)
+                        .strong(),
+                    );
+                    ui.add_space(15.0);
+                    ui.label(
+                        egui::RichText::new("Load a cartridge to start emulation")
+                            .size(18.0)
+                            .weak(),
+                    );
+                    ui.add_space(50.0);
+
+                    egui::Frame::new()
+                        .fill(egui::Color32::from_rgb(30, 30, 30))
+                        .corner_radius(8.0)
+                        .inner_margin(20.0)
+                        .show(ui, |ui| {
+                            ui.vertical_centered(|ui| {
+                                if ui
+                                    .add(
+                                        egui::Button::new(
+                                            egui::RichText::new("📁 Select Cartridge...")
+                                                .size(18.0),
+                                        )
+                                        .min_size(egui::vec2(200.0, 40.0)),
+                                    )
+                                    .clicked()
+                                {
+                                    self.pending_action = Some(TabAction::SelectCartridge);
+                                }
+                            });
+                        });
+                });
+            } else {
+                // No system loaded - show welcome screen with project creation instructions
+                ui.vertical_centered(|ui| {
+                    ui.add_space(60.0);
+
                     ui.heading(
                         egui::RichText::new("🎮 Welcome to Hemulator")
                             .size(32.0)
@@ -521,7 +603,6 @@ impl TabManager {
                     );
                     ui.add_space(50.0);
 
-                    // Simple call-to-action
                     ui.label(egui::RichText::new("Get Started").size(22.0).strong());
                     ui.add_space(20.0);
 
