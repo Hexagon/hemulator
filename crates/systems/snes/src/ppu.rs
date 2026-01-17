@@ -3327,13 +3327,19 @@ impl Ppu {
         let color15 = (low as u16) | ((high as u16) << 8);
 
         // Convert from 5-bit per channel to 8-bit per channel
-        // Simple shift by 3 (matches test expectations)
-        let r = ((color15 & 0x001F) << 3) as u8;
-        let g = (((color15 & 0x03E0) >> 5) << 3) as u8;
-        let b = (((color15 & 0x7C00) >> 10) << 3) as u8;
+        // First shift left by 3 to move to upper bits
+        let r = ((color15 & 0x001F) << 3) as u32;
+        let g = (((color15 & 0x03E0) >> 5) << 3) as u32;
+        let b = (((color15 & 0x7C00) >> 10) << 3) as u32;
+
+        // Expand 5-bit to 8-bit by copying upper bits to lower bits
+        // This ensures proper color distribution (e.g., 0x1F -> 0xFF, not 0xF8)
+        let r = r | (r >> 5);
+        let g = g | (g >> 5);
+        let b = b | (b >> 5);
 
         // Return as ARGB (0xAARRGGBB)
-        0xFF000000 | ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
+        0xFF000000 | (r << 16) | (g << 8) | b
     }
 
     /// Apply color math post-processing to the frame
@@ -3631,9 +3637,9 @@ mod tests {
         ppu.cgram[7] = 0x7C;
 
         assert_eq!(ppu.get_color(0), 0xFF000000); // Black
-        assert_eq!(ppu.get_color(1), 0xFFF8F8F8); // White (5-bit max = 0xF8 in 8-bit)
-        assert_eq!(ppu.get_color(2), 0xFFF80000); // Red (5-bit max = 0xF8 in 8-bit)
-        assert_eq!(ppu.get_color(3), 0xFF0000F8); // Blue (5-bit max = 0xF8 in 8-bit)
+        assert_eq!(ppu.get_color(1), 0xFFFFFFFF); // White (5-bit max 0x1F expands to 0xFF)
+        assert_eq!(ppu.get_color(2), 0xFFFF0000); // Red (5-bit max 0x1F expands to 0xFF)
+        assert_eq!(ppu.get_color(3), 0xFF0000FF); // Blue (5-bit max 0x1F expands to 0xFF)
     }
 
     #[test]
