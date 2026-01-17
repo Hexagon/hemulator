@@ -3,11 +3,25 @@
 //! This module provides a basic SNES system emulator using the reusable 65C816 CPU core
 //! from `emu_core`, along with SNES-specific components:
 //!
-//! - **CPU**: WDC 65C816 (16-bit processor running at ~3.58 MHz)
-//! - **PPU**: Picture Processing Unit (stub implementation)
-//! - **APU**: SPC700 audio processor (stub implementation)
+//! - **CPU**: WDC 65C816 (16-bit processor running at ~3.58 MHz effective)
+//! - **PPU**: Picture Processing Unit (complete modes 0-7)
+//! - **APU**: SPC700 audio processor (CPU implemented, DSP stub)
 //! - **Memory**: 128KB WRAM + cartridge ROM/RAM
-//! - **Timing**: NTSC (3.58 MHz CPU, ~60 Hz frame rate)
+//! - **Timing**: NTSC (21.477 MHz master clock, ~60.1 Hz frame rate)
+//!
+//! # Timing Details
+//!
+//! The SNES has complex timing based on a 21.477 MHz master clock. For detailed timing
+//! information, see the comments in the timing constants section and the reference:
+//! <https://wiki.superfamicom.org/timing>
+//!
+//! Key points:
+//! - Master clock: 21.477272 MHz (theoretically 1.89e9/88 Hz)
+//! - Each scanline: 1364 master cycles (340 dots, with 2 long dots)
+//! - Each frame: 262 scanlines = 357,368 master cycles
+//! - Frame rate: ~60.0988 Hz
+//! - CPU operations: 6-12 master cycles depending on type
+//! - Effective CPU speed: ~3.58 MHz (for IO operations)
 
 #![allow(clippy::upper_case_acronyms)]
 
@@ -114,9 +128,29 @@ pub struct SnesSystem {
 }
 
 // SNES timing constants (NTSC)
-const SNES_FRAME_CYCLES: u32 = 89342; // ~3.58MHz / 60Hz
-const SNES_SCANLINE_CYCLES: u32 = 341; // Cycles per scanline (~3.58MHz / 262 scanlines / 60Hz)
-const SNES_VISIBLE_SCANLINES: u32 = 224; // Visible scanlines
+//
+// Hardware Timing Reference (https://wiki.superfamicom.org/timing):
+// - Master Clock: 21.477272 MHz (theoretically 1.89e9/88 Hz)
+// - Scanline Length: 1364 master cycles (340 dots × 4 master cycles/dot)
+//   - Special case: Scanline $F0 (240) in non-interlace is 1360 master cycles every other frame
+//   - Dots 323 and 327 are 6 master cycles instead of 4 (adds 4 extra master cycles per scanline)
+// - Frame: 262 scanlines (non-interlace) = 357,368 master cycles
+//   - 224 or 225 visible scanlines (depending on overscan bit)
+//   - VBlank starts at scanline $E1 (225) or $F0 (240) depending on $2133 bit 2
+// - Frame Rate: 21.477272 MHz / 357,368 ≈ 60.0988 Hz
+//
+// CPU Timing:
+// - CPU internal operation (IO cycle): 6 master cycles
+// - Memory access: 6, 8, or 12 master cycles depending on region and $420D bit 0
+// - Effective CPU speed: ~3.58 MHz (21.477272 MHz / 6) for IO operations
+// - WRAM Refresh: CPU paused for 40 master cycles (~6-7 CPU cycles) at ~536 master cycles into each scanline
+//
+// Current Implementation:
+// We track "CPU cycles" returned by the 65C816 core, which represent abstract CPU operations.
+// Each CPU cycle corresponds to 6-12 master cycles depending on the operation.
+// For timing purposes, we use approximate cycle counts that work well for most games:
+const SNES_FRAME_CYCLES: u32 = 89342; // Approximate CPU cycles per frame (~60 Hz)
+const SNES_SCANLINE_CYCLES: u32 = 341; // Approximate CPU cycles per scanline
 
 impl SnesSystem {
     /// Create a new SNES system
@@ -244,8 +278,12 @@ impl System for SnesSystem {
         // Initialize HDMA at start of frame
         self.cpu.bus_mut().init_hdma();
 
-        // Execute CPU cycles for visible scanlines, with HDMA during H-blank
-        for scanline in 0..SNES_VISIBLE_SCANLINES {
+        // Execute CPU cycles for all scanlines before VBlank
+        // Reference: VBlank starts at scanline $E1 (225) or $F0 (240) depending on $2133 bit 2
+        // We use 225 as the standard configuration (224 visible + 1 post-render scanline)
+        const VBLANK_START_SCANLINE: u32 = 225;
+
+        for scanline in 0..VBLANK_START_SCANLINE {
             let scanline_target = (scanline + 1) * SNES_SCANLINE_CYCLES;
 
             // Active display starts at the beginning of each scanline
@@ -263,6 +301,7 @@ impl System for SnesSystem {
             }
 
             // Execute CPU until end of active display portion of scanline
+            // Only render on visible scanlines (0-223, total 224 scanlines)
             while self.current_cycles < scanline_target.saturating_sub(40) {
                 let pc_before = ((self.cpu.cpu.pbr as u32) << 16) | (self.cpu.cpu.pc as u32);
                 self.cpu.bus_mut().set_last_cpu_pc(pc_before);
@@ -306,10 +345,14 @@ impl System for SnesSystem {
             }
         }
 
-        // Render frame at end of visible scanlines
+        // Render frame at end of visible scanlines (scanlines 0-223)
+        // Reference: PPU outputs pixels for scanlines 1-224 (or 1-239 with overscan)
+        // In 0-based indexing, that's scanlines 0-223 for standard 224-line mode
         self.renderer.render_frame(self.cpu.bus_mut().ppu_mut());
 
-        // Enter VBlank and trigger NMI if enabled
+        // Enter VBlank at start of scanline 225 ($E1)
+        // Reference: "V-Blank begins on scanline $E1 or $F0, at H=0"
+        // NMI triggers at H=0.5 (approximately half a dot into the scanline)
         self.cpu.bus_mut().ppu_mut().set_vblank(true);
         log(LogCategory::PPU, LogLevel::Debug, || {
             format!(
@@ -359,7 +402,8 @@ impl System for SnesSystem {
             }
         }
 
-        // Clear VBlank at end of frame
+        // Clear VBlank and NMI flag at start of new frame (V=0 H=0)
+        // Reference: "The internal timer sets its NMI output high at H=0 V=0"
         self.cpu.bus_mut().ppu_mut().set_vblank(false);
         log(LogCategory::PPU, LogLevel::Trace, || {
             "SNES: Frame end, VBlank cleared".to_string()
