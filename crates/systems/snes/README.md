@@ -195,14 +195,32 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
 
 #### PPU Advanced Features
 - ✅ **Windows** - Complete window masking implementation ($2123-$212B)
-  - Registers: W12SEL, W34SEL, WOBJSEL, WH0-WH3, WBGLOG, WOBJLOG
-  - Window enable, inversion, and logic (OR/AND/XOR/XNOR) fully implemented
-  - Applied to all BG layers and sprites
-  - Reference: [Windows](https://snes.nesdev.org/wiki/PPU_registers#Windows)
+  - **Window Registers**:
+    - $2123 (W12SEL): Window settings for BG1/BG2
+    - $2124 (W34SEL): Window settings for BG3/BG4
+    - $2125 (WOBJSEL): Window settings for sprites and color window
+    - $2126-$2129 (WH0-WH3): Window boundaries (left/right positions)
+    - $212A (WBGLOG): Window logic for BG layers (OR/AND/XOR/XNOR)
+    - $212B (WOBJLOG): Window logic for sprites and color window
+  - **Features**:
+    - ✅ Two independent windows with configurable boundaries
+    - ✅ Per-layer window enable and inversion
+    - ✅ Window combination logic (OR/AND/XOR/XNOR)
+    - ✅ Window masking for BG layers and sprites
+    - ✅ Color window for clipping and color math control
+  - **Window Boundaries**:
+    - Inclusive on both ends: [left, right]
+    - Empty window when left > right (no wraparound)
+  - **Implementation Details**:
+    - BG1 uses bits 0-3 of W12SEL, BG2 uses bits 4-7
+    - BG3 uses bits 0-3 of W34SEL, BG4 uses bits 4-7
+    - Sprites use bits 0-3 of WOBJSEL
+    - Color window uses bits 4-7 of WOBJSEL
+  - Reference: [Windows](https://wiki.superfamicom.org/windows)
 
 - ✅ **Color Math** - Fully implemented with per-pixel layer tracking ($2130-$2132)
   - **Implementation Status**: Complete with sub-screen and fixed color blending
-    - $2130 (CGWSEL): Color math control with prevent-math and window-based clipping
+    - $2130 (CGWSEL): Color math control with color clipping and window-based math control
     - $2131 (CGADSUB): Per-layer enable (BG1-4, OBJ, backdrop) with add/subtract/half modes
     - $2132 (COLDATA): Fixed color RGB blending source
     - $212D (TS): Sub-screen layer designation for blending
@@ -220,15 +238,25 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
       - Allows 2048 colors (BBGGGRRR + bgr palette bits)
       - Used by some games for enhanced color effects
       - Reference: [Backgrounds - Direct Color](https://wiki.superfamicom.org/backgrounds#direct-color-mode)
+    - ✅ Color clipping to black (CGWSEL bits 6-7) - Applied BEFORE color math
+      - 00 = Never clip colors
+      - 01 = Clip colors outside color window
+      - 10 = Clip colors inside color window
+      - 11 = Always clip colors to black
+    - ✅ Window-based color math control (CGWSEL bits 4-5) - Controls WHERE color math is applied
+      - 00 = Enable color math everywhere
+      - 01 = Enable inside color window
+      - 10 = Enable outside color window
+      - 11 = Disable color math everywhere
     
   - **Technical Details**:
     - Layer buffer tracks source layer for each pixel (BG1=0, BG2=1, BG3=2, BG4=3, OBJ=4, backdrop=5)
     - Both main screen and sub-screen rendered independently
     - Sub-screen layers determined by TS register ($212D)
-    - Color math applied in post-processing pass after all layers rendered
+    - **Color clipping applied first** (clips pixels to black based on color window)
+    - **Color math applied second** (blends main/sub screens based on layer enables and math window)
     - Only pixels from layers enabled in CGADSUB undergo blending
     - CGWSEL prevent-math bit (bit 6) can globally disable color math
-    - Window-based clipping allows selective color math by screen region
     - Blending performed in 8-bit RGB color space with proper clamping
     - Direct color: combines tile data (BBGGGRRR) with palette bits (bgr) → Red=RRRr0, Green=GGGg0, Blue=BBb00
     
@@ -236,10 +264,10 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
     - Games using color math now work correctly
     - Fade effects, transparency, and color tinting render properly
     - Sub-screen blending effects (transparencies, shadows) work correctly
-    - Window-based effects (spotlight, fade regions) work correctly
+    - Window-based effects (spotlight, fade regions, color clipping) work correctly
     - Direct color mode games now have correct color output
     
-  - Reference: [Color Math](https://snes.nesdev.org/wiki/Color_math)
+  - Reference: [Color Math](https://wiki.superfamicom.org/rendering-the-screen#color-math)
 
 - ❌ **Mosaic** - No mosaic effect ($2106)
 

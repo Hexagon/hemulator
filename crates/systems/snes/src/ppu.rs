@@ -24,11 +24,19 @@
 //! - Mode 7 rotation/scaling matrix transformation (M7A-M7D, M7X, M7Y, M7SEL registers)
 //! - Offset-per-tile scrolling for Modes 2, 4, 6
 //! - True hi-res 512px rendering for Modes 5-6
+//! - Complete window system ($2123-$212B):
+//!   - Window masking for BG layers and sprites
+//!   - Color window for clipping and math control
+//!   - Window combination logic (OR/AND/XOR/XNOR)
+//!   - Window inversion support
+//!   - Reference: <https://wiki.superfamicom.org/windows>
 //! - Complete color math system ($2130-$2132):
 //!   - Sub-screen rendering and blending ($212D)
-//!   - Window-based color math clipping
+//!   - Window-based color clipping (CGWSEL bits 6-7)
+//!   - Window-based color math control (CGWSEL bits 4-5)
 //!   - Fixed color blending
 //!   - Add/subtract/half operations
+//!   - Reference: <https://wiki.superfamicom.org/rendering-the-screen#color-math>
 //!
 //! **NOT Implemented** (future enhancements):
 //! - Direct color mode (CGWSEL bits 0-1)
@@ -346,24 +354,26 @@ pub struct Ppu {
     // ============================================================================
     /// Color math control ($2130) - CGWSEL
     ///
-    /// Controls WHERE and WHEN color math is applied (window masking and global control)
+    /// Controls WHERE and WHEN color math is applied, plus color clipping
     ///
     /// Bit layout:
-    /// - Bits 0-1: Direct color mode for 256-color BGs (Mode 3/4/7)
+    /// - Bits 0-1: Direct color mode for 256-color BGs (Mode 3/4/7) - NOT IMPLEMENTED
     ///   - 00 = Normal color mode (palette lookup)
     ///   - 01/10/11 = Direct color mode (pixel value is color, not palette index)
     /// - Bits 2-3: Reserved (unused)
     /// - Bits 4-5: Color math enable control based on window regions
     ///   - 00 = Enable color math everywhere (no window masking)
-    ///   - 01 = Enable inside window
-    ///   - 10 = Enable outside window  
+    ///   - 01 = Enable inside color window
+    ///   - 10 = Enable outside color window
     ///   - 11 = Disable color math everywhere
     /// - Bit 6: Prevent color math (master disable)
     ///   - 0 = Color math enabled (subject to other controls)
     ///   - 1 = Color math disabled globally
-    /// - Bit 7: Add/subtract select for color window
-    ///   - 0 = Add colors in window regions
-    ///   - 1 = Subtract colors in window regions
+    /// - Bits 6-7: Color clipping control (clips colors to black BEFORE color math)
+    ///   - 00 = Never clip colors
+    ///   - 01 = Clip colors outside color window
+    ///   - 10 = Clip colors inside color window
+    ///   - 11 = Always clip colors to black
     cgwsel: u8,
 
     /// Color math designation ($2131) - CGADSUB
@@ -969,15 +979,23 @@ impl Ppu {
                 log(LogCategory::PPU, LogLevel::Debug, || {
                     let direct_color = val & 0x03;
                     let prevent_math = (val & 0x40) != 0;
-                    let clip_mode = (val >> 4) & 0x03;
+                    let math_clip_mode = (val >> 4) & 0x03;
+                    let color_clip_mode = (val >> 6) & 0x03;
                     format!(
-                        "SNES PPU: CGWSEL (Color math control) = ${:02X} [direct_color={}, prevent_math={}, clip={}]",
+                        "SNES PPU: CGWSEL (Color math control) = ${:02X} [direct_color={}, prevent_math={}, math_clip={}, color_clip={}]",
                         val, direct_color, prevent_math,
-                        match clip_mode {
+                        match math_clip_mode {
                             0 => "always",
                             1 => "inside_window",
                             2 => "outside_window",
                             3 => "never",
+                            _ => "?",
+                        },
+                        match color_clip_mode {
+                            0 => "never",
+                            1 => "outside_window",
+                            2 => "inside_window",
+                            3 => "always",
                             _ => "?",
                         }
                     )
@@ -1239,6 +1257,20 @@ impl Ppu {
             if priority == 0 {
                 sub_frame.pixels[i] = backdrop_color;
             }
+        }
+
+        // ============================================================================
+        // COLOR WINDOW CLIPPING (BEFORE COLOR MATH)
+        // ============================================================================
+        // CGWSEL bits 6-7 control color clipping to black based on window regions
+        // This must happen BEFORE color math is applied
+        // 00 = Never clip colors
+        // 01 = Clip colors outside window
+        // 10 = Clip colors inside window
+        // 11 = Always clip colors
+        let color_clip_mode = (self.cgwsel >> 6) & 0x03;
+        if color_clip_mode != 0 {
+            self.apply_color_clipping(&mut frame, color_clip_mode);
         }
 
         // ============================================================================
@@ -2232,6 +2264,7 @@ impl Ppu {
 
         // Return CGRAM index directly (8bpp uses all 256 colors)
         // Color index 0 is still transparent in 8bpp mode
+        // In 8bpp mode, color 0 is still the transparent color
         (bit7 << 7)
             | (bit6 << 6)
             | (bit5 << 5)
@@ -3539,6 +3572,8 @@ impl Ppu {
     /// Check if a pixel at the given x coordinate is masked by windows for a given layer
     /// layer: 0=BG1, 1=BG2, 2=BG3, 3=BG4, 4=OBJ
     /// Returns true if the pixel should be masked (not drawn)
+    ///
+    /// Reference: <https://wiki.superfamicom.org/windows>
     fn is_pixel_masked_by_window(&self, x: usize, layer: usize) -> bool {
         // Window masking only applies to main screen layers
 
@@ -3551,13 +3586,18 @@ impl Ppu {
         };
 
         // Extract window enable bits for this layer
-        let layer_shift = if layer == 0 || layer == 2 || layer == 4 {
-            0
+        // BG1 (layer 0) uses bits 0-3 of W12SEL
+        // BG2 (layer 1) uses bits 4-7 of W12SEL
+        // BG3 (layer 2) uses bits 0-3 of W34SEL
+        // BG4 (layer 3) uses bits 4-7 of W34SEL
+        // OBJ (layer 4) uses bits 0-3 of WOBJSEL
+        let layer_shift = if layer == 1 || layer == 3 {
+            4 // BG2 and BG4 use upper nibble
         } else {
-            4
+            0 // BG1, BG3, and OBJ use lower nibble
         };
-        let w1_enable = (w_sel >> layer_shift) & 0x0F;
-        let w2_enable = (w_sel >> (layer_shift + 2)) & 0x03;
+        let w1_enable = (w_sel >> layer_shift) & 0x03; // Bits 0-1: Window 1 enable and invert
+        let w2_enable = (w_sel >> (layer_shift + 2)) & 0x03; // Bits 2-3: Window 2 enable and invert
 
         // If no windows are enabled for this layer, no masking
         if w1_enable == 0 && w2_enable == 0 {
@@ -3565,17 +3605,21 @@ impl Ppu {
         }
 
         // Check if pixel is inside window 1
+        // Windows are inclusive on both ends: [left, right]
+        // If left > right, the window is empty (not wraparound)
         let in_w1 = if self.wh0 <= self.wh1 {
             x >= self.wh0 as usize && x <= self.wh1 as usize
         } else {
-            x >= self.wh0 as usize || x <= self.wh1 as usize
+            false // Empty window when left > right
         };
 
         // Check if pixel is inside window 2
+        // Windows are inclusive on both ends: [left, right]
+        // If left > right, the window is empty (not wraparound)
         let in_w2 = if self.wh2 <= self.wh3 {
             x >= self.wh2 as usize && x <= self.wh3 as usize
         } else {
-            x >= self.wh2 as usize || x <= self.wh3 as usize
+            false // Empty window when left > right
         };
 
         // Apply window inversion based on enable bits
@@ -3681,8 +3725,47 @@ impl Ppu {
         0xFF000000 | (r << 16) | (g << 8) | b
     }
 
+    /// Apply color window clipping (CGWSEL bits 6-7)
+    /// This clips pixel colors to black BEFORE color math is applied
+    ///
+    /// Color clip modes:
+    /// - 00 = Never clip colors
+    /// - 01 = Clip colors outside window
+    /// - 10 = Clip colors inside window
+    /// - 11 = Always clip colors
+    ///
+    /// Reference: <https://wiki.superfamicom.org/rendering-the-screen#color-math>
+    fn apply_color_clipping(&self, frame: &mut Frame, clip_mode: u8) {
+        let width = frame.width as usize;
+        let black = 0xFF000000u32; // Black color (opaque)
+
+        for (i, pixel) in frame.pixels.iter_mut().enumerate() {
+            let x = i % width;
+
+            let should_clip = match clip_mode {
+                0 => false, // Never clip
+                1 => {
+                    // Clip outside window
+                    !self.is_inside_color_window(x)
+                }
+                2 => {
+                    // Clip inside window
+                    self.is_inside_color_window(x)
+                }
+                3 => true, // Always clip
+                _ => false,
+            };
+
+            if should_clip {
+                *pixel = black;
+            }
+        }
+    }
+
     /// Apply color math post-processing to the frame
     /// This implements the SNES color math system for transparency and blending effects
+    ///
+    /// Reference: <https://wiki.superfamicom.org/rendering-the-screen#color-math>
     fn apply_color_math(&self, frame: &mut Frame, layer_buffer: &[u8], sub_frame: &Frame) {
         // Get fixed color for blending (from $2132 COLDATA register)
         // Convert 5-bit components to 8-bit
@@ -3781,6 +3864,8 @@ impl Ppu {
 
     /// Check if a pixel is inside the color window
     /// Color window is defined by wobjlog ($212B) similar to layer windows
+    ///
+    /// Reference: <https://wiki.superfamicom.org/windows>
     fn is_inside_color_window(&self, x: usize) -> bool {
         // Window enable bits for color math are in wobjsel ($2125) bits 4-7
         // Bit 4-5: Window 1 enable and inversion
@@ -3795,14 +3880,15 @@ impl Ppu {
         }
 
         // Check if x is inside window 1
+        // Windows are inclusive on both ends: [left, right]
+        // If left > right, the window is empty (not wraparound)
         let in_win1 = if win1_enable {
             let left = self.wh0 as usize;
             let right = self.wh1 as usize;
-            // Handle window wraparound: if left > right, window wraps around screen edges
             let inside = if self.wh0 <= self.wh1 {
                 x >= left && x <= right
             } else {
-                x >= left || x <= right
+                false // Empty window when left > right
             };
             if win1_invert {
                 !inside
@@ -3814,14 +3900,15 @@ impl Ppu {
         };
 
         // Check if x is inside window 2
+        // Windows are inclusive on both ends: [left, right]
+        // If left > right, the window is empty (not wraparound)
         let in_win2 = if win2_enable {
             let left = self.wh2 as usize;
             let right = self.wh3 as usize;
-            // Handle window wraparound: if left > right, window wraps around screen edges
             let inside = if self.wh2 <= self.wh3 {
                 x >= left && x <= right
             } else {
-                x >= left || x <= right
+                false // Empty window when left > right
             };
             if win2_invert {
                 !inside
@@ -5258,6 +5345,76 @@ mod tests {
         assert!(ppu.is_pixel_masked_by_window(70, 0)); // In both (XNOR = true)
         assert!(!ppu.is_pixel_masked_by_window(100, 0)); // In W2 only
         assert!(ppu.is_pixel_masked_by_window(20, 0)); // In neither (XNOR = true)
+    }
+
+    #[test]
+    fn test_color_window_clipping() {
+        let mut ppu = Ppu::new();
+
+        // Set up a simple test frame
+        let mut frame = Frame::new(256, 224);
+        // Fill with red color
+        for pixel in &mut frame.pixels {
+            *pixel = 0xFFFF0000; // Red
+        }
+
+        // Set up color window: left=50, right=100
+        ppu.write_register(0x2126, 50); // WH0 - Window 1 left
+        ppu.write_register(0x2127, 100); // WH1 - Window 1 right
+
+        // Enable color window 1 (no inversion)
+        // WOBJSEL bits 4-5: Color Window 1 enable/invert
+        ppu.write_register(0x2125, 0x10); // Enable color window 1
+
+        // Test mode 0: Never clip (default)
+        ppu.write_register(0x2130, 0x00); // CGWSEL - no clipping
+        let clip_mode = (ppu.cgwsel >> 6) & 0x03;
+        ppu.apply_color_clipping(&mut frame, clip_mode);
+        // All pixels should still be red
+        assert_eq!(frame.pixels[0], 0xFFFF0000); // Outside window
+        assert_eq!(frame.pixels[75], 0xFFFF0000); // Inside window
+
+        // Reset frame to red
+        for pixel in &mut frame.pixels {
+            *pixel = 0xFFFF0000;
+        }
+
+        // Test mode 1: Clip outside window
+        ppu.write_register(0x2130, 0x40); // CGWSEL bits 6-7 = 01
+        let clip_mode = (ppu.cgwsel >> 6) & 0x03;
+        ppu.apply_color_clipping(&mut frame, clip_mode);
+        // Pixels outside window should be black
+        assert_eq!(frame.pixels[49], 0xFF000000); // Just before window - should be black
+        assert_eq!(frame.pixels[75], 0xFFFF0000); // Inside window - should still be red
+        assert_eq!(frame.pixels[101], 0xFF000000); // Just after window - should be black
+
+        // Reset frame to red
+        for pixel in &mut frame.pixels {
+            *pixel = 0xFFFF0000;
+        }
+
+        // Test mode 2: Clip inside window
+        ppu.write_register(0x2130, 0x80); // CGWSEL bits 6-7 = 10
+        let clip_mode = (ppu.cgwsel >> 6) & 0x03;
+        ppu.apply_color_clipping(&mut frame, clip_mode);
+        // Pixels inside window should be black
+        assert_eq!(frame.pixels[49], 0xFFFF0000); // Just before window - should still be red
+        assert_eq!(frame.pixels[75], 0xFF000000); // Inside window - should be black
+        assert_eq!(frame.pixels[101], 0xFFFF0000); // Just after window - should still be red
+
+        // Reset frame to red
+        for pixel in &mut frame.pixels {
+            *pixel = 0xFFFF0000;
+        }
+
+        // Test mode 3: Always clip
+        ppu.write_register(0x2130, 0xC0); // CGWSEL bits 6-7 = 11
+        let clip_mode = (ppu.cgwsel >> 6) & 0x03;
+        ppu.apply_color_clipping(&mut frame, clip_mode);
+        // All pixels should be black
+        assert_eq!(frame.pixels[49], 0xFF000000); // Outside window - black
+        assert_eq!(frame.pixels[75], 0xFF000000); // Inside window - black
+        assert_eq!(frame.pixels[101], 0xFF000000); // Outside window - black
     }
 
     #[test]
