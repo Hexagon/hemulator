@@ -14,6 +14,11 @@
 //! **Communication Protocol:**
 //! The IPL ROM implements a boot protocol where it waits for the main CPU
 //! to upload code via the communication ports, then executes it.
+//!
+//! **References:**
+//! - [SPC700 Reference](https://wiki.superfamicom.org/spc700-reference)
+//! - [Transferring Data to APU](https://wiki.superfamicom.org/transferring-data-from-rom-to-the-snes-apu)
+//! - [Fullsnes Documentation](https://problemkaputt.de/fullsnes.htm#snescpuspc700audiosystemapu)
 
 use std::cell::Cell;
 
@@ -87,9 +92,10 @@ struct Spc700Memory {
     /// 64KB RAM
     ram: Box<[u8; 0x10000]>,
     /// Control register ($F1)
+    /// Reference: https://wiki.superfamicom.org/spc700-reference
     /// Bit 7: IPL ROM enable (1 = enabled, maps $FFC0-$FFFF to IPL ROM)
-    /// Bit 5: Clear ports $F6-$F7 (write-only, auto-clears)
-    /// Bit 4: Clear ports $F4-$F5 (write-only, auto-clears)
+    /// Bit 5: Clear OUTPUT ports $F6-$F7 (write-only, auto-clears, clears what main CPU reads)
+    /// Bit 4: Clear OUTPUT ports $F4-$F5 (write-only, auto-clears, clears what main CPU reads)
     /// Bit 2: Timer 2 enable
     /// Bit 1: Timer 1 enable
     /// Bit 0: Timer 0 enable
@@ -161,7 +167,8 @@ impl Spc700Memory {
             while self.timer_prescaler[timer] >= prescaler_period {
                 self.timer_prescaler[timer] -= prescaler_period;
 
-                // Increment internal counter
+                // Increment internal 8-bit counter (modulo divisor)
+                // When divisor register is 0, it acts as 256
                 let divisor = if self.timer_divisor[timer] == 0 {
                     256u16
                 } else {
@@ -170,10 +177,11 @@ impl Spc700Memory {
 
                 self.timer_internal[timer] = self.timer_internal[timer].wrapping_add(1);
 
-                // Check if internal counter reached divisor
+                // When internal counter reaches divisor, reset it and increment output counter
+                // Reference: https://wiki.superfamicom.org/spc700-reference (Timers section)
                 if self.timer_internal[timer] as u16 >= divisor {
                     self.timer_internal[timer] = 0;
-                    // Increment output counter (4-bit, wraps at 15)
+                    // Increment 4-bit output counter (wraps from 15 to 0)
                     let old = self.timer_counter[timer].get();
                     let new_val = (old + 1) & 0x0F;
                     self.timer_counter[timer].set(new_val);
@@ -224,8 +232,8 @@ impl MemorySpc700 for Spc700Memory {
             CPUIO0..=CPUIO3 => {
                 let port = (addr - CPUIO0) as usize;
                 let val = self.cpuio[port];
-                // Log all port reads during IPL ROM execution
-                log(LogCategory::APU, LogLevel::Info, || {
+                // Log port reads for debugging (reduced to Debug level to avoid spam)
+                log(LogCategory::APU, LogLevel::Debug, || {
                     format!("SPC700: Read port $F{} (CPUIO) = ${:02X} (all ports: ${:02X} ${:02X} ${:02X} ${:02X})", 
                         4 + port, val, self.cpuio[0], self.cpuio[1], self.cpuio[2], self.cpuio[3])
                 });
@@ -280,7 +288,8 @@ impl MemorySpc700 for Spc700Memory {
             CPUIO0..=CPUIO3 => {
                 let port = (addr - CPUIO0) as usize;
                 self.apu_out[port] = val;
-                log(LogCategory::APU, LogLevel::Info, || {
+                // Log port writes for debugging (reduced to Debug level to avoid spam)
+                log(LogCategory::APU, LogLevel::Debug, || {
                     format!("SPC700: Write port $F{} = ${:02X} (apu_out now: ${:02X} ${:02X} ${:02X} ${:02X})", 
                         4 + port, val, self.apu_out[0], self.apu_out[1], self.apu_out[2], self.apu_out[3])
                 });
@@ -320,14 +329,16 @@ impl MemorySpc700 for Spc700Memory {
                 }
 
                 if val & 0x10 != 0 {
-                    // Clear ports $F4-$F5
-                    self.cpuio[0] = 0;
-                    self.cpuio[1] = 0;
+                    // Clear ports $F4-$F5 (SPC700 output ports, main CPU input)
+                    // Reference: https://wiki.superfamicom.org/spc700-reference
+                    // Bits 4-5 clear the OUTPUT ports (what main CPU reads)
+                    self.apu_out[0] = 0;
+                    self.apu_out[1] = 0;
                 }
                 if val & 0x20 != 0 {
-                    // Clear ports $F6-$F7
-                    self.cpuio[2] = 0;
-                    self.cpuio[3] = 0;
+                    // Clear ports $F6-$F7 (SPC700 output ports, main CPU input)
+                    self.apu_out[2] = 0;
+                    self.apu_out[3] = 0;
                 }
             }
             // DSP address register
@@ -1064,39 +1075,78 @@ mod tests {
     }
 
     /// Test port clearing functionality via control register
+    /// Reference: https://wiki.superfamicom.org/spc700-reference
+    /// Bits 4-5 of control register ($F1) clear OUTPUT ports (what main CPU reads)
     #[test]
     fn test_port_clear_via_control() {
         let mut apu = Spc700::new();
 
-        // Write some values to input ports (from main CPU)
-        apu.write_port(0, 0x12);
-        apu.write_port(1, 0x34);
-        apu.write_port(2, 0x56);
-        apu.write_port(3, 0x78);
+        // SPC700 writes some values to output ports (for main CPU to read)
+        apu.cpu.memory.write(CPUIO0, 0x12);
+        apu.cpu.memory.write(CPUIO1, 0x34);
+        apu.cpu.memory.write(CPUIO2, 0x56);
+        apu.cpu.memory.write(CPUIO3, 0x78);
 
-        // Verify they were written
-        assert_eq!(apu.cpu.memory.cpuio[0], 0x12);
-        assert_eq!(apu.cpu.memory.cpuio[1], 0x34);
-        assert_eq!(apu.cpu.memory.cpuio[2], 0x56);
-        assert_eq!(apu.cpu.memory.cpuio[3], 0x78);
+        // Verify they were written to output ports
+        assert_eq!(apu.cpu.memory.apu_out[0], 0x12);
+        assert_eq!(apu.cpu.memory.apu_out[1], 0x34);
+        assert_eq!(apu.cpu.memory.apu_out[2], 0x56);
+        assert_eq!(apu.cpu.memory.apu_out[3], 0x78);
 
-        // Clear ports 0-1 via control register (bit 4)
+        // Main CPU should be able to read these values
+        assert_eq!(apu.read_port(0), 0x12);
+        assert_eq!(apu.read_port(1), 0x34);
+        assert_eq!(apu.read_port(2), 0x56);
+        assert_eq!(apu.read_port(3), 0x78);
+
+        // Clear OUTPUT ports 0-1 via control register (bit 4)
+        // This is what SPC700 would do to reset its output state
         apu.cpu.memory.write(CONTROL_REG, 0x10);
-        assert_eq!(apu.cpu.memory.cpuio[0], 0x00, "Port 0 should be cleared");
-        assert_eq!(apu.cpu.memory.cpuio[1], 0x00, "Port 1 should be cleared");
         assert_eq!(
-            apu.cpu.memory.cpuio[2], 0x56,
-            "Port 2 should not be cleared"
+            apu.cpu.memory.apu_out[0], 0x00,
+            "Output port 0 should be cleared"
         );
         assert_eq!(
-            apu.cpu.memory.cpuio[3], 0x78,
-            "Port 3 should not be cleared"
+            apu.cpu.memory.apu_out[1], 0x00,
+            "Output port 1 should be cleared"
+        );
+        assert_eq!(
+            apu.cpu.memory.apu_out[2], 0x56,
+            "Output port 2 should not be cleared"
+        );
+        assert_eq!(
+            apu.cpu.memory.apu_out[3], 0x78,
+            "Output port 3 should not be cleared"
         );
 
-        // Clear ports 2-3 via control register (bit 5)
+        // Main CPU reads should now see cleared ports
+        assert_eq!(apu.read_port(0), 0x00, "Main CPU should read 0 from port 0");
+        assert_eq!(apu.read_port(1), 0x00, "Main CPU should read 0 from port 1");
+        assert_eq!(
+            apu.read_port(2),
+            0x56,
+            "Main CPU should still read $56 from port 2"
+        );
+        assert_eq!(
+            apu.read_port(3),
+            0x78,
+            "Main CPU should still read $78 from port 3"
+        );
+
+        // Clear OUTPUT ports 2-3 via control register (bit 5)
         apu.cpu.memory.write(CONTROL_REG, 0x20);
-        assert_eq!(apu.cpu.memory.cpuio[2], 0x00, "Port 2 should be cleared");
-        assert_eq!(apu.cpu.memory.cpuio[3], 0x00, "Port 3 should be cleared");
+        assert_eq!(
+            apu.cpu.memory.apu_out[2], 0x00,
+            "Output port 2 should be cleared"
+        );
+        assert_eq!(
+            apu.cpu.memory.apu_out[3], 0x00,
+            "Output port 3 should be cleared"
+        );
+
+        // Main CPU reads should see all ports cleared
+        assert_eq!(apu.read_port(2), 0x00, "Main CPU should read 0 from port 2");
+        assert_eq!(apu.read_port(3), 0x00, "Main CPU should read 0 from port 3");
     }
 
     /// Test that reproduces the multi-session upload issue from Super Mario World.
