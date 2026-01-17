@@ -3114,16 +3114,18 @@ impl Ppu {
 
         for ty in 0..tiles_high {
             for tx in 0..tiles_wide {
-                // SNES sprite tile layout: tiles are arranged in a 16-tile wide grid
-                // Character (tile number) provides the base position in this grid
-                // For multi-tile sprites, tiles are adjacent horizontally (+1) and vertically (+16)
+                // SNES sprite tile layout: tiles are arranged in COLUMN-MAJOR order
+                // For multi-tile sprites, tiles are stored in columns (top-to-bottom), then next column
+                // Example 16x16 (2x2): N, N+1 (first column), N+2, N+3 (second column)
+                // Example 32x32 (4x4): tiles N+0 to N+3 (col 0), N+4 to N+7 (col 1), etc.
                 //
-                // Hardware behavior: The grid is 16 tiles wide (0-15) and wraps vertically
-                // - Horizontal: char_x wraps implicitly via the final & 0x0F mask in tile_index
-                // - Vertical: char_y & 0x0F explicitly wraps to keep y in range 0-15
-                // This means sprites taller than 16 tiles (128 pixels) wrap back to row 0
-                let char_x = (tile as usize & 0x0F) + tx;
-                let char_y = ((tile as usize >> 4) + ty) & 0x0F;
+                // Calculate offset from base tile: column (tx) * tiles_high + row (ty)
+                let tile_offset = tx * tiles_high + ty;
+
+                // Calculate the actual tile number and then find its position in the 16-wide VRAM grid
+                let actual_tile = (tile as usize + tile_offset) & 0x3FF; // 10-bit tile number
+                let char_x = actual_tile & 0x0F; // Position in grid (0-15)
+                let char_y = (actual_tile >> 4) & 0x0F; // Row in grid (0-15)
 
                 // Calculate tile address using the grid position
                 // Each tile is 32 bytes (4bpp: 8x8 pixels, 4 bits per pixel = 32 bytes)
@@ -3327,13 +3329,19 @@ impl Ppu {
         let color15 = (low as u16) | ((high as u16) << 8);
 
         // Convert from 5-bit per channel to 8-bit per channel
-        // Simple shift by 3 (matches test expectations)
-        let r = ((color15 & 0x001F) << 3) as u8;
-        let g = (((color15 & 0x03E0) >> 5) << 3) as u8;
-        let b = (((color15 & 0x7C00) >> 10) << 3) as u8;
+        // First shift left by 3 to move to upper bits
+        let r = ((color15 & 0x001F) << 3) as u32;
+        let g = (((color15 & 0x03E0) >> 5) << 3) as u32;
+        let b = (((color15 & 0x7C00) >> 10) << 3) as u32;
+
+        // Expand 5-bit to 8-bit by copying upper bits to lower bits
+        // This ensures proper color distribution (e.g., 0x1F -> 0xFF, not 0xF8)
+        let r = r | (r >> 5);
+        let g = g | (g >> 5);
+        let b = b | (b >> 5);
 
         // Return as ARGB (0xAARRGGBB)
-        0xFF000000 | ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
+        0xFF000000 | (r << 16) | (g << 8) | b
     }
 
     /// Apply color math post-processing to the frame
@@ -3631,9 +3639,9 @@ mod tests {
         ppu.cgram[7] = 0x7C;
 
         assert_eq!(ppu.get_color(0), 0xFF000000); // Black
-        assert_eq!(ppu.get_color(1), 0xFFF8F8F8); // White (5-bit max = 0xF8 in 8-bit)
-        assert_eq!(ppu.get_color(2), 0xFFF80000); // Red (5-bit max = 0xF8 in 8-bit)
-        assert_eq!(ppu.get_color(3), 0xFF0000F8); // Blue (5-bit max = 0xF8 in 8-bit)
+        assert_eq!(ppu.get_color(1), 0xFFFFFFFF); // White (5-bit max 0x1F expands to 0xFF)
+        assert_eq!(ppu.get_color(2), 0xFFFF0000); // Red (5-bit max 0x1F expands to 0xFF)
+        assert_eq!(ppu.get_color(3), 0xFF0000FF); // Blue (5-bit max 0x1F expands to 0xFF)
     }
 
     #[test]
