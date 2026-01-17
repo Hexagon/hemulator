@@ -5073,4 +5073,140 @@ mod tests {
         assert!(!ppu.is_pixel_masked_by_window(100, 0)); // In W2 only
         assert!(ppu.is_pixel_masked_by_window(20, 0)); // In neither (XNOR = true)
     }
+
+    #[test]
+    fn test_bg_character_size() {
+        let mut ppu = Ppu::new();
+
+        // Test default: all layers should be 8x8
+        assert_eq!(ppu.get_bg_char_size(0), 8, "BG1 should default to 8x8");
+        assert_eq!(ppu.get_bg_char_size(1), 8, "BG2 should default to 8x8");
+        assert_eq!(ppu.get_bg_char_size(2), 8, "BG3 should default to 8x8");
+        assert_eq!(ppu.get_bg_char_size(3), 8, "BG4 should default to 8x8");
+
+        // Test setting BG1 to 16x16 (bit 4 of BGMODE)
+        ppu.write_register(0x2105, 0x10); // Bit 4 set
+        assert_eq!(ppu.get_bg_char_size(0), 16, "BG1 should be 16x16");
+        assert_eq!(ppu.get_bg_char_size(1), 8, "BG2 should still be 8x8");
+        assert_eq!(ppu.get_bg_char_size(2), 8, "BG3 should still be 8x8");
+        assert_eq!(ppu.get_bg_char_size(3), 8, "BG4 should still be 8x8");
+
+        // Test setting BG2 to 16x16 (bit 5 of BGMODE)
+        ppu.write_register(0x2105, 0x20); // Bit 5 set
+        assert_eq!(ppu.get_bg_char_size(0), 8, "BG1 should be 8x8");
+        assert_eq!(ppu.get_bg_char_size(1), 16, "BG2 should be 16x16");
+        assert_eq!(ppu.get_bg_char_size(2), 8, "BG3 should still be 8x8");
+        assert_eq!(ppu.get_bg_char_size(3), 8, "BG4 should still be 8x8");
+
+        // Test setting multiple layers to 16x16
+        ppu.write_register(0x2105, 0xF0); // All bits 4-7 set
+        assert_eq!(ppu.get_bg_char_size(0), 16, "BG1 should be 16x16");
+        assert_eq!(ppu.get_bg_char_size(1), 16, "BG2 should be 16x16");
+        assert_eq!(ppu.get_bg_char_size(2), 16, "BG3 should be 16x16");
+        assert_eq!(ppu.get_bg_char_size(3), 16, "BG4 should be 16x16");
+
+        // Test with mode bits also set (mode should not affect char size)
+        ppu.write_register(0x2105, 0x11); // Mode 1 + BG1 16x16
+        assert_eq!(ppu.bgmode & 0x07, 1, "Should be in Mode 1");
+        assert_eq!(ppu.get_bg_char_size(0), 16, "BG1 should be 16x16 in Mode 1");
+    }
+
+    #[test]
+    fn test_16x16_tile_rendering() {
+        let mut ppu = Ppu::new();
+
+        // Set up Mode 1 with 16x16 tiles for BG1
+        ppu.write_register(0x2105, 0x11); // Mode 1 + BG1 16x16
+
+        // Set BG1 tilemap at $0000, CHR at $2000
+        ppu.write_register(0x2107, 0x00); // Tilemap at VRAM word $0000
+        ppu.write_register(0x210B, 0x01); // BG1 CHR base = 1, so byte address = $2000
+
+        // Enable BG1
+        ppu.write_register(0x212C, 0x01);
+
+        // Set up palette for 4bpp (16 colors)
+        ppu.write_register(0x2121, 0x01); // Start at color 1
+        ppu.write_register(0x2122, 0xFF); // Red component
+        ppu.write_register(0x2122, 0x7C); // Full red (RGB 31,0,0)
+
+        // Create a 16x16 tile by setting up 4 8x8 tiles
+        // Tilemap entry 0 references tile N, which maps to 4 8x8 tiles:
+        // N (top-left), N+1 (top-right), N+16 (bottom-left), N+17 (bottom-right)
+        
+        // Set tilemap entry 0 to tile 0, palette 0, no flips
+        ppu.vram[0] = 0x00; // Tile index low byte
+        ppu.vram[1] = 0x00; // Tile index high byte (palette=0, no flips)
+
+        // Fill all 4 sub-tiles with pattern (color 1)
+        // 4bpp tiles are 32 bytes each
+        let tile_base = 0x2000; // CHR base address
+
+        // Top-left tile (tile 0) - fill with color 1
+        for row in 0..8 {
+            let row_base = tile_base + row * 2;
+            ppu.vram[row_base] = 0xFF; // BP0: all bits set
+            ppu.vram[row_base + 1] = 0x00; // BP1: all bits clear
+            ppu.vram[row_base + 16] = 0x00; // BP2: all bits clear  
+            ppu.vram[row_base + 17] = 0x00; // BP3: all bits clear
+        }
+
+        // Top-right tile (tile 1) - fill with color 1
+        for row in 0..8 {
+            let row_base = tile_base + 32 + row * 2;
+            ppu.vram[row_base] = 0xFF; // BP0
+            ppu.vram[row_base + 1] = 0x00; // BP1
+            ppu.vram[row_base + 16] = 0x00; // BP2
+            ppu.vram[row_base + 17] = 0x00; // BP3
+        }
+
+        // Bottom-left tile (tile 16) - fill with color 1
+        for row in 0..8 {
+            let row_base = tile_base + 16 * 32 + row * 2;
+            ppu.vram[row_base] = 0xFF; // BP0
+            ppu.vram[row_base + 1] = 0x00; // BP1
+            ppu.vram[row_base + 16] = 0x00; // BP2
+            ppu.vram[row_base + 17] = 0x00; // BP3
+        }
+
+        // Bottom-right tile (tile 17) - fill with color 1
+        for row in 0..8 {
+            let row_base = tile_base + 17 * 32 + row * 2;
+            ppu.vram[row_base] = 0xFF; // BP0
+            ppu.vram[row_base + 1] = 0x00; // BP1
+            ppu.vram[row_base + 16] = 0x00; // BP2
+            ppu.vram[row_base + 17] = 0x00; // BP3
+        }
+
+        // Enable screen
+        ppu.write_register(0x2100, 0x0F); // Screen on, full brightness
+
+        // Render frame
+        let frame = ppu.render_frame();
+
+        // Verify that a 16x16 pixel area is rendered
+        let mut pixel_count = 0;
+        for y in 0..16 {
+            for x in 0..16 {
+                let pixel = frame.pixels[y * 256 + x];
+                if pixel != 0xFF000000 {
+                    // Non-backdrop pixel
+                    pixel_count += 1;
+                }
+            }
+        }
+
+        assert!(
+            pixel_count > 0,
+            "16x16 tile should produce visible pixels. Found {} non-backdrop pixels",
+            pixel_count
+        );
+
+        // Verify the tile covers the full 16x16 area (256 pixels)
+        assert!(
+            pixel_count >= 200,
+            "16x16 tile should cover most of the 16x16 area. Found {} non-backdrop pixels, expected ~256",
+            pixel_count
+        );
+    }
 }
