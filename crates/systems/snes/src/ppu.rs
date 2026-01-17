@@ -1818,6 +1818,7 @@ impl Ppu {
     /// Parse tilemap entry and extract tile attributes
     /// Returns (tile_index, palette, flip_x, flip_y, priority)
     /// TODO: Refactor rendering functions to use this helper method to reduce code duplication
+    #[allow(dead_code)]
     fn parse_tilemap_entry(&self, tilemap_addr: usize) -> (u16, usize, bool, bool, u8) {
         if tilemap_addr + 1 >= VRAM_SIZE {
             return (0, 0, false, false, 0);
@@ -1845,6 +1846,7 @@ impl Ppu {
     /// For 16x16 mode, each tilemap entry represents a 2x2 block of 8x8 tiles
     /// Returns (actual_tile_index, pixel_x_in_tile, pixel_y_in_tile)
     /// TODO: Refactor rendering functions to use this helper method to reduce code duplication
+    #[allow(dead_code)]
     fn calculate_16x16_tile_info(
         &self,
         base_tile_index: u16,
@@ -5191,7 +5193,7 @@ mod tests {
         // Create a 16x16 tile by setting up 4 8x8 tiles
         // Tilemap entry 0 references tile N, which maps to 4 8x8 tiles:
         // N (top-left), N+1 (top-right), N+16 (bottom-left), N+17 (bottom-right)
-        
+
         // Set tilemap entry 0 to tile 0, palette 0, no flips
         ppu.vram[0] = 0x00; // Tile index low byte
         ppu.vram[1] = 0x00; // Tile index high byte (palette=0, no flips)
@@ -5205,7 +5207,7 @@ mod tests {
             let row_base = tile_base + row * 2;
             ppu.vram[row_base] = 0xFF; // BP0: all bits set
             ppu.vram[row_base + 1] = 0x00; // BP1: all bits clear
-            ppu.vram[row_base + 16] = 0x00; // BP2: all bits clear  
+            ppu.vram[row_base + 16] = 0x00; // BP2: all bits clear
             ppu.vram[row_base + 17] = 0x00; // BP3: all bits clear
         }
 
