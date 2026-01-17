@@ -85,7 +85,6 @@ impl BrrDecoder {
     /// - `nibble`: 4-bit signed value (-8 to 7)
     /// - `shift`: Range/shift factor (0-12)
     /// - `filter`: Filter type (0-3)
-    #[allow(dead_code)] // Will be used when BRR decoding is implemented
     fn decode_nibble(&mut self, nibble: i8, shift: u8, filter: u8) -> i16 {
         // Convert 4-bit signed to extended value
         let mut sample = (nibble as i32) << shift;
@@ -245,10 +244,8 @@ struct Voice {
     /// Voice ended (BRR end flag reached)
     ended: bool,
     /// Current sample address in RAM
-    #[allow(dead_code)]
     sample_addr: u16,
     /// Loop start address (from BRR header)
-    #[allow(dead_code)]
     loop_addr: u16,
 }
 
@@ -292,8 +289,8 @@ impl Voice {
     /// Returns true if this is the last block (end flag set)
     fn decode_brr_block(&mut self, ram: &[u8; 0x10000]) -> bool {
         let addr = self.sample_addr as usize;
-        if addr + 8 >= 0x10000 {
-            // Invalid address, stop playback
+        if addr + 9 > 0x10000 {
+            // Invalid address, stop playback (need 9 bytes: 1 header + 8 data)
             self.ended = true;
             return true;
         }
@@ -435,10 +432,14 @@ pub struct Dsp {
     echo_delay: u8,
     /// FIR filter coefficients (8 taps)
     fir_coeff: [i8; 8],
-    /// Cycle counter for 32kHz envelope updates
-    cycle_counter: u32,
     /// Reference to APU RAM (for BRR sample access)
-    /// This will be set from the SPC700 module
+    ///
+    /// # Safety
+    /// This pointer is set once during Spc700Memory::new() and points to the RAM
+    /// Box owned by the same Spc700Memory struct that contains this DSP.
+    /// Since Spc700Memory is never moved after creation (it's stored in CpuSpc700),
+    /// the pointer remains valid for the lifetime of the DSP.
+    /// All dereferencing is done through checked unsafe blocks.
     ram: Option<*const [u8; 0x10000]>,
 }
 
@@ -472,12 +473,16 @@ impl Dsp {
             echo_addr: 0,
             echo_delay: 0,
             fir_coeff: [0; 8],
-            cycle_counter: 0,
             ram: None,
         }
     }
 
     /// Set reference to APU RAM for BRR sample access
+    ///
+    /// # Safety
+    /// The caller must ensure that the pointer remains valid for the lifetime of the DSP.
+    /// In practice, this is called once during Spc700Memory::new() with a pointer to
+    /// the RAM Box owned by the same Spc700Memory struct.
     pub fn set_ram(&mut self, ram: *const [u8; 0x10000]) {
         self.ram = Some(ram);
     }
@@ -485,6 +490,7 @@ impl Dsp {
     /// Read sample directory entry for a given source number
     /// Returns (start_address, loop_address) tuple
     fn get_sample_addresses(&self, source: u8) -> Option<(u16, u16)> {
+        // SAFETY: Pointer is valid because it points to RAM owned by the parent Spc700Memory
         let ram = unsafe { self.ram?.as_ref()? };
 
         // Sample directory is at (sample_dir << 8), each entry is 4 bytes
@@ -522,6 +528,7 @@ impl Dsp {
                 self.key_on = value;
 
                 // Get RAM reference for initial BRR block decode
+                // SAFETY: Pointer is valid because it points to RAM owned by the parent Spc700Memory
                 let ram = if let Some(ram_ptr) = self.ram {
                     unsafe { ram_ptr.as_ref() }
                 } else {
@@ -529,21 +536,22 @@ impl Dsp {
                 };
 
                 // Collect sample addresses for all voices that will be keyed on
-                let mut sample_addrs: Vec<Option<(u16, u16)>> = Vec::with_capacity(8);
+                let mut sample_addrs: [Option<(u16, u16)>; 8] = [None; 8];
                 for (i, voice) in self.voices.iter().enumerate() {
                     if value & (1 << i) != 0 {
-                        sample_addrs.push(self.get_sample_addresses(voice.source));
-                    } else {
-                        sample_addrs.push(None);
+                        sample_addrs[i] = self.get_sample_addresses(voice.source);
                     }
                 }
 
                 // Now key on the voices with the collected addresses
                 for (i, voice) in self.voices.iter_mut().enumerate() {
                     if value & (1 << i) != 0 {
-                        if let Some(Some((start_addr, loop_addr))) = sample_addrs.get(i) {
-                            voice.loop_addr = *loop_addr;
-                            voice.key_on(*start_addr);
+                        // Clear ENDX bit for this voice on key-on
+                        self.endx &= !(1 << i);
+
+                        if let Some((start_addr, loop_addr)) = sample_addrs[i] {
+                            voice.loop_addr = loop_addr;
+                            voice.key_on(start_addr);
 
                             // Decode initial BRR block
                             if let Some(ram_ref) = ram {
@@ -683,14 +691,14 @@ impl Dsp {
         }
 
         // Get RAM reference for BRR decoding
+        // SAFETY: Pointer is valid because it points to RAM owned by the parent Spc700Memory
         let ram = if let Some(ram_ptr) = self.ram {
             unsafe { ram_ptr.as_ref() }
         } else {
             None
         };
 
-        // Update each voice
-        self.endx = 0; // Clear ended flags
+        // Update each voice (ENDX is sticky - don't clear it)
         for (i, voice) in self.voices.iter_mut().enumerate() {
             // Update envelope
             voice.envelope.clock();
@@ -701,7 +709,7 @@ impl Dsp {
                 if let Some(ram_ref) = ram {
                     let is_end = voice.decode_brr_block(ram_ref);
                     if is_end && voice.ended {
-                        // Voice reached end without loop
+                        // Voice reached end without loop - set ENDX bit (sticky)
                         self.endx |= 1 << i;
                     }
                 } else {
@@ -711,7 +719,7 @@ impl Dsp {
                 }
             }
 
-            // Update ENDX flag if voice ended
+            // Update ENDX flag if voice ended (sticky)
             if voice.ended {
                 self.endx |= 1 << i;
             }
@@ -759,7 +767,6 @@ impl Dsp {
         self.echo_addr = 0;
         self.echo_delay = 0;
         self.fir_coeff = [0; 8];
-        self.cycle_counter = 0;
     }
 }
 
@@ -811,27 +818,27 @@ mod tests {
     #[test]
     fn test_dsp_key_on() {
         let mut dsp = Dsp::new();
-        
+
         // Setup a minimal RAM with sample directory
         let mut ram = Box::new([0u8; 0x10000]);
-        
+
         // Setup sample directory at $0000
         // Entry 0: start=$0100, loop=$0100
         ram[0] = 0x00; // Start address low
         ram[1] = 0x01; // Start address high
         ram[2] = 0x00; // Loop address low
         ram[3] = 0x01; // Loop address high
-        
+
         // Add a minimal BRR block at $0100
         // Header: no end flag, no loop, no filter, shift=0
         ram[0x100] = 0x00; // No flags
-        // 8 bytes of sample data (all zeros)
+                           // 8 bytes of sample data (all zeros)
         for i in 0x101..=0x108 {
             ram[i] = 0;
         }
-        
+
         dsp.set_ram(&*ram as *const [u8; 0x10000]);
-        
+
         // Set source to 0
         dsp.write_register(0x04, 0x00);
 
