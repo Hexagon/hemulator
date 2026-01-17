@@ -12,7 +12,7 @@
 //! - Pitch modulation
 //!
 //! **DSP Register Map** (128 registers, accessed via $F2/$F3):
-//! 
+//!
 //! Per-voice registers (0x00-0x7F, 16 bytes per voice):
 //! - V0L-V7L ($x0): Left volume
 //! - V0R-V7R ($x1): Right volume  
@@ -71,10 +71,7 @@ struct BrrDecoder {
 
 impl BrrDecoder {
     fn new() -> Self {
-        Self {
-            prev1: 0,
-            prev2: 0,
-        }
+        Self { prev1: 0, prev2: 0 }
     }
 
     /// Reset decoder state
@@ -84,10 +81,11 @@ impl BrrDecoder {
     }
 
     /// Decode a 4-bit nibble to 16-bit PCM sample
-    /// 
+    ///
     /// - `nibble`: 4-bit signed value (-8 to 7)
     /// - `shift`: Range/shift factor (0-12)
     /// - `filter`: Filter type (0-3)
+    #[allow(dead_code)] // Will be used when BRR decoding is implemented
     fn decode_nibble(&mut self, nibble: i8, shift: u8, filter: u8) -> i16 {
         // Convert 4-bit signed to extended value
         let mut sample = (nibble as i32) << shift;
@@ -297,13 +295,13 @@ impl Voice {
 
         // Simple linear interpolation for now
         // TODO: Implement Gaussian interpolation for hardware accuracy
-        let frac = (self.position & 0xFFFF) as u32;
+        let frac = self.position & 0xFFFF;
         let curr_idx = self.buffer_index;
         let next_idx = (curr_idx + 1) & 0xF; // Wrap at 16
-        
+
         let curr_sample = self.sample_buffer[curr_idx] as i32;
         let next_sample = self.sample_buffer[next_idx] as i32;
-        
+
         // Linear interpolation: curr + (next - curr) * frac / 65536
         let interpolated = curr_sample + ((next_sample - curr_sample) * frac as i32) / 65536;
         interpolated.clamp(-32768, 32767) as i16
@@ -313,14 +311,14 @@ impl Voice {
     fn output(&self) -> (i16, i16) {
         let sample = self.get_sample();
         let env = self.envelope.output() as i32;
-        
+
         // Apply envelope (11-bit * 16-bit >> 11 = 16-bit)
         let with_envelope = (sample as i32 * env) >> 11;
-        
+
         // Apply left/right volume (8-bit signed * 16-bit >> 7 = 16-bit)
         let left = ((with_envelope * self.volume_left as i32) >> 7) as i16;
         let right = ((with_envelope * self.volume_right as i32) >> 7) as i16;
-        
+
         (left, right)
     }
 }
@@ -625,10 +623,10 @@ mod tests {
         env.use_gain = false;
         env.adsr1 = 0xFF; // Fast attack
         env.adsr2 = 0xFF; // Max sustain
-        
+
         env.key_on();
         assert_eq!(env.mode, EnvelopeMode::Attack);
-        
+
         env.key_off();
         assert_eq!(env.mode, EnvelopeMode::Release);
     }
@@ -636,11 +634,11 @@ mod tests {
     #[test]
     fn test_dsp_register_write_read() {
         let mut dsp = Dsp::new();
-        
+
         // Test voice 0 left volume
         dsp.write_register(0x00, 0x7F);
         assert_eq!(dsp.read_register(0x00), 0x7F);
-        
+
         // Test master volume left
         dsp.write_register(0x0C, 0x40);
         assert_eq!(dsp.read_register(0x0C), 0x40);
@@ -649,7 +647,7 @@ mod tests {
     #[test]
     fn test_dsp_key_on() {
         let mut dsp = Dsp::new();
-        
+
         // Key on voice 0
         dsp.write_register(0x4C, 0x01);
         assert!(dsp.voices[0].playing);
@@ -659,10 +657,10 @@ mod tests {
     #[test]
     fn test_dsp_silence_when_muted() {
         let mut dsp = Dsp::new();
-        
+
         // Set mute flag
         dsp.write_register(0x6C, 0x40);
-        
+
         // Clock should return silence
         let (left, right) = dsp.clock();
         assert_eq!(left, 0);

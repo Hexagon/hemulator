@@ -657,7 +657,7 @@ impl AudioChip for Spc700 {
             while self.cycle_acc >= 1.0 {
                 self.cpu.step();
                 self.cycle_acc -= 1.0;
-                
+
                 // Clock DSP at 32kHz (every 32 CPU cycles)
                 self.dsp_cycle_acc += 1;
                 if self.dsp_cycle_acc >= 32 {
