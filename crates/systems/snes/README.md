@@ -279,7 +279,7 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
     - Window-based effects (spotlight, fade regions, color clipping) work correctly
     - Direct color mode games now have correct color output
     
-  - Reference: [Color Math](https://wiki.superfamicom.org/rendering-the-screen#color-math)
+  - Reference: [Color Math](https://wiki.superfamicom.org/rendering-the-screen#color-math), [Transparency](https://wiki.superfamicom.org/transparency)
 
 - ❌ **Mosaic** - No mosaic effect ($2106)
 
@@ -287,6 +287,7 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
   - TS register controls which layers appear on sub-screen
   - Sub-screen pixels blended with main screen via color math
   - Used for transparency, shadows, and other blending effects
+  - Reference: [Transparency](https://wiki.superfamicom.org/transparency)
 
 #### Audio
 - ❌ **DSP (Digital Signal Processor)** - No sound generation
@@ -574,3 +575,4 @@ cargo run -- game.sfc --log-bus debug
 - **Controllers**: https://snes.nesdev.org/wiki/Input_devices
 - **APU/SPC700**: https://snes.nesdev.org/wiki/SPC700
 - **Enhancement Chips**: https://snes.nesdev.org/wiki/Enhancement_chips
+- **Transparency Effects**: https://wiki.superfamicom.org/transparency

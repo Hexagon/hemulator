@@ -3768,7 +3768,9 @@ impl Ppu {
     /// Apply color math post-processing to the frame
     /// This implements the SNES color math system for transparency and blending effects
     ///
-    /// Reference: <https://wiki.superfamicom.org/rendering-the-screen#color-math>
+    /// References:
+    /// - <https://wiki.superfamicom.org/rendering-the-screen#color-math>
+    /// - <https://wiki.superfamicom.org/transparency>
     fn apply_color_math(&self, frame: &mut Frame, layer_buffer: &[u8], sub_frame: &Frame) {
         // Get fixed color for blending (from $2132 COLDATA register)
         // Convert 5-bit components to 8-bit
