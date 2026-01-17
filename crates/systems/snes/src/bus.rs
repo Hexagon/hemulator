@@ -470,25 +470,33 @@ impl SnesBus {
             // Transfer loop
             while size > 0 {
                 let bytes_this_transfer = match transfer_mode {
-                    0 | 2 | 6 => 1, // 1 byte per transfer
-                    1 | 5 => 2,     // 2 bytes per transfer (alternate between two B-bus addresses)
-                    3 | 7 => 4,     // 4 bytes per transfer
-                    4 => 4,         // 4 bytes per transfer
+                    0 => 1,         // Mode 0: 1 byte to 1 register
+                    1 | 5 => 2,     // Mode 1/5: 2 bytes to 2 registers
+                    2 | 6 => 2,     // Mode 2/6: 2 bytes to 1 register (write twice)
+                    3 | 7 => 4,     // Mode 3/7: 4 bytes to 2 registers (write twice each)
+                    4 => 4,         // Mode 4: 4 bytes to 4 registers
                     _ => 1,
                 };
 
                 for i in 0..bytes_this_transfer.min(size) {
                     // Calculate B-bus register address
                     let b_reg = match transfer_mode {
-                        0 | 4 => 0x2100 | (dma.b_addr as u16),
+                        0 => 0x2100 | (dma.b_addr as u16),
                         1 | 5 => {
                             // Alternate: b_addr, b_addr+1
                             0x2100 | ((dma.b_addr as u16) + (i as u16 & 1))
                         }
-                        2 | 6 => 0x2100 | (dma.b_addr as u16), // Fixed register
+                        2 | 6 => {
+                            // Write twice to same register: b_addr, b_addr
+                            0x2100 | (dma.b_addr as u16)
+                        }
                         3 | 7 => {
                             // Pattern: b_addr, b_addr, b_addr+1, b_addr+1
                             0x2100 | ((dma.b_addr as u16) + ((i as u16 >> 1) & 1))
+                        }
+                        4 => {
+                            // Four consecutive registers: b_addr, b_addr+1, b_addr+2, b_addr+3
+                            0x2100 | ((dma.b_addr as u16) + (i as u16 & 3))
                         }
                         _ => 0x2100 | (dma.b_addr as u16),
                     };
@@ -629,10 +637,11 @@ impl SnesBus {
             // Perform the transfer
             let transfer_mode = dma.control & 0x07;
             let bytes_to_transfer = match transfer_mode {
-                0 | 2 | 6 => 1, // 1 byte
-                1 | 5 => 2,     // 2 bytes
-                3 | 7 => 4,     // 4 bytes
-                4 => 4,         // 4 bytes
+                0 => 1,         // Mode 0: 1 byte
+                1 | 5 => 2,     // Mode 1/5: 2 bytes
+                2 | 6 => 2,     // Mode 2/6: 2 bytes
+                3 | 7 => 4,     // Mode 3/7: 4 bytes
+                4 => 4,         // Mode 4: 4 bytes
                 _ => 1,
             };
 
@@ -648,10 +657,11 @@ impl SnesBus {
             // Transfer the bytes
             for i in 0..bytes_to_transfer {
                 let b_reg = match transfer_mode {
-                    0 | 4 => 0x2100 | (dma.b_addr as u16),
+                    0 => 0x2100 | (dma.b_addr as u16),
                     1 | 5 => 0x2100 | ((dma.b_addr as u16) + (i as u16 & 1)),
                     2 | 6 => 0x2100 | (dma.b_addr as u16),
                     3 | 7 => 0x2100 | ((dma.b_addr as u16) + ((i as u16 >> 1) & 1)),
+                    4 => 0x2100 | ((dma.b_addr as u16) + (i as u16 & 3)),
                     _ => 0x2100 | (dma.b_addr as u16),
                 };
 
@@ -1794,5 +1804,110 @@ mod tests {
         // Should still be at same table position (repeat mode)
         // and line counter should be 0
         assert_eq!(bus.hdma_state[0].line_counter, 0);
+    }
+
+    #[test]
+    fn test_dma_mode_2_write_twice() {
+        let mut bus = SnesBus::new();
+
+        // Set up WRAM with test data
+        bus.wram[0] = 0xAA;
+        bus.wram[1] = 0xBB;
+
+        // Configure DMA channel 0: Mode 2 (2 bytes to 1 register, write twice)
+        bus.write(0x4300, 0x02); // Mode 2
+        bus.write(0x4301, 0x18); // B-bus: $2118 (VMDATAL)
+        bus.write(0x4302, 0x00); // A-bus: $7E0000 (WRAM start)
+        bus.write(0x4303, 0x00);
+        bus.write(0x4304, 0x7E);
+        bus.write(0x4305, 0x02); // Size: 2 bytes
+        bus.write(0x4306, 0x00);
+
+        // Trigger DMA
+        let cycles = bus.do_dma(0x01);
+
+        // Verify timing: 8 cycles overhead + 2 bytes * 8 cycles = 24 cycles
+        assert_eq!(cycles, 24, "Mode 2 should transfer 2 bytes");
+    }
+
+    #[test]
+    fn test_dma_mode_4_four_registers() {
+        let mut bus = SnesBus::new();
+
+        // Set up WRAM with test data
+        for i in 0..8 {
+            bus.wram[i] = i as u8;
+        }
+
+        // Configure DMA channel 0: Mode 4 (4 bytes to 4 registers)
+        bus.write(0x4300, 0x04); // Mode 4
+        bus.write(0x4301, 0x18); // B-bus: $2118-$211B
+        bus.write(0x4302, 0x00); // A-bus: $7E0000 (WRAM start)
+        bus.write(0x4303, 0x00);
+        bus.write(0x4304, 0x7E);
+        bus.write(0x4305, 0x08); // Size: 8 bytes (2 complete cycles)
+        bus.write(0x4306, 0x00);
+
+        // Trigger DMA
+        let cycles = bus.do_dma(0x01);
+
+        // Verify timing: 8 cycles overhead + 8 bytes * 8 cycles = 72 cycles
+        assert_eq!(cycles, 72, "Mode 4 should transfer 8 bytes to 4 registers");
+    }
+
+    #[test]
+    fn test_hdma_mode_2() {
+        let mut bus = SnesBus::new();
+
+        // Configure HDMA: Mode 2 (2 bytes to 1 register)
+        bus.write(0x4300, 0x02); // Mode 2, direct
+        bus.write(0x4301, 0x18); // B-bus: $2118
+        bus.write(0x4307, 0x7E); // HDMA bank
+        bus.write(0x4308, 0x00); // HDMA table address
+        bus.write(0x4309, 0x30);
+
+        // HDMA table: 1 scanline, 2 bytes
+        bus.wram[0x3000] = 0x01; // 1 scanline
+        bus.wram[0x3001] = 0xAA; // Byte 1
+        bus.wram[0x3002] = 0xBB; // Byte 2
+        bus.wram[0x3003] = 0x00; // Terminate
+
+        bus.write(0x420C, 0x01); // Enable channel 0
+        bus.init_hdma();
+
+        // Execute HDMA
+        let cycles = bus.do_hdma();
+
+        // Verify timing: 2 bytes * 8 cycles = 16 cycles
+        assert_eq!(cycles, 16, "Mode 2 HDMA should transfer 2 bytes");
+    }
+
+    #[test]
+    fn test_hdma_mode_4() {
+        let mut bus = SnesBus::new();
+
+        // Configure HDMA: Mode 4 (4 bytes to 4 registers)
+        bus.write(0x4300, 0x04); // Mode 4, direct
+        bus.write(0x4301, 0x18); // B-bus: $2118-$211B
+        bus.write(0x4307, 0x7E); // HDMA bank
+        bus.write(0x4308, 0x00); // HDMA table address
+        bus.write(0x4309, 0x30);
+
+        // HDMA table: 1 scanline, 4 bytes
+        bus.wram[0x3000] = 0x01; // 1 scanline
+        bus.wram[0x3001] = 0xAA; // Byte 1 -> $2118
+        bus.wram[0x3002] = 0xBB; // Byte 2 -> $2119
+        bus.wram[0x3003] = 0xCC; // Byte 3 -> $211A
+        bus.wram[0x3004] = 0xDD; // Byte 4 -> $211B
+        bus.wram[0x3005] = 0x00; // Terminate
+
+        bus.write(0x420C, 0x01); // Enable channel 0
+        bus.init_hdma();
+
+        // Execute HDMA
+        let cycles = bus.do_hdma();
+
+        // Verify timing: 4 bytes * 8 cycles = 32 cycles
+        assert_eq!(cycles, 32, "Mode 4 HDMA should transfer 4 bytes to 4 registers");
     }
 }
