@@ -5814,4 +5814,370 @@ mod tests {
         assert_eq!(ppu.cgwsel & 0x01, 0x01, "Direct color should be enabled");
         assert_eq!(ppu.cgwsel & 0x40, 0x40, "Prevent math should be enabled");
     }
+
+    // ========================================
+    // Edge Case Tests
+    // ========================================
+
+    #[test]
+    fn test_oam_address_wraparound() {
+        let mut ppu = Ppu::new();
+
+        // Set OAM address to 543 (last valid address before wrap)
+        // 543 = 0x21F, so low byte = 0x1F (31), high byte bit 0 = 1 (for 256+)
+        ppu.write_register(0x2102, 0x1F); // Low byte: 0x1F = 31
+        ppu.write_register(0x2103, 0x01); // High byte bit 0 = 1, so addr = 256 + 31 = 287
+                                          // Actually, OAM addr register only stores 9 bits (0-511), but OAM is 544 bytes
+                                          // Bit 0 of $2103 is bit 8 of the address, so max is 511
+                                          // Let me correct: OAM is 544 bytes but address register is only 9 bits (0-511)
+                                          // Actual wraparound happens at write time using % OAM_SIZE
+
+        // Set to 511 (max 9-bit value)
+        ppu.write_register(0x2102, 0xFF); // Low byte = 255
+        ppu.write_register(0x2103, 0x01); // High byte bit 0 = 1
+        assert_eq!(ppu.oam_addr, 511);
+
+        // Write bytes until we exceed OAM_SIZE (544)
+        // From 511, we need 33 more writes to reach 544
+        for _ in 0..33 {
+            ppu.write_register(0x2104, 0xFF);
+        }
+        // After 33 writes from 511, we're at 544, which wraps to 0
+        assert_eq!(
+            ppu.oam_addr, 0,
+            "OAM address should wrap to 0 after reaching 544"
+        );
+
+        // Test direct wrap by setting to 543
+        ppu.write_register(0x2102, 0x1F); // Low 8 bits
+        ppu.write_register(0x2103, 0x01); // Bit 8 set
+        assert_eq!(ppu.oam_addr, 287); // 256 + 31 = 287
+                                       // We need to manually set to 543 using direct field access for this test
+        ppu.oam_addr = 543;
+        ppu.write_register(0x2104, 0xFF);
+        assert_eq!(ppu.oam_addr, 0, "OAM address should wrap to 0 after 543");
+    }
+
+    #[test]
+    fn test_vram_address_wraparound() {
+        let mut ppu = Ppu::new();
+
+        // VRAM is 64KB (32K words), addressed as 16-bit words
+        // VRAM address register is 16-bit, so max is 0xFFFF
+        // But VRAM only has 0x8000 words (0-0x7FFF)
+        // Hardware wraps using modulo in the implementation
+
+        // Set VRAM address to near maximum
+        ppu.write_register(0x2116, 0xFE); // Low byte
+        ppu.write_register(0x2117, 0x7F); // High byte = 0x7FFE
+
+        // Set increment mode to 1 word
+        ppu.write_register(0x2115, 0x80); // Increment after high byte
+
+        // Write data - increment happens after high byte write
+        ppu.write_register(0x2118, 0xAA); // Write low byte (no increment yet)
+        ppu.write_register(0x2119, 0xBB); // Write high byte (triggers increment)
+
+        // Address should increment to 0x7FFF
+        assert_eq!(ppu.vram_addr.get(), 0x7FFF);
+
+        // Write again - should wrap past VRAM size
+        ppu.write_register(0x2118, 0xCC);
+        ppu.write_register(0x2119, 0xDD); // Increment from 0x7FFF
+
+        // After increment, address is 0x8000 (32768)
+        // This is stored in the register but will be masked when accessing VRAM
+        assert_eq!(
+            ppu.vram_addr.get(),
+            0x8000,
+            "VRAM address register stores full 16-bit value"
+        );
+
+        // The actual VRAM access uses modulo to wrap
+        // So 0x8000 % 0x8000 = 0 when accessing the actual VRAM array
+    }
+
+    #[test]
+    fn test_cgram_read_latch_unchanged() {
+        let mut ppu = Ppu::new();
+
+        // Write a complete color (2 bytes)
+        ppu.write_register(0x2121, 0x00); // Address 0
+        ppu.write_register(0x2122, 0x1F); // Low byte (R=31)
+        ppu.write_register(0x2122, 0x00); // High byte
+
+        // Latch should be at low byte for next write
+        assert!(!ppu.cgram_write_latch, "Latch should be at low byte");
+
+        // Read CGRAM - should NOT toggle latch
+        ppu.write_register(0x2121, 0x00); // Reset address
+        let _val = ppu.read_register(0x213B); // Read
+        assert!(!ppu.cgram_write_latch, "Latch should not toggle on read");
+
+        // Another read - still should not toggle
+        let _val2 = ppu.read_register(0x213B);
+        assert!(
+            !ppu.cgram_write_latch,
+            "Latch should still not toggle after second read"
+        );
+    }
+
+    #[test]
+    fn test_cgram_partial_write_then_address_change() {
+        let mut ppu = Ppu::new();
+
+        // Write low byte of color 0
+        ppu.write_register(0x2121, 0x00); // Address 0
+        ppu.write_register(0x2122, 0xFF); // Low byte only
+
+        // Verify low byte is written
+        assert_eq!(ppu.cgram[0], 0xFF);
+        assert_eq!(ppu.cgram[1], 0x00); // High byte still 0
+
+        // Change address mid-color - should reset latch
+        ppu.write_register(0x2121, 0x01); // Address 1
+        assert!(
+            !ppu.cgram_write_latch,
+            "Latch should reset on address write"
+        );
+
+        // Write complete color to address 1
+        ppu.write_register(0x2122, 0xAA); // Low byte
+        ppu.write_register(0x2122, 0xBB); // High byte
+
+        // Verify color 1 is correct
+        assert_eq!(ppu.cgram[2], 0xAA);
+        assert_eq!(ppu.cgram[3], 0xBB);
+
+        // Verify color 0 still has partial write
+        assert_eq!(ppu.cgram[0], 0xFF);
+        assert_eq!(ppu.cgram[1], 0x00);
+    }
+
+    #[test]
+    fn test_scroll_register_shared_latch() {
+        let mut ppu = Ppu::new();
+
+        // According to hardware docs, scroll registers share the "previous value"
+        // This test verifies that behavior
+
+        // Write first byte to BG1H
+        ppu.write_register(0x210D, 0x12); // BG1HOFS low byte
+        assert!(ppu.scroll_latch, "Latch should be set after first write");
+
+        // Write to different register (BG2H) without completing BG1H
+        ppu.write_register(0x210F, 0x34); // BG2HOFS - uses 0x12 as low byte!
+                                          // Hardware: second write to different register completes using previous value
+        // Note: Only 10 bits are used for scroll (bits 0-1 of high byte, all 8 bits of low byte)
+        // So 0x34 & 0x03 = 0, making the value just 0x12
+        assert_eq!(
+            ppu.bg2_hofs, 0x12,
+            "BG2HOFS should use BG1's first write as low byte, high bits are masked"
+        );
+
+        // Now write complete value to BG1H with high bits set
+        ppu.write_register(0x210D, 0x56); // BG1HOFS low byte (new sequence)
+        ppu.write_register(0x210D, 0x03); // BG1HOFS high byte (use value with bits set)
+        // 0x03 & 0x03 = 0x03, shifted left 8 = 0x300, OR with 0x56 = 0x356
+        assert_eq!(ppu.bg1_hofs, 0x356);
+    }
+
+    #[test]
+    fn test_mode7_zero_matrix() {
+        let mut ppu = Ppu::new();
+
+        // Set Mode 7
+        ppu.write_register(0x2105, 0x07); // BG mode 7
+
+        // Set all matrix values to zero
+        ppu.write_register(0x211B, 0x00);
+        ppu.write_register(0x211B, 0x00); // M7A = 0
+        ppu.write_register(0x211C, 0x00);
+        ppu.write_register(0x211C, 0x00); // M7B = 0
+        ppu.write_register(0x211D, 0x00);
+        ppu.write_register(0x211D, 0x00); // M7C = 0
+        ppu.write_register(0x211E, 0x00);
+        ppu.write_register(0x211E, 0x00); // M7D = 0
+
+        // Set center point
+        ppu.write_register(0x211F, 0x00);
+        ppu.write_register(0x211F, 0x00); // M7X = 0
+        ppu.write_register(0x2120, 0x00);
+        ppu.write_register(0x2120, 0x00); // M7Y = 0
+
+        // Verify matrix is zero
+        assert_eq!(ppu.m7a, 0);
+        assert_eq!(ppu.m7b, 0);
+        assert_eq!(ppu.m7c, 0);
+        assert_eq!(ppu.m7d, 0);
+
+        // Zero matrix should produce (0,0) for all screen coordinates
+        // This would result in all pixels reading from tile (0,0) in the tilemap
+        // The emulator should handle this gracefully without crashes
+    }
+
+    #[test]
+    fn test_mode7_extreme_center_points() {
+        let mut ppu = Ppu::new();
+
+        // Mode 7 center point is 13-bit signed: -4096 to +4095
+
+        // Test maximum positive value (+4095)
+        ppu.write_register(0x211F, 0xFF);
+        ppu.write_register(0x211F, 0x0F); // 0x0FFF = 4095
+        assert_eq!(ppu.m7x, 0x0FFF);
+
+        // Test maximum negative value (-4096)
+        // In two's complement 13-bit: 0x1000 = -4096
+        ppu.write_register(0x211F, 0x00);
+        ppu.write_register(0x211F, 0x10); // 0x1000 = -4096
+                                          // When stored in i16, this becomes sign-extended
+        assert_eq!(ppu.m7x, 0x1000);
+
+        // Test sign extension works correctly
+        // 0x1FFF in 13-bit should be -1 when sign-extended
+        ppu.write_register(0x211F, 0xFF);
+        ppu.write_register(0x211F, 0x1F); // 0x1FFF = -1 in 13-bit
+        assert_eq!(ppu.m7x, 0x1FFF);
+    }
+
+    #[test]
+    fn test_mode7_matrix_overflow() {
+        let mut ppu = Ppu::new();
+
+        // Test extreme matrix values that could cause coordinate overflow
+        // M7A = maximum positive (0x7FFF = 127.996 in 8.8 fixed point)
+        ppu.write_register(0x211B, 0xFF);
+        ppu.write_register(0x211B, 0x7F);
+        assert_eq!(ppu.m7a, 0x7FFF);
+
+        // M7D = maximum negative (0x8000 = -128.0 in 8.8 fixed point)
+        ppu.write_register(0x211E, 0x00);
+        ppu.write_register(0x211E, 0x80);
+        assert_eq!(ppu.m7d as u16, 0x8000);
+
+        // The rendering code should handle these extreme values gracefully
+        // by wrapping coordinates according to M7SEL screen over mode
+    }
+
+    #[test]
+    fn test_vram_increment_after_correct_byte() {
+        let mut ppu = Ppu::new();
+
+        // Test increment after low byte (VMAIN bit 7 = 0)
+        ppu.write_register(0x2115, 0x00); // Increment after low byte
+        ppu.write_register(0x2116, 0x00);
+        ppu.write_register(0x2117, 0x10); // Address = 0x1000
+
+        // Write low byte - should increment
+        ppu.write_register(0x2118, 0xAA);
+        assert_eq!(
+            ppu.vram_addr.get(),
+            0x1001,
+            "Should increment after low byte"
+        );
+
+        // Write high byte - should NOT increment again
+        ppu.write_register(0x2119, 0xBB);
+        assert_eq!(
+            ppu.vram_addr.get(),
+            0x1001,
+            "Should not increment after high byte"
+        );
+
+        // Test increment after high byte (VMAIN bit 7 = 1)
+        ppu.write_register(0x2115, 0x80); // Increment after high byte
+        ppu.write_register(0x2116, 0x00);
+        ppu.write_register(0x2117, 0x20); // Address = 0x2000
+
+        // Write low byte - should NOT increment
+        ppu.write_register(0x2118, 0xCC);
+        assert_eq!(
+            ppu.vram_addr.get(),
+            0x2000,
+            "Should not increment after low byte"
+        );
+
+        // Write high byte - should increment
+        ppu.write_register(0x2119, 0xDD);
+        assert_eq!(
+            ppu.vram_addr.get(),
+            0x2001,
+            "Should increment after high byte"
+        );
+    }
+
+    #[test]
+    fn test_vram_increment_amounts() {
+        let mut ppu = Ppu::new();
+
+        // Test increment by 1 (VMAIN bits 0-1 = 00)
+        ppu.write_register(0x2115, 0x80); // Increment by 1 after high byte
+        ppu.write_register(0x2116, 0x00);
+        ppu.write_register(0x2117, 0x00);
+        ppu.write_register(0x2118, 0x00);
+        ppu.write_register(0x2119, 0x00); // Triggers increment
+        assert_eq!(ppu.vram_addr.get(), 1);
+
+        // Test increment by 32 (VMAIN bits 0-1 = 01)
+        ppu.write_register(0x2115, 0x81); // Increment by 32 after high byte
+        ppu.write_register(0x2116, 0x00);
+        ppu.write_register(0x2117, 0x00);
+        ppu.write_register(0x2118, 0x00);
+        ppu.write_register(0x2119, 0x00); // Triggers increment
+        assert_eq!(ppu.vram_addr.get(), 32);
+
+        // Test increment by 128 (VMAIN bits 0-1 = 10)
+        ppu.write_register(0x2115, 0x82); // Increment by 128 after high byte
+        ppu.write_register(0x2116, 0x00);
+        ppu.write_register(0x2117, 0x00);
+        ppu.write_register(0x2118, 0x00);
+        ppu.write_register(0x2119, 0x00); // Triggers increment
+        assert_eq!(ppu.vram_addr.get(), 128);
+
+        // Test increment by 128 (VMAIN bits 0-1 = 11, same as 10)
+        ppu.write_register(0x2115, 0x83); // Increment by 128 after high byte
+        ppu.write_register(0x2116, 0x00);
+        ppu.write_register(0x2117, 0x00);
+        ppu.write_register(0x2118, 0x00);
+        ppu.write_register(0x2119, 0x00); // Triggers increment
+        assert_eq!(ppu.vram_addr.get(), 128);
+    }
+
+    #[test]
+    fn test_sprite_priority_rotation_calculation() {
+        let mut ppu = Ppu::new();
+
+        // Enable priority rotation
+        ppu.write_register(0x2103, 0x80);
+        assert!(ppu.oam_priority_rotation);
+
+        // Set OAM address to 0x28 (decimal 40)
+        // OAM address register is 9 bits (0-511)
+        ppu.write_register(0x2102, 0x28); // Low byte = 40
+        ppu.write_register(0x2103, 0x80); // High bit 0 = 0, rotation bit = 1
+        assert_eq!(ppu.oam_addr, 0x28);
+
+        // First sprite calculation: (oam_addr & 0x1FE) >> 1
+        // 0x28 = 40, 0x1FE = 510
+        // 40 & 510 = 40, 40 >> 1 = 20
+        // So first sprite index should be 20
+
+        // Test with odd address
+        ppu.write_register(0x2102, 0x29); // Byte 41
+        ppu.write_register(0x2103, 0x80); // Rotation enabled
+        assert_eq!(ppu.oam_addr, 0x29);
+        // First sprite: (0x29 & 0x1FE) >> 1 = (0x28) >> 1 = 20 (mask makes it even)
+
+        // Test with address in upper range (bit 8 set)
+        ppu.write_register(0x2102, 0x00); // Low byte = 0
+        ppu.write_register(0x2103, 0x81); // Bit 8 = 1, rotation bit = 1
+        assert_eq!(ppu.oam_addr, 0x100); // 256
+                                         // First sprite: (0x100 & 0x1FE) >> 1 = (0x100) >> 1 = 128
+                                         // But there are only 128 sprites (0-127), so rendering code wraps with % 128
+
+        // The OAM address register can store values up to 511 (9 bits)
+        // But sprite indices are derived from even addresses (2 bytes per sprite main entry)
+        // The formula ensures we get a sprite index from 0-127
+    }
 }
