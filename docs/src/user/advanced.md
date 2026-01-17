@@ -92,7 +92,7 @@ Measure raw emulation performance without frame limiting:
 hemu --benchmark game.nes
 ```
 
-Runs with no frame rate cap to measure maximum performance. Press F10 to view FPS counter.
+Runs with no frame rate cap to measure maximum performance. Use the Inspector panel to view FPS and performance metrics.
 
 ### Use Cases
 

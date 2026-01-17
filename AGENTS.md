@@ -3,9 +3,14 @@
 **Purpose**: Guidance for automated agents and maintainers about CI, formatting, and implementation guidelines.
 
 **Related Documentation**:
-- **[README.md](README.md)**: Developer quick start, build instructions, project overview
-- **[Documentation Site](https://hemulator.56k.guru)**: Complete documentation hosted via GitHub Pages
+- **[README.md](README.md)**: Brief project overview, quick start, and build instructions
+- **[Documentation Site](https://hemulator.56k.guru)**: Complete user and developer documentation
 - **[ARCHITECTURE.md](ARCHITECTURE.md)**: Overall emulation system architecture and design patterns
+
+**Documentation Site Structure**:
+- **User Manual** (`docs/src/user/`): [Getting Started](https://hemulator.56k.guru/user/getting-started.html), [Controls](https://hemulator.56k.guru/user/controls.html), [Configuration](https://hemulator.56k.guru/user/configuration.html), [Save States](https://hemulator.56k.guru/user/save-states.html), [Supported Systems](https://hemulator.56k.guru/user/systems.html), [Advanced Features](https://hemulator.56k.guru/user/advanced.html), [Troubleshooting](https://hemulator.56k.guru/user/troubleshooting.html)
+- **Developer Guides** (`docs/src/developer/`): [Architecture Overview](https://hemulator.56k.guru/developer/architecture.html), [Contributing Guide](https://hemulator.56k.guru/developer/contributing.html), [N64 Status](https://hemulator.56k.guru/developer/n64-status.html)
+- **CPU/Hardware References** (`docs/src/references/`): [6502](https://hemulator.56k.guru/references/6502.html), [65C816](https://hemulator.56k.guru/references/65c816.html), [8080](https://hemulator.56k.guru/references/8080.html), [8086](https://hemulator.56k.guru/references/8086.html), [LR35902](https://hemulator.56k.guru/references/lr35902.html), [Z80](https://hemulator.56k.guru/references/z80.html), [MIPS R4300i](https://hemulator.56k.guru/references/mips-r4300i.html), [SPC700](https://hemulator.56k.guru/references/spc700.html), [TIA](https://hemulator.56k.guru/references/tia.html), [PC Interrupts](https://hemulator.56k.guru/references/pc-interrupts.html)
 
 **System-Specific Implementation Details**:
 - **[NES](crates/systems/nes/README.md)**: Nintendo Entertainment System
@@ -38,11 +43,12 @@ The project uses a **Lumocs-based documentation site** hosted at https://hemulat
 - **Site Source** (`docs/src/`): Lumocs source files with frontmatter metadata - all user and developer documentation
 
 **When Adding/Updating Documentation**:
-1. **User-facing content**: Update `docs/src/user/`
-2. **Developer content**: Update `docs/src/developer/`
-3. **System-specific**: Update `crates/systems/*/README.md` and ensure `docs/src/systems/index.md` links are current
-4. **References**: Add CPU/hardware references to `docs/src/references/` with proper frontmatter
-5. **Always include sources**: Reference datasheets, wikis, and documentation in implementation docs
+1. **User-facing content**: Update `docs/src/user/` - [See user manual structure](https://hemulator.56k.guru/user/)
+2. **Developer content**: Update `docs/src/developer/` - [See developer guides](https://hemulator.56k.guru/developer/)
+3. **System-specific implementation**: Update `crates/systems/*/README.md` - Keep repository-specific technical details here
+4. **System overview**: Update `docs/src/user/systems.md` - [User-facing system information](https://hemulator.56k.guru/user/systems.html)
+5. **CPU/Hardware references**: Add to `docs/src/references/` with proper frontmatter - [See references index](https://hemulator.56k.guru/references/)
+6. **Always include sources**: Reference datasheets, wikis, and documentation in implementation docs
 
 **Documentation Workflow**:
 - Site automatically deploys via GitHub Actions on push to master/main

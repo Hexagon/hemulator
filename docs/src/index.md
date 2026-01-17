@@ -18,8 +18,7 @@ Hemulator is a modern, modular emulator supporting multiple classic gaming syste
 ### For Users
 
 - **[Download & Install](download.md)** - Get the latest release for Windows or Linux
-- **[User Manual](user/)** - Getting started, controls, features, and system-specific information
-- **[System Guides](systems/)** - Detailed information about each emulated system
+- **[User Manual](user/index.md)** - Getting started, controls, features, and system-specific information
 
 **Get Help & Contribute**:
 - **[🐛 Report a Bug](https://github.com/Hexagon/hemulator/issues/new?template=bug_report.yml)** - Found a problem? Let us know!
@@ -31,7 +30,7 @@ Hemulator is a modern, modular emulator supporting multiple classic gaming syste
 - **[Architecture Overview](developer/architecture.md)** - High-level system architecture and design patterns
   - Full details: [ARCHITECTURE.md](https://github.com/Hexagon/hemulator/blob/master/ARCHITECTURE.md) in repository
 - **[Contributing](developer/contributing.md)** - Development workflow and contribution guidelines
-- **[CPU References](references/)** - Technical reference documentation for CPU implementations
+- **[CPU References](references/index.md)** - Technical reference documentation for CPU implementations
 
 **Development Support**:
 - **[🔧 Technical Issue](https://github.com/Hexagon/hemulator/issues/new?template=developer_issue.yml)** - Report build issues, implementation problems, or ask technical questions
@@ -44,7 +43,7 @@ Hemulator is a modern, modular emulator supporting multiple classic gaming syste
 
 ## Features
 
-- 🎮 **Multiple Systems**: NES, Game Boy, Atari 2600, SNES, N64, SMS, CHIP-8, PC/DOS - [See all systems](systems/)
+- 🎮 **Multiple Systems**: NES, Game Boy, Atari 2600, SNES, N64, SMS, ColecoVision, SG-1000, CHIP-8, PC/DOS - [See all systems](user/systems.md)
 - 💾 **Save States**: 5 slots per game with instant save/load
 - ⚙️ **Persistent Settings**: Customizable controls and window scaling
 - 🖥️ **Cross-Platform**: Windows, Linux, and macOS support

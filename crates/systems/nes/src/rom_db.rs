@@ -93,6 +93,35 @@ impl RomDbEntry {
 /// This is a static array to avoid heap allocations and enable compile-time verification.
 /// Entries are sorted by CRC32 for potential binary search optimization in the future.
 static ROM_DATABASE: &[RomDbEntry] = &[
+    // Bad Dudes (USA) - MMC3/TLROM board with horizontal mirroring
+    // Some dumps have corrupted headers that may misidentify mapper or mirroring
+    RomDbEntry::new(
+        0x161D717B,                  // CRC32 of full ROM file
+        Some(4),                     // Override to mapper 4 (MMC3)
+        Some(Mirroring::Horizontal), // TLROM uses horizontal mirroring
+        Some("TLROM"),               // Board type
+    ),
+    // Dragon Ninja (Japan) - Same game as Bad Dudes, MMC3/TLROM
+    RomDbEntry::new(
+        0x2A7D3ADF,                  // CRC32 of full ROM file
+        Some(4),                     // Override to mapper 4 (MMC3)
+        Some(Mirroring::Horizontal), // TLROM uses horizontal mirroring
+        Some("TLROM"),               // Board type
+    ),
+    // Dragon Ninja (Japan, Rev A) - Revised version, MMC3/TLROM
+    RomDbEntry::new(
+        0x2AE535CA,                  // CRC32 of full ROM file
+        Some(4),                     // Override to mapper 4 (MMC3)
+        Some(Mirroring::Horizontal), // TLROM uses horizontal mirroring
+        Some("TLROM"),               // Board type
+    ),
+    // Bad Dudes vs Dragon Ninja (Europe) - MMC3/TLROM
+    RomDbEntry::new(
+        0x8C252AC4,                  // CRC32 of full ROM file
+        Some(4),                     // Override to mapper 4 (MMC3)
+        Some(Mirroring::Horizontal), // TLROM uses horizontal mirroring
+        Some("TLROM"),               // Board type
+    ),
     // Bee 52 (USA) (Unl) - Header incorrectly specifies horizontal mirroring,
     // but the game requires vertical mirroring for correct scrolling
     RomDbEntry::new(
