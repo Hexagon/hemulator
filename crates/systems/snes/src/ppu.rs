@@ -1689,7 +1689,10 @@ impl Ppu {
             }
         } else {
             self.hvbjoy &= !0x80; // Clear V-blank bit
-                                  // Clear sprite overflow flags at start of new frame
+                                  // Reference: "The internal timer sets its NMI output high at H=0 V=0"
+                                  // Clear NMI flag at start of new frame (V=0 H=0)
+            self.nmi_flag.set(false);
+            // Clear sprite overflow flags at start of new frame
             self.sprite_time_over = false;
             self.sprite_range_over = false;
         }
