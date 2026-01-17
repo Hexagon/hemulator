@@ -4681,20 +4681,44 @@ impl TabManager {
 
                     // Calculate if tile is visible based on scroll position
                     // SNES scroll coordinates wrap around the tilemap
-                    let scroll_x = scroll_x as usize % (tilemap_width * 8);
-                    let scroll_y = scroll_y as usize % (tilemap_height * 8);
+                    let map_width_px = tilemap_width * 8;
+                    let map_height_px = tilemap_height * 8;
+                    let scroll_x = scroll_x as usize % map_width_px;
+                    let scroll_y = scroll_y as usize % map_height_px;
 
                     let tile_right = tile_pixel_x + 8;
                     let tile_bottom = tile_pixel_y + 8;
                     let scroll_right = scroll_x + viewport_width;
                     let scroll_bottom = scroll_y + viewport_height;
 
-                    // Check if tile intersects with the scroll window
-                    let is_visible = !(tile_right <= scroll_x
-                        || tile_pixel_x >= scroll_right
-                        || tile_bottom <= scroll_y
-                        || tile_pixel_y >= scroll_bottom);
+                    // Check if tile intersects with the scroll window, taking wrapping into account
+                    let is_horiz_visible = if scroll_right <= map_width_px {
+                        // No horizontal wrap: simple interval intersection
+                        !(tile_right <= scroll_x || tile_pixel_x >= scroll_right)
+                    } else {
+                        // Horizontal wrap: visible region is [scroll_x, map_width_px) ∪ [0, wrapped_scroll_right)
+                        let wrapped_scroll_right = scroll_right % map_width_px;
+                        let overlaps_right_segment =
+                            tile_pixel_x < map_width_px && tile_right > scroll_x;
+                        let overlaps_left_segment =
+                            tile_pixel_x < wrapped_scroll_right && tile_right > 0;
+                        overlaps_right_segment || overlaps_left_segment
+                    };
 
+                    let is_vert_visible = if scroll_bottom <= map_height_px {
+                        // No vertical wrap: simple interval intersection
+                        !(tile_bottom <= scroll_y || tile_pixel_y >= scroll_bottom)
+                    } else {
+                        // Vertical wrap: visible region is [scroll_y, map_height_px) ∪ [0, wrapped_scroll_bottom)
+                        let wrapped_scroll_bottom = scroll_bottom % map_height_px;
+                        let overlaps_bottom_segment =
+                            tile_pixel_y < map_height_px && tile_bottom > scroll_y;
+                        let overlaps_top_segment =
+                            tile_pixel_y < wrapped_scroll_bottom && tile_bottom > 0;
+                        overlaps_bottom_segment || overlaps_top_segment
+                    };
+
+                    let is_visible = is_horiz_visible && is_vert_visible;
                     if !is_visible {
                         // Apply gray overlay to tiles outside the visible area
                         let tile_rect = egui::Rect::from_min_size(
