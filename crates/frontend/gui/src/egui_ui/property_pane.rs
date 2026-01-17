@@ -153,11 +153,13 @@ impl PropertyPane {
 
                 // Controller Settings section
                 if self.controller_visible {
-                    egui::CollapsingHeader::new(egui::RichText::new("🎮 Controller Settings").strong())
-                        .default_open(true)
-                        .show(ui, |ui| {
-                            self.render_controller_settings(ui);
-                        });
+                    egui::CollapsingHeader::new(
+                        egui::RichText::new("🎮 Controller Settings").strong(),
+                    )
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        self.render_controller_settings(ui);
+                    });
                     ui.add_space(5.0);
                 }
 
@@ -176,7 +178,11 @@ impl PropertyPane {
                         ui.add_space(20.0);
                         ui.label(egui::RichText::new("No panels visible").weak().italics());
                         ui.add_space(5.0);
-                        ui.label(egui::RichText::new("Use View menu to show panels").weak().small());
+                        ui.label(
+                            egui::RichText::new("Use View menu to show panels")
+                                .weak()
+                                .small(),
+                        );
                     });
                 }
             });
@@ -347,10 +353,19 @@ impl PropertyPane {
                     .selected_text(cpu_model.as_str())
                     .show_ui(ui, |ui| {
                         for model in [
-                            "Intel 8086", "Intel 8088", "Intel 80186", "Intel 80188",
-                            "Intel 80286", "Intel 80386", "Intel 80486", "Intel 80486SX",
-                            "Intel 80486DX2", "Intel 80486SX2", "Intel 80486DX4",
-                            "Intel Pentium", "Intel Pentium MMX",
+                            "Intel 8086",
+                            "Intel 8088",
+                            "Intel 80186",
+                            "Intel 80188",
+                            "Intel 80286",
+                            "Intel 80386",
+                            "Intel 80486",
+                            "Intel 80486SX",
+                            "Intel 80486DX2",
+                            "Intel 80486SX2",
+                            "Intel 80486DX4",
+                            "Intel Pentium",
+                            "Intel Pentium MMX",
                         ] {
                             ui.selectable_value(cpu_model, model.to_string(), model);
                         }
@@ -365,10 +380,16 @@ impl PropertyPane {
                     .selected_text(format!("{} KB", memory_kb))
                     .show_ui(ui, |ui| {
                         for (kb, label) in [
-                            (64, "64 KB"), (128, "128 KB"), (256, "256 KB"),
-                            (512, "512 KB"), (640, "640 KB"), (1024, "1024 KB (1 MB)"),
-                            (2048, "2048 KB (2 MB)"), (4096, "4096 KB (4 MB)"),
-                            (8192, "8192 KB (8 MB)"), (16384, "16384 KB (16 MB)"),
+                            (64, "64 KB"),
+                            (128, "128 KB"),
+                            (256, "256 KB"),
+                            (512, "512 KB"),
+                            (640, "640 KB"),
+                            (1024, "1024 KB (1 MB)"),
+                            (2048, "2048 KB (2 MB)"),
+                            (4096, "4096 KB (4 MB)"),
+                            (8192, "8192 KB (8 MB)"),
+                            (16384, "16384 KB (16 MB)"),
                         ] {
                             ui.selectable_value(memory_kb, kb, label);
                         }
@@ -385,20 +406,28 @@ impl PropertyPane {
             ui.label("Config Source:");
             ui.add_space(5.0);
             if ui
-                .selectable_label(self.input_config_source == InputConfigSource::Global, "Global")
+                .selectable_label(
+                    self.input_config_source == InputConfigSource::Global,
+                    "Global",
+                )
                 .on_hover_text("Use global config.json settings")
                 .clicked()
                 && self.input_config_source != InputConfigSource::Global
             {
-                self.pending_action = Some(PropertyAction::SetInputSource(InputConfigSource::Global));
+                self.pending_action =
+                    Some(PropertyAction::SetInputSource(InputConfigSource::Global));
             }
             if ui
-                .selectable_label(self.input_config_source == InputConfigSource::Project, "Project")
+                .selectable_label(
+                    self.input_config_source == InputConfigSource::Project,
+                    "Project",
+                )
                 .on_hover_text("Use project-specific .hemu file settings")
                 .clicked()
                 && self.input_config_source != InputConfigSource::Project
             {
-                self.pending_action = Some(PropertyAction::SetInputSource(InputConfigSource::Project));
+                self.pending_action =
+                    Some(PropertyAction::SetInputSource(InputConfigSource::Project));
             }
         });
 

@@ -20,10 +20,10 @@ pub enum MenuAction {
     Pause,
     Resume,
     Step,
-    SaveState(u8),           // Slot 1-5
-    LoadState(u8),           // Slot 1-5
-    SetSpeed(i32),           // Speed percentage (25, 50, 100, 200, 400)
-    EjectCartridge,          // Eject cartridge/ROM when single mount point
+    SaveState(u8),  // Slot 1-5
+    LoadState(u8),  // Slot 1-5
+    SetSpeed(i32),  // Speed percentage (25, 50, 100, 200, 400)
+    EjectCartridge, // Eject cartridge/ROM when single mount point
 
     // View menu
     Screenshot,
@@ -32,11 +32,11 @@ pub enum MenuAction {
     ScalingStretch,
     Fullscreen,
     FullscreenWithGui,
-    ShowInspector,           // Toggle Inspector dock visibility
+    ShowInspector,                   // Toggle Inspector dock visibility
     SetDisplayFilter(DisplayFilter), // Set display filter
-    ToggleMetrics,           // Toggle Metrics section visibility
-    ToggleControllerSettings, // Toggle Controller Settings section visibility
-    ToggleMountPoints,       // Toggle Mount Points section visibility
+    ToggleMetrics,                   // Toggle Metrics section visibility
+    ToggleControllerSettings,        // Toggle Controller Settings section visibility
+    ToggleMountPoints,               // Toggle Mount Points section visibility
 
     // Help menu
     ShowHelp,
@@ -45,15 +45,15 @@ pub enum MenuAction {
 
 pub struct MenuBar {
     pub pending_action: Option<MenuAction>,
-    pub recent_files: Vec<String>,      // List of recent files to display
-    pub system_loaded: bool,            // Whether a system is currently loaded
-    pub rom_loaded: bool,               // Whether a ROM is mounted
-    pub current_speed: i32,             // Current emulation speed percentage
-    pub current_filter: DisplayFilter,  // Current display filter
-    pub metrics_visible: bool,          // Metrics section visibility
-    pub controller_visible: bool,       // Controller section visibility
-    pub mounts_visible: bool,           // Mount points section visibility
-    pub single_mount_system: bool,      // Whether system has only one mount point
+    pub recent_files: Vec<String>, // List of recent files to display
+    pub system_loaded: bool,       // Whether a system is currently loaded
+    pub rom_loaded: bool,          // Whether a ROM is mounted
+    pub current_speed: i32,        // Current emulation speed percentage
+    pub current_filter: DisplayFilter, // Current display filter
+    pub metrics_visible: bool,     // Metrics section visibility
+    pub controller_visible: bool,  // Controller section visibility
+    pub mounts_visible: bool,      // Mount points section visibility
+    pub single_mount_system: bool, // Whether system has only one mount point
 }
 
 impl MenuBar {
@@ -410,28 +410,43 @@ impl MenuBar {
                 });
 
                 // Display filters submenu
-                ui.menu_button(format!("🖼️ Filters ({})", self.current_filter.name()), |ui| {
-                    let filters = [
-                        (DisplayFilter::None, "None", "No filter, pure pixels"),
-                        (DisplayFilter::PhosphorPersistence, "Phosphor Persistence", "Temporal frame blending"),
-                        (DisplayFilter::SonyTrinitron, "Sony Trinitron", "CRT simulation"),
-                        (DisplayFilter::Ibm5151, "IBM 5151", "Monochrome monitor"),
-                        (DisplayFilter::Commodore1702, "Commodore 1702", "Color monitor"),
-                        (DisplayFilter::SharpLcd, "Sharp LCD", "LCD simulation"),
-                        (DisplayFilter::RcaVictor, "RCA Victor", "CRT television"),
-                    ];
-                    for (filter, name, tooltip) in filters {
-                        let label = if self.current_filter == filter {
-                            format!("✓ {}", name)
-                        } else {
-                            format!("  {}", name)
-                        };
-                        if ui.button(label).on_hover_text(tooltip).clicked() {
-                            self.pending_action = Some(MenuAction::SetDisplayFilter(filter));
-                            ui.close();
+                ui.menu_button(
+                    format!("🖼️ Filters ({})", self.current_filter.name()),
+                    |ui| {
+                        let filters = [
+                            (DisplayFilter::None, "None", "No filter, pure pixels"),
+                            (
+                                DisplayFilter::PhosphorPersistence,
+                                "Phosphor Persistence",
+                                "Temporal frame blending",
+                            ),
+                            (
+                                DisplayFilter::SonyTrinitron,
+                                "Sony Trinitron",
+                                "CRT simulation",
+                            ),
+                            (DisplayFilter::Ibm5151, "IBM 5151", "Monochrome monitor"),
+                            (
+                                DisplayFilter::Commodore1702,
+                                "Commodore 1702",
+                                "Color monitor",
+                            ),
+                            (DisplayFilter::SharpLcd, "Sharp LCD", "LCD simulation"),
+                            (DisplayFilter::RcaVictor, "RCA Victor", "CRT television"),
+                        ];
+                        for (filter, name, tooltip) in filters {
+                            let label = if self.current_filter == filter {
+                                format!("✓ {}", name)
+                            } else {
+                                format!("  {}", name)
+                            };
+                            if ui.button(label).on_hover_text(tooltip).clicked() {
+                                self.pending_action = Some(MenuAction::SetDisplayFilter(filter));
+                                ui.close();
+                            }
                         }
-                    }
-                });
+                    },
+                );
 
                 ui.separator();
 
@@ -467,21 +482,45 @@ impl MenuBar {
 
                 // Property pane section toggles
                 ui.label(egui::RichText::new("Property Panels").strong());
-                
-                let metrics_label = if self.metrics_visible { "✓ Metrics" } else { "  Metrics" };
-                if ui.button(metrics_label).on_hover_text("Toggle Metrics panel").clicked() {
+
+                let metrics_label = if self.metrics_visible {
+                    "✓ Metrics"
+                } else {
+                    "  Metrics"
+                };
+                if ui
+                    .button(metrics_label)
+                    .on_hover_text("Toggle Metrics panel")
+                    .clicked()
+                {
                     self.pending_action = Some(MenuAction::ToggleMetrics);
                     ui.close();
                 }
-                
-                let controller_label = if self.controller_visible { "✓ Controller Settings" } else { "  Controller Settings" };
-                if ui.button(controller_label).on_hover_text("Toggle Controller Settings panel").clicked() {
+
+                let controller_label = if self.controller_visible {
+                    "✓ Controller Settings"
+                } else {
+                    "  Controller Settings"
+                };
+                if ui
+                    .button(controller_label)
+                    .on_hover_text("Toggle Controller Settings panel")
+                    .clicked()
+                {
                     self.pending_action = Some(MenuAction::ToggleControllerSettings);
                     ui.close();
                 }
-                
-                let mounts_label = if self.mounts_visible { "✓ Mount Points" } else { "  Mount Points" };
-                if ui.button(mounts_label).on_hover_text("Toggle Mount Points panel").clicked() {
+
+                let mounts_label = if self.mounts_visible {
+                    "✓ Mount Points"
+                } else {
+                    "  Mount Points"
+                };
+                if ui
+                    .button(mounts_label)
+                    .on_hover_text("Toggle Mount Points panel")
+                    .clicked()
+                {
                     self.pending_action = Some(MenuAction::ToggleMountPoints);
                     ui.close();
                 }

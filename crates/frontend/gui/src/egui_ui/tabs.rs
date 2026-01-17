@@ -426,7 +426,7 @@ impl TabManager {
     ) {
         // Only show tab bar if there are multiple tabs visible (Help or About)
         let has_extra_tabs = self.help_visible || self.about_visible;
-        
+
         if has_extra_tabs {
             // Tab bar with improved visual styling
             ui.horizontal(|ui| {
@@ -535,7 +535,7 @@ impl TabManager {
                 // System is loaded but needs a cartridge - show system-specific header
                 ui.vertical_centered(|ui| {
                     ui.add_space(60.0);
-                    
+
                     let system_icon = match self.system_name.as_str() {
                         "NES" => "🎮",
                         "SNES" => "🎮",
@@ -549,9 +549,12 @@ impl TabManager {
                         _ => "🎮",
                     };
                     ui.heading(
-                        egui::RichText::new(format!("{} {} Emulator Ready", system_icon, self.system_name))
-                            .size(32.0)
-                            .strong(),
+                        egui::RichText::new(format!(
+                            "{} {} Emulator Ready",
+                            system_icon, self.system_name
+                        ))
+                        .size(32.0)
+                        .strong(),
                     );
                     ui.add_space(15.0);
                     ui.label(
@@ -586,7 +589,7 @@ impl TabManager {
                 // No system loaded - show welcome screen with project creation instructions
                 ui.vertical_centered(|ui| {
                     ui.add_space(60.0);
-                    
+
                     ui.heading(
                         egui::RichText::new("🎮 Welcome to Hemulator")
                             .size(32.0)
@@ -599,7 +602,7 @@ impl TabManager {
                             .weak(),
                     );
                     ui.add_space(50.0);
-                    
+
                     ui.label(egui::RichText::new("Get Started").size(22.0).strong());
                     ui.add_space(20.0);
 

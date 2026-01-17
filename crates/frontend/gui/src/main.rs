@@ -1746,10 +1746,10 @@ fn configure_system_ui(
     egui_app.property_pane.rendering_backend = sys.get_current_renderer_name();
     egui_app.property_pane.available_renderers = sys.get_available_renderers();
     egui_app.status_bar.set_message(status_message.to_string());
-    
+
     // Update tab_manager state immediately so welcome screen shows correctly
     egui_app.set_system_loaded(*rom_loaded, system_name);
-    
+
     // Update mount_info immediately so the welcome screen can check if cartridge is needed
     update_tab_mount_info(egui_app, sys, runtime_state);
 }
@@ -3392,9 +3392,12 @@ fn main() {
 
             // Update menu bar state for new menu features
             let mount_points = sys.mount_points();
-            let has_required_mount = mount_points.iter().any(|mp| mp.required && sys.is_mounted(&mp.id));
+            let has_required_mount = mount_points
+                .iter()
+                .any(|mp| mp.required && sys.is_mounted(&mp.id));
             egui_app.menu_bar.rom_loaded = has_required_mount;
-            egui_app.menu_bar.single_mount_system = mount_points.iter().filter(|mp| mp.required).count() == 1;
+            egui_app.menu_bar.single_mount_system =
+                mount_points.iter().filter(|mp| mp.required).count() == 1;
             egui_app.menu_bar.current_speed = egui_app.property_pane.emulation_speed_percent;
         }
 
@@ -5047,14 +5050,24 @@ fn main() {
                             if sys.supports_save_states() {
                                 let state = sys.save_state();
                                 let state_json = serde_json::to_string(&state).unwrap_or_default();
-                                if let Err(e) = _game_saves.save_slot(slot, state_json.as_bytes(), hash) {
-                                    egui_app.status_bar.set_message(format!("Error saving state: {}", e));
+                                if let Err(e) =
+                                    _game_saves.save_slot(slot, state_json.as_bytes(), hash)
+                                {
+                                    egui_app
+                                        .status_bar
+                                        .set_message(format!("Error saving state: {}", e));
                                 } else {
-                                    egui_app.status_bar.set_message(format!("Saved to slot {}", slot));
-                                    egui_app.tab_manager.add_log(format!("State saved to slot {}", slot));
+                                    egui_app
+                                        .status_bar
+                                        .set_message(format!("Saved to slot {}", slot));
+                                    egui_app
+                                        .tab_manager
+                                        .add_log(format!("State saved to slot {}", slot));
                                 }
                             } else {
-                                egui_app.status_bar.set_message("Save states not supported for this system".to_string());
+                                egui_app.status_bar.set_message(
+                                    "Save states not supported for this system".to_string(),
+                                );
                             }
                         }
                     } else {
@@ -5070,24 +5083,41 @@ fn main() {
                                         if let Ok(state_str) = String::from_utf8(data) {
                                             if let Ok(state) = serde_json::from_str(&state_str) {
                                                 if let Err(e) = sys.load_state(&state) {
-                                                    egui_app.status_bar.set_message(format!("Error loading state: {}", e));
+                                                    egui_app.status_bar.set_message(format!(
+                                                        "Error loading state: {}",
+                                                        e
+                                                    ));
                                                 } else {
-                                                    egui_app.status_bar.set_message(format!("Loaded from slot {}", slot));
-                                                    egui_app.tab_manager.add_log(format!("State loaded from slot {}", slot));
+                                                    egui_app.status_bar.set_message(format!(
+                                                        "Loaded from slot {}",
+                                                        slot
+                                                    ));
+                                                    egui_app.tab_manager.add_log(format!(
+                                                        "State loaded from slot {}",
+                                                        slot
+                                                    ));
                                                 }
                                             } else {
-                                                egui_app.status_bar.set_message("Invalid state data".to_string());
+                                                egui_app
+                                                    .status_bar
+                                                    .set_message("Invalid state data".to_string());
                                             }
                                         } else {
-                                            egui_app.status_bar.set_message("Invalid state encoding".to_string());
+                                            egui_app
+                                                .status_bar
+                                                .set_message("Invalid state encoding".to_string());
                                         }
                                     }
                                     Err(e) => {
-                                        egui_app.status_bar.set_message(format!("Error loading state: {}", e));
+                                        egui_app
+                                            .status_bar
+                                            .set_message(format!("Error loading state: {}", e));
                                     }
                                 }
                             } else {
-                                egui_app.status_bar.set_message("Save states not supported for this system".to_string());
+                                egui_app.status_bar.set_message(
+                                    "Save states not supported for this system".to_string(),
+                                );
                             }
                         }
                     } else {
@@ -5098,18 +5128,24 @@ fn main() {
                     settings.emulation_speed = speed as f64 / 100.0;
                     egui_app.property_pane.emulation_speed_percent = speed;
                     egui_app.menu_bar.current_speed = speed;
-                    egui_app.status_bar.set_message(format!("Speed set to {}%", speed));
+                    egui_app
+                        .status_bar
+                        .set_message(format!("Speed set to {}%", speed));
                 }
                 MenuAction::EjectCartridge => {
                     // Find the first required mount point and eject it
                     let mount_points = sys.mount_points();
                     if let Some(mp) = mount_points.iter().find(|mp| mp.required) {
                         if let Err(e) = sys.unmount(&mp.id) {
-                            egui_app.status_bar.set_message(format!("Error ejecting: {}", e));
+                            egui_app
+                                .status_bar
+                                .set_message(format!("Error ejecting: {}", e));
                         } else {
                             runtime_state.current_mounts.remove(&mp.id);
                             rom_hash = None;
-                            egui_app.status_bar.set_message("Cartridge ejected".to_string());
+                            egui_app
+                                .status_bar
+                                .set_message("Cartridge ejected".to_string());
                             egui_app.tab_manager.add_log(format!("Ejected {}", mp.name));
                             update_tab_mount_info(&mut egui_app, &sys, &runtime_state);
                         }
@@ -5118,15 +5154,20 @@ fn main() {
                 MenuAction::SetDisplayFilter(filter) => {
                     settings.display_filter = filter;
                     egui_app.menu_bar.current_filter = filter;
-                    egui_app.status_bar.set_message(format!("Filter: {}", filter.name()));
+                    egui_app
+                        .status_bar
+                        .set_message(format!("Filter: {}", filter.name()));
                 }
                 MenuAction::ToggleMetrics => {
-                    egui_app.property_pane.metrics_visible = !egui_app.property_pane.metrics_visible;
+                    egui_app.property_pane.metrics_visible =
+                        !egui_app.property_pane.metrics_visible;
                     egui_app.menu_bar.metrics_visible = egui_app.property_pane.metrics_visible;
                 }
                 MenuAction::ToggleControllerSettings => {
-                    egui_app.property_pane.controller_visible = !egui_app.property_pane.controller_visible;
-                    egui_app.menu_bar.controller_visible = egui_app.property_pane.controller_visible;
+                    egui_app.property_pane.controller_visible =
+                        !egui_app.property_pane.controller_visible;
+                    egui_app.menu_bar.controller_visible =
+                        egui_app.property_pane.controller_visible;
                 }
                 MenuAction::ToggleMountPoints => {
                     egui_app.property_pane.mounts_visible = !egui_app.property_pane.mounts_visible;

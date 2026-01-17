@@ -1306,17 +1306,29 @@ mod tests {
         // Write test data to VRAM when accessible
         ppu.stat = 0x00; // Mode 0 (HBlank) - VRAM accessible
         ppu.write_vram(0x1000, 0x42);
-        assert_eq!(ppu.read_vram(0x1000), 0x42, "VRAM should be accessible in Mode 0");
+        assert_eq!(
+            ppu.read_vram(0x1000),
+            0x42,
+            "VRAM should be accessible in Mode 0"
+        );
 
         // Mode 1 (VBlank) - VRAM accessible
         ppu.stat = 0x01;
         ppu.write_vram(0x1001, 0x43);
-        assert_eq!(ppu.read_vram(0x1001), 0x43, "VRAM should be accessible in Mode 1");
+        assert_eq!(
+            ppu.read_vram(0x1001),
+            0x43,
+            "VRAM should be accessible in Mode 1"
+        );
 
         // Mode 2 (OAM Search) - VRAM accessible
         ppu.stat = 0x02;
         ppu.write_vram(0x1002, 0x44);
-        assert_eq!(ppu.read_vram(0x1002), 0x44, "VRAM should be accessible in Mode 2");
+        assert_eq!(
+            ppu.read_vram(0x1002),
+            0x44,
+            "VRAM should be accessible in Mode 2"
+        );
 
         // Mode 3 (Pixel Transfer) - VRAM inaccessible
         ppu.stat = 0x03;
@@ -1360,12 +1372,20 @@ mod tests {
         // Write test data to OAM when accessible
         ppu.stat = 0x00; // Mode 0 (HBlank) - OAM accessible
         ppu.write_oam(0x10, 0x42);
-        assert_eq!(ppu.read_oam(0x10), 0x42, "OAM should be accessible in Mode 0");
+        assert_eq!(
+            ppu.read_oam(0x10),
+            0x42,
+            "OAM should be accessible in Mode 0"
+        );
 
         // Mode 1 (VBlank) - OAM accessible
         ppu.stat = 0x01;
         ppu.write_oam(0x11, 0x43);
-        assert_eq!(ppu.read_oam(0x11), 0x43, "OAM should be accessible in Mode 1");
+        assert_eq!(
+            ppu.read_oam(0x11),
+            0x43,
+            "OAM should be accessible in Mode 1"
+        );
 
         // Mode 2 (OAM Search) - OAM inaccessible
         ppu.stat = 0x02;
