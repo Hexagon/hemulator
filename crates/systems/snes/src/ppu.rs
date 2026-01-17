@@ -1765,6 +1765,25 @@ impl Ppu {
         }
     }
 
+    /// Get character size for a BG layer (8 or 16)
+    /// Bits 4-7 of BGMODE ($2105) control character size for BG1-4
+    /// Returns the size in pixels (8 for 8x8 tiles, 16 for 16x16 tiles)
+    fn get_bg_char_size(&self, bg_index: usize) -> usize {
+        let bit = match bg_index {
+            0 => 4, // BG1 = bit 4
+            1 => 5, // BG2 = bit 5
+            2 => 6, // BG3 = bit 6
+            3 => 7, // BG4 = bit 7
+            _ => return 8,
+        };
+
+        if (self.bgmode & (1 << bit)) != 0 {
+            16 // 16x16 tiles
+        } else {
+            8 // 8x8 tiles
+        }
+    }
+
     /// Calculate tilemap offset for a given tile position
     /// SNES tilemaps are organized in 32x32 tile blocks
     /// For larger tilemaps, multiple 32x32 blocks are arranged:
@@ -2195,6 +2214,9 @@ impl Ppu {
             _ => LAYER_BACKDROP,
         };
 
+        // Get character size for this layer (8 or 16)
+        let char_size = self.get_bg_char_size(bg_index);
+
         // Render all visible tiles
         for screen_y in 0..224 {
             for screen_x in 0..256 {
@@ -2202,11 +2224,11 @@ impl Ppu {
                 let world_x = ((screen_x as u16 + hofs) % tilemap_pixel_width as u16) as usize;
                 let world_y = ((screen_y as u16 + vofs) % tilemap_pixel_height as u16) as usize;
 
-                // Get tile and pixel position
-                let tile_x = world_x / 8;
-                let tile_y = world_y / 8;
-                let pixel_x_in_tile = world_x % 8;
-                let pixel_y_in_tile = world_y % 8;
+                // Get tile and pixel position based on character size
+                let tile_x = world_x / char_size;
+                let tile_y = world_y / char_size;
+                let pixel_x_in_metatile = world_x % char_size;
+                let pixel_y_in_metatile = world_y % char_size;
 
                 // Get tilemap entry
                 let tilemap_offset = self.get_tilemap_offset(tile_x, tile_y, tilemap_width);
@@ -2226,7 +2248,7 @@ impl Ppu {
                 let tile_high = self.vram[tilemap_addr + 1];
 
                 // Extract full 10-bit tile number: bits 0-1 from tile_high + 8 bits from tile_low
-                let tile_index = (tile_low as u16) | (((tile_high & 0x03) as u16) << 8);
+                let base_tile_index = (tile_low as u16) | (((tile_high & 0x03) as u16) << 8);
                 let palette = ((tile_high >> 2) & 0x07) as usize;
                 let flip_x = (tile_high & 0x40) != 0;
                 let flip_y = (tile_high & 0x80) != 0;
@@ -2236,6 +2258,31 @@ impl Ppu {
                 if priority != filter_priority {
                     continue;
                 }
+
+                // For 16x16 tiles, calculate which 8x8 sub-tile we're in
+                let (tile_index, pixel_x_in_tile, pixel_y_in_tile) = if char_size == 16 {
+                    // Determine which quadrant (0-3) we're in
+                    let sub_x = pixel_x_in_metatile / 8; // 0 or 1
+                    let sub_y = pixel_y_in_metatile / 8; // 0 or 1
+
+                    // Apply flips to the quadrant selection
+                    let flipped_sub_x = if flip_x { 1 - sub_x } else { sub_x };
+                    let flipped_sub_y = if flip_y { 1 - sub_y } else { sub_y };
+
+                    // Calculate the actual tile index
+                    // Tiles are arranged as: N, N+1 (top row), N+16, N+17 (bottom row)
+                    let tile_offset = flipped_sub_y * 16 + flipped_sub_x;
+                    let actual_tile_index = base_tile_index + tile_offset as u16;
+
+                    // Calculate pixel position within the 8x8 sub-tile
+                    let px = pixel_x_in_metatile % 8;
+                    let py = pixel_y_in_metatile % 8;
+
+                    (actual_tile_index, px, py)
+                } else {
+                    // 8x8 tiles - use directly
+                    (base_tile_index, pixel_x_in_metatile, pixel_y_in_metatile)
+                };
 
                 // Get pixel color from tile
                 let color = self.get_tile_pixel_mode0(
@@ -2302,6 +2349,9 @@ impl Ppu {
         // Determine layer ID for tracking
         let layer_id = bg_index as u8;
 
+        // Get character size for this layer (8 or 16)
+        let char_size = self.get_bg_char_size(bg_index);
+
         // Render all visible tiles
         for screen_y in 0..224 {
             for screen_x in 0..256 {
@@ -2320,11 +2370,12 @@ impl Ppu {
                     .rem_euclid(tilemap_pixel_height as i32))
                     as usize;
 
-                // Get tile and pixel position
-                let tile_x = world_x / 8;
-                let tile_y = world_y / 8;
-                let pixel_x_in_tile = world_x % 8;
-                let pixel_y_in_tile = world_y % 8;
+                // Get tile and pixel position based on character size
+                // For 16x16 tiles, each tilemap entry represents a 2x2 block of 8x8 tiles
+                let tile_x = world_x / char_size;
+                let tile_y = world_y / char_size;
+                let pixel_x_in_metatile = world_x % char_size;
+                let pixel_y_in_metatile = world_y % char_size;
 
                 // Get tilemap entry
                 let tilemap_offset = self.get_tilemap_offset(tile_x, tile_y, tilemap_width);
@@ -2344,7 +2395,7 @@ impl Ppu {
                 let tile_high = self.vram[tilemap_addr + 1];
 
                 // Extract full 10-bit tile number: bits 0-1 from tile_high + 8 bits from tile_low
-                let tile_index = (tile_low as u16) | (((tile_high & 0x03) as u16) << 8);
+                let base_tile_index = (tile_low as u16) | (((tile_high & 0x03) as u16) << 8);
                 let palette = ((tile_high >> 2) & 0x07) as usize;
                 let flip_x = (tile_high & 0x40) != 0;
                 let flip_y = (tile_high & 0x80) != 0;
@@ -2354,6 +2405,31 @@ impl Ppu {
                 if priority != filter_priority {
                     continue;
                 }
+
+                // For 16x16 tiles, calculate which 8x8 sub-tile we're in
+                let (tile_index, pixel_x_in_tile, pixel_y_in_tile) = if char_size == 16 {
+                    // Determine which quadrant (0-3) we're in
+                    let sub_x = pixel_x_in_metatile / 8; // 0 or 1
+                    let sub_y = pixel_y_in_metatile / 8; // 0 or 1
+
+                    // Apply flips to the quadrant selection
+                    let flipped_sub_x = if flip_x { 1 - sub_x } else { sub_x };
+                    let flipped_sub_y = if flip_y { 1 - sub_y } else { sub_y };
+
+                    // Calculate the actual tile index
+                    // Tiles are arranged as: N, N+1 (top row), N+16, N+17 (bottom row)
+                    let tile_offset = flipped_sub_y * 16 + flipped_sub_x;
+                    let actual_tile_index = base_tile_index + tile_offset as u16;
+
+                    // Calculate pixel position within the 8x8 sub-tile
+                    let px = pixel_x_in_metatile % 8;
+                    let py = pixel_y_in_metatile % 8;
+
+                    (actual_tile_index, px, py)
+                } else {
+                    // 8x8 tiles - use directly
+                    (base_tile_index, pixel_x_in_metatile, pixel_y_in_metatile)
+                };
 
                 // Get pixel color from tile (4bpp)
                 let color = self.get_tile_pixel_4bpp(
@@ -2418,6 +2494,9 @@ impl Ppu {
             _ => (0, 0),
         };
 
+        // Get character size for this layer (8 or 16)
+        let char_size = self.get_bg_char_size(bg_index);
+
         // Render all visible tiles
         for screen_y in 0..224 {
             for screen_x in 0..256 {
@@ -2436,11 +2515,11 @@ impl Ppu {
                     .rem_euclid(tilemap_pixel_height as i32))
                     as usize;
 
-                // Get tile and pixel position
-                let tile_x = world_x / 8;
-                let tile_y = world_y / 8;
-                let pixel_x_in_tile = world_x % 8;
-                let pixel_y_in_tile = world_y % 8;
+                // Get tile and pixel position based on character size
+                let tile_x = world_x / char_size;
+                let tile_y = world_y / char_size;
+                let pixel_x_in_metatile = world_x % char_size;
+                let pixel_y_in_metatile = world_y % char_size;
 
                 // Get tilemap entry
                 let tilemap_offset = self.get_tilemap_offset(tile_x, tile_y, tilemap_width);
@@ -2455,7 +2534,7 @@ impl Ppu {
                 let tile_high = self.vram[tilemap_addr + 1];
 
                 // Extract full 10-bit tile number: bits 0-1 from tile_high + 8 bits from tile_low
-                let tile_index = (tile_low as u16) | (((tile_high & 0x03) as u16) << 8);
+                let base_tile_index = (tile_low as u16) | (((tile_high & 0x03) as u16) << 8);
                 let flip_x = (tile_high & 0x40) != 0;
                 let flip_y = (tile_high & 0x80) != 0;
                 let priority = if (tile_high & 0x20) != 0 { 1 } else { 0 };
@@ -2464,6 +2543,31 @@ impl Ppu {
                 if priority != filter_priority {
                     continue;
                 }
+
+                // For 16x16 tiles, calculate which 8x8 sub-tile we're in
+                let (tile_index, pixel_x_in_tile, pixel_y_in_tile) = if char_size == 16 {
+                    // Determine which quadrant (0-3) we're in
+                    let sub_x = pixel_x_in_metatile / 8; // 0 or 1
+                    let sub_y = pixel_y_in_metatile / 8; // 0 or 1
+
+                    // Apply flips to the quadrant selection
+                    let flipped_sub_x = if flip_x { 1 - sub_x } else { sub_x };
+                    let flipped_sub_y = if flip_y { 1 - sub_y } else { sub_y };
+
+                    // Calculate the actual tile index
+                    // Tiles are arranged as: N, N+1 (top row), N+16, N+17 (bottom row)
+                    let tile_offset = flipped_sub_y * 16 + flipped_sub_x;
+                    let actual_tile_index = base_tile_index + tile_offset as u16;
+
+                    // Calculate pixel position within the 8x8 sub-tile
+                    let px = pixel_x_in_metatile % 8;
+                    let py = pixel_y_in_metatile % 8;
+
+                    (actual_tile_index, px, py)
+                } else {
+                    // 8x8 tiles - use directly
+                    (base_tile_index, pixel_x_in_metatile, pixel_y_in_metatile)
+                };
 
                 // Get pixel color from tile (8bpp)
                 let color = self.get_tile_pixel_8bpp(
@@ -2660,6 +2764,9 @@ impl Ppu {
             _ => (0, 0),
         };
 
+        // Get character size for this layer (8 or 16)
+        let char_size = self.get_bg_char_size(bg_index);
+
         // Render all visible tiles at 512px width
         // In hi-res mode, each logical pixel is rendered as 2 physical pixels horizontally
         for screen_y in 0..224 {
@@ -2681,11 +2788,11 @@ impl Ppu {
                     .rem_euclid(tilemap_pixel_height as i32))
                     as usize;
 
-                // Get tile and pixel position
-                let tile_x = world_x / 8;
-                let tile_y = world_y / 8;
-                let pixel_x_in_tile = world_x % 8;
-                let pixel_y_in_tile = world_y % 8;
+                // Get tile and pixel position based on character size
+                let tile_x = world_x / char_size;
+                let tile_y = world_y / char_size;
+                let pixel_x_in_metatile = world_x % char_size;
+                let pixel_y_in_metatile = world_y % char_size;
 
                 // Get tilemap entry
                 let tilemap_offset = self.get_tilemap_offset(tile_x, tile_y, tilemap_width);
@@ -2700,7 +2807,7 @@ impl Ppu {
                 let tile_high = self.vram[tilemap_addr + 1];
 
                 // Extract full 10-bit tile number: bits 0-1 from tile_high + 8 bits from tile_low
-                let tile_index = (tile_low as u16) | (((tile_high & 0x03) as u16) << 8);
+                let base_tile_index = (tile_low as u16) | (((tile_high & 0x03) as u16) << 8);
                 let palette = ((tile_high >> 2) & 0x07) as usize;
                 let flip_x = (tile_high & 0x40) != 0;
                 let flip_y = (tile_high & 0x80) != 0;
@@ -2710,6 +2817,31 @@ impl Ppu {
                 if priority != filter_priority {
                     continue;
                 }
+
+                // For 16x16 tiles, calculate which 8x8 sub-tile we're in
+                let (tile_index, pixel_x_in_tile, pixel_y_in_tile) = if char_size == 16 {
+                    // Determine which quadrant (0-3) we're in
+                    let sub_x = pixel_x_in_metatile / 8; // 0 or 1
+                    let sub_y = pixel_y_in_metatile / 8; // 0 or 1
+
+                    // Apply flips to the quadrant selection
+                    let flipped_sub_x = if flip_x { 1 - sub_x } else { sub_x };
+                    let flipped_sub_y = if flip_y { 1 - sub_y } else { sub_y };
+
+                    // Calculate the actual tile index
+                    // Tiles are arranged as: N, N+1 (top row), N+16, N+17 (bottom row)
+                    let tile_offset = flipped_sub_y * 16 + flipped_sub_x;
+                    let actual_tile_index = base_tile_index + tile_offset as u16;
+
+                    // Calculate pixel position within the 8x8 sub-tile
+                    let px = pixel_x_in_metatile % 8;
+                    let py = pixel_y_in_metatile % 8;
+
+                    (actual_tile_index, px, py)
+                } else {
+                    // 8x8 tiles - use directly
+                    (base_tile_index, pixel_x_in_metatile, pixel_y_in_metatile)
+                };
 
                 // Get pixel color from tile (4bpp)
                 let color = self.get_tile_pixel_4bpp(
@@ -2772,6 +2904,9 @@ impl Ppu {
             _ => (0, 0),
         };
 
+        // Get character size for this layer (8 or 16)
+        let char_size = self.get_bg_char_size(bg_index);
+
         // Render all visible tiles at 512px width
         for screen_y in 0..224 {
             for screen_x in 0..512 {
@@ -2785,11 +2920,11 @@ impl Ppu {
                     .rem_euclid(tilemap_pixel_height as i32))
                     as usize;
 
-                // Get tile and pixel position
-                let tile_x = world_x / 8;
-                let tile_y = world_y / 8;
-                let pixel_x_in_tile = world_x % 8;
-                let pixel_y_in_tile = world_y % 8;
+                // Get tile and pixel position based on character size
+                let tile_x = world_x / char_size;
+                let tile_y = world_y / char_size;
+                let pixel_x_in_metatile = world_x % char_size;
+                let pixel_y_in_metatile = world_y % char_size;
 
                 // Get tilemap entry
                 let tilemap_offset = self.get_tilemap_offset(tile_x, tile_y, tilemap_width);
@@ -2804,7 +2939,7 @@ impl Ppu {
                 let tile_high = self.vram[tilemap_addr + 1];
 
                 // Extract full 10-bit tile number: bits 0-1 from tile_high + 8 bits from tile_low
-                let tile_index = (tile_low as u16) | (((tile_high & 0x03) as u16) << 8);
+                let base_tile_index = (tile_low as u16) | (((tile_high & 0x03) as u16) << 8);
                 let palette = ((tile_high >> 2) & 0x07) as usize;
                 let flip_x = (tile_high & 0x40) != 0;
                 let flip_y = (tile_high & 0x80) != 0;
@@ -2814,6 +2949,31 @@ impl Ppu {
                 if priority != filter_priority {
                     continue;
                 }
+
+                // For 16x16 tiles, calculate which 8x8 sub-tile we're in
+                let (tile_index, pixel_x_in_tile, pixel_y_in_tile) = if char_size == 16 {
+                    // Determine which quadrant (0-3) we're in
+                    let sub_x = pixel_x_in_metatile / 8; // 0 or 1
+                    let sub_y = pixel_y_in_metatile / 8; // 0 or 1
+
+                    // Apply flips to the quadrant selection
+                    let flipped_sub_x = if flip_x { 1 - sub_x } else { sub_x };
+                    let flipped_sub_y = if flip_y { 1 - sub_y } else { sub_y };
+
+                    // Calculate the actual tile index
+                    // Tiles are arranged as: N, N+1 (top row), N+16, N+17 (bottom row)
+                    let tile_offset = flipped_sub_y * 16 + flipped_sub_x;
+                    let actual_tile_index = base_tile_index + tile_offset as u16;
+
+                    // Calculate pixel position within the 8x8 sub-tile
+                    let px = pixel_x_in_metatile % 8;
+                    let py = pixel_y_in_metatile % 8;
+
+                    (actual_tile_index, px, py)
+                } else {
+                    // 8x8 tiles - use directly
+                    (base_tile_index, pixel_x_in_metatile, pixel_y_in_metatile)
+                };
 
                 // Get pixel color from tile (2bpp)
                 let color = self.get_tile_pixel_mode0(
