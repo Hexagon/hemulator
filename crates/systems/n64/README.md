@@ -275,7 +275,7 @@ n64.set_frame_cycles(100000); // Increase for better accuracy
 
 ## Known Limitations
 
-See [User Manual](https://hemulator.56k.guru/user/manual.html#n64-nintendo-64) for the complete list of user-facing limitations.
+See [User Manual](https://hemulator.56k.guru/user/systems.html#n64-nintendo-64) for the complete list of user-facing limitations.
 
 **Main limitations preventing full game compatibility**:
 1. **Cycle Accuracy** - Uses 50,000 cycles/frame (vs hardware's 1,562,500) for performance; may cause issues with precise timing-dependent games (configurable via `set_frame_cycles()`)
@@ -392,7 +392,7 @@ fn test_sign_extension_lw() {
 
 ## References
 
-- **Project Documentation**: See [README.md](../../../README.md), [User Manual](https://hemulator.56k.guru/user/manual.html), and [AGENTS.md](../../../AGENTS.md)
+- **Project Documentation**: See [README.md](../../../README.md), [User Manual](https://hemulator.56k.guru/user/systems.html), and [AGENTS.md](../../../AGENTS.md)
 - **RDP Commands**: Documented in `rdp.rs`
 - **Test ROMs**: See `../../../test_roms/README.md`
 

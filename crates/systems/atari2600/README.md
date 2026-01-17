@@ -347,7 +347,7 @@ Addresses $40-$7F write to BOTH TIA and RAM simultaneously on real hardware:
 
 ## Known Limitations
 
-See [User Manual](https://hemulator.56k.guru/user/manual.html#atari-2600) for user-facing limitations.
+See [User Manual](https://hemulator.56k.guru/user/systems.html#atari-2600) for user-facing limitations.
 
 ### Implemented Features
 
@@ -534,13 +534,13 @@ When adding Atari 2600 features:
 
 1. **Banking Schemes**: Add to `src/cartridge.rs`
 2. **Tests**: Add unit tests for new functionality
-3. **Documentation**: Update this README and [User Manual](https://hemulator.56k.guru/user/manual.html)
+3. **Documentation**: Update this README and [User Manual](https://hemulator.56k.guru/user/systems.html)
 
 ## References
 
 ### Project Documentation
 - [ARCHITECTURE.md](../../../ARCHITECTURE.md) - Overall emulation architecture
-- [User Manual](https://hemulator.56k.guru/user/manual.html#atari-2600) - User manual
+- [User Manual](https://hemulator.56k.guru/user/systems.html#atari-2600) - User manual
 - [Contributing Guide](https://hemulator.56k.guru/developer/contributing.html) - Contribution guidelines
 - [TIA Hardware Reference](../../../docs/src/references/tia.md) - TIA register specification
 

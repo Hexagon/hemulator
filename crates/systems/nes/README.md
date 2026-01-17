@@ -295,7 +295,7 @@ NES ROM DB: Overriding mirroring Vertical -> Horizontal for CRC32 0x12345678 (TL
 
 ## Known Limitations
 
-See [User Manual](https://hemulator.56k.guru/user/manual.html#nes-nintendo-entertainment-system) for user-facing limitations.
+See [User Manual](https://hemulator.56k.guru/user/systems.html#nes-nintendo-entertainment-system) for user-facing limitations.
 
 **Technical Limitations**:
 - MMC2/MMC4 latch switching happens per-frame, not mid-scanline
@@ -354,13 +354,13 @@ When adding NES features:
 
 1. **Mappers**: Add to `src/mappers/`, implement `Mapper` trait
 2. **Tests**: Add unit tests for new functionality
-3. **Documentation**: Update this README and [User Manual](https://hemulator.56k.guru/user/manual.html)
+3. **Documentation**: Update this README and [User Manual](https://hemulator.56k.guru/user/systems.html)
 4. **Known Limitations**: Update limitations when features are added
 
 ## References
 
 - **Architecture**: [ARCHITECTURE.md](../../../ARCHITECTURE.md)
-- **User Manual**: [User Manual](https://hemulator.56k.guru/user/manual.html#nes-nintendo-entertainment-system)
+- **User Manual**: [User Manual](https://hemulator.56k.guru/user/systems.html#nes-nintendo-entertainment-system)
 - **Contributing**: [Contributing Guide](https://hemulator.56k.guru/developer/contributing.html)
 - **NESDev Wiki**: https://www.nesdev.org/
 

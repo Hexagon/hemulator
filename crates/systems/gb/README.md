@@ -180,7 +180,7 @@ let frame = gb.step_frame()?;
 
 ## Known Limitations
 
-See [User Manual](https://hemulator.56k.guru/user/manual.html#game-boy--game-boy-color) for user-facing limitations.
+See [User Manual](https://hemulator.56k.guru/user/systems.html#game-boy--game-boy-color) for user-facing limitations.
 
 **Technical Limitations**:
 - **Frame-based timing**: Not cycle-accurate - renders full frames at once rather than scanline-by-scanline. Suitable for ~99% of games.
@@ -227,12 +227,12 @@ When adding Game Boy features:
 
 1. **Mappers**: Add to `src/mappers/`, implement `Mapper` trait
 2. **Tests**: Add unit tests for new functionality
-3. **Documentation**: Update this README and [User Manual](https://hemulator.56k.guru/user/manual.html)
+3. **Documentation**: Update this README and [User Manual](https://hemulator.56k.guru/user/systems.html)
 
 ## References
 
 - **Architecture**: [ARCHITECTURE.md](../../../ARCHITECTURE.md)
-- **User Manual**: [User Manual](https://hemulator.56k.guru/user/manual.html#game-boy--game-boy-color)
+- **User Manual**: [User Manual](https://hemulator.56k.guru/user/systems.html#game-boy--game-boy-color)
 - **Contributing**: [Contributing Guide](https://hemulator.56k.guru/developer/contributing.html)
 - **Pan Docs**: https://gbdev.io/pandocs/
 

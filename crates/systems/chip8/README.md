@@ -252,4 +252,4 @@ Potential improvements for future versions:
 
 - [Test ROM README](../../../test_roms/chip8/README.md): Information about the bundled test program
 - [ARCHITECTURE.md](../../../ARCHITECTURE.md): Overall emulator architecture
-- [User Manual](https://hemulator.56k.guru/user/manual.html): End-user manual including CHIP-8 controls
+- [User Manual](https://hemulator.56k.guru/user/systems.html): End-user manual including CHIP-8 controls

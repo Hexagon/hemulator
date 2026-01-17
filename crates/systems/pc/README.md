@@ -327,7 +327,7 @@ Without modifier, function keys go to DOS program.
 
 ## Known Limitations
 
-See [User Manual](https://hemulator.56k.guru/user/manual.html#pcdos-ibm-pcxt) for user-facing limitations.
+See [User Manual](https://hemulator.56k.guru/user/systems.html#pcdos-ibm-pcxt) for user-facing limitations.
 
 **Technical Limitations**:
 - **No save states**: PC systems don't use save states like ROM-based consoles
@@ -396,12 +396,12 @@ When adding PC features:
 1. **Video Adapters**: Add to `src/video_adapter*.rs`
 2. **BIOS Interrupts**: Add to `src/bios.rs` (when created)
 3. **Tests**: Add unit tests for new functionality
-4. **Documentation**: Update this README and [User Manual](https://hemulator.56k.guru/user/manual.html)
+4. **Documentation**: Update this README and [User Manual](https://hemulator.56k.guru/user/systems.html)
 
 ## References
 
 - **Architecture**: [ARCHITECTURE.md](../../../ARCHITECTURE.md)
-- **User Manual**: [User Manual](https://hemulator.56k.guru/user/manual.html#pcdos-ibm-pcxt)
+- **User Manual**: [User Manual](https://hemulator.56k.guru/user/systems.html#pcdos-ibm-pcxt)
 - **Contributing**: [Contributing Guide](https://hemulator.56k.guru/developer/contributing.html)
 - **CPU Reference**: [8086 CPU Reference](https://hemulator.56k.guru/references/8086.html)
 - **Interrupt Reference**: [PC Interrupts Reference](https://hemulator.56k.guru/references/pc-interrupts.html)
