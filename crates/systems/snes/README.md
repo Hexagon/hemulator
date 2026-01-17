@@ -17,7 +17,7 @@ This implementation follows specifications from the **SNESdev Wiki** and **Super
 
 ## Current Status
 
-The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HDMA, LoROM, HiROM, and ExHiROM cartridge support, SPC700 APU processor, and complete PPU rendering for all modes 0-7. All background modes now support their advanced features including Mode 7 matrix transformation (rotation/scaling), offset-per-tile rendering (Modes 2, 4, 6), and true hi-res 512px rendering (Modes 5-6). Audio processor (SPC700) is fully implemented but DSP (sound generation) is not, so games run silently.
+The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HDMA, LoROM, HiROM, and ExHiROM cartridge support, SPC700 APU processor, and complete PPU rendering for all modes 0-7. All background modes now support their advanced features including Mode 7 matrix transformation (rotation/scaling), offset-per-tile rendering (Modes 2, 4, 6), and true hi-res 512px rendering (Modes 5-6). Audio processor (SPC700) is fully implemented and DSP (sound generation) now supports BRR sample playback, enabling actual audio output from games!
 
 ### What Works
 
@@ -150,10 +150,22 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
   - Games can upload audio drivers and communicate with APU
   - Reference: [APU](https://snes.nesdev.org/wiki/APU), [SPC700](https://snes.nesdev.org/wiki/SPC700)
 
-- ❌ **DSP (Digital Signal Processor)** - Not implemented
-  - No audio sample generation
-  - No 8-voice synthesis
-  - Silent gameplay (no sound output)
+- ✅ **DSP (Digital Signal Processor)** - Core functionality implemented
+  - ✅ 8-voice synthesis engine with BRR sample playback
+  - ✅ BRR (ADPCM) decoder with all 4 filter types
+  - ✅ Sample directory and loop point support
+  - ✅ Pitch control (14-bit precision)
+  - ✅ ADSR envelope generator (simplified curves)
+  - ✅ Voice control (key on/off, volume, pitch registers)
+  - ✅ Voice mixing to stereo output
+  - ✅ Master volume control
+  - ✅ ENDX register (voice ended flags)
+  - ⚠️ Linear interpolation (Gaussian filter not yet implemented)
+  - ⚠️ Simplified envelope rates (not cycle-accurate)
+  - ❌ Echo/reverb FIR filter
+  - ❌ Noise generator
+  - ❌ Pitch modulation
+  - **Status**: Actual audio output working! Games can play samples from RAM
   - Reference: [DSP](https://snes.nesdev.org/wiki/DSP)
 
 #### Timing
@@ -290,10 +302,19 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
   - Reference: [Transparency](https://wiki.superfamicom.org/transparency)
 
 #### Audio
-- ❌ **DSP (Digital Signal Processor)** - No sound generation
+- ✅ **DSP (Digital Signal Processor)** - Core functionality implemented
   - SPC700 CPU is fully implemented and functional
-  - DSP registers can be accessed but produce no audio
-  - No 8-voice synthesis, ADPCM playback, or echo effects
+  - ✅ DSP register interface and voice control
+  - ✅ 8-voice synthesis with BRR sample playback
+  - ✅ BRR (ADPCM) decoder with all filter types
+  - ✅ Sample directory and loop point support
+  - ✅ Pitch control and sample advancement
+  - ✅ Simplified ADSR envelope generation
+  - ✅ Audio output working - games can play sound!
+  - ⚠️ Linear interpolation (Gaussian filter pending)
+  - ⚠️ Simplified envelope rates (not cycle-accurate)
+  - ❌ Echo/reverb FIR filter
+  - **Status**: Actual audio output working! Advanced features pending
   - Reference: [DSP](https://snes.nesdev.org/wiki/DSP)
 
 #### Enhancement Chips
@@ -534,11 +555,14 @@ cargo run -- game.sfc --log-bus debug
 
 ## Known Issues
 
-1. **Audio Output** - SPC700 CPU implemented but no sound
-   - SPC700 processor fully functional
-   - Games can upload audio drivers
-   - DSP not implemented, so no audio generation
-   - Silent gameplay
+1. **Audio Quality** - DSP implemented but with simplifications
+   - ✅ BRR (ADPCM) sample decoding working
+   - ✅ Sample playback and mixing functional
+   - ✅ Games can play sound
+   - ⚠️ Using linear interpolation instead of Gaussian filter
+   - ⚠️ Simplified envelope rates (not cycle-accurate)
+   - ❌ Echo/reverb effects not implemented
+   - Current status: Audio works but quality may differ from hardware
 
 2. **Timing** - Frame-based, not cycle-accurate
    - Good enough for most games
