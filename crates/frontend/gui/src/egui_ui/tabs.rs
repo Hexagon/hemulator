@@ -136,6 +136,24 @@ pub struct SnesTileData {
     pub palette: Vec<u32>,
     pub bg_mode: u8,
     pub screen_enabled: bool,
+    // Tilemap configuration
+    pub bg1sc: u8,
+    pub bg2sc: u8,
+    pub bg3sc: u8,
+    pub bg4sc: u8,
+    pub bg12nba: u8,
+    pub bg34nba: u8,
+    // Scroll positions
+    pub bg1_hofs: u16,
+    pub bg1_vofs: u16,
+    pub bg2_hofs: u16,
+    pub bg2_vofs: u16,
+    pub bg3_hofs: u16,
+    pub bg3_vofs: u16,
+    pub bg4_hofs: u16,
+    pub bg4_vofs: u16,
+    // Main screen designation
+    pub tm: u8,
 }
 
 /// CHIP-8 inspector data
@@ -4362,6 +4380,695 @@ impl TabManager {
 
             if pal_num % 4 == 3 && pal_num < num_palettes - 1 {
                 ui.add_space(5.0);
+            }
+        }
+    }
+
+    /// Render SNES tilemaps with visible window highlighting
+    pub fn render_snes_tilemaps(&self, ui: &mut Ui, data: &SnesTileData) {
+        // Header
+        ui.heading("📐 SNES Background Layers & Tilemaps");
+        ui.separator();
+        ui.add_space(5.0);
+
+        // BG Mode information
+        let mode_info = match data.bg_mode {
+            0 => "Mode 0: 4 layers, 2bpp each (4 colors)",
+            1 => "Mode 1: BG1/BG2 4bpp (16 colors), BG3 2bpp (4 colors)",
+            2 => "Mode 2: BG1/BG2 4bpp with offset-per-tile",
+            3 => "Mode 3: BG1 8bpp (256 colors), BG2 4bpp (16 colors)",
+            4 => "Mode 4: BG1 8bpp, BG2 2bpp, offset-per-tile",
+            5 => "Mode 5: BG1 4bpp, BG2 2bpp (hi-res 512px)",
+            6 => "Mode 6: BG1 4bpp, offset-per-tile (hi-res 512px)",
+            7 => "Mode 7: BG1 8bpp (256 colors), rotation/scaling",
+            _ => "Unknown mode",
+        };
+
+        ui.horizontal(|ui| {
+            ui.label(format!("BG Mode: {} - {}", data.bg_mode, mode_info));
+            ui.separator();
+            ui.label(format!("VRAM: {} KB", data.vram.len() / 1024));
+        });
+
+        ui.add_space(10.0);
+
+        // Determine which layers are active based on mode
+        let active_layers = match data.bg_mode {
+            0 => vec![0, 1, 2, 3], // BG1-4
+            1 => vec![0, 1, 2],    // BG1-3
+            2 => vec![0, 1],       // BG1-2
+            3 => vec![0, 1],       // BG1-2
+            4 => vec![0, 1],       // BG1-2
+            5 => vec![0, 1],       // BG1-2
+            6 => vec![0],          // BG1 only
+            7 => vec![0],          // BG1 only (Mode 7)
+            _ => vec![],
+        };
+
+        // Render each active layer
+        for &bg_idx in &active_layers {
+            ui.separator();
+            ui.add_space(10.0);
+
+            // Determine bits-per-pixel for this layer
+            let bpp = match (data.bg_mode, bg_idx) {
+                (0, _) => 2,     // Mode 0: all layers 2bpp
+                (1, 0..=1) => 4, // Mode 1: BG1-2 are 4bpp
+                (1, 2) => 2,     // Mode 1: BG3 is 2bpp
+                (2, 0..=1) => 4, // Mode 2: BG1-2 are 4bpp
+                (3, 0) => 8,     // Mode 3: BG1 is 8bpp
+                (3, 1) => 4,     // Mode 3: BG2 is 4bpp
+                (4, 0) => 8,     // Mode 4: BG1 is 8bpp
+                (4, 1) => 2,     // Mode 4: BG2 is 2bpp
+                (5, 0) => 4,     // Mode 5: BG1 is 4bpp
+                (5, 1) => 2,     // Mode 5: BG2 is 2bpp
+                (6, 0) => 4,     // Mode 6: BG1 is 4bpp
+                (7, 0) => 8,     // Mode 7: BG1 is 8bpp
+                _ => 2,
+            };
+
+            // Get tilemap configuration for this layer
+            let sc_reg = match bg_idx {
+                0 => data.bg1sc,
+                1 => data.bg2sc,
+                2 => data.bg3sc,
+                3 => data.bg4sc,
+                _ => 0,
+            };
+
+            // Get scroll position for this layer
+            let (scroll_x, scroll_y) = match bg_idx {
+                0 => (data.bg1_hofs, data.bg1_vofs),
+                1 => (data.bg2_hofs, data.bg2_vofs),
+                2 => (data.bg3_hofs, data.bg3_vofs),
+                3 => (data.bg4_hofs, data.bg4_vofs),
+                _ => (0, 0),
+            };
+
+            // Check if layer is enabled on main screen
+            let enabled = (data.tm & (1 << bg_idx)) != 0;
+
+            // Tilemap size from BGxSC bits 0-1
+            let size_bits = sc_reg & 0x03;
+            let (tilemap_width, tilemap_height) = match size_bits {
+                0b00 => (32, 32),
+                0b01 => (64, 32),
+                0b10 => (32, 64),
+                0b11 => (64, 64),
+                _ => (32, 32),
+            };
+
+            // Tilemap base address from BGxSC bits 2-7
+            let tilemap_base = ((sc_reg as usize >> 2) & 0x3F) << 11;
+
+            // CHR base address
+            let nba_reg = match bg_idx {
+                0 => data.bg12nba & 0x0F,
+                1 => (data.bg12nba >> 4) & 0x0F,
+                2 => data.bg34nba & 0x0F,
+                3 => (data.bg34nba >> 4) & 0x0F,
+                _ => 0,
+            };
+            let chr_base = (nba_reg as usize) << 13;
+
+            // Layer header
+            ui.heading(format!(
+                "BG{} - {}bpp{}",
+                bg_idx + 1,
+                bpp,
+                if enabled { " (enabled)" } else { " (disabled)" }
+            ));
+            ui.horizontal(|ui| {
+                ui.label(format!(
+                    "Tilemap: ${:04X} ({}x{} tiles)",
+                    tilemap_base, tilemap_width, tilemap_height
+                ));
+                ui.separator();
+                ui.label(format!("CHR: ${:04X}", chr_base));
+                ui.separator();
+                ui.label(format!("Scroll: ({}, {})", scroll_x, scroll_y));
+            });
+
+            ui.add_space(5.0);
+
+            // Render the tilemap
+            self.render_snes_layer_tilemap(
+                ui,
+                data,
+                bg_idx,
+                tilemap_base,
+                tilemap_width,
+                tilemap_height,
+                chr_base,
+                bpp,
+                scroll_x,
+                scroll_y,
+                enabled,
+            );
+        }
+
+        ui.add_space(10.0);
+    }
+
+    /// Render a single SNES background layer tilemap
+    #[allow(clippy::too_many_arguments)]
+    fn render_snes_layer_tilemap(
+        &self,
+        ui: &mut Ui,
+        data: &SnesTileData,
+        _bg_idx: usize,
+        tilemap_base: usize,
+        tilemap_width: usize,
+        tilemap_height: usize,
+        chr_base: usize,
+        bpp: usize,
+        scroll_x: u16,
+        scroll_y: u16,
+        enabled: bool,
+    ) {
+        // Scale factor for rendering (smaller to fit on screen)
+        let scale = if tilemap_width > 32 || tilemap_height > 32 {
+            0.8
+        } else {
+            1.2
+        };
+        let tile_size = 8.0 * scale;
+
+        // Calculate tilemap pixel dimensions
+        let tilemap_pixel_width = tilemap_width as f32 * tile_size;
+        let tilemap_pixel_height = tilemap_height as f32 * tile_size;
+
+        let (response, painter) = ui.allocate_painter(
+            egui::Vec2::new(tilemap_pixel_width, tilemap_pixel_height + 20.0),
+            egui::Sense::hover(),
+        );
+        let rect = response.rect;
+
+        // Check if we have valid data
+        if data.vram.is_empty() {
+            painter.text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "VRAM data not available",
+                egui::FontId::default(),
+                egui::Color32::GRAY,
+            );
+            return;
+        }
+
+        let tilemap_start_y = rect.min.y;
+
+        // Render all tiles in the tilemap
+        for tile_y in 0..tilemap_height {
+            for tile_x in 0..tilemap_width {
+                // Calculate tilemap offset for this tile
+                // SNES tilemaps are organized in 32x32 tile blocks (2048 bytes each)
+                let block_x = tile_x / 32;
+                let block_y = tile_y / 32;
+                let in_block_x = tile_x % 32;
+                let in_block_y = tile_y % 32;
+
+                // Calculate which block we're in
+                let block_index = if tilemap_width == 64 {
+                    // 64x32 (or wider) tilemaps: two blocks horizontally
+                    block_y * 2 + block_x
+                } else if tilemap_height == 64 {
+                    // 32x64 (or taller) tilemaps: blocks arranged vertically
+                    block_y
+                } else {
+                    // Other configurations: default to first block
+                    0
+                };
+
+                let block_offset = block_index * 32 * 32 * 2; // 2048 bytes per block
+                let in_block_offset = (in_block_y * 32 + in_block_x) * 2;
+                let tilemap_offset = tilemap_base + block_offset + in_block_offset;
+
+                // Read tilemap entry (2 bytes)
+                if tilemap_offset + 1 >= data.vram.len() {
+                    continue;
+                }
+
+                let tile_low = data.vram[tilemap_offset];
+                let tile_high = data.vram[tilemap_offset + 1];
+
+                // Parse tilemap entry
+                // Format: vhopppcc cccccccc
+                // v = vertical flip (bit 15)
+                // h = horizontal flip (bit 14)
+                // o = priority (bit 13)
+                // ppp = palette (bits 12-10)
+                // cccccccccc = tile number (bits 9-0)
+                let tile_index = (tile_low as usize) | (((tile_high & 0x03) as usize) << 8);
+                let palette = ((tile_high >> 2) & 0x07) as usize;
+                let flip_x = (tile_high & 0x40) != 0;
+                let flip_y = (tile_high & 0x80) != 0;
+
+                // Get tile position on screen
+                let tile_screen_x = rect.min.x + tile_x as f32 * tile_size;
+                let tile_screen_y = tilemap_start_y + tile_y as f32 * tile_size;
+
+                // Render 8x8 tile pixels
+                let chr_addr = chr_base + tile_index * (8 * bpp);
+
+                // Render based on bpp
+                match bpp {
+                    2 => {
+                        self.render_snes_tile_2bpp(
+                            &painter,
+                            data,
+                            chr_addr,
+                            tile_screen_x,
+                            tile_screen_y,
+                            scale,
+                            palette,
+                            flip_x,
+                            flip_y,
+                        );
+                    }
+                    4 => {
+                        self.render_snes_tile_4bpp(
+                            &painter,
+                            data,
+                            chr_addr,
+                            tile_screen_x,
+                            tile_screen_y,
+                            scale,
+                            palette,
+                            flip_x,
+                            flip_y,
+                        );
+                    }
+                    8 => {
+                        self.render_snes_tile_8bpp(
+                            &painter,
+                            data,
+                            chr_addr,
+                            tile_screen_x,
+                            tile_screen_y,
+                            scale,
+                            palette,
+                            flip_x,
+                            flip_y,
+                        );
+                    }
+                    _ => {}
+                }
+
+                // Check if this tile is outside the scroll window and dim it
+                if enabled {
+                    let tile_pixel_x = tile_x * 8;
+                    let tile_pixel_y = tile_y * 8;
+
+                    // Viewport is 256x224 pixels (32x28 tiles)
+                    let viewport_width = 256;
+                    let viewport_height = 224;
+
+                    // Calculate if tile is visible based on scroll position
+                    // SNES scroll coordinates wrap around the tilemap
+                    let map_width_px = tilemap_width * 8;
+                    let map_height_px = tilemap_height * 8;
+                    let scroll_x = scroll_x as usize % map_width_px;
+                    let scroll_y = scroll_y as usize % map_height_px;
+
+                    let tile_right = tile_pixel_x + 8;
+                    let tile_bottom = tile_pixel_y + 8;
+                    let scroll_right = scroll_x + viewport_width;
+                    let scroll_bottom = scroll_y + viewport_height;
+
+                    // Check if tile intersects with the scroll window, taking wrapping into account
+                    let is_horiz_visible = if scroll_right <= map_width_px {
+                        // No horizontal wrap: simple interval intersection
+                        !(tile_right <= scroll_x || tile_pixel_x >= scroll_right)
+                    } else {
+                        // Horizontal wrap: visible region is [scroll_x, map_width_px) ∪ [0, wrapped_scroll_right)
+                        let wrapped_scroll_right = scroll_right % map_width_px;
+                        let overlaps_right_segment =
+                            tile_pixel_x < map_width_px && tile_right > scroll_x;
+                        let overlaps_left_segment =
+                            tile_pixel_x < wrapped_scroll_right && tile_right > 0;
+                        overlaps_right_segment || overlaps_left_segment
+                    };
+
+                    let is_vert_visible = if scroll_bottom <= map_height_px {
+                        // No vertical wrap: simple interval intersection
+                        !(tile_bottom <= scroll_y || tile_pixel_y >= scroll_bottom)
+                    } else {
+                        // Vertical wrap: visible region is [scroll_y, map_height_px) ∪ [0, wrapped_scroll_bottom)
+                        let wrapped_scroll_bottom = scroll_bottom % map_height_px;
+                        let overlaps_bottom_segment =
+                            tile_pixel_y < map_height_px && tile_bottom > scroll_y;
+                        let overlaps_top_segment =
+                            tile_pixel_y < wrapped_scroll_bottom && tile_bottom > 0;
+                        overlaps_bottom_segment || overlaps_top_segment
+                    };
+
+                    let is_visible = is_horiz_visible && is_vert_visible;
+                    if !is_visible {
+                        // Apply gray overlay to tiles outside the visible area
+                        let tile_rect = egui::Rect::from_min_size(
+                            egui::Pos2::new(tile_screen_x, tile_screen_y),
+                            egui::Vec2::new(tile_size, tile_size),
+                        );
+                        painter.rect_filled(
+                            tile_rect,
+                            0.0,
+                            egui::Color32::from_rgba_unmultiplied(0, 0, 0, 160),
+                        );
+                    }
+                }
+            }
+        }
+
+        // Highlight the scroll window if layer is enabled
+        if enabled {
+            let viewport_width = 256.0;
+            let viewport_height = 224.0;
+
+            // Calculate scroll position in tilemap space
+            let scroll_x_pixel = (scroll_x as f32) % (tilemap_width as f32 * 8.0);
+            let scroll_y_pixel = (scroll_y as f32) % (tilemap_height as f32 * 8.0);
+
+            // Convert to screen coordinates
+            let scroll_screen_x = rect.min.x + scroll_x_pixel * scale;
+            let scroll_screen_y = tilemap_start_y + scroll_y_pixel * scale;
+
+            let viewport_width_scaled = viewport_width * scale;
+            let viewport_height_scaled = viewport_height * scale;
+
+            // Check if the window wraps around
+            let wraps_x = scroll_x_pixel + viewport_width > tilemap_width as f32 * 8.0;
+            let wraps_y = scroll_y_pixel + viewport_height > tilemap_height as f32 * 8.0;
+
+            // Helper function to draw a scroll window rectangle segment
+            let draw_scroll_rect = |painter: &egui::Painter, x: f32, y: f32, w: f32, h: f32| {
+                let rect = egui::Rect::from_min_size(egui::Pos2::new(x, y), egui::Vec2::new(w, h));
+                painter.rect_stroke(
+                    rect,
+                    0.0,
+                    egui::Stroke::new(2.0, egui::Color32::from_rgba_unmultiplied(255, 255, 0, 200)),
+                    egui::StrokeKind::Outside,
+                );
+                painter.rect_filled(
+                    rect,
+                    0.0,
+                    egui::Color32::from_rgba_unmultiplied(255, 255, 0, 20),
+                );
+            };
+
+            // Draw the scroll window, handling wrapping
+            match (wraps_x, wraps_y) {
+                (false, false) => {
+                    // No wrapping - draw single rectangle
+                    draw_scroll_rect(
+                        &painter,
+                        scroll_screen_x,
+                        scroll_screen_y,
+                        viewport_width_scaled,
+                        viewport_height_scaled,
+                    );
+                }
+                (true, false) => {
+                    // Wraps horizontally
+                    let right_width = tilemap_pixel_width - scroll_screen_x + rect.min.x;
+                    let left_width = viewport_width_scaled - right_width;
+                    draw_scroll_rect(
+                        &painter,
+                        scroll_screen_x,
+                        scroll_screen_y,
+                        right_width,
+                        viewport_height_scaled,
+                    );
+                    draw_scroll_rect(
+                        &painter,
+                        rect.min.x,
+                        scroll_screen_y,
+                        left_width,
+                        viewport_height_scaled,
+                    );
+                }
+                (false, true) => {
+                    // Wraps vertically
+                    let bottom_height = tilemap_pixel_height - scroll_screen_y + tilemap_start_y;
+                    let top_height = viewport_height_scaled - bottom_height;
+                    draw_scroll_rect(
+                        &painter,
+                        scroll_screen_x,
+                        scroll_screen_y,
+                        viewport_width_scaled,
+                        bottom_height,
+                    );
+                    draw_scroll_rect(
+                        &painter,
+                        scroll_screen_x,
+                        tilemap_start_y,
+                        viewport_width_scaled,
+                        top_height,
+                    );
+                }
+                (true, true) => {
+                    // Wraps both ways - draw 4 rectangles
+                    let right_width = tilemap_pixel_width - scroll_screen_x + rect.min.x;
+                    let left_width = viewport_width_scaled - right_width;
+                    let bottom_height = tilemap_pixel_height - scroll_screen_y + tilemap_start_y;
+                    let top_height = viewport_height_scaled - bottom_height;
+
+                    draw_scroll_rect(
+                        &painter,
+                        scroll_screen_x,
+                        scroll_screen_y,
+                        right_width,
+                        bottom_height,
+                    );
+                    draw_scroll_rect(
+                        &painter,
+                        rect.min.x,
+                        scroll_screen_y,
+                        left_width,
+                        bottom_height,
+                    );
+                    draw_scroll_rect(
+                        &painter,
+                        scroll_screen_x,
+                        tilemap_start_y,
+                        right_width,
+                        top_height,
+                    );
+                    draw_scroll_rect(
+                        &painter,
+                        rect.min.x,
+                        tilemap_start_y,
+                        left_width,
+                        top_height,
+                    );
+                }
+            }
+        }
+
+        // Draw tilemap border
+        let tilemap_rect = egui::Rect::from_min_size(
+            egui::Pos2::new(rect.min.x, tilemap_start_y),
+            egui::Vec2::new(tilemap_pixel_width, tilemap_pixel_height),
+        );
+        painter.rect_stroke(
+            tilemap_rect,
+            0.0,
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 100, 120)),
+            egui::StrokeKind::Outside,
+        );
+    }
+
+    /// Render a single 2bpp SNES tile
+    #[allow(clippy::too_many_arguments)]
+    fn render_snes_tile_2bpp(
+        &self,
+        painter: &egui::Painter,
+        data: &SnesTileData,
+        chr_addr: usize,
+        screen_x: f32,
+        screen_y: f32,
+        scale: f32,
+        palette: usize,
+        flip_x: bool,
+        flip_y: bool,
+    ) {
+        // 2bpp: 2 bitplanes, 16 bytes per tile
+        for py in 0..8 {
+            let y = if flip_y { 7 - py } else { py };
+            let plane0_addr = chr_addr + y * 2;
+            let plane1_addr = chr_addr + y * 2 + 1;
+
+            if plane1_addr >= data.vram.len() {
+                continue;
+            }
+
+            let plane0 = data.vram[plane0_addr];
+            let plane1 = data.vram[plane1_addr];
+
+            for px in 0..8 {
+                let x = if flip_x { 7 - px } else { px };
+                let bit0 = (plane0 >> (7 - x)) & 1;
+                let bit1 = (plane1 >> (7 - x)) & 1;
+                let color_idx = ((bit1 << 1) | bit0) as usize;
+
+                // Get color from palette
+                let pal_offset = palette * 4 + color_idx;
+                if pal_offset >= data.palette.len() {
+                    continue;
+                }
+
+                let rgb = data.palette[pal_offset];
+                let r = ((rgb >> 16) & 0xFF) as u8;
+                let g = ((rgb >> 8) & 0xFF) as u8;
+                let b = (rgb & 0xFF) as u8;
+                let color = egui::Color32::from_rgb(r, g, b);
+
+                let pixel_rect = egui::Rect::from_min_size(
+                    egui::Pos2::new(screen_x + px as f32 * scale, screen_y + py as f32 * scale),
+                    egui::Vec2::new(scale, scale),
+                );
+                painter.rect_filled(pixel_rect, 0.0, color);
+            }
+        }
+    }
+
+    /// Render a single 4bpp SNES tile
+    #[allow(clippy::too_many_arguments)]
+    fn render_snes_tile_4bpp(
+        &self,
+        painter: &egui::Painter,
+        data: &SnesTileData,
+        chr_addr: usize,
+        screen_x: f32,
+        screen_y: f32,
+        scale: f32,
+        palette: usize,
+        flip_x: bool,
+        flip_y: bool,
+    ) {
+        // 4bpp: 4 bitplanes, 32 bytes per tile
+        // Layout: 8 rows * 2 bytes (plane 0-1), then 8 rows * 2 bytes (plane 2-3)
+        for py in 0..8 {
+            let y = if flip_y { 7 - py } else { py };
+            let plane0_addr = chr_addr + y * 2;
+            let plane1_addr = chr_addr + y * 2 + 1;
+            let plane2_addr = chr_addr + 16 + y * 2;
+            let plane3_addr = chr_addr + 16 + y * 2 + 1;
+
+            if plane3_addr >= data.vram.len() {
+                continue;
+            }
+
+            let plane0 = data.vram[plane0_addr];
+            let plane1 = data.vram[plane1_addr];
+            let plane2 = data.vram[plane2_addr];
+            let plane3 = data.vram[plane3_addr];
+
+            for px in 0..8 {
+                let x = if flip_x { 7 - px } else { px };
+                let bit0 = (plane0 >> (7 - x)) & 1;
+                let bit1 = (plane1 >> (7 - x)) & 1;
+                let bit2 = (plane2 >> (7 - x)) & 1;
+                let bit3 = (plane3 >> (7 - x)) & 1;
+                let color_idx = ((bit3 << 3) | (bit2 << 2) | (bit1 << 1) | bit0) as usize;
+
+                // Get color from palette (16 colors per palette for 4bpp)
+                let pal_offset = palette * 16 + color_idx;
+                if pal_offset >= data.palette.len() {
+                    continue;
+                }
+
+                let rgb = data.palette[pal_offset];
+                let r = ((rgb >> 16) & 0xFF) as u8;
+                let g = ((rgb >> 8) & 0xFF) as u8;
+                let b = (rgb & 0xFF) as u8;
+                let color = egui::Color32::from_rgb(r, g, b);
+
+                let pixel_rect = egui::Rect::from_min_size(
+                    egui::Pos2::new(screen_x + px as f32 * scale, screen_y + py as f32 * scale),
+                    egui::Vec2::new(scale, scale),
+                );
+                painter.rect_filled(pixel_rect, 0.0, color);
+            }
+        }
+    }
+
+    /// Render a single 8bpp SNES tile
+    #[allow(clippy::too_many_arguments)]
+    fn render_snes_tile_8bpp(
+        &self,
+        painter: &egui::Painter,
+        data: &SnesTileData,
+        chr_addr: usize,
+        screen_x: f32,
+        screen_y: f32,
+        scale: f32,
+        _palette: usize,
+        flip_x: bool,
+        flip_y: bool,
+    ) {
+        // 8bpp: 8 bitplanes, 64 bytes per tile
+        // Layout: 8 rows * 2 bytes (plane 0-1), 8 rows * 2 bytes (plane 2-3),
+        //         8 rows * 2 bytes (plane 4-5), 8 rows * 2 bytes (plane 6-7)
+        for py in 0..8 {
+            let y = if flip_y { 7 - py } else { py };
+            let plane0_addr = chr_addr + y * 2;
+            let plane1_addr = chr_addr + y * 2 + 1;
+            let plane2_addr = chr_addr + 16 + y * 2;
+            let plane3_addr = chr_addr + 16 + y * 2 + 1;
+            let plane4_addr = chr_addr + 32 + y * 2;
+            let plane5_addr = chr_addr + 32 + y * 2 + 1;
+            let plane6_addr = chr_addr + 48 + y * 2;
+            let plane7_addr = chr_addr + 48 + y * 2 + 1;
+
+            if plane7_addr >= data.vram.len() {
+                continue;
+            }
+
+            let plane0 = data.vram[plane0_addr];
+            let plane1 = data.vram[plane1_addr];
+            let plane2 = data.vram[plane2_addr];
+            let plane3 = data.vram[plane3_addr];
+            let plane4 = data.vram[plane4_addr];
+            let plane5 = data.vram[plane5_addr];
+            let plane6 = data.vram[plane6_addr];
+            let plane7 = data.vram[plane7_addr];
+
+            for px in 0..8 {
+                let x = if flip_x { 7 - px } else { px };
+                let bit0 = (plane0 >> (7 - x)) & 1;
+                let bit1 = (plane1 >> (7 - x)) & 1;
+                let bit2 = (plane2 >> (7 - x)) & 1;
+                let bit3 = (plane3 >> (7 - x)) & 1;
+                let bit4 = (plane4 >> (7 - x)) & 1;
+                let bit5 = (plane5 >> (7 - x)) & 1;
+                let bit6 = (plane6 >> (7 - x)) & 1;
+                let bit7 = (plane7 >> (7 - x)) & 1;
+                let color_idx = ((bit7 << 7)
+                    | (bit6 << 6)
+                    | (bit5 << 5)
+                    | (bit4 << 4)
+                    | (bit3 << 3)
+                    | (bit2 << 2)
+                    | (bit1 << 1)
+                    | bit0) as usize;
+
+                // 8bpp uses all 256 colors directly
+                if color_idx >= data.palette.len() {
+                    continue;
+                }
+
+                let rgb = data.palette[color_idx];
+                let r = ((rgb >> 16) & 0xFF) as u8;
+                let g = ((rgb >> 8) & 0xFF) as u8;
+                let b = (rgb & 0xFF) as u8;
+                let color = egui::Color32::from_rgb(r, g, b);
+
+                let pixel_rect = egui::Rect::from_min_size(
+                    egui::Pos2::new(screen_x + px as f32 * scale, screen_y + py as f32 * scale),
+                    egui::Vec2::new(scale, scale),
+                );
+                painter.rect_filled(pixel_rect, 0.0, color);
             }
         }
     }

@@ -94,6 +94,36 @@ pub struct TileViewerData {
     pub bg_mode: u8,
     /// Screen enable status
     pub screen_enabled: bool,
+    /// BG1 tilemap config ($2107)
+    pub bg1sc: u8,
+    /// BG2 tilemap config ($2108)
+    pub bg2sc: u8,
+    /// BG3 tilemap config ($2109)
+    pub bg3sc: u8,
+    /// BG4 tilemap config ($210A)
+    pub bg4sc: u8,
+    /// BG1/2 character base addresses ($210B)
+    pub bg12nba: u8,
+    /// BG3/4 character base addresses ($210C)
+    pub bg34nba: u8,
+    /// BG1 horizontal scroll
+    pub bg1_hofs: u16,
+    /// BG1 vertical scroll
+    pub bg1_vofs: u16,
+    /// BG2 horizontal scroll
+    pub bg2_hofs: u16,
+    /// BG2 vertical scroll
+    pub bg2_vofs: u16,
+    /// BG3 horizontal scroll
+    pub bg3_hofs: u16,
+    /// BG3 vertical scroll
+    pub bg3_vofs: u16,
+    /// BG4 horizontal scroll
+    pub bg4_hofs: u16,
+    /// BG4 vertical scroll
+    pub bg4_vofs: u16,
+    /// Main screen designation ($212C)
+    pub tm: u8,
 }
 
 /// Cartridge information for the inspector tab
@@ -1090,5 +1120,49 @@ mod cartridge_info_tests {
 
         // Verify info is cleared
         assert!(sys.get_cartridge_info().is_none());
+    }
+
+    #[test]
+    fn test_tile_viewer_data_fields() {
+        let mut sys = SnesSystem::new();
+
+        // Load a test ROM
+        let rom_data = include_bytes!("../../../../test_roms/snes/test.sfc");
+        sys.mount("Cartridge", rom_data)
+            .expect("Failed to mount cartridge");
+
+        // Run a frame to initialize PPU state
+        let _ = sys.step_frame();
+
+        // Get tile viewer data
+        let tile_data = sys.get_tile_viewer_data();
+
+        // Verify VRAM is populated
+        assert_eq!(tile_data.vram.len(), 64 * 1024); // 64KB VRAM
+
+        // Verify CGRAM is populated
+        assert_eq!(tile_data.cgram.len(), 512); // 512 bytes CGRAM
+
+        // Verify OAM is populated
+        assert_eq!(tile_data.oam.len(), 544); // 544 bytes OAM
+
+        // Verify palette is populated with 256 colors
+        assert_eq!(tile_data.palette.len(), 256);
+
+        // Verify BG mode is in valid range
+        assert!(tile_data.bg_mode <= 7);
+
+        // Verify scroll registers are 10-bit values (0-1023)
+        assert!(tile_data.bg1_hofs <= 1023);
+        assert!(tile_data.bg1_vofs <= 1023);
+        assert!(tile_data.bg2_hofs <= 1023);
+        assert!(tile_data.bg2_vofs <= 1023);
+        assert!(tile_data.bg3_hofs <= 1023);
+        assert!(tile_data.bg3_vofs <= 1023);
+        assert!(tile_data.bg4_hofs <= 1023);
+        assert!(tile_data.bg4_vofs <= 1023);
+
+        // Verify TM register (main screen designation)
+        assert!(tile_data.tm <= 0x1F); // Only bits 0-4 are valid
     }
 }
