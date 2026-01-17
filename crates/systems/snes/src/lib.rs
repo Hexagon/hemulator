@@ -151,7 +151,6 @@ pub struct SnesSystem {
 // For timing purposes, we use approximate cycle counts that work well for most games:
 const SNES_FRAME_CYCLES: u32 = 89342; // Approximate CPU cycles per frame (~60 Hz)
 const SNES_SCANLINE_CYCLES: u32 = 341; // Approximate CPU cycles per scanline
-const SNES_VISIBLE_SCANLINES: u32 = 224; // Visible scanlines (standard, not overscan)
 
 impl SnesSystem {
     /// Create a new SNES system
@@ -279,8 +278,12 @@ impl System for SnesSystem {
         // Initialize HDMA at start of frame
         self.cpu.bus_mut().init_hdma();
 
-        // Execute CPU cycles for visible scanlines, with HDMA during H-blank
-        for scanline in 0..SNES_VISIBLE_SCANLINES {
+        // Execute CPU cycles for all scanlines before VBlank
+        // Reference: VBlank starts at scanline $E1 (225) or $F0 (240) depending on $2133 bit 2
+        // We use 225 as the standard configuration (224 visible + 1 post-render scanline)
+        const VBLANK_START_SCANLINE: u32 = 225;
+        
+        for scanline in 0..VBLANK_START_SCANLINE {
             let scanline_target = (scanline + 1) * SNES_SCANLINE_CYCLES;
 
             // Active display starts at the beginning of each scanline
@@ -298,6 +301,7 @@ impl System for SnesSystem {
             }
 
             // Execute CPU until end of active display portion of scanline
+            // Only render on visible scanlines (0-223, total 224 scanlines)
             while self.current_cycles < scanline_target.saturating_sub(40) {
                 let pc_before = ((self.cpu.cpu.pbr as u32) << 16) | (self.cpu.cpu.pc as u32);
                 self.cpu.bus_mut().set_last_cpu_pc(pc_before);
@@ -341,10 +345,14 @@ impl System for SnesSystem {
             }
         }
 
-        // Render frame at end of visible scanlines
+        // Render frame at end of visible scanlines (scanlines 0-223)
+        // Reference: PPU outputs pixels for scanlines 1-224 (or 1-239 with overscan)
+        // In 0-based indexing, that's scanlines 0-223 for standard 224-line mode
         self.renderer.render_frame(self.cpu.bus_mut().ppu_mut());
 
-        // Enter VBlank and trigger NMI if enabled
+        // Enter VBlank at start of scanline 225 ($E1)
+        // Reference: "V-Blank begins on scanline $E1 or $F0, at H=0"
+        // NMI triggers at H=0.5 (approximately half a dot into the scanline)
         self.cpu.bus_mut().ppu_mut().set_vblank(true);
         log(LogCategory::PPU, LogLevel::Debug, || {
             format!(
@@ -394,7 +402,8 @@ impl System for SnesSystem {
             }
         }
 
-        // Clear VBlank at end of frame
+        // Clear VBlank and NMI flag at start of new frame (V=0 H=0)
+        // Reference: "The internal timer sets its NMI output high at H=0 V=0"
         self.cpu.bus_mut().ppu_mut().set_vblank(false);
         log(LogCategory::PPU, LogLevel::Trace, || {
             "SNES: Frame end, VBlank cleared".to_string()
