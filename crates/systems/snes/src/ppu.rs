@@ -1347,43 +1347,57 @@ impl Ppu {
     ) {
         match bg_mode {
             // Mode 0: 4 BG layers, 2bpp each
+            // Priority order (back to front, per superfamicom wiki):
+            // backdrop -> BG4.0 -> BG3.0 -> OBJ.0 -> BG4.1 -> BG3.1 -> OBJ.1 ->
+            // BG2.0 -> BG1.0 -> OBJ.2 -> BG2.1 -> BG1.1 -> OBJ.3
             0 => {
-                // Render priority 0 BG layers
+                // 1. BG4 priority 0 (lowest)
                 if layer_enable & 0x08 != 0 {
                     self.render_bg_layer_2bpp_priority(frame, priority_buffer, layer_buffer, 3, 0);
                 }
+                // 2. BG3 priority 0
                 if layer_enable & 0x04 != 0 {
                     self.render_bg_layer_2bpp_priority(frame, priority_buffer, layer_buffer, 2, 0);
                 }
-                if layer_enable & 0x02 != 0 {
-                    self.render_bg_layer_2bpp_priority(frame, priority_buffer, layer_buffer, 1, 0);
-                }
-                if layer_enable & 0x01 != 0 {
-                    self.render_bg_layer_2bpp_priority(frame, priority_buffer, layer_buffer, 0, 0);
-                }
-
-                // Render sprites with priority 0-1
+                // 3. OBJ priority 0
                 if layer_enable & 0x10 != 0 {
-                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 0, 1);
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 0, 0);
                 }
-
-                // Render priority 1 BG layers
+                // 4. BG4 priority 1
                 if layer_enable & 0x08 != 0 {
                     self.render_bg_layer_2bpp_priority(frame, priority_buffer, layer_buffer, 3, 1);
                 }
+                // 5. BG3 priority 1
                 if layer_enable & 0x04 != 0 {
                     self.render_bg_layer_2bpp_priority(frame, priority_buffer, layer_buffer, 2, 1);
                 }
+                // 6. OBJ priority 1
+                if layer_enable & 0x10 != 0 {
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 1, 1);
+                }
+                // 7. BG2 priority 0
+                if layer_enable & 0x02 != 0 {
+                    self.render_bg_layer_2bpp_priority(frame, priority_buffer, layer_buffer, 1, 0);
+                }
+                // 8. BG1 priority 0
+                if layer_enable & 0x01 != 0 {
+                    self.render_bg_layer_2bpp_priority(frame, priority_buffer, layer_buffer, 0, 0);
+                }
+                // 9. OBJ priority 2
+                if layer_enable & 0x10 != 0 {
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 2, 2);
+                }
+                // 10. BG2 priority 1
                 if layer_enable & 0x02 != 0 {
                     self.render_bg_layer_2bpp_priority(frame, priority_buffer, layer_buffer, 1, 1);
                 }
+                // 11. BG1 priority 1
                 if layer_enable & 0x01 != 0 {
                     self.render_bg_layer_2bpp_priority(frame, priority_buffer, layer_buffer, 0, 1);
                 }
-
-                // Render sprites with priority 2-3
+                // 12. OBJ priority 3 (highest)
                 if layer_enable & 0x10 != 0 {
-                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 2, 3);
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 3, 3);
                 }
             }
             // Mode 1: 2 BG layers (4bpp) + 1 BG layer (2bpp)
@@ -1391,7 +1405,12 @@ impl Ppu {
                 let bg3_priority = (self.bgmode & 0x08) != 0;
 
                 if bg3_priority {
-                    // BG3 high priority mode - render BG3 with all sprites
+                    // BG3 high priority mode for Mode 1
+                    // When bit 3 of BGMODE is set, BG3 priority 1 becomes the highest priority
+                    // Priority order (back to front):
+                    // BG3.0 -> BG2.0 -> BG1.0 -> OBJ.0 -> OBJ.1 -> BG3.1 -> BG2.1 -> BG1.1 -> OBJ.2 -> OBJ.3
+
+                    // 1. BG3 priority 0
                     if layer_enable & 0x04 != 0 {
                         self.render_bg_layer_2bpp_priority(
                             frame,
@@ -1401,6 +1420,7 @@ impl Ppu {
                             0,
                         );
                     }
+                    // 2. BG2 priority 0
                     if layer_enable & 0x02 != 0 {
                         self.render_bg_layer_4bpp_priority(
                             frame,
@@ -1410,6 +1430,7 @@ impl Ppu {
                             0,
                         );
                     }
+                    // 3. BG1 priority 0
                     if layer_enable & 0x01 != 0 {
                         self.render_bg_layer_4bpp_priority(
                             frame,
@@ -1419,11 +1440,15 @@ impl Ppu {
                             0,
                         );
                     }
-
+                    // 4. OBJ priority 0
                     if layer_enable & 0x10 != 0 {
-                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 0, 1);
+                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 0, 0);
                     }
-
+                    // 5. OBJ priority 1
+                    if layer_enable & 0x10 != 0 {
+                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 1, 1);
+                    }
+                    // 6. BG3 priority 1 (high priority mode - appears in middle)
                     if layer_enable & 0x04 != 0 {
                         self.render_bg_layer_2bpp_priority(
                             frame,
@@ -1433,6 +1458,7 @@ impl Ppu {
                             1,
                         );
                     }
+                    // 7. BG2 priority 1
                     if layer_enable & 0x02 != 0 {
                         self.render_bg_layer_4bpp_priority(
                             frame,
@@ -1442,6 +1468,7 @@ impl Ppu {
                             1,
                         );
                     }
+                    // 8. BG1 priority 1
                     if layer_enable & 0x01 != 0 {
                         self.render_bg_layer_4bpp_priority(
                             frame,
@@ -1451,14 +1478,22 @@ impl Ppu {
                             1,
                         );
                     }
-
+                    // 9. OBJ priority 2
                     if layer_enable & 0x10 != 0 {
-                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 2, 3);
+                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 2, 2);
+                    }
+                    // 10. OBJ priority 3
+                    if layer_enable & 0x10 != 0 {
+                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 3, 3);
                     }
                 } else {
-                    // Normal priority mode
-                    // Priority order (back to front): 3L S0 S1 2L 1L S2 2H 1H S3 3H
-                    // Render 3L (BG3 priority 0) first - furthest back
+                    // Normal priority mode for Mode 1
+                    // Priority order (back to front, per superfamicom wiki):
+                    // backdrop -> BG3.0 -> OBJ.0 -> OBJ.1 -> BG2.0 -> BG1.0 -> OBJ.2 -> BG2.1 -> BG1.1 -> OBJ.3 -> BG3.1
+                    //
+                    // Render in order from back to front (painter's algorithm)
+
+                    // 1. BG3 priority 0 (lowest, furthest back)
                     if layer_enable & 0x04 != 0 {
                         self.render_bg_layer_2bpp_priority(
                             frame,
@@ -1469,10 +1504,17 @@ impl Ppu {
                         );
                     }
 
+                    // 2. OBJ priority 0
                     if layer_enable & 0x10 != 0 {
-                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 0, 1);
+                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 0, 0);
                     }
 
+                    // 3. OBJ priority 1
+                    if layer_enable & 0x10 != 0 {
+                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 1, 1);
+                    }
+
+                    // 4. BG2 priority 0
                     if layer_enable & 0x02 != 0 {
                         self.render_bg_layer_4bpp_priority(
                             frame,
@@ -1482,6 +1524,8 @@ impl Ppu {
                             0,
                         );
                     }
+
+                    // 5. BG1 priority 0
                     if layer_enable & 0x01 != 0 {
                         self.render_bg_layer_4bpp_priority(
                             frame,
@@ -1492,10 +1536,12 @@ impl Ppu {
                         );
                     }
 
+                    // 6. OBJ priority 2
                     if layer_enable & 0x10 != 0 {
-                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 1, 2);
+                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 2, 2);
                     }
 
+                    // 7. BG2 priority 1
                     if layer_enable & 0x02 != 0 {
                         self.render_bg_layer_4bpp_priority(
                             frame,
@@ -1505,6 +1551,8 @@ impl Ppu {
                             1,
                         );
                     }
+
+                    // 8. BG1 priority 1
                     if layer_enable & 0x01 != 0 {
                         self.render_bg_layer_4bpp_priority(
                             frame,
@@ -1515,11 +1563,12 @@ impl Ppu {
                         );
                     }
 
+                    // 9. OBJ priority 3
                     if layer_enable & 0x10 != 0 {
-                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 2, 3);
+                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 3, 3);
                     }
 
-                    // Render 3H (BG3 priority 1) - on top
+                    // 10. BG3 priority 1 (highest, on top)
                     if layer_enable & 0x04 != 0 {
                         self.render_bg_layer_2bpp_priority(
                             frame,
@@ -1532,135 +1581,203 @@ impl Ppu {
                 }
             }
             // Mode 2: 2 BG layers, both 4bpp
+            // Priority order (back to front): BG2.0 -> BG1.0 -> OBJ.0 -> OBJ.1 -> BG2.1 -> BG1.1 -> OBJ.2 -> OBJ.3
             2 => {
+                // 1. BG2 priority 0
                 if layer_enable & 0x02 != 0 {
                     self.render_bg_layer_4bpp_priority(frame, priority_buffer, layer_buffer, 1, 0);
                 }
+                // 2. BG1 priority 0
                 if layer_enable & 0x01 != 0 {
                     self.render_bg_layer_4bpp_priority(frame, priority_buffer, layer_buffer, 0, 0);
                 }
-
+                // 3. OBJ priority 0
                 if layer_enable & 0x10 != 0 {
-                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 0, 1);
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 0, 0);
                 }
-
+                // 4. OBJ priority 1
+                if layer_enable & 0x10 != 0 {
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 1, 1);
+                }
+                // 5. BG2 priority 1
                 if layer_enable & 0x02 != 0 {
                     self.render_bg_layer_4bpp_priority(frame, priority_buffer, layer_buffer, 1, 1);
                 }
+                // 6. BG1 priority 1
                 if layer_enable & 0x01 != 0 {
                     self.render_bg_layer_4bpp_priority(frame, priority_buffer, layer_buffer, 0, 1);
                 }
-
+                // 7. OBJ priority 2
                 if layer_enable & 0x10 != 0 {
-                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 2, 3);
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 2, 2);
+                }
+                // 8. OBJ priority 3
+                if layer_enable & 0x10 != 0 {
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 3, 3);
                 }
             }
             // Mode 3: BG1 8bpp, BG2 4bpp
+            // Priority order similar to Mode 2
             3 => {
+                // 1. BG2 priority 0
                 if layer_enable & 0x02 != 0 {
                     self.render_bg_layer_4bpp_priority(frame, priority_buffer, layer_buffer, 1, 0);
                 }
+                // 2. BG1 priority 0
                 if layer_enable & 0x01 != 0 {
                     self.render_bg_layer_8bpp_priority(frame, priority_buffer, layer_buffer, 0, 0);
                 }
-
+                // 3. OBJ priority 0
                 if layer_enable & 0x10 != 0 {
-                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 0, 1);
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 0, 0);
                 }
-
+                // 4. OBJ priority 1
+                if layer_enable & 0x10 != 0 {
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 1, 1);
+                }
+                // 5. BG2 priority 1
                 if layer_enable & 0x02 != 0 {
                     self.render_bg_layer_4bpp_priority(frame, priority_buffer, layer_buffer, 1, 1);
                 }
+                // 6. BG1 priority 1
                 if layer_enable & 0x01 != 0 {
                     self.render_bg_layer_8bpp_priority(frame, priority_buffer, layer_buffer, 0, 1);
                 }
-
+                // 7. OBJ priority 2
                 if layer_enable & 0x10 != 0 {
-                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 2, 3);
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 2, 2);
+                }
+                // 8. OBJ priority 3
+                if layer_enable & 0x10 != 0 {
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 3, 3);
                 }
             }
             // Mode 4: BG1 8bpp, BG2 2bpp
+            // Priority order similar to Mode 2
             4 => {
+                // 1. BG2 priority 0
                 if layer_enable & 0x02 != 0 {
                     self.render_bg_layer_2bpp_priority(frame, priority_buffer, layer_buffer, 1, 0);
                 }
+                // 2. BG1 priority 0
                 if layer_enable & 0x01 != 0 {
                     self.render_bg_layer_8bpp_priority(frame, priority_buffer, layer_buffer, 0, 0);
                 }
-
+                // 3. OBJ priority 0
                 if layer_enable & 0x10 != 0 {
-                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 0, 1);
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 0, 0);
                 }
-
+                // 4. OBJ priority 1
+                if layer_enable & 0x10 != 0 {
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 1, 1);
+                }
+                // 5. BG2 priority 1
                 if layer_enable & 0x02 != 0 {
                     self.render_bg_layer_2bpp_priority(frame, priority_buffer, layer_buffer, 1, 1);
                 }
+                // 6. BG1 priority 1
                 if layer_enable & 0x01 != 0 {
                     self.render_bg_layer_8bpp_priority(frame, priority_buffer, layer_buffer, 0, 1);
                 }
-
+                // 7. OBJ priority 2
                 if layer_enable & 0x10 != 0 {
-                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 2, 3);
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 2, 2);
+                }
+                // 8. OBJ priority 3
+                if layer_enable & 0x10 != 0 {
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 3, 3);
                 }
             }
             // Mode 5: 2 BG layers, hi-res
+            // Priority order similar to Mode 2
             5 => {
+                // 1. BG2 priority 0
                 if layer_enable & 0x02 != 0 {
                     self.render_bg_layer_2bpp_hires(frame, priority_buffer, layer_buffer, 1, 0);
                 }
+                // 2. BG1 priority 0
                 if layer_enable & 0x01 != 0 {
                     self.render_bg_layer_4bpp_hires(frame, priority_buffer, layer_buffer, 0, 0);
                 }
-
+                // 3. OBJ priority 0
                 if layer_enable & 0x10 != 0 {
-                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 0, 1);
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 0, 0);
                 }
-
+                // 4. OBJ priority 1
+                if layer_enable & 0x10 != 0 {
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 1, 1);
+                }
+                // 5. BG2 priority 1
                 if layer_enable & 0x02 != 0 {
                     self.render_bg_layer_2bpp_hires(frame, priority_buffer, layer_buffer, 1, 1);
                 }
+                // 6. BG1 priority 1
                 if layer_enable & 0x01 != 0 {
                     self.render_bg_layer_4bpp_hires(frame, priority_buffer, layer_buffer, 0, 1);
                 }
-
+                // 7. OBJ priority 2
                 if layer_enable & 0x10 != 0 {
-                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 2, 3);
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 2, 2);
+                }
+                // 8. OBJ priority 3
+                if layer_enable & 0x10 != 0 {
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 3, 3);
                 }
             }
             // Mode 6: 1 BG layer, hi-res
+            // Priority order: BG1.0 -> OBJ.0 -> OBJ.1 -> BG1.1 -> OBJ.2 -> OBJ.3
             6 => {
+                // 1. BG1 priority 0
                 if layer_enable & 0x01 != 0 {
                     self.render_bg_layer_4bpp_hires(frame, priority_buffer, layer_buffer, 0, 0);
                 }
-
+                // 2. OBJ priority 0
                 if layer_enable & 0x10 != 0 {
-                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 0, 1);
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 0, 0);
                 }
-
+                // 3. OBJ priority 1
+                if layer_enable & 0x10 != 0 {
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 1, 1);
+                }
+                // 4. BG1 priority 1
                 if layer_enable & 0x01 != 0 {
                     self.render_bg_layer_4bpp_hires(frame, priority_buffer, layer_buffer, 0, 1);
                 }
-
+                // 5. OBJ priority 2
                 if layer_enable & 0x10 != 0 {
-                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 2, 3);
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 2, 2);
+                }
+                // 6. OBJ priority 3
+                if layer_enable & 0x10 != 0 {
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 3, 3);
                 }
             }
             // Mode 7: 1 BG layer, 8bpp
+            // Priority order: BG1.0 -> OBJ.0 -> OBJ.1 -> BG1.1 -> OBJ.2 -> OBJ.3
             7 => {
+                // 1. BG1 priority 0 (Mode 7 has only BG1)
                 if layer_enable & 0x01 != 0 {
                     self.render_mode7(frame, priority_buffer, layer_buffer, 0);
                 }
-
+                // 2. OBJ priority 0
                 if layer_enable & 0x10 != 0 {
-                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 0, 1);
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 0, 0);
                 }
-
+                // 3. OBJ priority 1
+                if layer_enable & 0x10 != 0 {
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 1, 1);
+                }
+                // 4. BG1 priority 1
                 if layer_enable & 0x01 != 0 {
                     self.render_mode7(frame, priority_buffer, layer_buffer, 1);
                 }
-
+                // 5. OBJ priority 2
                 if layer_enable & 0x10 != 0 {
-                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 2, 3);
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 2, 2);
+                }
+                // 6. OBJ priority 3
+                if layer_enable & 0x10 != 0 {
+                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 3, 3);
                 }
             }
             _ => {
@@ -3390,9 +3507,16 @@ impl Ppu {
         let tiles_wide = width / 8;
         let tiles_high = height / 8;
 
-        // Calculate rendering priority (0-7 scale)
-        // Sprite priority 0-1 = priority level 2, Sprite priority 2-3 = priority level 4
-        let render_priority = if sprite_priority < 2 { 2 } else { 4 };
+        // Calculate rendering priority
+        // Since we use painter's algorithm (back to front rendering), we need distinct
+        // priority values for each OBJ priority level. The render_priority only needs
+        // to be > priority_buffer value to paint over, so we just need monotonically
+        // increasing values. Using sprite_priority + 2 gives us values 2-5 for OBJ
+        // priorities 0-3, which works with BG priorities of 1 (BG.0) and 3 (BG.1).
+        // Actually, since we now render in proper order (back to front), the priority
+        // buffer comparison ensures correct layering, so any non-zero value works.
+        // We use sprite_priority + 2 to keep OBJ distinct from BG (which uses 1 and 3).
+        let render_priority = sprite_priority + 2;
 
         // Calculate base address for this sprite's tiles
         // If nameselect is set, add the gap to access second sprite page
