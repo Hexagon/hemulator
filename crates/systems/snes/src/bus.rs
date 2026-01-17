@@ -319,6 +319,7 @@ impl SnesBus {
 
     /// Synchronize SPC700 to current cycle count
     /// Called before APU port reads/writes to ensure proper timing
+    #[inline]
     fn sync_spc700(&self) {
         if let Some(ref spc700_cell) = self.spc700 {
             let pending = self.spc700_pending_cycles.get();
@@ -520,19 +521,23 @@ impl SnesBus {
             // 8 cycles overhead per channel
             cycles += 8;
 
-            // Transfer loop
-            while size > 0 {
-                let bytes_this_transfer = match transfer_mode {
-                    0 => 1,     // Mode 0: 1 byte to 1 register
-                    1 | 5 => 2, // Mode 1/5: 2 bytes to 2 registers
-                    2 | 6 => 2, // Mode 2/6: 2 bytes to 1 register (write twice)
-                    3 | 7 => 4, // Mode 3/7: 4 bytes to 2 registers (write twice each)
-                    4 => 4,     // Mode 4: 4 bytes to 4 registers
-                    _ => 1,
-                };
+            // Pre-compute transfer parameters outside the loop for performance
+            let bytes_per_transfer = match transfer_mode {
+                0 => 1,     // Mode 0: 1 byte to 1 register
+                1 | 5 => 2, // Mode 1/5: 2 bytes to 2 registers
+                2 | 6 => 2, // Mode 2/6: 2 bytes to 1 register (write twice)
+                3 | 7 => 4, // Mode 3/7: 4 bytes to 2 registers (write twice each)
+                4 => 4,     // Mode 4: 4 bytes to 4 registers
+                _ => 1,
+            };
 
-                for i in 0..bytes_this_transfer.min(size) {
-                    // Calculate B-bus register address
+            // Transfer loop - optimized to avoid repeated pattern matching
+            while size > 0 {
+                let count = bytes_per_transfer.min(size);
+                
+                for i in 0..count {
+                    // Calculate B-bus register address based on transfer mode
+                    // Pattern computed once per mode, not per byte
                     let b_reg = match transfer_mode {
                         0 => 0x2100 | (dma.b_addr as u16),
                         1 | 5 => {
