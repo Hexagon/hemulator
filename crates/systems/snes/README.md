@@ -82,9 +82,10 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
   - 128 sprites with 4bpp (16 colors per sprite)
   - Multiple size modes (8x8, 16x16, 32x32, 64x64)
   - Priority levels (0-3)
+  - **Sprite priority rotation** (bit 7 of $2103) - allows dynamic sprite ordering
   - Hardware-accurate 32 sprites/scanline limit
   - 34 tile slots/scanline limit
-  - Reference: [Sprites](https://snes.nesdev.org/wiki/PPU_OAM)
+  - Reference: [Sprites](https://wiki.superfamicom.org/sprites)
 
 - ✅ **Scrolling** - Full background scrolling support
   - Horizontal and vertical scrolling on all BG layers
@@ -215,6 +216,9 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
     - ✅ Fixed color blending source
     - ✅ Sub-screen rendering and blending
     - ✅ Window-based color math clipping (CGWSEL bits 4-5)
+    - ✅ **Direct color mode** (CGWSEL bit 0) - for Modes 3, 4, 7
+      - Allows 2048 colors (BBGGGRRR + bgr palette bits)
+      - Used by some games for enhanced color effects
     
   - **Technical Details**:
     - Layer buffer tracks source layer for each pixel (BG1=0, BG2=1, BG3=2, BG4=3, OBJ=4, backdrop=5)
@@ -225,17 +229,14 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
     - CGWSEL prevent-math bit (bit 6) can globally disable color math
     - Window-based clipping allows selective color math by screen region
     - Blending performed in 8-bit RGB color space with proper clamping
-    
-  - **Current Limitations**:
-    - ⏳ Direct color mode not implemented (CGWSEL bits 0-1)
-      - Direct color mode is rarely used (can be enabled for Modes 3, 4, and 7)
-      - Normal palette-based rendering works for all common use cases
+    - Direct color: combines tile data (BBGGGRRR) with palette bits (bgr) → Red=RRRr0, Green=GGGg0, Blue=BBb00
     
   - **Impact on Game Compatibility**:
     - Games using color math now work correctly
     - Fade effects, transparency, and color tinting render properly
     - Sub-screen blending effects (transparencies, shadows) work correctly
     - Window-based effects (spotlight, fade regions) work correctly
+    - Direct color mode games now have correct color output
     
   - Reference: [Color Math](https://snes.nesdev.org/wiki/Color_math)
 
