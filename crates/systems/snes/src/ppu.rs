@@ -1815,6 +1815,64 @@ impl Ppu {
         block_offset + in_block_offset
     }
 
+    /// Parse tilemap entry and extract tile attributes
+    /// Returns (tile_index, palette, flip_x, flip_y, priority)
+    /// TODO: Refactor rendering functions to use this helper method to reduce code duplication
+    fn parse_tilemap_entry(&self, tilemap_addr: usize) -> (u16, usize, bool, bool, u8) {
+        if tilemap_addr + 1 >= VRAM_SIZE {
+            return (0, 0, false, false, 0);
+        }
+
+        // Read tile entry (format: vhopppcc cccccccc)
+        // v = vertical flip (bit 15 of 16-bit entry, bit 7 of tile_high)
+        // h = horizontal flip (bit 14 of 16-bit entry, bit 6 of tile_high)
+        // o = priority (bit 13 of 16-bit entry, bit 5 of tile_high)
+        // ppp = palette (bits 12-10 of 16-bit entry, bits 4-2 of tile_high)
+        // cccccccccc = tile number (bits 9-0)
+        let tile_low = self.vram[tilemap_addr];
+        let tile_high = self.vram[tilemap_addr + 1];
+
+        let tile_index = (tile_low as u16) | (((tile_high & 0x03) as u16) << 8);
+        let palette = ((tile_high >> 2) & 0x07) as usize;
+        let flip_x = (tile_high & 0x40) != 0;
+        let flip_y = (tile_high & 0x80) != 0;
+        let priority = if (tile_high & 0x20) != 0 { 1 } else { 0 };
+
+        (tile_index, palette, flip_x, flip_y, priority)
+    }
+
+    /// Calculate actual tile index and pixel position for 16x16 tiles
+    /// For 16x16 mode, each tilemap entry represents a 2x2 block of 8x8 tiles
+    /// Returns (actual_tile_index, pixel_x_in_tile, pixel_y_in_tile)
+    /// TODO: Refactor rendering functions to use this helper method to reduce code duplication
+    fn calculate_16x16_tile_info(
+        &self,
+        base_tile_index: u16,
+        pixel_x_in_metatile: usize,
+        pixel_y_in_metatile: usize,
+        flip_x: bool,
+        flip_y: bool,
+    ) -> (u16, usize, usize) {
+        // Determine which quadrant (0-3) we're in
+        let sub_x = pixel_x_in_metatile / 8; // 0 or 1
+        let sub_y = pixel_y_in_metatile / 8; // 0 or 1
+
+        // Apply flips to the quadrant selection
+        let flipped_sub_x = if flip_x { 1 - sub_x } else { sub_x };
+        let flipped_sub_y = if flip_y { 1 - sub_y } else { sub_y };
+
+        // Calculate the actual tile index
+        // Tiles are arranged as: N, N+1 (top row), N+16, N+17 (bottom row)
+        let tile_offset = flipped_sub_y * 16 + flipped_sub_x;
+        let actual_tile_index = base_tile_index + tile_offset as u16;
+
+        // Calculate pixel position within the 8x8 sub-tile
+        let px = pixel_x_in_metatile % 8;
+        let py = pixel_y_in_metatile % 8;
+
+        (actual_tile_index, px, py)
+    }
+
     /// Check if offset-per-tile mode is enabled
     /// Bit 3 of BGMODE ($2105) enables offset-per-tile for modes 2, 4, 6
     fn is_offset_per_tile_enabled(&self) -> bool {
