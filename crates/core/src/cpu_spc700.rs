@@ -15,6 +15,8 @@
 //! **References:**
 //! - https://problemkaputt.de/fullsnes.htm#snescpuspc700audiosystemapu
 //! - https://wiki.superfamicom.org/spc700-reference
+//! - https://snes.nesdev.org/wiki/S-SMP
+//! - https://snes.nesdev.org/wiki/SPC-700_instruction_set
 
 use crate::logging::{log, LogCategory, LogLevel};
 

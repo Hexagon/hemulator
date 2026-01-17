@@ -223,3 +223,5 @@ The echo protocol ensures data integrity:
 - [SPC700/IPL ROM - SnesLab](https://sneslab.net/wiki/SPC700/IPL_ROM)
 - [Anomie's SPC700 Documentation](https://github.com/gilligan/snesdev/blob/master/docs/spc700.txt)
 - [Super NES Programming/Loading SPC700 programs](https://en.wikibooks.org/wiki/Super_NES_Programming/Loading_SPC700_programs)
+- [Booting the SPC700 - SNESdev Wiki](https://snes.nesdev.org/wiki/Booting_the_SPC700)
+- [S-SMP - SNESdev Wiki](https://snes.nesdev.org/wiki/S-SMP)
