@@ -1121,4 +1121,48 @@ mod cartridge_info_tests {
         // Verify info is cleared
         assert!(sys.get_cartridge_info().is_none());
     }
+
+    #[test]
+    fn test_tile_viewer_data_fields() {
+        let mut sys = SnesSystem::new();
+
+        // Load a test ROM
+        let rom_data = include_bytes!("../../../../test_roms/snes/test.sfc");
+        sys.mount("Cartridge", rom_data)
+            .expect("Failed to mount cartridge");
+
+        // Run a frame to initialize PPU state
+        let _ = sys.step_frame();
+
+        // Get tile viewer data
+        let tile_data = sys.get_tile_viewer_data();
+
+        // Verify VRAM is populated
+        assert_eq!(tile_data.vram.len(), 64 * 1024); // 64KB VRAM
+
+        // Verify CGRAM is populated
+        assert_eq!(tile_data.cgram.len(), 512); // 512 bytes CGRAM
+
+        // Verify OAM is populated
+        assert_eq!(tile_data.oam.len(), 544); // 544 bytes OAM
+
+        // Verify palette is populated with 256 colors
+        assert_eq!(tile_data.palette.len(), 256);
+
+        // Verify BG mode is in valid range
+        assert!(tile_data.bg_mode <= 7);
+
+        // Verify scroll registers are 10-bit values (0-1023)
+        assert!(tile_data.bg1_hofs <= 1023);
+        assert!(tile_data.bg1_vofs <= 1023);
+        assert!(tile_data.bg2_hofs <= 1023);
+        assert!(tile_data.bg2_vofs <= 1023);
+        assert!(tile_data.bg3_hofs <= 1023);
+        assert!(tile_data.bg3_vofs <= 1023);
+        assert!(tile_data.bg4_hofs <= 1023);
+        assert!(tile_data.bg4_vofs <= 1023);
+
+        // Verify TM register (main screen designation)
+        assert!(tile_data.tm <= 0x1F); // Only bits 0-4 are valid
+    }
 }
