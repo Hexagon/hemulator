@@ -3334,18 +3334,22 @@ impl Ppu {
 
         for ty in 0..tiles_high {
             for tx in 0..tiles_wide {
-                // SNES sprite tile layout: tiles are arranged in COLUMN-MAJOR order
-                // For multi-tile sprites, tiles are stored in columns (top-to-bottom), then next column
-                // Example 16x16 (2x2): N, N+1 (first column), N+2, N+3 (second column)
-                // Example 32x32 (4x4): tiles N+0 to N+3 (col 0), N+4 to N+7 (col 1), etc.
+                // SNES sprite tile layout: tiles are arranged in a 16-tile wide grid
+                // Character (tile number) provides the base position in this grid
+                // For multi-tile sprites, tiles are adjacent horizontally (+1) and vertically (+16)
                 //
-                // Calculate offset from base tile: column (tx) * tiles_high + row (ty)
-                let tile_offset = tx * tiles_high + ty;
-
-                // Calculate the actual tile number and then find its position in the 16-wide VRAM grid
-                let actual_tile = (tile as usize + tile_offset) & 0x3FF; // 10-bit tile number
-                let char_x = actual_tile & 0x0F; // Position in grid (0-15)
-                let char_y = (actual_tile >> 4) & 0x0F; // Row in grid (0-15)
+                // When flipping, the tile ORDER is also reversed:
+                // - flip_x: tiles are drawn right-to-left (reverse tx)
+                // - flip_y: tiles are drawn bottom-to-top (reverse ty)
+                let actual_tx = if flip_x { tiles_wide - 1 - tx } else { tx };
+                let actual_ty = if flip_y { tiles_high - 1 - ty } else { ty };
+                
+                // Hardware behavior: The grid is 16 tiles wide (0-15) and wraps vertically
+                // - Horizontal: char_x wraps implicitly via the final & 0x0F mask in tile_index
+                // - Vertical: char_y & 0x0F explicitly wraps to keep y in range 0-15
+                // This means sprites taller than 16 tiles (128 pixels) wrap back to row 0
+                let char_x = (tile as usize & 0x0F) + actual_tx;
+                let char_y = ((tile as usize >> 4) + actual_ty) & 0x0F;
 
                 // Calculate tile address using the grid position
                 // Each tile is 32 bytes (4bpp: 8x8 pixels, 4 bits per pixel = 32 bytes)
@@ -3363,8 +3367,25 @@ impl Ppu {
                         let screen_x = x + (tx * 8) as i16 + px as i16;
                         let screen_y = y + (ty * 8) as i16 + py as i16;
 
-                        // Bounds check
-                        if !(0..256).contains(&screen_x) || !(0..224).contains(&screen_y) {
+                        // Bounds check with horizontal wrapping
+                        // SNES sprites wrap horizontally: X values 256-511 appear on left side
+                        let wrapped_x = if screen_x < 0 {
+                            // Negative values wrap from the right
+                            (screen_x + 256) as usize
+                        } else if screen_x >= 256 {
+                            // Values >= 256 wrap to the left
+                            (screen_x - 256) as usize
+                        } else {
+                            screen_x as usize
+                        };
+                        
+                        // Validate wrapped_x is in valid range
+                        if wrapped_x >= 256 {
+                            continue;
+                        }
+                        
+                        // Y doesn't wrap (only 0-223 valid)
+                        if !(0..224).contains(&screen_y) {
                             continue;
                         }
 
@@ -3413,7 +3434,8 @@ impl Ppu {
                         }
 
                         // Check window masking for sprites (layer 4)
-                        if self.is_pixel_masked_by_window(screen_x as usize, 4) {
+                        // Use wrapped_x for window check
+                        if self.is_pixel_masked_by_window(wrapped_x as usize, 4) {
                             continue;
                         }
 
@@ -3422,8 +3444,9 @@ impl Ppu {
                         let color = self.get_color(cgram_index);
 
                         // Draw pixel if it has equal or higher priority (later layers paint on top)
+                        // Use wrapped_x for frame buffer access
                         let frame_offset =
-                            screen_y as usize * frame.width as usize + screen_x as usize;
+                            screen_y as usize * frame.width as usize + wrapped_x as usize;
                         if frame_offset < frame.pixels.len()
                             && render_priority >= priority_buffer[frame_offset]
                         {
@@ -3437,7 +3460,7 @@ impl Ppu {
                                 log(LogCategory::PPU, LogLevel::Debug, || {
                                     format!(
                                         "OBJ pixel: screen=({},{}), tile_addr=${:04X}, bp=[{:02X},{:02X},{:02X},{:02X}], color_idx={}, cgram_idx={}, color=${:08X}",
-                                        screen_x, screen_y, tile_addr, bp0, bp1, bp2, bp3, color_index, cgram_index, color
+                                        wrapped_x, screen_y, tile_addr, bp0, bp1, bp2, bp3, color_index, cgram_index, color
                                     )
                                 });
                             }
