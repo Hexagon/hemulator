@@ -3114,16 +3114,20 @@ impl Ppu {
 
         for ty in 0..tiles_high {
             for tx in 0..tiles_wide {
-                // SNES sprite tile layout: tiles are arranged in a 16-tile wide grid
-                // Character (tile number) provides the base position in this grid
-                // For multi-tile sprites, tiles are adjacent horizontally (+1) and vertically (+16)
+                // SNES sprite tile layout: tiles are arranged in COLUMN-MAJOR order
+                // For multi-tile sprites, tiles are stored in columns (top-to-bottom), then next column
+                // Example 16x16 (2x2): tile+0, tile+1 (first column), tile+2, tile+3 (second column)
+                // Example 32x32 (4x4): tiles 0-3 (col 0), 4-7 (col 1), 8-11 (col 2), 12-15 (col 3)
                 //
+                // Calculate offset from base tile: column (tx) * tiles_high + row (ty)
+                let tile_offset = tx * tiles_high + ty;
+
+                // Calculate position in the 16-wide tile grid
                 // Hardware behavior: The grid is 16 tiles wide (0-15) and wraps vertically
                 // - Horizontal: char_x wraps implicitly via the final & 0x0F mask in tile_index
                 // - Vertical: char_y & 0x0F explicitly wraps to keep y in range 0-15
-                // This means sprites taller than 16 tiles (128 pixels) wrap back to row 0
-                let char_x = (tile as usize & 0x0F) + tx;
-                let char_y = ((tile as usize >> 4) + ty) & 0x0F;
+                let char_x = (tile as usize & 0x0F) + (tile_offset & 0x0F);
+                let char_y = ((tile as usize >> 4) + (tile_offset >> 4)) & 0x0F;
 
                 // Calculate tile address using the grid position
                 // Each tile is 32 bytes (4bpp: 8x8 pixels, 4 bits per pixel = 32 bytes)
