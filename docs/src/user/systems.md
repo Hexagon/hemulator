@@ -17,7 +17,7 @@ This emulator supports 10 different retro gaming systems. **NES emulation is ful
 | **SMS** | ✅ Functional | Z80 CPU, VDP, PSG, ROM banking | Test ROM, full game testing | Testing/gameplay |
 | **ColecoVision** | ✅ Functional | Z80 CPU, TMS9918A VDP, SN76489 PSG | Audio output, BIOS required, test ROM | Testing/gameplay |
 | **SG-1000** | ✅ Functional | Z80 CPU, TMS9918A VDP, SN76489 PSG | Audio output, test ROM | Testing/gameplay |
-| **SNES** | ✅ Functional (Graphics Working!) | CPU, PPU rendering, sprites, input | Audio, advanced graphics features | Playing most games (silent) |
+| **SNES** | ✅ Functional | CPU, all PPU modes 0-7, sprites, DMA/HDMA | Audio (DSP), some enhancement chips | Playing most games (silent) |
 | **N64** | 🚧 In Development | 3D rendering, CPU | Full graphics, audio, games | Development/testing |
 | **PC/DOS** | 🧪 Experimental | Multi-slot mounts, disk controller, custom BIOS, CGA/EGA/VGA | Full disk I/O, boot | Development/testing |
 
@@ -474,58 +474,61 @@ For detailed technical information, see [crates/systems/sg1000/README.md](../../
 
 ### SNES (Super Nintendo Entertainment System)
 
-**Status**: 🚧 In Development (**Graphics now working!**)  
-**Coverage**: Infrastructure in place - CPU complete, PPU functional with basic rendering
+**Status**: ✅ Functional (Graphics Working!)  
+**Coverage**: Complete CPU, comprehensive PPU with all modes 0-7, full DMA/HDMA
 
 **ROM Format**: SMC/SFC (.smc, .sfc files) - automatically detected
 
 **Features**:
-- ✅ 65C816 CPU core with 16-bit extensions (100% complete)
-- ✅ **SPC700 APU CPU** - Full audio processor implementation
+- ✅ **65C816 CPU** - Complete 16-bit CPU (256/256 opcodes, 100% complete)
+- ✅ **PPU Rendering** - All modes 0-7 fully implemented:
+  - Mode 0: 4 BG layers, 2bpp (most flexible)
+  - Mode 1: 2 BG layers 4bpp + 1 BG layer 2bpp (most common in games)
+  - Mode 2-6: Advanced features (offset-per-tile, hi-res 512px)
+  - Mode 7: Full rotation/scaling with matrix transformation
+- ✅ **Sprites** - 128 sprites, 4bpp, hardware-accurate overflow limits
+- ✅ **Advanced Graphics**:
+  - Window masking (2 independent windows with combination logic)
+  - Color math (sub-screen blending, add/subtract/half modes)
+  - Mode 7 rotation and scaling
+  - Offset-per-tile scrolling (Modes 2, 4, 6)
+  - Hi-res 512px modes (Modes 5-6)
+- ✅ **DMA/HDMA** - Complete 8-channel implementation, all transfer modes
+- ✅ **SPC700 APU CPU** - Full audio processor implementation:
   - Complete SPC700 instruction set
   - 64KB audio RAM (ARAM)
   - IPL boot ROM with upload protocol
   - Communication ports ($2140-$2143) working
   - Games can upload and execute audio drivers
-  - DSP not implemented (no sound output)
-- ✅ PPU rendering for modes 0-7 (with brightness control)
-- ✅ Background layers (BG1-4) with priority rendering
-- ✅ Sprite rendering (128 sprites, 4bpp)
-- ✅ Scrolling support (all BG layers)
-- ✅ Basic memory bus (128KB WRAM + cartridge mapping)
-- ✅ LoROM and HiROM cartridge mapping
-- ✅ SMC header detection and removal
-- ✅ Controller input (12 buttons)
-- ✅ Save states (F5/F6)
+  - ❌ DSP not implemented (no sound output)
+- ✅ **Cartridge Support**:
+  - LoROM, HiROM, and ExHiROM auto-detection
+  - SRAM save support
+  - Enhancement chips: DSP-1 (partial), SuperFX/SuperFX2 (core features)
+- ✅ **Controller** - Full 12-button support with auto-joypad read
+- ✅ **Save States** - F5-F9 for save, Shift+F5-F9 for load
 
 **Known Limitations**:
-- **Graphics**: 
-  - ⚠️ Mode 7 rotation/scaling not implemented (renders as basic 8bpp)
-  - ⚠️ Windows and color math not implemented
-  - ⚠️ Hi-res modes (512px) render at 256px
-  - ⚠️ Offset-per-tile not implemented for modes 2, 4, 6
-- **Audio**: 
-  - ✅ SPC700 APU CPU fully implemented and functional
-  - ✅ APU communication ports ($2140-$2143) working correctly
-  - ✅ 64KB audio RAM (ARAM) and IPL boot ROM implemented
-  - ✅ Games can upload audio drivers and communicate with APU
-  - ❌ DSP (Digital Signal Processor) not implemented - **silent gameplay**
+- **Audio**: SPC700 CPU fully functional but DSP not implemented - **silent gameplay**
+  - Games can upload audio drivers and communicate with APU
   - No 8-voice synthesis, ADPCM playback, or echo effects
-- **Cartridge**: 
-  - LoROM and HiROM supported
-  - ❌ No enhancement chips (SuperFX, SA-1, etc.)
-- **Input**:
-  - Controller infrastructure functional (12 buttons per controller)
-  - Auto-joypad read during VBlank
-- **Timing**: 
-  - Frame-based rendering - not cycle-accurate
-  - NTSC timing only
-- **Status**: **Playable with limitations** - Graphics now working! SPC700 APU fully functional but DSP not implemented so games run silently. Most games should display correctly (modes 0-1), but some advanced graphics features are missing.
+- **Enhancement Chips**: 
+  - DSP-1 partially implemented (missing some math operations)
+  - SuperFX/SuperFX2 core functionality implemented
+  - SA-1, S-DD1, CX4, and others not yet implemented
+- **Graphics Edge Cases**:
+  - Frame-based rendering: mid-frame register changes take effect on next frame
+  - Most games work correctly, advanced techniques may not render exactly as hardware
+- **Mosaic Effects**: Not implemented ($2106 register stubbed)
+- **Timing**: Frame-based rendering (not cycle-accurate), NTSC only
 
 **Recommended For**:
-- Testing games that don't require enhancement chips
-- Playing Mode 0/1 games (most commercial games)
-- Not recommended for games requiring audio or advanced graphics features
+- Playing most SNES games (silently)
+- Games using Modes 0-1 (vast majority of commercial titles)
+- Testing enhancement chip games (DSP-1, SuperFX)
+- Not recommended if audio is essential
+
+**See Also**: [SNES Implementation README](../../../crates/systems/snes/README.md) for technical details
 
 ### N64 (Nintendo 64)
 

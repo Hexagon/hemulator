@@ -553,10 +553,55 @@ cargo run -- game.sfc --log-bus debug
    - Games requiring unimplemented chips will not work properly
    - See Enhancement Chip Roadmap section for planned implementations
 
+## Hardware Accuracy & Edge Cases
+
+The SNES implementation handles hardware-specific behaviors and edge cases accurately:
+
+### PPU (Picture Processing Unit)
+- **OAM (Object Attribute Memory)**:
+  - Address auto-increments on write to $2104, wrapping at 544 bytes (512 main + 32 high table)
+  - Sprite priority rotation (bit 7 of $2103) correctly implemented
+  - Hardware-accurate sprite overflow limits: 32 sprites per scanline, 34 8x8 tile slots per scanline
+  - Overflow flags ($213E bits 6-7) set correctly when limits exceeded
+
+- **VRAM Access**:
+  - Prefetch buffer behavior: reading VRAM returns previously buffered value, then prefetches next
+  - Address increment modes: 1/32/128 words configurable via $2115
+  - Increment timing: after low byte or high byte write based on VMAIN bit 7
+  - Access protection: writes during active display are ignored (with logging)
+
+- **CGRAM (Color Generator RAM)**:
+  - Write latch toggles between low/high bytes on each write to $2122
+  - Address write ($2121) resets latch to low byte
+  - Read operations ($213B) do not toggle the write latch
+  - Address auto-increments only after high byte write
+
+- **Scroll Registers ($210D-$2114)**:
+  - Double-write pattern: first write sets low 8 bits, second write sets high 2 bits (10-bit total)
+  - All scroll registers share the "previous value" across writes (hardware-accurate behavior)
+  - Writing to different scroll register mid-sequence uses previous register's low byte
+
+- **Mode 7 Matrix Transformation**:
+  - 8.8 fixed-point signed values for matrix (M7A-M7D)
+  - 13-bit signed center point coordinates (M7X, M7Y)
+  - Screen over modes correctly implemented: wrap (default), transparent, tile 0
+  - Handles edge cases: zero matrices, extreme values, overflow scenarios
+
+### Frame-Based Rendering Limitations
+- **Mid-frame Changes**: Current implementation renders full frame at once, so mid-frame register changes (e.g., OAM priority rotation, window positions) take effect on next frame, not immediately
+- **Impact**: Most games work correctly, but some advanced techniques that change registers during HBlank may not render exactly as on hardware
+
+### Test Coverage
+The implementation includes comprehensive edge case tests (70+ PPU tests total):
+- OAM/VRAM/CGRAM address wraparound at boundaries
+- CGRAM read latch behavior (no toggle on read)
+- Scroll register shared latch across different registers
+- Mode 7 zero matrix, extreme center points, overflow handling
+- VRAM increment timing based on VMAIN configuration
+
 ## Additional Documentation
 
-- `EDGE_CASES_REVIEW.md` - Comprehensive review of hardware edge cases and quirks
-- `DMA_HDMA_REVIEW.md` - Details on DMA/HDMA implementation and fixes
+- `DMA_HDMA_REVIEW.md` - DMA/HDMA implementation review and verification
 - `SNES_REGISTER_FIXES.md` - Details on NMI register implementation
 - `SNES_WAI_INVESTIGATION.md` - WAI instruction debugging notes
 

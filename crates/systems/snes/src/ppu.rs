@@ -5968,8 +5968,8 @@ mod tests {
         // Write to different register (BG2H) without completing BG1H
         ppu.write_register(0x210F, 0x34); // BG2HOFS - uses 0x12 as low byte!
                                           // Hardware: second write to different register completes using previous value
-        // Note: Only 10 bits are used for scroll (bits 0-1 of high byte, all 8 bits of low byte)
-        // So 0x34 & 0x03 = 0, making the value just 0x12
+                                          // Note: Only 10 bits are used for scroll (bits 0-1 of high byte, all 8 bits of low byte)
+                                          // So 0x34 & 0x03 = 0, making the value just 0x12
         assert_eq!(
             ppu.bg2_hofs, 0x12,
             "BG2HOFS should use BG1's first write as low byte, high bits are masked"
@@ -5978,7 +5978,7 @@ mod tests {
         // Now write complete value to BG1H with high bits set
         ppu.write_register(0x210D, 0x56); // BG1HOFS low byte (new sequence)
         ppu.write_register(0x210D, 0x03); // BG1HOFS high byte (use value with bits set)
-        // 0x03 & 0x03 = 0x03, shifted left 8 = 0x300, OR with 0x56 = 0x356
+                                          // 0x03 & 0x03 = 0x03, shifted left 8 = 0x300, OR with 0x56 = 0x356
         assert_eq!(ppu.bg1_hofs, 0x356);
     }
 
