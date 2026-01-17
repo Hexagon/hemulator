@@ -272,18 +272,92 @@ impl Voice {
     }
 
     /// Start playback (key on)
-    fn key_on(&mut self) {
+    fn key_on(&mut self, sample_addr: u16) {
         self.playing = true;
         self.ended = false;
         self.position = 0;
         self.buffer_index = 0;
+        self.sample_addr = sample_addr;
         self.brr_decoder.reset();
         self.envelope.key_on();
+        self.sample_buffer = [0; 16]; // Clear sample buffer
     }
 
     /// Stop playback (key off)
     fn key_off(&mut self) {
         self.envelope.key_off();
+    }
+
+    /// Decode a BRR block from RAM into the sample buffer
+    /// Returns true if this is the last block (end flag set)
+    fn decode_brr_block(&mut self, ram: &[u8; 0x10000]) -> bool {
+        let addr = self.sample_addr as usize;
+        if addr + 8 >= 0x10000 {
+            // Invalid address, stop playback
+            self.ended = true;
+            return true;
+        }
+
+        // Read BRR block header
+        let header = ram[addr];
+        let shift = (header >> 4) & 0x0F;
+        let filter = (header >> 2) & 0x03;
+        let end_flag = (header & 0x01) != 0;
+        let loop_flag = (header & 0x02) != 0;
+
+        // Decode 16 samples (8 bytes of nibbles)
+        for i in 0..8 {
+            let byte = ram[addr + 1 + i];
+
+            // High nibble (bits 7-4)
+            let high_nibble = ((byte >> 4) as i8) << 4 >> 4; // Sign-extend 4-bit to 8-bit
+            self.sample_buffer[i * 2] = self.brr_decoder.decode_nibble(high_nibble, shift, filter);
+
+            // Low nibble (bits 3-0)
+            let low_nibble = ((byte & 0x0F) as i8) << 4 >> 4; // Sign-extend 4-bit to 8-bit
+            self.sample_buffer[i * 2 + 1] =
+                self.brr_decoder.decode_nibble(low_nibble, shift, filter);
+        }
+
+        // Advance to next block
+        self.sample_addr = self.sample_addr.wrapping_add(9);
+
+        // Handle end/loop flags
+        if end_flag {
+            if loop_flag {
+                // Loop back to loop address
+                self.sample_addr = self.loop_addr;
+            } else {
+                // End playback
+                self.ended = true;
+            }
+            return true;
+        }
+
+        false
+    }
+
+    /// Advance sample position based on pitch
+    /// Returns true if a new BRR block needs to be decoded
+    fn advance_position(&mut self) -> bool {
+        // Pitch is 14-bit, represents rate multiplier (4096 = 32kHz, same as DSP clock)
+        // Position is 16.16 fixed point
+        self.position = self.position.wrapping_add(self.pitch as u32);
+
+        // Check if we've moved to the next sample
+        let sample_index = (self.position >> 16) as usize;
+
+        if sample_index >= 16 {
+            // Wrapped past the buffer, need new BRR block
+            self.position &= 0xFFFF; // Keep fractional part
+            self.buffer_index = 0;
+            return true;
+        } else if sample_index != self.buffer_index {
+            // Moved to next sample within buffer
+            self.buffer_index = sample_index;
+        }
+
+        false
     }
 
     /// Get current sample output with interpolation
@@ -408,6 +482,28 @@ impl Dsp {
         self.ram = Some(ram);
     }
 
+    /// Read sample directory entry for a given source number
+    /// Returns (start_address, loop_address) tuple
+    fn get_sample_addresses(&self, source: u8) -> Option<(u16, u16)> {
+        let ram = unsafe { self.ram?.as_ref()? };
+
+        // Sample directory is at (sample_dir << 8), each entry is 4 bytes
+        let dir_addr = (self.sample_dir as usize) << 8;
+        let entry_addr = dir_addr + (source as usize) * 4;
+
+        if entry_addr + 3 >= 0x10000 {
+            return None;
+        }
+
+        // Read start address (16-bit little-endian)
+        let start_addr = ram[entry_addr] as u16 | ((ram[entry_addr + 1] as u16) << 8);
+
+        // Read loop address (16-bit little-endian)
+        let loop_addr = ram[entry_addr + 2] as u16 | ((ram[entry_addr + 3] as u16) << 8);
+
+        Some((start_addr, loop_addr))
+    }
+
     /// Write to a DSP register
     pub fn write_register(&mut self, addr: u8, value: u8) {
         // DSP registers are organized in groups
@@ -424,12 +520,50 @@ impl Dsp {
             0x4C => {
                 // KON - Key On
                 self.key_on = value;
+
+                // Get RAM reference for initial BRR block decode
+                let ram = if let Some(ram_ptr) = self.ram {
+                    unsafe { ram_ptr.as_ref() }
+                } else {
+                    None
+                };
+
+                // Collect sample addresses for all voices that will be keyed on
+                let mut sample_addrs: Vec<Option<(u16, u16)>> = Vec::with_capacity(8);
+                for (i, voice) in self.voices.iter().enumerate() {
+                    if value & (1 << i) != 0 {
+                        sample_addrs.push(self.get_sample_addresses(voice.source));
+                    } else {
+                        sample_addrs.push(None);
+                    }
+                }
+
+                // Now key on the voices with the collected addresses
                 for (i, voice) in self.voices.iter_mut().enumerate() {
                     if value & (1 << i) != 0 {
-                        voice.key_on();
-                        log(LogCategory::APU, LogLevel::Debug, || {
-                            format!("DSP: Voice {} key on", i)
-                        });
+                        if let Some(Some((start_addr, loop_addr))) = sample_addrs.get(i) {
+                            voice.loop_addr = *loop_addr;
+                            voice.key_on(*start_addr);
+
+                            // Decode initial BRR block
+                            if let Some(ram_ref) = ram {
+                                voice.decode_brr_block(ram_ref);
+                            }
+
+                            log(LogCategory::APU, LogLevel::Debug, || {
+                                format!(
+                                    "DSP: Voice {} key on, source={}, start=${:04X}, loop=${:04X}",
+                                    i, voice.source, start_addr, loop_addr
+                                )
+                            });
+                        } else {
+                            log(LogCategory::APU, LogLevel::Warn, || {
+                                format!(
+                                    "DSP: Voice {} key on failed - invalid sample source {}",
+                                    i, voice.source
+                                )
+                            });
+                        }
                     }
                 }
             }
@@ -548,9 +682,39 @@ impl Dsp {
             return (0, 0);
         }
 
-        // Update envelopes at 32kHz rate
-        for voice in &mut self.voices {
+        // Get RAM reference for BRR decoding
+        let ram = if let Some(ram_ptr) = self.ram {
+            unsafe { ram_ptr.as_ref() }
+        } else {
+            None
+        };
+
+        // Update each voice
+        self.endx = 0; // Clear ended flags
+        for (i, voice) in self.voices.iter_mut().enumerate() {
+            // Update envelope
             voice.envelope.clock();
+
+            // Advance sample position if voice is playing
+            if voice.playing && !voice.ended && voice.advance_position() {
+                // Need to decode next BRR block
+                if let Some(ram_ref) = ram {
+                    let is_end = voice.decode_brr_block(ram_ref);
+                    if is_end && voice.ended {
+                        // Voice reached end without loop
+                        self.endx |= 1 << i;
+                    }
+                } else {
+                    // No RAM available, stop voice
+                    voice.ended = true;
+                    self.endx |= 1 << i;
+                }
+            }
+
+            // Update ENDX flag if voice ended
+            if voice.ended {
+                self.endx |= 1 << i;
+            }
         }
 
         // Mix all voices
@@ -647,6 +811,29 @@ mod tests {
     #[test]
     fn test_dsp_key_on() {
         let mut dsp = Dsp::new();
+        
+        // Setup a minimal RAM with sample directory
+        let mut ram = Box::new([0u8; 0x10000]);
+        
+        // Setup sample directory at $0000
+        // Entry 0: start=$0100, loop=$0100
+        ram[0] = 0x00; // Start address low
+        ram[1] = 0x01; // Start address high
+        ram[2] = 0x00; // Loop address low
+        ram[3] = 0x01; // Loop address high
+        
+        // Add a minimal BRR block at $0100
+        // Header: no end flag, no loop, no filter, shift=0
+        ram[0x100] = 0x00; // No flags
+        // 8 bytes of sample data (all zeros)
+        for i in 0x101..=0x108 {
+            ram[i] = 0;
+        }
+        
+        dsp.set_ram(&*ram as *const [u8; 0x10000]);
+        
+        // Set source to 0
+        dsp.write_register(0x04, 0x00);
 
         // Key on voice 0
         dsp.write_register(0x4C, 0x01);

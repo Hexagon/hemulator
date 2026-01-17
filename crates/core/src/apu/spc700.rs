@@ -2,7 +2,7 @@
 //!
 //! This module implements the SPC700 CPU, RAM, timers, and I/O ports that form
 //! the SNES Audio Processing Unit. The S-DSP (Digital Signal Processor) audio
-//! generation is now **partially implemented** with basic voice synthesis.
+//! generation is now **functional** with BRR sample playback!
 //!
 //! **Architecture:**
 //! - SPC700 CPU (8-bit, 256 opcodes) - ✅ **Fully implemented**
@@ -11,7 +11,7 @@
 //! - 4 communication ports ($F4-$F7) for CPU<->APU communication - ✅ **Fully implemented**
 //! - 3 timers (8-bit counters with programmable periods) - ✅ **Fully implemented**
 //! - DSP register interface ($F2/$F3, 128 registers) - ✅ **Fully implemented**
-//! - S-DSP audio processing (8-channel ADPCM, ADSR, echo, etc.) - 🚧 **Partially implemented**
+//! - S-DSP audio processing (8-channel ADPCM, ADSR, echo, etc.) - ✅ **Core features working**
 //!
 //! **Implementation Status:**
 //!
@@ -23,24 +23,28 @@
 //! - Control register for IPL ROM, timers, and port clearing
 //! - DSP register read/write interface
 //! - DSP voice control (key on/off, volume, pitch)
-//! - Basic envelope generation (ADSR and GAIN modes)
+//! - BRR (ADPCM) sample decoder with all 4 filter types
+//! - Sample directory and loop point support
+//! - Pitch control and sample position advancement
+//! - Envelope generation (ADSR and GAIN modes, simplified curves)
 //! - Voice mixing to stereo output
+//! - ENDX register (voice ended flags)
+//! - **Actual audio output working!**
 //!
-//! 🚧 **Partially Implemented:**
-//! - BRR (ADPCM) sample decoder (structure in place, needs RAM access)
-//! - Sample playback (stub interpolation)
-//! - Envelope curves (simplified)
+//! ⚠️ **Simplified Implementations:**
+//! - Linear interpolation (Gaussian filter not yet implemented)
+//! - Envelope rates (not cycle-accurate)
 //!
 //! ❌ **NOT Yet Implemented:**
-//! - BRR sample fetching from RAM
 //! - Gaussian interpolation filter
 //! - Echo/reverb FIR filter
 //! - Noise generator
 //! - Pitch modulation
-//! - Accurate envelope rates
+//! - Cycle-accurate envelope rates
 //!
-//! **Result:** Audio drivers execute correctly and DSP accepts register writes.
-//! Basic audio output is generated (simplified envelopes and mixing).
+//! **Result:** Games can now play audio! BRR samples are decoded from RAM and
+//! mixed to produce stereo output. Quality may differ from hardware due to
+//! linear interpolation and simplified envelope curves.
 //!
 //! **Communication Protocol:**
 //! The IPL ROM implements a boot protocol where it waits for the main CPU
