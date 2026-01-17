@@ -48,6 +48,10 @@ pub struct SmsSystem {
     total_cycles: u64,
     timing_mode: emu_core::apu::TimingMode,
 
+    // State
+    /// Whether a cartridge is loaded
+    cartridge_loaded: bool,
+
     // Debugging
     /// Instruction tracer for debugging
     pub(crate) instruction_tracer: emu_core::instruction_tracer::InstructionTracer,
@@ -76,6 +80,7 @@ impl SmsSystem {
             cycles: 0,
             total_cycles: 0,
             timing_mode: emu_core::apu::TimingMode::Ntsc,
+            cartridge_loaded: false,
             instruction_tracer: emu_core::instruction_tracer::InstructionTracer::new(),
             breakpoint_manager: emu_core::breakpoints::BreakpointManager::new(),
         }
@@ -469,6 +474,7 @@ impl System for SmsSystem {
     fn mount(&mut self, mount_point_id: &str, data: &[u8]) -> Result<(), Self::Error> {
         if mount_point_id == "cartridge" {
             self.load_rom(data.to_vec());
+            self.cartridge_loaded = true;
             Ok(())
         } else {
             Err(SmsError::InvalidMountPoint)
@@ -478,6 +484,7 @@ impl System for SmsSystem {
     fn unmount(&mut self, mount_point_id: &str) -> Result<(), Self::Error> {
         if mount_point_id == "cartridge" {
             self.load_rom(vec![0; 0x8000]);
+            self.cartridge_loaded = false;
             Ok(())
         } else {
             Err(SmsError::InvalidMountPoint)
@@ -485,7 +492,7 @@ impl System for SmsSystem {
     }
 
     fn is_mounted(&self, mount_point_id: &str) -> bool {
-        mount_point_id == "cartridge"
+        mount_point_id == "cartridge" && self.cartridge_loaded
     }
 
     fn debugger(&self) -> Option<&dyn emu_core::debug::Debugger> {

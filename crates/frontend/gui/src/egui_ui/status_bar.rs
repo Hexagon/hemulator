@@ -15,7 +15,6 @@ pub struct StatusBarWidget {
     pub message_type: MessageType,
     pub fps: f32,
     pub show_fps: bool,
-    pub show_shortcuts: bool,
 }
 
 impl StatusBarWidget {
@@ -25,7 +24,6 @@ impl StatusBarWidget {
             message_type: MessageType::Info,
             fps: 0.0,
             show_fps: true,
-            show_shortcuts: true,
         }
     }
 
@@ -76,20 +74,9 @@ impl StatusBarWidget {
 
             // Spacer to push content to the right
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                // Right side - FPS and keyboard shortcuts
+                // Right side - FPS only (shortcuts removed - use menus)
                 if self.show_fps && self.fps > 0.0 {
                     ui.label(format!("FPS: {:.1}", self.fps));
-                    ui.separator();
-                }
-
-                if self.show_shortcuts {
-                    ui.label("F3: Open ROM");
-                    ui.separator();
-                    ui.label("F2: Reset");
-                    ui.separator();
-                    ui.label("P: Pause");
-                    ui.separator();
-                    ui.label("F11: Fullscreen");
                 }
             });
         });
