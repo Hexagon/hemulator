@@ -1419,6 +1419,22 @@ impl Ppu {
                     }
                 } else {
                     // Normal priority mode
+                    // Priority order (back to front): 3L S0 S1 2L 1L S2 2H 1H S3 3H
+                    // Render 3L (BG3 priority 0) first - furthest back
+                    if layer_enable & 0x04 != 0 {
+                        self.render_bg_layer_2bpp_priority(
+                            frame,
+                            priority_buffer,
+                            layer_buffer,
+                            2,
+                            0,
+                        );
+                    }
+
+                    if layer_enable & 0x10 != 0 {
+                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 0, 1);
+                    }
+
                     if layer_enable & 0x02 != 0 {
                         self.render_bg_layer_4bpp_priority(
                             frame,
@@ -1439,7 +1455,7 @@ impl Ppu {
                     }
 
                     if layer_enable & 0x10 != 0 {
-                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 0, 1);
+                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 1, 2);
                     }
 
                     if layer_enable & 0x02 != 0 {
@@ -1465,13 +1481,14 @@ impl Ppu {
                         self.render_sprites_priority(frame, priority_buffer, layer_buffer, 2, 3);
                     }
 
+                    // Render 3H (BG3 priority 1) - on top
                     if layer_enable & 0x04 != 0 {
                         self.render_bg_layer_2bpp_priority(
                             frame,
                             priority_buffer,
                             layer_buffer,
                             2,
-                            7,
+                            1,
                         );
                     }
                 }
