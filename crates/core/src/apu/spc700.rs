@@ -1,15 +1,39 @@
-//! Complete SPC700 Audio Processing Unit chip
+//! SPC700 Audio Processing Unit chip
 //!
-//! This module combines the SPC700 CPU, DSP, RAM, timers, and I/O ports
-//! into a complete audio processing unit that can be used by the SNES system.
+//! This module implements the SPC700 CPU, RAM, timers, and I/O ports that form
+//! the SNES Audio Processing Unit. The S-DSP (Digital Signal Processor) audio
+//! generation is **not yet implemented** - all audio output is silent.
 //!
 //! **Architecture:**
-//! - SPC700 CPU (8-bit, 256 opcodes)
-//! - 64KB RAM
-//! - 64-byte IPL boot ROM ($FFC0-$FFFF, can be disabled)
-//! - 4 communication ports ($F4-$F7) for CPU<->APU communication
-//! - 3 timers (8-bit counters with programmable periods)
-//! - DSP (8-channel audio with ADPCM, ADSR, echo, etc.)
+//! - SPC700 CPU (8-bit, 256 opcodes) - ✅ **Fully implemented**
+//! - 64KB RAM - ✅ **Fully implemented**
+//! - 64-byte IPL boot ROM ($FFC0-$FFFF, can be disabled) - ✅ **Fully implemented**
+//! - 4 communication ports ($F4-$F7) for CPU<->APU communication - ✅ **Fully implemented**
+//! - 3 timers (8-bit counters with programmable periods) - ✅ **Fully implemented**
+//! - DSP register interface ($F2/$F3, 128 registers) - ✅ **Interface implemented**
+//! - S-DSP audio processing (8-channel ADPCM, ADSR, echo, etc.) - ❌ **NOT implemented**
+//!
+//! **Implementation Status:**
+//!
+//! ✅ **Implemented:**
+//! - SPC700 CPU with all 256 opcodes
+//! - IPL ROM boot sequence and data upload protocol
+//! - Bidirectional communication ports with main CPU
+//! - Three timers with correct frequencies (8 kHz for T0/T1, 64 kHz for T2)
+//! - Control register for IPL ROM, timers, and port clearing
+//! - DSP register read/write interface (registers stored but not processed)
+//!
+//! ❌ **NOT Implemented (S-DSP Audio):**
+//! - BRR (ADPCM) sample decoder
+//! - 8-voice sample playback engine
+//! - ADSR envelope generation
+//! - Pitch control and sample rate conversion
+//! - Voice mixing (8 channels → stereo output)
+//! - Echo/reverb FIR filter
+//! - Noise generator
+//! - Pitch modulation
+//!
+//! **Result:** Audio drivers execute correctly but produce **no sound** (all samples = 0).
 //!
 //! **Communication Protocol:**
 //! The IPL ROM implements a boot protocol where it waits for the main CPU
