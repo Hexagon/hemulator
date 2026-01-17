@@ -19,6 +19,10 @@
 //! - [SPC700 Reference](https://wiki.superfamicom.org/spc700-reference)
 //! - [Transferring Data to APU](https://wiki.superfamicom.org/transferring-data-from-rom-to-the-snes-apu)
 //! - [Fullsnes Documentation](https://problemkaputt.de/fullsnes.htm#snescpuspc700audiosystemapu)
+//! - [S-SMP - SNESdev Wiki](https://snes.nesdev.org/wiki/S-SMP)
+//! - [SPC-700 Instruction Set - SNESdev Wiki](https://snes.nesdev.org/wiki/SPC-700_instruction_set)
+//! - [S-DSP Registers - SNESdev Wiki](https://snes.nesdev.org/wiki/S-DSP_registers)
+//! - [DSP Envelopes - SNESdev Wiki](https://snes.nesdev.org/wiki/DSP_envelopes)
 
 use std::cell::Cell;
 
