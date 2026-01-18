@@ -12,7 +12,7 @@
 //!
 //! # BIOS Memory Map
 //!
-//! The BIOS is mapped to address 0x0000-0x1FFF (8KB) or 0x0000-0x0400 (1KB)
+//! The BIOS is mapped to address 0x0000-0x1FFF (8KB) or 0x0000-0x03FF (1KB)
 //! depending on the BIOS size. It can be disabled via bit 3 of the memory
 //! control register (port 0x3E), which maps the cartridge ROM to 0x0000 instead.
 

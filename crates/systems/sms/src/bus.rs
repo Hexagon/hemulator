@@ -82,6 +82,8 @@ impl SmsMemory {
         // Enable BIOS when explicitly loaded (user wants to use it)
         if !self.bios.is_empty() {
             self.memory_control &= !0x08; // Clear bit 3 to enable BIOS
+        } else {
+            self.memory_control |= 0x08; // Set bit 3 to disable BIOS when none is loaded
         }
     }
 

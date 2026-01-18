@@ -473,7 +473,7 @@ impl System for SmsSystem {
                 id: "bios".to_string(),
                 name: "BIOS ROM".to_string(),
                 extensions: vec!["sms".to_string(), "bin".to_string(), "rom".to_string()],
-                required: false, // Has default BIOS
+                required: false, // Optional: system starts without a BIOS and games can run without one
             },
             MountPointInfo {
                 id: "cartridge".to_string(),

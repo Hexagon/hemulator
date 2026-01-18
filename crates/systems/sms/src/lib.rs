@@ -12,7 +12,7 @@
 //!
 //! For detailed implementation information, see the SMS_IMPLEMENTATION_GUIDE.md
 
-mod bios;
+pub mod bios;
 mod bus;
 mod debugger;
 mod psg;
