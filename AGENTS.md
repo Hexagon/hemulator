@@ -98,6 +98,37 @@ The project uses a **Lumocs-based documentation site** hosted at https://hemulat
   - **Especially important** when other not-yet-implemented systems will use the features
   - Example: Implement complete APU with all channels (pulse, triangle, noise, DMC) even if only pulse is currently used, because future systems will need the other channels
   - Incomplete implementations create technical debt and require refactoring later
+
+- **TODO Management**:
+  - **ALWAYS add a TODO** when leaving a stub, incomplete implementation, or simplified implementation
+  - TODOs must be added in **TWO places**:
+    1. **In the code** - Add a comment at the exact location: `// TODO: Description of what's needed`
+    2. **In TODO.md** - Add an entry in the appropriate priority section with file reference
+  - **Categorize by priority**:
+    - **Critical**: Blocking issues, security vulnerabilities, or crashes
+    - **High**: Major functionality gaps affecting compatibility or user experience
+    - **Medium**: Important features or optimizations
+    - **Low**: Nice-to-have features, minor improvements, or polish
+  - **TODO format in code**:
+    ```rust
+    // TODO: Implement Gaussian interpolation for hardware accuracy
+    let sample = linear_interpolate(prev, next, fraction);
+    ```
+  - **TODO format in TODO.md**:
+    ```markdown
+    ### High
+    - [ ] **Gaussian Interpolation**: Replace linear with Gaussian filter - `crates/core/src/apu/dsp.rs`
+      - Current: Linear interpolation
+      - Needed: Hardware-accurate Gaussian filter
+      - Impact: Audio quality improvement
+    ```
+  - **When completing TODOs**:
+    - Remove from both the code AND TODO.md
+    - Update any related documentation (README, system docs, user manual)
+  - **Keywords to track**: TODO, FIXME, XXX, HACK, STUB, INCOMPLETE, WIP
+    - Prefer `TODO` for consistency
+    - Use `FIXME` only for bugs in existing implementations
+    - Avoid `XXX`, `HACK`, `WIP` - use `TODO` instead
   - Full implementations with comprehensive tests ensure robustness and reusability
 
 - **Permissions & safety**:
