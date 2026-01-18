@@ -5221,8 +5221,17 @@ fn main() {
                     }
                 }
                 MenuAction::ShowHelp => {
-                    egui_app.tab_manager.show_help_tab();
+                    if let Err(e) = open::that("https://hemulator.56k.guru/user") {
+                        egui_app
+                            .status_bar
+                            .set_error(format!("Failed to open help URL: {}", e));
+                    } else {
+                        egui_app
+                            .status_bar
+                            .set_message("Opened help in default browser".to_string());
+                    }
                 }
+
                 MenuAction::About => {
                     egui_app.tab_manager.show_about_tab();
                 }

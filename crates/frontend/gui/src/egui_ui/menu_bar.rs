@@ -381,10 +381,10 @@ impl MenuBar {
             });
 
             // View menu - Screenshot only enabled when system is loaded, others always available
-            ui.menu_button("👁️ View", |ui| {
-                ui.menu_button("🔍 Scaling", |ui| {
+            ui.menu_button("View", |ui| {
+                ui.menu_button("Scaling", |ui| {
                     if ui
-                        .button("1️⃣ Original")
+                        .button("Original")
                         .on_hover_text("1:1 pixel mapping, no scaling")
                         .clicked()
                     {
@@ -392,7 +392,7 @@ impl MenuBar {
                         ui.close();
                     }
                     if ui
-                        .button("📐 Fit")
+                        .button("Fit")
                         .on_hover_text("Scale to fit window, maintain aspect ratio")
                         .clicked()
                     {
@@ -400,7 +400,7 @@ impl MenuBar {
                         ui.close();
                     }
                     if ui
-                        .button("⬛ Stretch")
+                        .button("Stretch")
                         .on_hover_text("Stretch to fill window, ignore aspect ratio")
                         .clicked()
                     {
@@ -411,7 +411,7 @@ impl MenuBar {
 
                 // Display filters submenu
                 ui.menu_button(
-                    format!("🖼️ Filters ({})", self.current_filter.name()),
+                    format!("Filters ({})", self.current_filter.name()),
                     |ui| {
                         let filters = [
                             (DisplayFilter::None, "None", "No filter, pure pixels"),
@@ -451,7 +451,7 @@ impl MenuBar {
                 ui.separator();
 
                 if ui
-                    .button("🖼️ Fullscreen")
+                    .button("Fullscreen")
                     .on_hover_text("Toggle fullscreen mode without GUI")
                     .clicked()
                 {
@@ -459,7 +459,7 @@ impl MenuBar {
                     ui.close();
                 }
                 if ui
-                    .button("🖥️ Fullscreen with GUI")
+                    .button("Fullscreen with GUI")
                     .on_hover_text("Toggle fullscreen mode with GUI visible")
                     .clicked()
                 {
@@ -470,7 +470,7 @@ impl MenuBar {
                 ui.separator();
 
                 if ui
-                    .button("🔍 Inspector")
+                    .button("Inspector")
                     .on_hover_text("Toggle Inspector panel (Debug, Log, Tiles)")
                     .clicked()
                 {
@@ -484,9 +484,9 @@ impl MenuBar {
                 ui.label(egui::RichText::new("Property Panels").strong());
 
                 let metrics_label = if self.metrics_visible {
-                    "✓ Metrics"
+                    "☑ Metrics"
                 } else {
-                    "  Metrics"
+                    "☐ Metrics"
                 };
                 if ui
                     .button(metrics_label)
@@ -498,9 +498,9 @@ impl MenuBar {
                 }
 
                 let controller_label = if self.controller_visible {
-                    "✓ Controller Settings"
+                    "☑ Controller Settings"
                 } else {
-                    "  Controller Settings"
+                    "☐ Controller Settings"
                 };
                 if ui
                     .button(controller_label)
@@ -512,9 +512,9 @@ impl MenuBar {
                 }
 
                 let mounts_label = if self.mounts_visible {
-                    "✓ Mount Points"
+                    "☑ Mount Points"
                 } else {
-                    "  Mount Points"
+                    "☐ Mount Points"
                 };
                 if ui
                     .button(mounts_label)
@@ -545,9 +545,9 @@ impl MenuBar {
             });
 
             // Help menu
-            ui.menu_button("❓ Help", |ui| {
+            ui.menu_button("Help", |ui| {
                 if ui
-                    .button("⌨️ Controls & Help")
+                    .button("User Manual 🗗")
                     .on_hover_text("View keyboard controls and usage instructions")
                     .clicked()
                 {
@@ -556,7 +556,7 @@ impl MenuBar {
                 }
                 ui.separator();
                 if ui
-                    .button("ℹ️ About")
+                    .button("About")
                     .on_hover_text("About Hemulator")
                     .clicked()
                 {
