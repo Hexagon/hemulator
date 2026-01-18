@@ -213,4 +213,171 @@ mod tests {
         // Verify cycles match
         assert_eq!(system1.get_total_cycles(), system2.get_total_cycles());
     }
+
+    #[test]
+    fn test_vdp_sprite_transparency() {
+        use emu_core::renderer::Renderer;
+        use emu_core::tms9918a::Tms9918a;
+
+        let mut vdp = Tms9918a::new();
+
+        // Enable display (bit 6 clear in register 1 = display enabled)
+        vdp.write_control(0x00); // No flags set = display enabled, 8x8 sprites, no mag
+        vdp.write_control(0x81); // Write to register 1
+
+        // Set name table at 0x3800 (register 2)
+        vdp.write_control(0x0E); // 0x0E = bits 3-0 = 14, 14 << 10 = 0x3800
+        vdp.write_control(0x82); // Write to register 2
+
+        // Set pattern table at 0x0000 (register 4)
+        vdp.write_control(0x00); // 0x00 = bits 2-0 = 0, 0 << 11 = 0x0000
+        vdp.write_control(0x84); // Write to register 4
+
+        // Set color table at 0x0000 (register 3)
+        vdp.write_control(0x00); // 0x00, 0 << 6 = 0x0000
+        vdp.write_control(0x83); // Write to register 3
+
+        // Set sprite attribute table at 0x3F00 (register 5)
+        vdp.write_control(0x7E); // 0x7E << 7 = 0x3F00
+        vdp.write_control(0x85); // Write to register 5
+
+        // Set sprite pattern table at 0x3800 (register 6)
+        vdp.write_control(0x07); // 0x07, 7 << 11 = 0x3800
+        vdp.write_control(0x86); // Write to register 6
+
+        // Set backdrop color to color 1 (black)
+        vdp.write_control(0x01); // Backdrop color = 1
+        vdp.write_control(0x87); // Write to register 7
+
+        // Fill color table with black-on-black (so background tiles don't interfere)
+        vdp.write_control(0x00); // Address 0x0000
+        vdp.write_control(0x40); // Write mode
+        for _ in 0..32 {
+            vdp.write_data(0x11); // Color: bg=1 (black), fg=1 (black)
+        }
+
+        // Write sprite attribute for sprite 0 (transparent sprite with color 0)
+        vdp.write_control(0x00); // Address low
+        vdp.write_control(0x7F); // Address high (0x3F00) | write mode
+        vdp.write_data(51); // Y position (50 + 1 offset)
+        vdp.write_data(50); // X position
+        vdp.write_data(0); // Pattern number
+        vdp.write_data(0); // Color 0 (transparent)
+
+        // Write sprite attribute for sprite 1 (visible sprite with color 15/white)
+        vdp.write_data(51); // Y position
+        vdp.write_data(100); // X position (different from sprite 0)
+        vdp.write_data(0); // Pattern number
+        vdp.write_data(15); // Color 15 (white)
+
+        // End marker
+        vdp.write_data(0xD0);
+
+        // Write sprite pattern data at 0x3800 (all pixels on)
+        vdp.write_control(0x00); // Address low (0x3800)
+        vdp.write_control(0x78); // Address high | write mode
+        for _ in 0..8 {
+            vdp.write_data(0xFF); // All pixels on
+        }
+
+        // Render the frame
+        vdp.render_frame();
+
+        // Get the frame data
+        let frame = vdp.get_frame();
+
+        // Check that sprite 0 with color 0 is NOT rendered (pixels should be backdrop color)
+        // Line 50, X positions 50-57 should show backdrop color (0xFF000000 = black)
+        let line_offset = 50 * 256;
+        let backdrop_color = 0xFF000000; // Color 1 (black) from palette
+
+        // Verify sprite 0 (color 0, transparent) didn't render - pixels should be backdrop
+        for x in 50..58 {
+            let pixel = frame.pixels[line_offset + x];
+            assert_eq!(
+                pixel, backdrop_color,
+                "Sprite with color 0 should be transparent at X={}, got {:08X} instead of backdrop {:08X}",
+                x, pixel, backdrop_color
+            );
+        }
+
+        // Check that sprite 1 with color 15 IS rendered (pixels should be white)
+        // Line 50, X positions 100-107 should show white (0xFFFFFFFF)
+        let white_color = 0xFFFFFFFF; // Color 15 (white) from palette
+
+        // Verify sprite 1 (color 15, white) did render
+        for x in 100..108 {
+            let pixel = frame.pixels[line_offset + x];
+            assert_eq!(
+                pixel, white_color,
+                "Sprite with color 15 should render white at X={}, got {:08X}",
+                x, pixel
+            );
+        }
+    }
+
+    #[test]
+    fn test_vdp_sprite_transparency_counts_toward_limit() {
+        use emu_core::tms9918a::Tms9918a;
+
+        let mut vdp = Tms9918a::new();
+
+        // Enable display (bit 6 clear = display enabled)
+        vdp.write_control(0x00);
+        vdp.write_control(0x81);
+
+        // Set up sprite attribute table at 0x3F00
+        vdp.write_control(0x7E);
+        vdp.write_control(0x85);
+
+        // Set up sprite pattern table
+        vdp.write_control(0x00);
+        vdp.write_control(0x86);
+
+        // Write to attribute table
+        vdp.write_control(0x00);
+        vdp.write_control(0x7F);
+
+        // Create 3 transparent sprites (color 0) on line 50
+        for i in 0..3 {
+            vdp.write_data(51); // Y position (50 + 1 offset)
+            vdp.write_data(i * 20); // X position (spread out)
+            vdp.write_data(0); // Pattern
+            vdp.write_data(0); // Color 0 (transparent)
+        }
+
+        // Create 2 visible sprites (color 1) on line 50
+        // This makes 5 sprites total, which should trigger overflow
+        for i in 0..2 {
+            vdp.write_data(51); // Y position
+            vdp.write_data(60 + i * 20); // X position
+            vdp.write_data(0); // Pattern
+            vdp.write_data(1); // Color 1 (visible)
+        }
+
+        // End marker
+        vdp.write_data(0xD0);
+
+        // Write pattern data
+        vdp.write_control(0x00);
+        vdp.write_control(0x40);
+        for _ in 0..8 {
+            vdp.write_data(0xFF);
+        }
+
+        // Clear any previous status
+        let _ = vdp.read_status();
+
+        // Render the frame to detect sprite overflow
+        vdp.render_frame();
+
+        // Check status - bit 6 should be set for sprite overflow
+        // Transparent sprites (color 0) should still count toward the 4-sprite limit
+        let status = vdp.read_status();
+        assert_ne!(
+            status & 0x40,
+            0,
+            "Sprite overflow should be detected with 5 sprites (3 transparent + 2 visible) on line 50"
+        );
+    }
 }
