@@ -28,6 +28,8 @@ sha2 = "0.10"
 base64 = "0.22"
 rfd = "0.14"
 png = "0.17"
+image = "0.24"
+open = "3.2"
 rand = "0.8"
 chrono = "0.4"
 

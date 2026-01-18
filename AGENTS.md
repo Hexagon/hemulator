@@ -6,6 +6,7 @@
 - **[README.md](README.md)**: Brief project overview, quick start, and build instructions
 - **[Documentation Site](https://hemulator.56k.guru)**: Complete user and developer documentation
 - **[ARCHITECTURE.md](ARCHITECTURE.md)**: Overall emulation system architecture and design patterns
+- **[TODO.md](TODO.md)**: Project todo list with prioritized tasks
 
 **Documentation Site Structure**:
 - **User Manual** (`docs/src/user/`): [Getting Started](https://hemulator.56k.guru/user/getting-started.html), [Controls](https://hemulator.56k.guru/user/controls.html), [Configuration](https://hemulator.56k.guru/user/configuration.html), [Save States](https://hemulator.56k.guru/user/save-states.html), [Supported Systems](https://hemulator.56k.guru/user/systems.html), [Advanced Features](https://hemulator.56k.guru/user/advanced.html), [Troubleshooting](https://hemulator.56k.guru/user/troubleshooting.html)
@@ -27,6 +28,55 @@
 ---
 
 ## Agent Guidelines
+
+### TODO Tracking
+
+The project maintains a **[TODO.md](TODO.md)** file to track incomplete work, stubs, and simplified implementations.
+
+**When to Add TODOs**:
+- **ALWAYS** add a TODO when leaving:
+  - **Stub implementations**: Functions that return placeholder values or unimplemented!()
+  - **Incomplete implementations**: Features that are partially implemented but missing functionality
+  - **Simplified implementations**: Code that works for basic cases but needs enhancement for full compatibility
+  - **Temporary workarounds**: Code that bypasses issues rather than fixing them properly
+
+**TODO Prioritization**:
+Organize TODOs by priority level in TODO.md:
+
+- **Critical**: Blocks core functionality or causes crashes/data loss. Must be fixed before release.
+  - Example: "Fix save state corruption when saving during audio playback"
+  
+- **High**: Significant feature gaps or compatibility issues affecting user experience.
+  - Example: "Implement mapper 4 (MMC3) scanline counter for sprite 0 hit"
+  
+- **Medium**: Minor compatibility issues, missing features that don't block usage.
+  - Example: "Add support for NTSC color emphasis bits in PPU"
+  
+- **Low**: Nice-to-have improvements, edge cases, optimizations.
+  - Example: "Optimize APU mixer to reduce CPU usage"
+
+**TODO Format**:
+```markdown
+### [System/Component Name]
+
+#### Critical
+- [ ] Specific task description with context
+
+#### High
+- [ ] Specific task description with context
+
+#### Medium
+- [ ] Specific task description with context
+
+#### Low
+- [ ] Specific task description with context
+```
+
+**Best Practices**:
+- Be specific: Include context about what's missing and why it matters
+- Link to relevant files or functions when possible
+- Update TODO.md when completing tasks by checking off items or removing them
+- Review existing TODOs before adding duplicates
 
 ### Documentation Structure
 
@@ -98,6 +148,37 @@ The project uses a **Lumocs-based documentation site** hosted at https://hemulat
   - **Especially important** when other not-yet-implemented systems will use the features
   - Example: Implement complete APU with all channels (pulse, triangle, noise, DMC) even if only pulse is currently used, because future systems will need the other channels
   - Incomplete implementations create technical debt and require refactoring later
+
+- **TODO Management**:
+  - **ALWAYS add a TODO** when leaving a stub, incomplete implementation, or simplified implementation
+  - TODOs must be added in **TWO places**:
+    1. **In the code** - Add a comment at the exact location: `// TODO: Description of what's needed`
+    2. **In TODO.md** - Add an entry in the appropriate priority section with file reference
+  - **Categorize by priority**:
+    - **Critical**: Blocking issues, security vulnerabilities, or crashes
+    - **High**: Major functionality gaps affecting compatibility or user experience
+    - **Medium**: Important features or optimizations
+    - **Low**: Nice-to-have features, minor improvements, or polish
+  - **TODO format in code**:
+    ```rust
+    // TODO: Implement Gaussian interpolation for hardware accuracy
+    let sample = linear_interpolate(prev, next, fraction);
+    ```
+  - **TODO format in TODO.md**:
+    ```markdown
+    ### High
+    - [ ] **Gaussian Interpolation**: Replace linear with Gaussian filter - `crates/core/src/apu/dsp.rs`
+      - Current: Linear interpolation
+      - Needed: Hardware-accurate Gaussian filter
+      - Impact: Audio quality improvement
+    ```
+  - **When completing TODOs**:
+    - Remove from both the code AND TODO.md
+    - Update any related documentation (README, system docs, user manual)
+  - **Keywords to track**: TODO, FIXME, XXX, HACK, STUB, INCOMPLETE, WIP
+    - Prefer `TODO` for consistency
+    - Use `FIXME` only for bugs in existing implementations
+    - Avoid `XXX`, `HACK`, `WIP` - use `TODO` instead
   - Full implementations with comprehensive tests ensure robustness and reusability
 
 - **Permissions & safety**:
