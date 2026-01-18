@@ -1,21 +1,26 @@
 //! Texas Instruments TMS9918A Video Display Processor
 //!
-//! The TMS9918A is the graphics chip used in the ColecoVision.
+//! The TMS9918A is a graphics chip used in multiple systems:
+//! - Sega SG-1000
+//! - ColecoVision
+//! - Sega SC-3000
+//! - MSX (original)
+//! - TI-99/4A
 //!
 //! # Features
 //! - 256×192 pixel resolution
 //! - 16 color palette
 //! - 4 graphics modes (Text, Graphics I, Graphics II, Multicolor)
-//! - 32 hardware sprites
+//! - 32 hardware sprites (4 per scanline)
 //! - Tilemap-based background rendering
 //! - Frame interrupts
 
-use emu_core::logging::{log, LogCategory, LogLevel};
-use emu_core::renderer::Renderer;
-use emu_core::types::Frame;
+use crate::logging::{log, LogCategory, LogLevel};
+use crate::renderer::Renderer;
+use crate::types::Frame;
 
 /// TMS9918A VDP state and rendering
-pub struct Vdp {
+pub struct Tms9918a {
     // Video RAM (16KB)
     vram: [u8; 0x4000],
 
@@ -37,6 +42,7 @@ pub struct Vdp {
     // Sprite flags
     sprite_overflow: bool,
     sprite_collision: bool,
+    fifth_sprite_number: u8,
 
     // Current scanline
     scanline: u16,
@@ -45,8 +51,8 @@ pub struct Vdp {
     palette: [u32; 16],
 }
 
-impl Vdp {
-    /// Create a new VDP
+impl Tms9918a {
+    /// Create a new TMS9918A VDP
     pub fn new() -> Self {
         Self {
             vram: [0; 0x4000],
@@ -59,6 +65,7 @@ impl Vdp {
             frame_interrupt_pending: false,
             sprite_overflow: false,
             sprite_collision: false,
+            fifth_sprite_number: 31,
             scanline: 262, // Start at end of frame
             palette: [
                 // TMS9918A standard palette (ARGB8888)
@@ -162,18 +169,17 @@ impl Vdp {
             status |= 0x20;
         }
 
-        // Bits 4-0: 5th sprite number (we use 0 for simplicity)
-        // In a full implementation, this would be the number of the first sprite
-        // that couldn't be displayed
+        // Bits 4-0: 5th sprite number
+        // Contains the number of the first sprite that caused overflow (or 31 if no overflow)
+        status |= self.fifth_sprite_number & 0x1F;
 
-        // Clear interrupt flag on read
+        // Clear interrupt flag on read (sprite flags persist until next frame)
         self.frame_interrupt_pending = false;
 
         status
     }
 
     /// Set current scanline (for cycle-accurate timing)
-    #[allow(dead_code)]
     pub fn set_scanline(&mut self, scanline: u16) {
         let old_scanline = self.scanline;
 
@@ -184,29 +190,33 @@ impl Vdp {
 
         self.scanline = scanline;
 
-        // Render any scanlines that were crossed
+        // Check for frame wrap (new frame started)
         if scanline < old_scanline {
-            // Wrapped around to new frame
-            for line in old_scanline..192 {
-                self.render_scanline(line as u8);
-            }
-            for line in 0..=scanline.min(191) {
-                self.render_scanline(line as u8);
-            }
             // Trigger frame interrupt at start of VBlank
             if (self.registers[1] & 0x20) != 0 {
                 // Frame interrupt enable
                 self.frame_interrupt_pending = true;
             }
         } else {
-            // Normal forward progress within same frame
-            for line in (old_scanline + 1)..=scanline.min(191) {
-                self.render_scanline(line as u8);
-            }
-            // Trigger frame interrupt when crossing scanline 192
+            // Trigger frame interrupt when crossing into VBlank (scanline 192)
+            // Note: TMS9918A triggers VBlank interrupt at end of visible area (line 192)
+            // Some sources mention line 242, but 192 is when active display ends
             if old_scanline < 192 && scanline >= 192 && (self.registers[1] & 0x20) != 0 {
                 self.frame_interrupt_pending = true;
             }
+        }
+    }
+
+    /// Render the full frame (called once per frame)
+    pub fn render_frame(&mut self) {
+        // Reset sprite overflow and collision flags at start of frame
+        self.sprite_overflow = false;
+        self.sprite_collision = false;
+        self.fifth_sprite_number = 31;
+
+        // Render all visible scanlines
+        for line in 0..192 {
+            self.render_scanline(line);
         }
     }
 
@@ -215,18 +225,14 @@ impl Vdp {
         self.frame_interrupt_pending
     }
 
-    /// Clear frame interrupt
+    /// Clear frame interrupt flag (used when interrupt is acknowledged)
     pub fn clear_frame_interrupt(&mut self) {
         self.frame_interrupt_pending = false;
     }
 
-    /// Get tile viewer data for debugging
-    pub fn get_tile_viewer_data(&self) -> crate::system::TileViewerData {
-        crate::system::TileViewerData {
-            vram: self.vram.to_vec(),
-            palette: self.palette.to_vec(),
-            registers: self.registers.to_vec(),
-        }
+    /// Get tile viewer data for debugging (returns VRAM, palette, and register data)
+    pub fn get_tile_viewer_data(&self) -> (Vec<u8>, Vec<u32>, Vec<u8>) {
+        (self.vram.to_vec(), self.palette.to_vec(), self.registers.to_vec())
     }
 
     /// Get VDP state for save state
@@ -241,6 +247,7 @@ impl Vdp {
             "frame_interrupt_pending": self.frame_interrupt_pending,
             "sprite_overflow": self.sprite_overflow,
             "sprite_collision": self.sprite_collision,
+            "fifth_sprite_number": self.fifth_sprite_number,
             "scanline": self.scanline,
         })
     }
@@ -306,13 +313,13 @@ impl Vdp {
         );
         load_bool!(state, "sprite_overflow", self.sprite_overflow);
         load_bool!(state, "sprite_collision", self.sprite_collision);
+        load_u8!(state, "fifth_sprite_number", self.fifth_sprite_number);
         load_u16!(state, "scanline", self.scanline);
 
         Ok(())
     }
 
     /// Render a single scanline
-    #[allow(dead_code)]
     fn render_scanline(&mut self, line: u8) {
         // Get graphics mode from registers
         let mode = self.get_graphics_mode();
@@ -340,7 +347,6 @@ impl Vdp {
     }
 
     /// Get current graphics mode from register bits
-    #[allow(dead_code)]
     fn get_graphics_mode(&self) -> u8 {
         let m1 = (self.registers[0] & 0x02) != 0;
         let m2 = (self.registers[1] & 0x08) != 0;
@@ -357,7 +363,6 @@ impl Vdp {
     }
 
     /// Render Graphics I mode
-    #[allow(dead_code)]
     fn render_graphics_i(&mut self, line: u8, line_offset: usize) {
         // Name table base address (register 2, bits 3-0)
         let name_table_base = ((self.registers[2] & 0x0F) as usize) << 10;
@@ -396,7 +401,6 @@ impl Vdp {
     }
 
     /// Render Text mode (40 column)
-    #[allow(dead_code)]
     fn render_text_mode(&mut self, line: u8, line_offset: usize) {
         // Name table base address
         let name_table_base = ((self.registers[2] & 0x0F) as usize) << 10;
@@ -436,7 +440,6 @@ impl Vdp {
     }
 
     /// Render Graphics II mode
-    #[allow(dead_code)]
     fn render_graphics_ii(&mut self, line: u8, line_offset: usize) {
         // Name table base address
         let name_table_base = ((self.registers[2] & 0x0F) as usize) << 10;
@@ -480,7 +483,6 @@ impl Vdp {
     }
 
     /// Render Multicolor mode
-    #[allow(dead_code)]
     fn render_multicolor_mode(&mut self, line: u8, line_offset: usize) {
         // Name table base address
         let name_table_base = ((self.registers[2] & 0x0F) as usize) << 10;
@@ -520,7 +522,6 @@ impl Vdp {
     }
 
     /// Render sprites
-    #[allow(dead_code)]
     fn render_sprites(&mut self, line: u8, line_offset: usize) {
         // Sprite attribute table base address (register 5, bits 6-0)
         let sprite_attr_base = ((self.registers[5] & 0x7F) as usize) << 7;
@@ -544,17 +545,22 @@ impl Vdp {
         let actual_size = sprite_size * mag;
 
         let mut sprite_count = 0;
-        self.sprite_overflow = false;
+
+        // Track which pixels have sprites for collision detection
+        // Per SMS Power!: collision only occurs between sprites, not sprite-background
+        let mut sprite_line_buffer = [false; 256];
 
         // Scan through sprite attribute table (32 sprites max)
         for sprite_num in 0..32 {
             let attr_addr = sprite_attr_base + (sprite_num * 4);
 
             // Get sprite Y position
-            let sprite_y = self.vram[attr_addr] as i16;
+            // Per TMS9918A datasheet: Y coordinate is stored as Y+1
+            // Y=0 means position -1 (off top of screen), Y=1 means position 0, etc.
+            let sprite_y = (self.vram[attr_addr] as i16).wrapping_sub(1);
 
-            // Check for end-of-sprite-list marker
-            if sprite_y == 0xD0 {
+            // Check for end-of-sprite-list marker (0xD0 = 208, or position 207 after -1 offset)
+            if self.vram[attr_addr] == 0xD0 {
                 break;
             }
 
@@ -566,6 +572,10 @@ impl Vdp {
                 // Check for sprite overflow (more than 4 sprites on a line)
                 if sprite_count > 4 {
                     self.sprite_overflow = true;
+                    // Record the number of the 5th sprite (first one that couldn't be displayed)
+                    if self.fifth_sprite_number == 31 {
+                        self.fifth_sprite_number = sprite_num as u8;
+                    }
                     break;
                 }
 
@@ -605,13 +615,18 @@ impl Vdp {
                             let x = sprite_x + x_offset + (bit * mag) as i16 + mx as i16;
                             if (0..256).contains(&x) {
                                 let pixel_idx = line_offset + x as usize;
-                                // Check for sprite collision
-                                if self.frame.pixels[pixel_idx] != 0
-                                    && self.frame.pixels[pixel_idx]
-                                        != self.palette[(self.registers[7] & 0x0F) as usize]
-                                {
+                                let x_idx = x as usize;
+
+                                // Check for sprite-to-sprite collision (not sprite-to-background)
+                                // Per SMS Power!: collision flag is set when opaque sprite pixels overlap
+                                if sprite_line_buffer[x_idx] {
                                     self.sprite_collision = true;
                                 }
+
+                                // Mark this pixel as having a sprite
+                                sprite_line_buffer[x_idx] = true;
+
+                                // Draw the sprite pixel
                                 self.frame.pixels[pixel_idx] = sprite_color;
                             }
                         }
@@ -635,12 +650,17 @@ impl Vdp {
                                 let x = sprite_x + x_offset + ((8 + bit) * mag) as i16 + mx as i16;
                                 if (0..256).contains(&x) {
                                     let pixel_idx = line_offset + x as usize;
-                                    if self.frame.pixels[pixel_idx] != 0
-                                        && self.frame.pixels[pixel_idx]
-                                            != self.palette[(self.registers[7] & 0x0F) as usize]
-                                    {
+                                    let x_idx = x as usize;
+
+                                    // Check for sprite-to-sprite collision
+                                    if sprite_line_buffer[x_idx] {
                                         self.sprite_collision = true;
                                     }
+
+                                    // Mark this pixel as having a sprite
+                                    sprite_line_buffer[x_idx] = true;
+
+                                    // Draw the sprite pixel
                                     self.frame.pixels[pixel_idx] = sprite_color;
                                 }
                             }
@@ -652,13 +672,13 @@ impl Vdp {
     }
 }
 
-impl Default for Vdp {
+impl Default for Tms9918a {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Renderer for Vdp {
+impl Renderer for Tms9918a {
     fn get_frame(&self) -> &Frame {
         &self.frame
     }

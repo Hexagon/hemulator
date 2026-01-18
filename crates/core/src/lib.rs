@@ -25,6 +25,7 @@ pub mod instruction_tracer;
 pub mod logging;
 pub mod ppu;
 pub mod renderer;
+pub mod tms9918a;
 pub mod types {
     use serde::{Deserialize, Serialize};
 

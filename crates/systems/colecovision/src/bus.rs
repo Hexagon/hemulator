@@ -12,7 +12,7 @@
 //! - 0xE0-0xFF: Controller ports
 
 use crate::psg::ColecoVisionPsg;
-use crate::vdp::Vdp;
+use emu_core::tms9918a::Tms9918a;
 use emu_core::cpu_z80::MemoryZ80;
 use emu_core::logging::{log, LogCategory, LogLevel};
 use std::cell::RefCell;
@@ -30,7 +30,7 @@ pub struct ColecoVisionMemory {
     pub(crate) rom: Vec<u8>,
 
     // Shared components
-    vdp: Rc<RefCell<Vdp>>,
+    vdp: Rc<RefCell<Tms9918a>>,
     psg: Rc<RefCell<ColecoVisionPsg>>,
 
     // Controller state
@@ -43,7 +43,7 @@ impl ColecoVisionMemory {
     pub fn new(
         bios: Vec<u8>,
         rom: Vec<u8>,
-        vdp: Rc<RefCell<Vdp>>,
+        vdp: Rc<RefCell<Tms9918a>>,
         psg: Rc<RefCell<ColecoVisionPsg>>,
     ) -> Self {
         Self {

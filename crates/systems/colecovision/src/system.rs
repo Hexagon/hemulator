@@ -2,8 +2,8 @@
 
 use crate::bus::ColecoVisionMemory;
 use crate::psg::ColecoVisionPsg;
-use crate::vdp::Vdp;
 use emu_core::cpu_z80::CpuZ80;
+use emu_core::tms9918a::Tms9918a;
 use emu_core::debug::Debugger;
 use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::renderer::Renderer;
@@ -42,7 +42,7 @@ pub struct ColecoVisionSystem {
     pub(crate) cpu: CpuZ80<ColecoVisionMemory>,
 
     // Shared components
-    vdp: Rc<RefCell<Vdp>>,
+    vdp: Rc<RefCell<Tms9918a>>,
     psg: Rc<RefCell<ColecoVisionPsg>>,
 
     // Timing
@@ -68,7 +68,7 @@ impl ColecoVisionSystem {
     /// Create a new ColecoVision system
     pub fn new() -> Self {
         // Create shared components
-        let vdp = Rc::new(RefCell::new(Vdp::new()));
+        let vdp = Rc::new(RefCell::new(Tms9918a::new()));
         let psg = Rc::new(RefCell::new(ColecoVisionPsg::new()));
 
         // Create empty BIOS and ROM
@@ -149,7 +149,12 @@ impl ColecoVisionSystem {
 
     /// Get tile viewer data for debugging
     pub fn get_tile_viewer_data(&self) -> TileViewerData {
-        self.vdp.borrow().get_tile_viewer_data()
+        let (vram, palette, registers) = self.vdp.borrow().get_tile_viewer_data();
+        TileViewerData {
+            vram,
+            palette,
+            registers,
+        }
     }
 
     /// Set controller state
