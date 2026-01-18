@@ -197,16 +197,18 @@ impl System for ColecoVisionSystem {
                 / self.scanline_cycles as u64) as u16;
             self.vdp.borrow_mut().set_scanline(scanline);
 
-            // Check for VDP interrupt
+            // Check for VDP interrupt (game clears it by reading VDP status)
             if self.vdp.borrow().frame_interrupt_pending() {
                 self.cpu.interrupt(0xFF);
-                self.vdp.borrow_mut().clear_frame_interrupt();
             }
 
             // Step PSG and collect audio samples
             let samples = self.psg.borrow_mut().step(cpu_cycles);
             self.audio_buffer.extend_from_slice(&samples);
         }
+
+        // Render the full frame once at the end
+        self.vdp.borrow_mut().render_frame();
 
         Ok(self.vdp.borrow().get_frame().clone())
     }
