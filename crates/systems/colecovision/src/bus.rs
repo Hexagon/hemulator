@@ -12,9 +12,9 @@
 //! - 0xE0-0xFF: Controller ports
 
 use crate::psg::ColecoVisionPsg;
-use emu_core::tms9918a::Tms9918a;
 use emu_core::cpu_z80::MemoryZ80;
 use emu_core::logging::{log, LogCategory, LogLevel};
+use emu_core::tms9918a::Tms9918a;
 use std::cell::RefCell;
 use std::rc::Rc;
 

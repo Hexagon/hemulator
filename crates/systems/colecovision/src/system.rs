@@ -3,10 +3,10 @@
 use crate::bus::ColecoVisionMemory;
 use crate::psg::ColecoVisionPsg;
 use emu_core::cpu_z80::CpuZ80;
-use emu_core::tms9918a::Tms9918a;
 use emu_core::debug::Debugger;
 use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::renderer::Renderer;
+use emu_core::tms9918a::Tms9918a;
 use emu_core::types::Frame;
 use emu_core::{MountPointInfo, System};
 use serde_json::Value;
