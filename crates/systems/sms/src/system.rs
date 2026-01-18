@@ -605,9 +605,9 @@ mod tests {
         let mount_points = system.mount_points();
         assert_eq!(mount_points.len(), 2);
         assert_eq!(mount_points[0].name, "BIOS ROM");
-        assert_eq!(mount_points[0].required, false);
+        assert!(!mount_points[0].required);
         assert_eq!(mount_points[1].name, "Cartridge");
-        assert_eq!(mount_points[1].required, true);
+        assert!(mount_points[1].required);
 
         // BIOS should not be loaded by default
         assert!(!system.is_mounted("bios"));
@@ -1266,7 +1266,7 @@ mod tests {
         let test_bios = vec![0xAA; 0x400];
         system.mount("bios", &test_bios).unwrap();
 
-        let mut rom = vec![0xBB; 0x8000];
+        let rom = vec![0xBB; 0x8000];
         system.load_rom(rom);
 
         // With BIOS enabled, should read BIOS
