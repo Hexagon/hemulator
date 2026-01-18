@@ -20,6 +20,11 @@ This document describes the SMS (Sega Master System) implementation in Hemulator
   - Sprite overflow detection
   - Sprite collision detection
 - Memory bus with ROM banking support
+- BIOS support with optional BIOS mount point:
+  - Games run without BIOS by default
+  - Optional BIOS ROM loading for games that require it
+  - BIOS can be enabled/disabled via memory control register (port 0x3E, bit 3)
+  - Minimal default BIOS available for testing
 - PAL/NTSC timing detection from ROM header (TMR SEGA)
   - Automatic detection based on region code
   - Proper frame timing (60Hz NTSC, 50Hz PAL)
@@ -32,7 +37,7 @@ This document describes the SMS (Sega Master System) implementation in Hemulator
 - System trait implementation
 - Frontend integration (ROM detection, controller input, audio)
 - Test ROM and smoke tests
-- All unit tests passing (45/45)
+- All unit tests passing (50/50)
 
 **❌ Not Yet Implemented:**
 - Game Gear support (planned)
@@ -127,13 +132,39 @@ For 440 Hz (A4): register = 3579545 / (32 × 440) ≈ 254
 
 | Address Range | Description |
 |--------------|-------------|
-| 0x0000-0x3FFF | ROM Bank 0 (16KB) |
+| 0x0000-0x03FF | BIOS ROM (1KB, when enabled via bit 3 of port 0x3E) |
+| 0x0000-0x3FFF | ROM Bank 0 (16KB, when BIOS disabled) |
 | 0x4000-0x7FFF | ROM Bank 1 (16KB) |
 | 0x8000-0xBFFF | ROM Bank 2 (16KB) |
 | 0xC000-0xDFFF | RAM (8KB) |
 | 0xE000-0xFFFF | RAM Mirror |
 
 Banking registers at 0xFFFC, 0xFFFD, 0xFFFE (in RAM) control which 16KB banks are mapped.
+
+### BIOS Support
+
+The SMS has optional BIOS ROM support:
+
+**Memory Control Register (Port 0x3E):**
+- Bit 3: BIOS enable/disable
+  - 0 = BIOS enabled (BIOS ROM mapped at 0x0000-0x03FF)
+  - 1 = BIOS disabled (Cartridge ROM mapped from 0x0000)
+
+**Default Behavior:**
+- Most games work without BIOS
+- BIOS is not loaded by default
+- Games start directly from cartridge ROM at 0x0000
+
+**Loading BIOS:**
+- BIOS can be mounted via the "bios" mount point
+- Supports .sms, .bin, .rom file extensions
+- When loaded, BIOS is automatically enabled
+- BIOS typically boots, initializes hardware, then disables itself
+
+**Use Cases:**
+- Some Japanese games require BIOS
+- BIOS shows SEGA logo on boot
+- BIOS provides utility functions for games
 
 ### I/O Ports
 
@@ -153,9 +184,10 @@ Current test coverage:
 - ✅ VDP: register writes, VRAM access, color decoding, interrupts, sprite flags (8 tests)
 - ✅ Memory bus: RAM/ROM access, banking (3 tests)
 - ✅ System: creation, reset, ROM loading, frame stepping, interrupts (10 tests)
+- ✅ BIOS: mounting/unmounting, enable/disable, memory reads (5 tests)
 - ✅ Save states: CPU, VDP, PSG, memory serialization (5 tests)
 - ✅ Timing: PAL/NTSC detection, frame cycle calculations (3 tests)
-- ✅ Total: 45 tests passing
+- ✅ Total: 50 tests passing
 
 Run tests with:
 ```bash

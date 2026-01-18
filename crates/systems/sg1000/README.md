@@ -81,6 +81,12 @@ The SG-1000 only requires a cartridge ROM to run - no BIOS is needed.
 - Controllers limited to standard joystick
 - Audio output currently stubbed (PSG implemented but not connected to audio pipeline)
 
+## Recent Fixes
+
+### TMS9918A Sprite Rendering (January 2026)
+- **Fixed sprite transparency**: Sprites with color code 0 are now properly treated as transparent and not drawn, matching TMS9918A hardware behavior
+- **Impact**: Fixes missing sprites in games like 007 where sprites were incorrectly rendered as invisible black rectangles
+
 ## References
 
 ### Technical Documentation

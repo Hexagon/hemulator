@@ -14,15 +14,22 @@ use std::rc::Rc;
 /// - 0xC000-0xDFFF: RAM (8KB)
 /// - 0xE000-0xFFFF: RAM mirror
 ///
+/// BIOS Support:
+/// - When bit 3 of memory control (port 0x3E) is 0, BIOS is mapped at 0x0000-0x03FF (1KB)
+/// - When bit 3 is set, cartridge ROM is mapped starting at 0x0000
+///
 /// I/O Ports:
 /// - 0x7E/0x7F: PSG
 /// - 0xBE: VDP data port
 /// - 0xBF: VDP control/status port
 /// - 0xDC/0xDD: Controller ports
-/// - 0x3E: Memory control (banking)
+/// - 0x3E: Memory control (banking, BIOS enable)
 pub struct SmsMemory {
     // ROM data
     rom: Vec<u8>,
+
+    // BIOS ROM (1KB or 8KB, optional)
+    bios: Vec<u8>,
 
     // RAM (8KB)
     ram: [u8; 0x2000],
@@ -55,6 +62,7 @@ impl SmsMemory {
 
         Self {
             rom,
+            bios: Vec::new(), // No BIOS by default
             ram: [0; 0x2000],
             vdp,
             psg,
@@ -64,8 +72,36 @@ impl SmsMemory {
             num_banks,
             controller_1: 0xFF,
             controller_2: 0xFF,
-            memory_control: 0,
+            memory_control: 0x08, // Bit 3 set by default (BIOS disabled)
         }
+    }
+
+    /// Load BIOS ROM
+    pub fn load_bios(&mut self, bios: Vec<u8>) {
+        self.bios = bios;
+        // Enable BIOS when explicitly loaded (user wants to use it)
+        if !self.bios.is_empty() {
+            self.memory_control &= !0x08; // Clear bit 3 to enable BIOS
+        } else {
+            self.memory_control |= 0x08; // Set bit 3 to disable BIOS when none is loaded
+        }
+    }
+
+    /// Load cartridge ROM (preserves BIOS)
+    pub fn load_rom(&mut self, rom: Vec<u8>) {
+        self.rom = rom;
+        // Recalculate number of banks
+        self.num_banks = self.rom.len().div_ceil(0x4000);
+        // Reset bank registers
+        self.rom_bank_0 = 0;
+        self.rom_bank_1 = 1;
+        self.rom_bank_2 = 2;
+    }
+
+    /// Check if BIOS is currently enabled
+    pub fn is_bios_enabled(&self) -> bool {
+        // Bit 3 of memory control: 0 = BIOS enabled, 1 = BIOS disabled
+        (self.memory_control & 0x08) == 0 && !self.bios.is_empty()
     }
 
     /// Update banking configuration
@@ -157,6 +193,10 @@ impl SmsMemory {
 impl MemoryZ80 for SmsMemory {
     fn read(&self, addr: u16) -> u8 {
         match addr {
+            0x0000..=0x03FF if self.is_bios_enabled() => {
+                // BIOS area (1KB) when BIOS is enabled
+                self.bios.get(addr as usize).copied().unwrap_or(0xFF)
+            }
             0x0000..=0x3FFF => {
                 // Bank 0
                 let offset = self.rom_bank_0 * 0x4000 + (addr as usize);

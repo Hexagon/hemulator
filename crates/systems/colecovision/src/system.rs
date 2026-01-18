@@ -3,10 +3,10 @@
 use crate::bus::ColecoVisionMemory;
 use crate::psg::ColecoVisionPsg;
 use emu_core::cpu_z80::CpuZ80;
-use emu_core::tms9918a::Tms9918a;
 use emu_core::debug::Debugger;
 use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::renderer::Renderer;
+use emu_core::tms9918a::Tms9918a;
 use emu_core::types::Frame;
 use emu_core::{MountPointInfo, System};
 use serde_json::Value;
@@ -197,16 +197,18 @@ impl System for ColecoVisionSystem {
                 / self.scanline_cycles as u64) as u16;
             self.vdp.borrow_mut().set_scanline(scanline);
 
-            // Check for VDP interrupt
+            // Check for VDP interrupt (game clears it by reading VDP status)
             if self.vdp.borrow().frame_interrupt_pending() {
                 self.cpu.interrupt(0xFF);
-                self.vdp.borrow_mut().clear_frame_interrupt();
             }
 
             // Step PSG and collect audio samples
             let samples = self.psg.borrow_mut().step(cpu_cycles);
             self.audio_buffer.extend_from_slice(&samples);
         }
+
+        // Render the full frame once at the end
+        self.vdp.borrow_mut().render_frame();
 
         Ok(self.vdp.borrow().get_frame().clone())
     }

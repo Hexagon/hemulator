@@ -14,9 +14,9 @@ This emulator supports 10 different retro gaming systems. **NES emulation is ful
 | **Atari 2600** | 🚧 In Development | TIA, RIOT, cartridge formats | Rendering issues, stability | Testing/development |
 | **CHIP-8** | ✅ Fully Working | Complete CHIP-8/Super-CHIP/XO-CHIP | - | Playing CHIP-8 programs |
 | **Game Boy** | ✅ Fully Functional (GB) / 🚧 GBC WIP | Core features, MBC0/1/2/3/5 | Some edge cases, GBC features incomplete | Playing GB games |
-| **SMS** | ✅ Functional | Z80 CPU, VDP, PSG, ROM banking | Test ROM, full game testing | Testing/gameplay |
-| **ColecoVision** | ✅ Functional | Z80 CPU, TMS9918A VDP, SN76489 PSG | Audio output, BIOS required, test ROM | Testing/gameplay |
-| **SG-1000** | ✅ Functional | Z80 CPU, TMS9918A VDP, SN76489 PSG | Audio output, test ROM | Testing/gameplay |
+| **SMS** | 🚧 In Development | Z80 CPU, VDP, PSG, ROM banking | Not producing image, test ROM | Development only |
+| **ColecoVision** | 🚧 In Development | Z80 CPU, TMS9918A VDP, SN76489 PSG | Not producing image, audio output, BIOS required | Development only |
+| **SG-1000** | ⚠️ Experimental | Z80 CPU, TMS9918A VDP, SN76489 PSG | Audio output, test ROM | Development/testing |
 | **SNES** | ✅ Functional | CPU, all PPU modes 0-7, sprites, DMA/HDMA | Audio (DSP), some enhancement chips | Playing most games (silent) |
 | **N64** | 🚧 In Development | 3D rendering, CPU | Full graphics, audio, games | Development/testing |
 | **PC/DOS** | 🧪 Experimental | Multi-slot mounts, disk controller, custom BIOS, CGA/EGA/VGA | Full disk I/O, boot | Development/testing |
@@ -246,7 +246,7 @@ For more technical information, see [crates/systems/chip8/README.md](../crates/s
 
 ### SMS (Sega Master System)
 
-**Status**: ✅ Functional  
+**Status**: 🚧 In Development (not producing image)  
 **Coverage**: Complete hardware emulation - Z80 CPU, VDP, PSG fully implemented
 
 **ROM Format**: SMS (.sms files) - automatically detected via TMR SEGA header or file size
@@ -290,6 +290,7 @@ For more technical information, see [crates/systems/chip8/README.md](../crates/s
   - Frame-based timing with proper cycle counts
 
 **Known Limitations**:
+- **Not Producing Image**: Currently not generating visible output - under active development
 - **Test ROM**: No smoke test ROM yet - testing with commercial ROMs needed
 - **Timing Model**: Frame-based rendering (not cycle-accurate) - suitable for most games
 
@@ -320,7 +321,7 @@ For more technical information, see [crates/systems/chip8/README.md](../crates/s
 
 ### ColecoVision
 
-**Status**: ✅ Functional  
+**Status**: 🚧 In Development (not producing image)  
 **Coverage**: Complete hardware emulation - Z80 CPU, TMS9918A VDP, SN76489 PSG fully implemented
 
 **ROM Format**: COL (.col files) - automatically detected
@@ -366,6 +367,7 @@ For more technical information, see [crates/systems/chip8/README.md](../crates/s
   - Memory state (RAM, BIOS, cartridge)
 
 **Known Limitations**:
+- **Not Producing Image**: Currently not generating visible output - under active development
 - **Audio Output**: PSG implemented but not yet connected to audio pipeline - silent gameplay
 - **BIOS Required**: Must provide 8 KB BIOS ROM separately (not included)
 - **Test ROM**: No smoke test ROM yet - testing with commercial ROMs needed
@@ -373,12 +375,21 @@ For more technical information, see [crates/systems/chip8/README.md](../crates/s
 - **No Expansion Modules**: Super Game Module and other expansions not supported
 - **Controllers**: Limited to standard joystick (no Super Action Controllers, spinners, etc.)
 
-**Controls**: ColecoVision controller mapped to same keyboard layout as NES:
-- Arrow keys = D-pad
-- Z = Fire 1
-- X = Fire 2
-- Enter = Not used (ColecoVision keypad not implemented)
-- Left Shift = Not used
+**Controls**: The ColecoVision controller has a joystick, 2 fire buttons, and a 12-key numeric keypad.
+
+**Player 1:**
+- Arrow keys = Joystick (Up/Down/Left/Right)
+- Left Shift = Fire Button A (left side)
+- Enter = Fire Button B (right side)
+- 1,2,3,Q,W,E,A,S,D,Z,X,C = Numeric keypad (keys 1-9, *, 0, #)
+
+**Player 2:**
+- I/J/K/L = Joystick (I=Up, K=Down, J=Left, L=Right)
+- Right Shift = Fire Button A (left side)
+- P = Fire Button B (right side)
+- 7,8,9,U,I,O,H,J,K,N,M,Comma = Numeric keypad (keys 1-9, *, 0, #)
+
+See the [Controls](controls.html#colecovision-controller-input) page for detailed keypad layout.
 
 **ROM Loading**: 
 - ROMs with .col extension are auto-detected as ColecoVision
@@ -404,7 +415,7 @@ For detailed technical information, see [crates/systems/colecovision/README.md](
 
 ### SG-1000
 
-**Status**: ✅ Functional  
+**Status**: ⚠️ Experimental  
 **Coverage**: Complete hardware emulation - Z80 CPU, TMS9918A VDP, SN76489 PSG fully implemented
 
 **ROM Format**: SG (.sg, .sc files) - automatically detected

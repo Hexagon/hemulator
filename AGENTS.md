@@ -241,8 +241,9 @@ For system-specific implementation details, see each system's README:
 - Traits: System, Cpu, Renderer, AudioChip
 
 **System Modules** (`crates/systems/`):
-- ✅ NES (~90% game coverage), Game Boy (GB fully functional, GBC WIP), CHIP-8 (fully working), SMS (functional)
-- 🚧 Atari 2600 (rendering issues), SNES (no visible output), N64 (in development)
+- ✅ NES (~90% game coverage), Game Boy (GB fully functional, GBC WIP), CHIP-8 (fully working)
+- 🚧 Atari 2600 (rendering issues), SMS (not producing image), ColecoVision (not producing image), SNES (no visible output), N64 (in development)
+- ⚠️ SG-1000 (experimental)
 - 🧪 PC (experimental)
 
 ## Implementation Guidelines

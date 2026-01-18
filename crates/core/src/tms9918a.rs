@@ -232,7 +232,11 @@ impl Tms9918a {
 
     /// Get tile viewer data for debugging (returns VRAM, palette, and register data)
     pub fn get_tile_viewer_data(&self) -> (Vec<u8>, Vec<u32>, Vec<u8>) {
-        (self.vram.to_vec(), self.palette.to_vec(), self.registers.to_vec())
+        (
+            self.vram.to_vec(),
+            self.palette.to_vec(),
+            self.registers.to_vec(),
+        )
     }
 
     /// Get VDP state for save state
@@ -340,8 +344,10 @@ impl Tms9918a {
             _ => {} // Invalid mode
         }
 
-        // Render sprites if enabled
-        if (self.registers[1] & 0x02) != 0 {
+        // Render sprites (always active unless display is blanked)
+        // Bit 6 of register 1 is the blank bit (0=display enabled, 1=blanked)
+        let display_blanked = (self.registers[1] & 0x40) != 0;
+        if !display_blanked {
             self.render_sprites(line, line_offset);
         }
     }
@@ -582,7 +588,14 @@ impl Tms9918a {
                 // Get sprite attributes
                 let sprite_x = self.vram[attr_addr + 1] as i16;
                 let pattern_num = self.vram[attr_addr + 2] as usize;
-                let sprite_color = self.palette[(self.vram[attr_addr + 3] & 0x0F) as usize];
+                let color_code = self.vram[attr_addr + 3] & 0x0F;
+
+                // Skip sprites with color 0 (transparent)
+                if color_code == 0 {
+                    continue;
+                }
+
+                let sprite_color = self.palette[color_code as usize];
 
                 // Early color flag (bit 7 of attribute 3)
                 let early_clock = (self.vram[attr_addr + 3] & 0x80) != 0;

@@ -22,12 +22,6 @@ fn linear_to_srgb(linear: u8) -> u8 {
     (srgb_f * 255.0).round().min(255.0) as u8
 }
 
-/// Helper to create egui Color32, applying inverse gamma to compensate for GL_FRAMEBUFFER_SRGB
-#[inline]
-fn color_from_rgb(r: u8, g: u8, b: u8) -> egui::Color32 {
-    egui::Color32::from_rgb(linear_to_srgb(r), linear_to_srgb(g), linear_to_srgb(b))
-}
-
 /// Main egui application state
 pub struct EguiApp {
     pub menu_bar: MenuBar,
@@ -108,28 +102,40 @@ impl EguiApp {
 
     /// Render the UI
     pub fn ui(&mut self, ctx: &Context, scaling_mode: ScalingMode) {
+        let fg_color = egui::Color32::from_rgb(224, 224, 224);
+        let white_color = egui::Color32::from_rgb(255, 255, 255);
+        let panel_bg = egui::Color32::from_rgb(70, 70, 70);
+        let dock_fill_color = egui::Color32::from_rgb(60, 60, 60);
+        let main_bg_color = egui::Color32::from_rgb(0, 0, 0);
+
         // Set brighter text color globally
         let mut style = (*ctx.style()).clone();
-        style.visuals.override_text_color = Some(color_from_rgb(204, 204, 204));
+        style.visuals.override_text_color = Some(fg_color);
+
+        // Also brighten weak text color
+        style.visuals.weak_text_alpha = 0.85;
+
+        style.visuals.panel_fill = panel_bg;
+
         // Brighter widget text colors
-        style.visuals.widgets.noninteractive.fg_stroke.color = color_from_rgb(204, 204, 204);
-        style.visuals.widgets.inactive.fg_stroke.color = color_from_rgb(204, 204, 204);
-        style.visuals.widgets.hovered.fg_stroke.color = color_from_rgb(255, 255, 255);
-        style.visuals.widgets.active.fg_stroke.color = color_from_rgb(255, 255, 255);
+        style.visuals.widgets.noninteractive.fg_stroke.color = fg_color;
+        style.visuals.widgets.inactive.fg_stroke.color = fg_color;
+        style.visuals.widgets.hovered.fg_stroke.color = white_color;
+        style.visuals.widgets.active.fg_stroke.color = white_color;
         ctx.set_style(style);
 
-        // Top menu bar - VS Code menu bar color RGB(24,24,24)
+        // Top menu bar
         TopBottomPanel::top("menu_bar")
-            .frame(egui::Frame::new().fill(color_from_rgb(24, 24, 24)))
+            .frame(egui::Frame::new().fill(panel_bg))
             .show(ctx, |ui| {
                 self.menu_bar.ui(ui);
             });
 
-        // Bottom status bar - VS Code lighter area RGB(31,31,31)
+        // Bottom status bar
         // Update status bar with current FPS from property pane
         self.status_bar.set_fps(self.property_pane.fps);
         TopBottomPanel::bottom("status_bar")
-            .frame(egui::Frame::new().fill(color_from_rgb(31, 31, 31)))
+            .frame(egui::Frame::new().fill(dock_fill_color))
             .show(ctx, |ui| {
                 self.status_bar.ui(ui);
             });
@@ -140,7 +146,7 @@ impl EguiApp {
                 .default_height(250.0)
                 .min_height(100.0)
                 .resizable(true)
-                .frame(egui::Frame::new().fill(color_from_rgb(12, 12, 12)))
+                .frame(egui::Frame::new().fill(dock_fill_color))
                 .show(ctx, |ui| {
                     let mut inspector_viewer = InspectorTabViewer {
                         tab_manager: &mut self.tab_manager,
@@ -162,7 +168,7 @@ impl EguiApp {
                 .min_width(200.0)
                 .max_width(500.0)
                 .resizable(true)
-                .frame(egui::Frame::new().fill(color_from_rgb(12, 12, 12)))
+                .frame(egui::Frame::new().fill(dock_fill_color))
                 .show(ctx, |ui| {
                     let mut property_viewer = PropertyTabViewer {
                         property_pane: &mut self.property_pane,
@@ -179,7 +185,7 @@ impl EguiApp {
 
         // Central panel with main tabs (Emulator, NewProject, Help, About)
         CentralPanel::default()
-            .frame(egui::Frame::new().fill(color_from_rgb(0, 0, 0)))
+            .frame(egui::Frame::new().fill(main_bg_color))
             .show(ctx, |ui| {
                 self.tab_manager
                     .ui(ui, &self.emulator_texture, scaling_mode);

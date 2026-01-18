@@ -64,6 +64,20 @@ pub enum VirtualButton {
     // System-specific buttons
     TurboA,
     TurboB,
+
+    // ColecoVision numeric keypad (12 keys)
+    Num0,
+    Num1,
+    Num2,
+    Num3,
+    Num4,
+    Num5,
+    Num6,
+    Num7,
+    Num8,
+    Num9,
+    NumStar,  // * key
+    NumPound, // # key
 }
 
 /// Controller profile that maps physical inputs to virtual buttons
@@ -209,6 +223,164 @@ impl ControllerProfile {
                     axis: 1,
                     direction: 1,
                 },
+            )
+    }
+
+    /// ColecoVision keyboard profile for Player 1
+    /// Includes joystick, 2 fire buttons, and 12-key numeric keypad
+    pub fn colecovision_player1() -> Self {
+        Self::new("ColecoVision (Player 1)")
+            .for_device(InputDeviceType::Keyboard)
+            // Fire buttons
+            .map(
+                VirtualButton::A,
+                InputSource::KeyboardKey("LeftShift".to_string()),
+            )
+            .map(
+                VirtualButton::B,
+                InputSource::KeyboardKey("Enter".to_string()),
+            )
+            // Joystick (arrow keys)
+            .map(
+                VirtualButton::Up,
+                InputSource::KeyboardKey("Up".to_string()),
+            )
+            .map(
+                VirtualButton::Down,
+                InputSource::KeyboardKey("Down".to_string()),
+            )
+            .map(
+                VirtualButton::Left,
+                InputSource::KeyboardKey("Left".to_string()),
+            )
+            .map(
+                VirtualButton::Right,
+                InputSource::KeyboardKey("Right".to_string()),
+            )
+            // Numeric keypad (1-9, *, 0, #)
+            .map(
+                VirtualButton::Num1,
+                InputSource::KeyboardKey("1".to_string()),
+            )
+            .map(
+                VirtualButton::Num2,
+                InputSource::KeyboardKey("2".to_string()),
+            )
+            .map(
+                VirtualButton::Num3,
+                InputSource::KeyboardKey("3".to_string()),
+            )
+            .map(
+                VirtualButton::Num4,
+                InputSource::KeyboardKey("Q".to_string()),
+            )
+            .map(
+                VirtualButton::Num5,
+                InputSource::KeyboardKey("W".to_string()),
+            )
+            .map(
+                VirtualButton::Num6,
+                InputSource::KeyboardKey("E".to_string()),
+            )
+            .map(
+                VirtualButton::Num7,
+                InputSource::KeyboardKey("A".to_string()),
+            )
+            .map(
+                VirtualButton::Num8,
+                InputSource::KeyboardKey("S".to_string()),
+            )
+            .map(
+                VirtualButton::Num9,
+                InputSource::KeyboardKey("D".to_string()),
+            )
+            .map(
+                VirtualButton::NumStar,
+                InputSource::KeyboardKey("Z".to_string()),
+            )
+            .map(
+                VirtualButton::Num0,
+                InputSource::KeyboardKey("X".to_string()),
+            )
+            .map(
+                VirtualButton::NumPound,
+                InputSource::KeyboardKey("C".to_string()),
+            )
+    }
+
+    /// ColecoVision keyboard profile for Player 2
+    /// Includes joystick, 2 fire buttons, and 12-key numeric keypad
+    pub fn colecovision_player2() -> Self {
+        Self::new("ColecoVision (Player 2)")
+            .for_device(InputDeviceType::Keyboard)
+            // Fire buttons
+            .map(
+                VirtualButton::A,
+                InputSource::KeyboardKey("RightShift".to_string()),
+            )
+            .map(VirtualButton::B, InputSource::KeyboardKey("P".to_string()))
+            // Joystick (IJKL keys)
+            .map(VirtualButton::Up, InputSource::KeyboardKey("I".to_string()))
+            .map(
+                VirtualButton::Down,
+                InputSource::KeyboardKey("K".to_string()),
+            )
+            .map(
+                VirtualButton::Left,
+                InputSource::KeyboardKey("J".to_string()),
+            )
+            .map(
+                VirtualButton::Right,
+                InputSource::KeyboardKey("L".to_string()),
+            )
+            // Numeric keypad (1-9, *, 0, #) - right side of keyboard
+            .map(
+                VirtualButton::Num1,
+                InputSource::KeyboardKey("7".to_string()),
+            )
+            .map(
+                VirtualButton::Num2,
+                InputSource::KeyboardKey("8".to_string()),
+            )
+            .map(
+                VirtualButton::Num3,
+                InputSource::KeyboardKey("9".to_string()),
+            )
+            .map(
+                VirtualButton::Num4,
+                InputSource::KeyboardKey("U".to_string()),
+            )
+            .map(
+                VirtualButton::Num5,
+                InputSource::KeyboardKey("Y".to_string()),
+            )
+            .map(
+                VirtualButton::Num6,
+                InputSource::KeyboardKey("O".to_string()),
+            )
+            .map(
+                VirtualButton::Num7,
+                InputSource::KeyboardKey("G".to_string()),
+            )
+            .map(
+                VirtualButton::Num8,
+                InputSource::KeyboardKey("H".to_string()),
+            )
+            .map(
+                VirtualButton::Num9,
+                InputSource::KeyboardKey("B".to_string()),
+            )
+            .map(
+                VirtualButton::NumStar,
+                InputSource::KeyboardKey("N".to_string()),
+            )
+            .map(
+                VirtualButton::Num0,
+                InputSource::KeyboardKey("M".to_string()),
+            )
+            .map(
+                VirtualButton::NumPound,
+                InputSource::KeyboardKey("Comma".to_string()),
             )
     }
 }
