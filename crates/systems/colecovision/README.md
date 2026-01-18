@@ -159,6 +159,10 @@ Unit tests now cover:
 - VDP address register wrapping
 - Save state roundtrip
 
+### TMS9918A Sprite Fixes (January 2026)
+- **Fixed sprite transparency**: Sprites with color code 0 are now properly treated as transparent and not drawn, matching TMS9918A hardware behavior
+- **Impact**: Resolves rendering issues in games where sprites were incorrectly appearing as black/invisible when they should be completely transparent
+
 ## References
 
 ### Technical Documentation
