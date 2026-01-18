@@ -56,6 +56,7 @@ pub mod controller {
 
 use bus::SnesBus;
 use cpu::SnesCpu;
+use emu_core::apu::AudioChip;
 use emu_core::{types::Frame, MountPointInfo, System};
 use ppu_renderer::{SnesPpuRenderer, SoftwareSnesPpuRenderer};
 use thiserror::Error;
@@ -262,6 +263,17 @@ impl SnesSystem {
     /// Get cartridge information for the inspector tab
     pub fn get_cartridge_info(&self) -> Option<CartridgeInfo> {
         self.cartridge_info.clone()
+    }
+
+    /// Get audio samples from the APU
+    /// Generates the requested number of audio samples from the SPC700/DSP
+    pub fn get_audio_samples(&mut self, count: usize) -> Vec<i16> {
+        if let Some(ref mut spc700) = self.cpu.bus_mut().spc700_mut() {
+            spc700.generate_samples(count)
+        } else {
+            // If SPC700 is not initialized, return silence
+            vec![0; count]
+        }
     }
 }
 
