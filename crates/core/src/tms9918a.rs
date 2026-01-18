@@ -588,7 +588,14 @@ impl Tms9918a {
                 // Get sprite attributes
                 let sprite_x = self.vram[attr_addr + 1] as i16;
                 let pattern_num = self.vram[attr_addr + 2] as usize;
-                let sprite_color = self.palette[(self.vram[attr_addr + 3] & 0x0F) as usize];
+                let color_code = self.vram[attr_addr + 3] & 0x0F;
+
+                // Skip sprites with color 0 (transparent)
+                if color_code == 0 {
+                    continue;
+                }
+
+                let sprite_color = self.palette[color_code as usize];
 
                 // Early color flag (bit 7 of attribute 3)
                 let early_clock = (self.vram[attr_addr + 3] & 0x80) != 0;
