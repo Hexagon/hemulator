@@ -51,6 +51,8 @@ pub struct SmsSystem {
     // State
     /// Whether a cartridge is loaded
     cartridge_loaded: bool,
+    /// Whether a BIOS is loaded
+    bios_loaded: bool,
 
     // Debugging
     /// Instruction tracer for debugging
@@ -70,6 +72,9 @@ impl SmsSystem {
         let rom = vec![0; 0x8000];
         let memory = SmsMemory::new(rom, Rc::clone(&vdp), Rc::clone(&psg));
 
+        // Don't load BIOS by default - games should work without it
+        // BIOS can be loaded via mount() if needed
+
         // Create CPU
         let cpu = CpuZ80::new(memory);
 
@@ -81,6 +86,7 @@ impl SmsSystem {
             total_cycles: 0,
             timing_mode: emu_core::apu::TimingMode::Ntsc,
             cartridge_loaded: false,
+            bios_loaded: false, // No BIOS by default
             instruction_tracer: emu_core::instruction_tracer::InstructionTracer::new(),
             breakpoint_manager: emu_core::breakpoints::BreakpointManager::new(),
         }
@@ -105,9 +111,8 @@ impl SmsSystem {
         // Update PSG timing
         self.psg.borrow_mut().set_timing(self.timing_mode);
 
-        // Create new memory with ROM
-        let memory = SmsMemory::new(rom_data, Rc::clone(&self.vdp), Rc::clone(&self.psg));
-        self.cpu = CpuZ80::new(memory);
+        // Load ROM into existing memory (preserves BIOS)
+        self.cpu.memory.load_rom(rom_data);
         self.reset();
     }
 
@@ -463,36 +468,74 @@ impl System for SmsSystem {
     }
 
     fn mount_points(&self) -> Vec<MountPointInfo> {
-        vec![MountPointInfo {
-            id: "cartridge".to_string(),
-            name: "Cartridge".to_string(),
-            extensions: vec!["sms".to_string()],
-            required: true,
-        }]
+        vec![
+            MountPointInfo {
+                id: "bios".to_string(),
+                name: "BIOS ROM".to_string(),
+                extensions: vec!["sms".to_string(), "bin".to_string(), "rom".to_string()],
+                required: false, // Has default BIOS
+            },
+            MountPointInfo {
+                id: "cartridge".to_string(),
+                name: "Cartridge".to_string(),
+                extensions: vec!["sms".to_string()],
+                required: true,
+            },
+        ]
     }
 
     fn mount(&mut self, mount_point_id: &str, data: &[u8]) -> Result<(), Self::Error> {
-        if mount_point_id == "cartridge" {
-            self.load_rom(data.to_vec());
-            self.cartridge_loaded = true;
-            Ok(())
-        } else {
-            Err(SmsError::InvalidMountPoint)
+        match mount_point_id {
+            "bios" => {
+                if data.is_empty() {
+                    return Err(SmsError::InvalidMountPoint);
+                }
+
+                log(LogCategory::CPU, LogLevel::Info, || {
+                    format!("SMS: Loading BIOS ({} bytes)", data.len())
+                });
+
+                // Load BIOS into memory
+                self.cpu.memory.load_bios(data.to_vec());
+                self.bios_loaded = true;
+                Ok(())
+            }
+            "cartridge" => {
+                self.load_rom(data.to_vec());
+                self.cartridge_loaded = true;
+                Ok(())
+            }
+            _ => Err(SmsError::InvalidMountPoint),
         }
     }
 
     fn unmount(&mut self, mount_point_id: &str) -> Result<(), Self::Error> {
-        if mount_point_id == "cartridge" {
-            self.load_rom(vec![0; 0x8000]);
-            self.cartridge_loaded = false;
-            Ok(())
-        } else {
-            Err(SmsError::InvalidMountPoint)
+        match mount_point_id {
+            "bios" => {
+                log(LogCategory::CPU, LogLevel::Info, || {
+                    "SMS: Unloading BIOS".to_string()
+                });
+
+                // Clear BIOS (no default BIOS)
+                self.cpu.memory.load_bios(Vec::new());
+                self.bios_loaded = false;
+                Ok(())
+            }
+            "cartridge" => {
+                self.load_rom(vec![0; 0x8000]);
+                self.cartridge_loaded = false;
+                Ok(())
+            }
+            _ => Err(SmsError::InvalidMountPoint),
         }
     }
 
     fn is_mounted(&self, mount_point_id: &str) -> bool {
-        mount_point_id == "cartridge" && self.cartridge_loaded
+        match mount_point_id {
+            "bios" => self.bios_loaded,
+            "cartridge" => self.cartridge_loaded,
+            _ => false,
+        }
     }
 
     fn debugger(&self) -> Option<&dyn emu_core::debug::Debugger> {
@@ -559,7 +602,15 @@ mod tests {
     #[test]
     fn test_system_creation() {
         let system = SmsSystem::new();
-        assert_eq!(system.mount_points()[0].name, "Cartridge");
+        let mount_points = system.mount_points();
+        assert_eq!(mount_points.len(), 2);
+        assert_eq!(mount_points[0].name, "BIOS ROM");
+        assert_eq!(mount_points[0].required, false);
+        assert_eq!(mount_points[1].name, "Cartridge");
+        assert_eq!(mount_points[1].required, true);
+
+        // BIOS should not be loaded by default
+        assert!(!system.is_mounted("bios"));
     }
 
     #[test]
@@ -1157,5 +1208,83 @@ mod tests {
         // Load state - should restore PAL
         system.load_state(&state).unwrap();
         assert_eq!(system.get_timing(), TimingMode::Pal);
+    }
+
+    #[test]
+    fn test_bios_mount_unmount() {
+        let mut system = SmsSystem::new();
+
+        // System should NOT have BIOS loaded by default
+        assert!(!system.is_mounted("bios"));
+
+        // Create a test BIOS (1KB)
+        let test_bios = vec![0x42; 0x400];
+
+        // Mount custom BIOS
+        system.mount("bios", &test_bios).unwrap();
+        assert!(system.is_mounted("bios"));
+
+        // Unmount BIOS
+        system.unmount("bios").unwrap();
+        assert!(!system.is_mounted("bios"));
+    }
+
+    #[test]
+    fn test_bios_disabled_by_default() {
+        let system = SmsSystem::new();
+
+        // Without BIOS loaded, it should be disabled
+        assert!(!system.cpu.memory.is_bios_enabled());
+    }
+
+    #[test]
+    fn test_bios_rom_reads() {
+        let mut system = SmsSystem::new();
+
+        // Create a test BIOS with known data
+        let mut test_bios = vec![0; 0x400];
+        test_bios[0] = 0xAB;
+        test_bios[0x100] = 0xCD;
+        test_bios[0x3FF] = 0xEF;
+
+        system.mount("bios", &test_bios).unwrap();
+
+        // Enable BIOS via memory control (clear bit 3)
+        system.cpu.memory.io_write(0x3E, 0x00);
+
+        // Verify BIOS is readable when enabled
+        assert_eq!(system.cpu.memory.read(0x0000), 0xAB);
+        assert_eq!(system.cpu.memory.read(0x0100), 0xCD);
+        assert_eq!(system.cpu.memory.read(0x03FF), 0xEF);
+    }
+
+    #[test]
+    fn test_bios_disable_via_memory_control() {
+        let mut system = SmsSystem::new();
+
+        // Load test BIOS and cartridge ROM
+        let test_bios = vec![0xAA; 0x400];
+        system.mount("bios", &test_bios).unwrap();
+
+        let mut rom = vec![0xBB; 0x8000];
+        system.load_rom(rom);
+
+        // With BIOS enabled, should read BIOS
+        assert!(system.cpu.memory.is_bios_enabled());
+        assert_eq!(system.cpu.memory.read(0x0000), 0xAA);
+
+        // Disable BIOS via memory control register (set bit 3)
+        system.cpu.memory.io_write(0x3E, 0x08);
+
+        // Now should read cartridge ROM
+        assert!(!system.cpu.memory.is_bios_enabled());
+        assert_eq!(system.cpu.memory.read(0x0000), 0xBB);
+
+        // Re-enable BIOS (clear bit 3)
+        system.cpu.memory.io_write(0x3E, 0x00);
+
+        // Should read BIOS again
+        assert!(system.cpu.memory.is_bios_enabled());
+        assert_eq!(system.cpu.memory.read(0x0000), 0xAA);
     }
 }
