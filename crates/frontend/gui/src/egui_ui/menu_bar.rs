@@ -410,43 +410,40 @@ impl MenuBar {
                 });
 
                 // Display filters submenu
-                ui.menu_button(
-                    format!("Filters ({})", self.current_filter.name()),
-                    |ui| {
-                        let filters = [
-                            (DisplayFilter::None, "None", "No filter, pure pixels"),
-                            (
-                                DisplayFilter::PhosphorPersistence,
-                                "Phosphor Persistence",
-                                "Temporal frame blending",
-                            ),
-                            (
-                                DisplayFilter::SonyTrinitron,
-                                "Sony Trinitron",
-                                "CRT simulation",
-                            ),
-                            (DisplayFilter::Ibm5151, "IBM 5151", "Monochrome monitor"),
-                            (
-                                DisplayFilter::Commodore1702,
-                                "Commodore 1702",
-                                "Color monitor",
-                            ),
-                            (DisplayFilter::SharpLcd, "Sharp LCD", "LCD simulation"),
-                            (DisplayFilter::RcaVictor, "RCA Victor", "CRT television"),
-                        ];
-                        for (filter, name, tooltip) in filters {
-                            let label = if self.current_filter == filter {
-                                format!("✓ {}", name)
-                            } else {
-                                format!("  {}", name)
-                            };
-                            if ui.button(label).on_hover_text(tooltip).clicked() {
-                                self.pending_action = Some(MenuAction::SetDisplayFilter(filter));
-                                ui.close();
-                            }
+                ui.menu_button(format!("Filters ({})", self.current_filter.name()), |ui| {
+                    let filters = [
+                        (DisplayFilter::None, "None", "No filter, pure pixels"),
+                        (
+                            DisplayFilter::PhosphorPersistence,
+                            "Phosphor Persistence",
+                            "Temporal frame blending",
+                        ),
+                        (
+                            DisplayFilter::SonyTrinitron,
+                            "Sony Trinitron",
+                            "CRT simulation",
+                        ),
+                        (DisplayFilter::Ibm5151, "IBM 5151", "Monochrome monitor"),
+                        (
+                            DisplayFilter::Commodore1702,
+                            "Commodore 1702",
+                            "Color monitor",
+                        ),
+                        (DisplayFilter::SharpLcd, "Sharp LCD", "LCD simulation"),
+                        (DisplayFilter::RcaVictor, "RCA Victor", "CRT television"),
+                    ];
+                    for (filter, name, tooltip) in filters {
+                        let label = if self.current_filter == filter {
+                            format!("✓ {}", name)
+                        } else {
+                            format!("  {}", name)
+                        };
+                        if ui.button(label).on_hover_text(tooltip).clicked() {
+                            self.pending_action = Some(MenuAction::SetDisplayFilter(filter));
+                            ui.close();
                         }
-                    },
-                );
+                    }
+                });
 
                 ui.separator();
 

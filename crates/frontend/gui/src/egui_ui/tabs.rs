@@ -597,9 +597,11 @@ impl TabManager {
                                 &pixels,
                             );
 
-                            let texture = ui
-                                .ctx()
-                                .load_texture("hemulator_logo", color_image, egui::TextureOptions::default());
+                            let texture = ui.ctx().load_texture(
+                                "hemulator_logo",
+                                color_image,
+                                egui::TextureOptions::default(),
+                            );
                             let image = egui::Image::from_texture(&texture)
                                 .fit_to_exact_size(egui::vec2(128.0, 128.0));
                             ui.add(image);
