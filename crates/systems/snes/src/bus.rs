@@ -531,13 +531,13 @@ impl SnesBus {
                 _ => 1,
             };
 
-            // Transfer loop - optimized to avoid repeated pattern matching
+            // Transfer loop - optimized by hoisting bytes_per_transfer out of the inner loop
             while size > 0 {
                 let count = bytes_per_transfer.min(size);
                 
                 for i in 0..count {
-                    // Calculate B-bus register address based on transfer mode
-                    // Pattern computed once per mode, not per byte
+                    // Calculate B-bus register address based on transfer mode for each byte.
+                    // Note: bytes_per_transfer is precomputed, but b_reg is still computed per byte.
                     let b_reg = match transfer_mode {
                         0 => 0x2100 | (dma.b_addr as u16),
                         1 | 5 => {
