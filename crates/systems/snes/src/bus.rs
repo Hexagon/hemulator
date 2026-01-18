@@ -378,13 +378,14 @@ impl SnesBus {
     fn update_blanking_cache(&self) {
         let current_scanline = self.frame_cycle / Self::SCANLINE_CYCLES;
         let cycle_in_scanline = self.frame_cycle % Self::SCANLINE_CYCLES;
-        
+
         // VBlank is active during scanlines 225-261 (NTSC has 262 scanlines total)
         self.cached_in_vblank.set(current_scanline >= 225);
-        
+
         // HBlank is the last ~40 cycles of each scanline
-        self.cached_in_hblank.set(cycle_in_scanline >= (Self::SCANLINE_CYCLES - Self::HBLANK_CYCLES));
-        
+        self.cached_in_hblank
+            .set(cycle_in_scanline >= (Self::SCANLINE_CYCLES - Self::HBLANK_CYCLES));
+
         // Update the cached cycle value
         self.last_cached_cycle.set(self.frame_cycle);
     }
@@ -534,7 +535,7 @@ impl SnesBus {
             // Transfer loop - optimized by hoisting bytes_per_transfer out of the inner loop
             while size > 0 {
                 let count = bytes_per_transfer.min(size);
-                
+
                 for i in 0..count {
                     // Calculate B-bus register address based on transfer mode for each byte.
                     // Note: bytes_per_transfer is precomputed, but b_reg is still computed per byte.
