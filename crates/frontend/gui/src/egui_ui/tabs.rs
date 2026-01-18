@@ -11,7 +11,6 @@ const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Emulator,
-    Help,
     About,
 }
 
@@ -305,7 +304,6 @@ pub enum DebugAction {
 pub struct TabManager {
     pub active_tab: Tab,
     pub log_messages: Vec<String>,
-    pub help_visible: bool,
     pub about_visible: bool,
     pub debug_info: Option<SystemDebugInfo>,
     pub enhanced_debug_state: Option<EnhancedDebugState>,
@@ -333,7 +331,6 @@ impl TabManager {
         Self {
             active_tab: Tab::Emulator,
             log_messages: Vec::new(),
-            help_visible: false,
             about_visible: false,
             debug_info: None,
             enhanced_debug_state: None,
@@ -376,11 +373,6 @@ impl TabManager {
 
     pub fn update_mount_info(&mut self, mounts: Vec<MountInfo>) {
         self.mount_info = mounts;
-    }
-
-    pub fn show_help_tab(&mut self) {
-        self.help_visible = true;
-        self.active_tab = Tab::Help;
     }
 
     pub fn show_about_tab(&mut self) {
@@ -442,32 +434,15 @@ impl TabManager {
         emulator_texture: &Option<TextureHandle>,
         scaling_mode: ScalingMode,
     ) {
-        // Only show tab bar if there are multiple tabs visible (Help or About)
-        let has_extra_tabs = self.help_visible || self.about_visible;
+        // Only show tab bar if there are multiple tabs visible (About)
+        let has_extra_tabs = self.about_visible;
 
         if has_extra_tabs {
             // Tab bar with improved visual styling
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut self.active_tab, Tab::Emulator, "🎮 Emulator");
 
-                if self.help_visible {
-                    ui.selectable_value(&mut self.active_tab, Tab::Help, "❓ Help");
-                    // Use a colored button for the close icon to ensure visibility
-                    let close_button = egui::Button::new(
-                        egui::RichText::new("✖").color(egui::Color32::from_rgb(220, 220, 220)),
-                    )
-                    .small();
-                    if ui
-                        .add(close_button)
-                        .on_hover_text("Close Help tab")
-                        .clicked()
-                    {
-                        self.help_visible = false;
-                        if self.active_tab == Tab::Help {
-                            self.active_tab = Tab::Emulator;
-                        }
-                    }
-                }
+                // Help tab removed.
 
                 if self.about_visible {
                     ui.selectable_value(&mut self.active_tab, Tab::About, "ℹ️ About");
@@ -498,7 +473,6 @@ impl TabManager {
         // Tab content
         match self.active_tab {
             Tab::Emulator => self.render_emulator_tab(ui, emulator_texture, scaling_mode),
-            Tab::Help => self.render_help_tab(ui),
             Tab::About => self.render_about_tab(ui),
         }
     }
@@ -608,11 +582,39 @@ impl TabManager {
                 ui.vertical_centered(|ui| {
                     ui.add_space(60.0);
 
-                    ui.heading(
-                        egui::RichText::new("🎮 Welcome to Hemulator")
-                            .size(32.0)
-                            .strong(),
-                    );
+                    // Try to show embedded app icon from assets/icon_256.png.
+                    // Fall back to the original text heading if decoding fails.
+                    // Decode embedded PNG (assets/icon_256.png) to an egui::ColorImage
+                    match image::load_from_memory(include_bytes!(
+                        "../../../../../assets/icon_256.png",
+                    )) {
+                        Ok(img) => {
+                            let rgba = img.to_rgba8();
+                            let (w, h) = rgba.dimensions();
+                            let pixels = rgba.into_raw();
+                            let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                                [w as usize, h as usize],
+                                &pixels,
+                            );
+
+                            let texture = ui.ctx().load_texture(
+                                "hemulator_logo",
+                                color_image,
+                                egui::TextureOptions::default(),
+                            );
+                            let image = egui::Image::from_texture(&texture)
+                                .fit_to_exact_size(egui::vec2(128.0, 128.0));
+                            ui.add(image);
+                        }
+                        Err(e) => {
+                            ui.heading(
+                                egui::RichText::new("🎮 Welcome to Hemulator")
+                                    .size(32.0)
+                                    .strong(),
+                            );
+                            eprintln!("Failed to load embedded app icon for welcome screen: {}", e);
+                        }
+                    }
                     ui.add_space(15.0);
                     ui.label(
                         egui::RichText::new("Multi-System Console Emulator")
@@ -964,143 +966,7 @@ impl TabManager {
         });
     }
 
-    fn render_help_tab(&self, ui: &mut Ui) {
-        ScrollArea::vertical()
-            .auto_shrink([false; 2])
-            .show(ui, |ui| {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(10.0);
-                    ui.heading(egui::RichText::new("⌨️ Controls & Help").size(24.0).strong());
-                    ui.add_space(5.0);
-                    ui.label(egui::RichText::new("Keyboard shortcuts and game controls").weak());
-                });
-
-                ui.add_space(15.0);
-                ui.separator();
-                ui.add_space(10.0);
-
-                // File Operations
-                ui.heading(egui::RichText::new("📁 File Operations").strong());
-                ui.add_space(5.0);
-                ui.label("Use File → New Project → Auto Detect from ROM... to load a ROM");
-                ui.label("Use File → Open Project to load a saved .hemu project");
-                ui.add_space(10.0);
-
-                // Emulation Control
-                ui.heading(egui::RichText::new("🎮 Emulation Control").strong());
-                ui.add_space(5.0);
-                ui.label("Use the Emulation menu to control emulation:");
-                ui.label("• Reset - Reset the emulated system");
-                ui.label("• Pause - Pause emulation");
-                ui.label("• Resume - Resume emulation");
-                ui.label("• Step - Step one instruction when paused");
-                ui.add_space(10.0);
-
-                // Save States
-                ui.heading(egui::RichText::new("💾 Save States").strong());
-                ui.add_space(5.0);
-                ui.label("Use the Property Pane on the right to manage save states:");
-                ui.label("• 5 save slots available per game");
-                ui.label("• Save and Load buttons for each slot");
-                ui.label("• States are automatically saved to disk");
-                ui.add_space(10.0);
-
-                // View Options
-                ui.heading(egui::RichText::new("👁️ View Options").strong());
-                ui.add_space(5.0);
-                ui.label("Use the View menu to control display settings:");
-                ui.label("• Scaling - Choose between Original, Fit, or Stretch");
-                ui.label("• Fullscreen - Toggle fullscreen mode");
-                ui.label("• Fullscreen with GUI - Toggle fullscreen with GUI visible");
-                ui.label("• Inspector - Toggle the Inspector panel");
-                ui.label("• Screenshot - Capture the current frame");
-                ui.add_space(10.0);
-
-                // Default Game Controls
-                ui.heading(egui::RichText::new("🕹️ Default Game Controls (Player 1)").strong());
-                ui.add_space(5.0);
-                egui::Grid::new("controls_grid")
-                    .num_columns(2)
-                    .spacing([15.0, 5.0])
-                    .striped(true)
-                    .show(ui, |ui| {
-                        ui.label(egui::RichText::new("Arrow Keys").strong().monospace());
-                        ui.label("D-Pad (Up/Down/Left/Right)");
-                        ui.end_row();
-
-                        ui.label(egui::RichText::new("Z").strong().monospace());
-                        ui.label("A Button (Confirm/Jump)");
-                        ui.end_row();
-
-                        ui.label(egui::RichText::new("X").strong().monospace());
-                        ui.label("B Button (Back/Action)");
-                        ui.end_row();
-
-                        ui.label(egui::RichText::new("Enter").strong().monospace());
-                        ui.label("Start Button");
-                        ui.end_row();
-
-                        ui.label(egui::RichText::new("Left Shift").strong().monospace());
-                        ui.label("Select Button");
-                        ui.end_row();
-                    });
-                ui.add_space(10.0);
-
-                // Player 2 Controls
-                ui.heading(egui::RichText::new("🎮 Player 2 Controls").strong());
-                ui.add_space(5.0);
-                egui::Grid::new("p2_controls_grid")
-                    .num_columns(2)
-                    .spacing([15.0, 5.0])
-                    .striped(true)
-                    .show(ui, |ui| {
-                        ui.label(egui::RichText::new("I/J/K/L").strong().monospace());
-                        ui.label("D-Pad (I=Up, K=Down, J=Left, L=Right)");
-                        ui.end_row();
-
-                        ui.label(egui::RichText::new("U").strong().monospace());
-                        ui.label("A Button");
-                        ui.end_row();
-
-                        ui.label(egui::RichText::new("O").strong().monospace());
-                        ui.label("B Button");
-                        ui.end_row();
-
-                        ui.label(egui::RichText::new("P").strong().monospace());
-                        ui.label("Start Button");
-                        ui.end_row();
-
-                        ui.label(egui::RichText::new("Right Shift").strong().monospace());
-                        ui.label("Select Button");
-                        ui.end_row();
-                    });
-                ui.add_space(15.0);
-
-                // Note about customization
-                egui::Frame::new()
-                    .fill(egui::Color32::from_rgb(30, 30, 30))
-                    .corner_radius(8.0)
-                    .inner_margin(12.0)
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new("ℹ️").size(18.0));
-                            ui.vertical(|ui| {
-                                ui.label(egui::RichText::new("Tip:").strong());
-                                ui.label("All controls can be customized in config.json");
-                                ui.label("Use the Property Pane → Project Settings → Input Configuration");
-                                ui.label("to configure input devices and button mappings.");
-                            });
-                        });
-                    });
-
-                ui.add_space(10.0);
-                ui.separator();
-                ui.add_space(10.0);
-
-                ui.label("For system-specific information and advanced features,");
-                ui.label("see the user manual: docs/MANUAL.md");
-            });
-    }
+    // Help tab removed.
 
     pub fn render_debug_tab(&mut self, ui: &mut Ui) {
         // If we have enhanced debug state, show the comprehensive 3-panel view
@@ -2888,51 +2754,6 @@ impl TabManager {
                 ui.label("A cross-platform, multi-system console emulator written in Rust,");
                 ui.label("supporting NES, Atari 2600, Game Boy, SNES, N64, and PC emulation");
                 ui.label("with comprehensive save state management and customizable controls.");
-                ui.add_space(10.0);
-
-                // Supported Systems
-                ui.heading(egui::RichText::new("🖥️ Supported Systems").strong());
-                ui.add_space(5.0);
-                egui::Grid::new("systems_grid")
-                    .num_columns(2)
-                    .spacing([10.0, 5.0])
-                    .striped(true)
-                    .show(ui, |ui| {
-                        ui.label("✅ NES");
-                        ui.label("Nintendo Entertainment System - Fully working");
-                        ui.end_row();
-
-                        ui.label("⚠️ PC");
-                        ui.label("IBM PC/XT - Functional");
-                        ui.end_row();
-
-                        ui.label("🚧 Atari 2600");
-                        ui.label("In development");
-                        ui.end_row();
-
-                        ui.label("🚧 Game Boy");
-                        ui.label("Game Boy / Game Boy Color - In development");
-                        ui.end_row();
-
-                        ui.label("🚧 SNES");
-                        ui.label("Super Nintendo - In development");
-                        ui.end_row();
-
-                        ui.label("🚧 N64");
-                        ui.label("Nintendo 64 - In development");
-                        ui.end_row();
-                    });
-                ui.add_space(10.0);
-
-                // Features
-                ui.heading(egui::RichText::new("✨ Features").strong());
-                ui.add_space(5.0);
-                ui.label("💾 Save States - 5 slots per game with instant save/load");
-                ui.label("⚙️ Persistent Settings - Customizable controls and window scaling");
-                ui.label("🎨 CRT Filters - Hardware-accelerated shader-based effects");
-                ui.label("🎵 Audio Support - Integrated audio playback via rodio");
-                ui.label("📁 ROM Auto-Detection - Automatic format detection");
-                ui.label("🖱️ Modern GUI - Menu bar and status bar with mouse support");
                 ui.add_space(10.0);
 
                 // License
