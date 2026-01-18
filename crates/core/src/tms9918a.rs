@@ -232,7 +232,11 @@ impl Tms9918a {
 
     /// Get tile viewer data for debugging (returns VRAM, palette, and register data)
     pub fn get_tile_viewer_data(&self) -> (Vec<u8>, Vec<u32>, Vec<u8>) {
-        (self.vram.to_vec(), self.palette.to_vec(), self.registers.to_vec())
+        (
+            self.vram.to_vec(),
+            self.palette.to_vec(),
+            self.registers.to_vec(),
+        )
     }
 
     /// Get VDP state for save state
