@@ -430,7 +430,7 @@ impl MenuBar {
                     ];
                     for (filter, name, tooltip) in filters {
                         let label = if self.current_filter == filter {
-                            format!("► {}", name)
+                            format!("> {}", name)
                         } else {
                             format!("  {}", name)
                         };
@@ -523,7 +523,7 @@ impl MenuBar {
                 // Screenshot only enabled when system is loaded
                 ui.add_enabled_ui(self.system_loaded, |ui| {
                     if ui
-                        .button("📸 Screenshot")
+                        .button("Screenshot")
                         .on_hover_text(if self.system_loaded {
                             "Save a screenshot of the current frame"
                         } else {
@@ -540,7 +540,7 @@ impl MenuBar {
             // Help menu
             ui.menu_button("Help", |ui| {
                 if ui
-                    .button("User Manual 🗗")
+                    .button("User Manual (browser)")
                     .on_hover_text("View keyboard controls and usage instructions")
                     .clicked()
                 {
