@@ -6317,13 +6317,13 @@ fn main() {
                     let snes_state =
                         get_snes_controller_state(&egui_backend, &settings.input.player1);
                     let chip8_state = get_chip8_controller_state(&egui_backend);
-                    
+
                     // ColecoVision needs special handling for 2-player input
                     let coleco_p1_state =
                         get_colecovision_controller_state(&egui_backend, &settings.input.player1);
                     let coleco_p2_state =
                         get_colecovision_controller_state(&egui_backend, &settings.input.player2);
-                    
+
                     match &mut sys {
                         EmulatorSystem::SNES(s) => s.set_controller(0, snes_state),
                         EmulatorSystem::Chip8(s) => s.set_controller(chip8_state),

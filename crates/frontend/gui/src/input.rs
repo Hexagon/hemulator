@@ -236,7 +236,10 @@ impl ControllerProfile {
                 VirtualButton::A,
                 InputSource::KeyboardKey("LeftShift".to_string()),
             )
-            .map(VirtualButton::B, InputSource::KeyboardKey("Enter".to_string()))
+            .map(
+                VirtualButton::B,
+                InputSource::KeyboardKey("Enter".to_string()),
+            )
             // Joystick (arrow keys)
             .map(
                 VirtualButton::Up,
@@ -255,20 +258,50 @@ impl ControllerProfile {
                 InputSource::KeyboardKey("Right".to_string()),
             )
             // Numeric keypad (1-9, *, 0, #)
-            .map(VirtualButton::Num1, InputSource::KeyboardKey("1".to_string()))
-            .map(VirtualButton::Num2, InputSource::KeyboardKey("2".to_string()))
-            .map(VirtualButton::Num3, InputSource::KeyboardKey("3".to_string()))
-            .map(VirtualButton::Num4, InputSource::KeyboardKey("Q".to_string()))
-            .map(VirtualButton::Num5, InputSource::KeyboardKey("W".to_string()))
-            .map(VirtualButton::Num6, InputSource::KeyboardKey("E".to_string()))
-            .map(VirtualButton::Num7, InputSource::KeyboardKey("A".to_string()))
-            .map(VirtualButton::Num8, InputSource::KeyboardKey("S".to_string()))
-            .map(VirtualButton::Num9, InputSource::KeyboardKey("D".to_string()))
+            .map(
+                VirtualButton::Num1,
+                InputSource::KeyboardKey("1".to_string()),
+            )
+            .map(
+                VirtualButton::Num2,
+                InputSource::KeyboardKey("2".to_string()),
+            )
+            .map(
+                VirtualButton::Num3,
+                InputSource::KeyboardKey("3".to_string()),
+            )
+            .map(
+                VirtualButton::Num4,
+                InputSource::KeyboardKey("Q".to_string()),
+            )
+            .map(
+                VirtualButton::Num5,
+                InputSource::KeyboardKey("W".to_string()),
+            )
+            .map(
+                VirtualButton::Num6,
+                InputSource::KeyboardKey("E".to_string()),
+            )
+            .map(
+                VirtualButton::Num7,
+                InputSource::KeyboardKey("A".to_string()),
+            )
+            .map(
+                VirtualButton::Num8,
+                InputSource::KeyboardKey("S".to_string()),
+            )
+            .map(
+                VirtualButton::Num9,
+                InputSource::KeyboardKey("D".to_string()),
+            )
             .map(
                 VirtualButton::NumStar,
                 InputSource::KeyboardKey("Z".to_string()),
             )
-            .map(VirtualButton::Num0, InputSource::KeyboardKey("X".to_string()))
+            .map(
+                VirtualButton::Num0,
+                InputSource::KeyboardKey("X".to_string()),
+            )
             .map(
                 VirtualButton::NumPound,
                 InputSource::KeyboardKey("C".to_string()),
@@ -301,20 +334,50 @@ impl ControllerProfile {
                 InputSource::KeyboardKey("L".to_string()),
             )
             // Numeric keypad (1-9, *, 0, #) - right side of keyboard
-            .map(VirtualButton::Num1, InputSource::KeyboardKey("7".to_string()))
-            .map(VirtualButton::Num2, InputSource::KeyboardKey("8".to_string()))
-            .map(VirtualButton::Num3, InputSource::KeyboardKey("9".to_string()))
-            .map(VirtualButton::Num4, InputSource::KeyboardKey("U".to_string()))
-            .map(VirtualButton::Num5, InputSource::KeyboardKey("I".to_string()))
-            .map(VirtualButton::Num6, InputSource::KeyboardKey("O".to_string()))
-            .map(VirtualButton::Num7, InputSource::KeyboardKey("H".to_string()))
-            .map(VirtualButton::Num8, InputSource::KeyboardKey("J".to_string()))
-            .map(VirtualButton::Num9, InputSource::KeyboardKey("K".to_string()))
+            .map(
+                VirtualButton::Num1,
+                InputSource::KeyboardKey("7".to_string()),
+            )
+            .map(
+                VirtualButton::Num2,
+                InputSource::KeyboardKey("8".to_string()),
+            )
+            .map(
+                VirtualButton::Num3,
+                InputSource::KeyboardKey("9".to_string()),
+            )
+            .map(
+                VirtualButton::Num4,
+                InputSource::KeyboardKey("U".to_string()),
+            )
+            .map(
+                VirtualButton::Num5,
+                InputSource::KeyboardKey("I".to_string()),
+            )
+            .map(
+                VirtualButton::Num6,
+                InputSource::KeyboardKey("O".to_string()),
+            )
+            .map(
+                VirtualButton::Num7,
+                InputSource::KeyboardKey("H".to_string()),
+            )
+            .map(
+                VirtualButton::Num8,
+                InputSource::KeyboardKey("J".to_string()),
+            )
+            .map(
+                VirtualButton::Num9,
+                InputSource::KeyboardKey("K".to_string()),
+            )
             .map(
                 VirtualButton::NumStar,
                 InputSource::KeyboardKey("N".to_string()),
             )
-            .map(VirtualButton::Num0, InputSource::KeyboardKey("M".to_string()))
+            .map(
+                VirtualButton::Num0,
+                InputSource::KeyboardKey("M".to_string()),
+            )
             .map(
                 VirtualButton::NumPound,
                 InputSource::KeyboardKey("Comma".to_string()),
