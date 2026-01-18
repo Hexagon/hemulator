@@ -344,8 +344,10 @@ impl Tms9918a {
             _ => {} // Invalid mode
         }
 
-        // Render sprites if enabled
-        if (self.registers[1] & 0x02) != 0 {
+        // Render sprites (always active unless display is blanked)
+        // Bit 6 of register 1 is the blank bit (0=display enabled, 1=blanked)
+        let display_blanked = (self.registers[1] & 0x40) != 0;
+        if !display_blanked {
             self.render_sprites(line, line_offset);
         }
     }
