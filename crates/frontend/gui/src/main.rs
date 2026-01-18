@@ -1003,6 +1003,83 @@ fn get_chip8_controller_state(window: &dyn WindowBackend) -> u16 {
     state
 }
 
+/// Get ColecoVision controller state from current keyboard state (8-bit)
+///
+/// ColecoVision controller layout:
+/// - Joystick: 4 directions (bits 4-7)
+/// - Fire Button A (left side): bit 0
+/// - Fire Button B (right side): bit 1
+/// - Start: bit 3
+/// - Select: bit 2
+///
+/// Note: The ColecoVision hardware also has a 12-key numeric keypad (0-9, *, #)
+/// which is read separately from the main controller state. For now, this function
+/// only handles the joystick and fire buttons.
+///
+/// Player 1 mapping (Problem statement: Arrow keys for joystick, Left Shift and Enter for buttons A and B):
+/// - Arrow Keys: Joystick directions
+/// - Left Shift: Fire Button A
+/// - Enter: Fire Button B
+///
+/// Player 2 mapping (IJKL for joystick, Right Shift and P for buttons):
+/// - I/J/K/L: Joystick directions (I=Up, K=Down, J=Left, L=Right)
+/// - Right Shift: Fire Button A
+/// - P: Fire Button B
+fn get_colecovision_controller_state(
+    window: &dyn WindowBackend,
+    mapping: &settings::KeyMapping,
+) -> u8 {
+    let mut state: u8 = 0;
+
+    // Fire buttons (A and B)
+    if let Some(key) = string_to_key(&mapping.a) {
+        if window.is_key_down(key) {
+            state |= 1 << 0; // Bit 0: Fire Button A
+        }
+    }
+    if let Some(key) = string_to_key(&mapping.b) {
+        if window.is_key_down(key) {
+            state |= 1 << 1; // Bit 1: Fire Button B
+        }
+    }
+
+    // Select and Start (though not commonly used in ColecoVision)
+    if let Some(key) = string_to_key(&mapping.select) {
+        if window.is_key_down(key) {
+            state |= 1 << 2; // Bit 2: Select
+        }
+    }
+    if let Some(key) = string_to_key(&mapping.start) {
+        if window.is_key_down(key) {
+            state |= 1 << 3; // Bit 3: Start
+        }
+    }
+
+    // Joystick directions
+    if let Some(key) = string_to_key(&mapping.up) {
+        if window.is_key_down(key) {
+            state |= 1 << 4; // Bit 4: Up
+        }
+    }
+    if let Some(key) = string_to_key(&mapping.down) {
+        if window.is_key_down(key) {
+            state |= 1 << 5; // Bit 5: Down
+        }
+    }
+    if let Some(key) = string_to_key(&mapping.left) {
+        if window.is_key_down(key) {
+            state |= 1 << 6; // Bit 6: Left
+        }
+    }
+    if let Some(key) = string_to_key(&mapping.right) {
+        if window.is_key_down(key) {
+            state |= 1 << 7; // Bit 7: Right
+        }
+    }
+
+    state
+}
+
 /// Streaming audio source backed by a channel. When there's no data, it outputs silence to avoid
 /// underruns.
 struct StreamSource {
@@ -6240,9 +6317,21 @@ fn main() {
                     let snes_state =
                         get_snes_controller_state(&egui_backend, &settings.input.player1);
                     let chip8_state = get_chip8_controller_state(&egui_backend);
+
+                    // ColecoVision needs special handling for 2-player input
+                    let coleco_p1_state =
+                        get_colecovision_controller_state(&egui_backend, &settings.input.player1);
+                    let coleco_p2_state =
+                        get_colecovision_controller_state(&egui_backend, &settings.input.player2);
+
                     match &mut sys {
                         EmulatorSystem::SNES(s) => s.set_controller(0, snes_state),
                         EmulatorSystem::Chip8(s) => s.set_controller(chip8_state),
+                        EmulatorSystem::ColecoVision(s) => {
+                            // Set both players for ColecoVision
+                            s.set_controller(1, coleco_p1_state);
+                            s.set_controller(2, coleco_p2_state);
+                        }
                         _ => sys.set_controller(0, controller_state),
                     }
                 } else {

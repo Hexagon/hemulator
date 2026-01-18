@@ -95,6 +95,61 @@ The host modifier key can be customized in `config.json` by changing the `host_m
 - Or choose a different modifier key in `config.json` (e.g., `RightAlt`)
 - Some OS-level keyboard shortcuts cannot be overridden by applications
 
+### ColecoVision Controller Input
+
+The ColecoVision has a unique controller with:
+- **Joystick**: 4 directions (up, down, left, right)
+- **Two fire buttons**: Side buttons (A and B)
+- **12-key numeric keypad**: Numbers 0-9 plus * and # keys
+
+The emulator maps these controls to the keyboard for both Player 1 and Player 2.
+
+#### Player 1 ColecoVision Controller
+
+| Key | Action | Notes |
+|-----|--------|-------|
+| Arrow Keys | Joystick | Up/Down/Left/Right |
+| Left Shift | Fire Button A | Left side fire button |
+| Enter | Fire Button B | Right side fire button |
+| **Numeric Keypad** | | |
+| 1 | Key 1 | Top row |
+| 2 | Key 2 | Top row |
+| 3 | Key 3 | Top row |
+| Q | Key 4 | Second row |
+| W | Key 5 | Second row |
+| E | Key 6 | Second row |
+| A | Key 7 | Third row |
+| S | Key 8 | Third row |
+| D | Key 9 | Third row |
+| Z | Key * | Bottom row |
+| X | Key 0 | Bottom row |
+| C | Key # | Bottom row |
+
+#### Player 2 ColecoVision Controller
+
+| Key | Action | Notes |
+|-----|--------|-------|
+| I/J/K/L | Joystick | I=Up, K=Down, J=Left, L=Right |
+| Right Shift | Fire Button A | Left side fire button |
+| P | Fire Button B | Right side fire button |
+| **Numeric Keypad** | | |
+| 7 | Key 1 | Top row |
+| 8 | Key 2 | Top row |
+| 9 | Key 3 | Top row |
+| U | Key 4 | Second row |
+| I | Key 5 | Second row (same as Up) |
+| O | Key 6 | Second row |
+| H | Key 7 | Third row |
+| J | Key 8 | Third row (same as Left) |
+| K | Key 9 | Third row (same as Down) |
+| N | Key * | Bottom row |
+| M | Key 0 | Bottom row |
+| Comma (,) | Key # | Bottom row |
+
+**Note**: The ColecoVision keypad mappings are designed to mirror the physical layout of the ColecoVision controller's numeric keypad, with keys arranged in a 3x4 grid. Some Player 2 keys overlap with joystick directions (I, J, K) - games typically don't use keypad and joystick simultaneously.
+
+**Technical Note**: The ColecoVision hardware reads the joystick/fire buttons and the numeric keypad separately. The current implementation focuses on the joystick and fire buttons. Full keypad support for all 12 keys requires additional implementation in the emulation core.
+
 ### User Interface
 
 The emulator features a menu bar at the top and a status bar at the bottom of the window:
