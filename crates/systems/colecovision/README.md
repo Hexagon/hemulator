@@ -86,11 +86,59 @@ The ColecoVision requires a BIOS ROM to boot, which must be provided separately 
 - **BIOS**: 8 KB system ROM (required)
 - **Cartridge**: Game ROM up to 32 KB (required)
 
+## Controllers
+
+The ColecoVision has a unique controller design with:
+- **Joystick**: 4-way directional control
+- **Two fire buttons**: Left and right side buttons
+- **12-key numeric keypad**: Numbers 0-9 plus * and # keys
+
+### Controller Mapping
+
+The emulator maps ColecoVision controllers to keyboard controls for 2 players:
+
+#### Player 1
+- **Joystick**: Arrow Keys (Up/Down/Left/Right)
+- **Fire Button A** (left side): Left Shift
+- **Fire Button B** (right side): Enter
+- **Numeric Keypad**:
+  - Keys 1,2,3: Number keys 1,2,3
+  - Keys 4,5,6: Q,W,E
+  - Keys 7,8,9: A,S,D
+  - Keys *,0,#: Z,X,C
+
+#### Player 2
+- **Joystick**: I/J/K/L (I=Up, K=Down, J=Left, L=Right)
+- **Fire Button A** (left side): Right Shift
+- **Fire Button B** (right side): P
+- **Numeric Keypad**:
+  - Keys 1,2,3: Number keys 7,8,9
+  - Keys 4,5,6: U,I,O
+  - Keys 7,8,9: H,J,K
+  - Keys *,0,#: N,M,Comma
+
+**Note**: The keypad layout mirrors the physical ColecoVision controller's 3x4 grid arrangement. Some Player 2 keys overlap with joystick directions (I, J, K) - games typically don't use both simultaneously.
+
+### Controller State Format
+
+The controller uses an 8-bit state format:
+- **Bit 0**: Fire Button A
+- **Bit 1**: Fire Button B
+- **Bit 2**: Select (unused, for compatibility)
+- **Bit 3**: Start (unused, for compatibility)
+- **Bit 4**: Joystick Up
+- **Bit 5**: Joystick Down
+- **Bit 6**: Joystick Left
+- **Bit 7**: Joystick Right
+
+The 12-key numeric keypad is read separately from the main controller state in the actual hardware. Full keypad support requires additional implementation in the emulation core.
+
 ## Known Limitations
 
 - No expansion module support (e.g., Super Game Module)
 - No tape/disk drive support
 - Controllers limited to standard joystick (no Super Action Controllers, spinners, etc.)
+- Numeric keypad (12 keys) not fully implemented - only joystick and fire buttons currently functional
 - Audio output currently stubbed (PSG implemented but not connected to audio pipeline)
 
 ## Recent Improvements

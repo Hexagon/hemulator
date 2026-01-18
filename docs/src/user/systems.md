@@ -375,12 +375,21 @@ For more technical information, see [crates/systems/chip8/README.md](../crates/s
 - **No Expansion Modules**: Super Game Module and other expansions not supported
 - **Controllers**: Limited to standard joystick (no Super Action Controllers, spinners, etc.)
 
-**Controls**: ColecoVision controller mapped to same keyboard layout as NES:
-- Arrow keys = D-pad
-- Z = Fire 1
-- X = Fire 2
-- Enter = Not used (ColecoVision keypad not implemented)
-- Left Shift = Not used
+**Controls**: The ColecoVision controller has a joystick, 2 fire buttons, and a 12-key numeric keypad.
+
+**Player 1:**
+- Arrow keys = Joystick (Up/Down/Left/Right)
+- Left Shift = Fire Button A (left side)
+- Enter = Fire Button B (right side)
+- 1,2,3,Q,W,E,A,S,D,Z,X,C = Numeric keypad (keys 1-9, *, 0, #)
+
+**Player 2:**
+- I/J/K/L = Joystick (I=Up, K=Down, J=Left, L=Right)
+- Right Shift = Fire Button A (left side)
+- P = Fire Button B (right side)
+- 7,8,9,U,I,O,H,J,K,N,M,Comma = Numeric keypad (keys 1-9, *, 0, #)
+
+See the [Controls](controls.html#colecovision-controller-input) page for detailed keypad layout.
 
 **ROM Loading**: 
 - ROMs with .col extension are auto-detected as ColecoVision
