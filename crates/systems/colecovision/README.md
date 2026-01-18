@@ -113,11 +113,11 @@ The emulator maps ColecoVision controllers to keyboard controls for 2 players:
 - **Fire Button B** (right side): P
 - **Numeric Keypad**:
   - Keys 1,2,3: Number keys 7,8,9
-  - Keys 4,5,6: U,I,O
-  - Keys 7,8,9: H,J,K
+  - Keys 4,5,6: U,Y,O
+  - Keys 7,8,9: G,H,B
   - Keys *,0,#: N,M,Comma
 
-**Note**: The keypad layout mirrors the physical ColecoVision controller's 3x4 grid arrangement. Some Player 2 keys overlap with joystick directions (I, J, K) - games typically don't use both simultaneously.
+**Note**: The keypad layout mirrors the physical ColecoVision controller's 3x4 grid arrangement arranged around the right side of the keyboard, avoiding conflicts with joystick directions.
 
 ### Controller State Format
 

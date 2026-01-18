@@ -352,7 +352,7 @@ impl ControllerProfile {
             )
             .map(
                 VirtualButton::Num5,
-                InputSource::KeyboardKey("I".to_string()),
+                InputSource::KeyboardKey("Y".to_string()),
             )
             .map(
                 VirtualButton::Num6,
@@ -360,15 +360,15 @@ impl ControllerProfile {
             )
             .map(
                 VirtualButton::Num7,
-                InputSource::KeyboardKey("H".to_string()),
+                InputSource::KeyboardKey("G".to_string()),
             )
             .map(
                 VirtualButton::Num8,
-                InputSource::KeyboardKey("J".to_string()),
+                InputSource::KeyboardKey("H".to_string()),
             )
             .map(
                 VirtualButton::Num9,
-                InputSource::KeyboardKey("K".to_string()),
+                InputSource::KeyboardKey("B".to_string()),
             )
             .map(
                 VirtualButton::NumStar,
