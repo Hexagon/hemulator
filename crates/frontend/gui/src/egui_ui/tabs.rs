@@ -634,7 +634,7 @@ impl TabManager {
                             ui.vertical_centered(|ui| {
                                 ui.label(
                                     egui::RichText::new(
-                                        "📁 File → New Project → Auto Detect from ROM...",
+                                        "File -> New Project -> Auto Detect from ROM...",
                                     )
                                     .size(16.0),
                                 );
@@ -643,7 +643,7 @@ impl TabManager {
                                     egui::RichText::new("Load a ROM to start emulating").weak(),
                                 );
                                 ui.add_space(15.0);
-                                ui.label(egui::RichText::new("📁 File → Open Project").size(16.0));
+                                ui.label(egui::RichText::new("File -> Open Project").size(16.0));
                                 ui.add_space(5.0);
                                 ui.label(egui::RichText::new("Load a saved .hemu project").weak());
                             });
