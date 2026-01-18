@@ -2,11 +2,11 @@
 
 use crate::bus::Sg1000Memory;
 use crate::psg::Sg1000Psg;
-use crate::vdp::Vdp;
 use emu_core::cpu_z80::CpuZ80;
 use emu_core::debug::Debugger;
 use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::renderer::Renderer;
+use emu_core::tms9918a::Tms9918a;
 use emu_core::types::Frame;
 use emu_core::{MountPointInfo, System};
 use serde_json::Value;
@@ -40,7 +40,7 @@ pub struct Sg1000System {
     pub(crate) cpu: CpuZ80<Sg1000Memory>,
 
     // Shared components
-    vdp: Rc<RefCell<Vdp>>,
+    vdp: Rc<RefCell<Tms9918a>>,
     psg: Rc<RefCell<Sg1000Psg>>,
 
     // Timing
@@ -67,7 +67,7 @@ impl Sg1000System {
     /// Create a new SG-1000 system
     pub fn new() -> Self {
         // Create shared components
-        let vdp = Rc::new(RefCell::new(Vdp::new()));
+        let vdp = Rc::new(RefCell::new(Tms9918a::new()));
         let psg = Rc::new(RefCell::new(Sg1000Psg::new()));
 
         // Create empty ROM
@@ -107,7 +107,12 @@ impl Sg1000System {
 
     /// Get tile viewer data for debugging
     pub fn get_tile_viewer_data(&self) -> TileViewerData {
-        self.vdp.borrow().get_tile_viewer_data()
+        let (vram, palette, registers) = self.vdp.borrow().get_tile_viewer_data();
+        TileViewerData {
+            vram,
+            palette,
+            registers,
+        }
     }
 }
 
@@ -118,20 +123,29 @@ impl System for Sg1000System {
         // Execute one frame worth of CPU cycles
         let mut cycles_this_frame = 0;
 
+        // SG-1000 timing: 262 scanlines per frame (NTSC)
+        let total_scanlines = 262_u64;
+        let target_cycles = self.cpu_cycles_per_frame as u64;
+
         while cycles_this_frame < self.cpu_cycles_per_frame {
             // Execute one CPU instruction
             let cycles = self.cpu.step();
             cycles_this_frame += cycles;
             self.cycles += cycles as u64;
 
-            // Check for VDP interrupt
+            // Update VDP scanline based on cycles executed (for interrupt timing)
+            let current_scanline =
+                (cycles_this_frame as u64 * total_scanlines / target_cycles) % total_scanlines;
+            self.vdp.borrow_mut().set_scanline(current_scanline as u16);
+
+            // Check for VDP interrupt (don't clear it here - the game will clear it by reading status)
             if self.vdp.borrow().frame_interrupt_pending() {
                 self.cpu.interrupt(0xFF);
-                self.vdp.borrow_mut().clear_frame_interrupt();
             }
         }
 
-        // Render happens during step_frame execution, no separate render_frame call needed
+        // Render the full frame once at the end
+        self.vdp.borrow_mut().render_frame();
 
         Ok(self.vdp.borrow().get_frame().clone())
     }

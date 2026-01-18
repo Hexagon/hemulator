@@ -16,6 +16,5 @@ mod bus;
 mod debugger;
 mod psg;
 mod system;
-mod vdp;
 
 pub use system::Sg1000System;

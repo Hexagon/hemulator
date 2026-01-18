@@ -95,9 +95,9 @@ impl MenuBar {
     pub fn ui(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
             // File menu
-            ui.menu_button("📁 File", |ui| {
+            ui.menu_button("File", |ui| {
                 // New Project submenu with system choices
-                ui.menu_button("➕ New Project", |ui| {
+                ui.menu_button("New Project", |ui| {
                     ui.label(
                         egui::RichText::new("Select System Type")
                             .strong()
@@ -107,7 +107,7 @@ impl MenuBar {
 
                     // Auto-detect from ROM option
                     if ui
-                        .button("🔍 Auto Detect from ROM...")
+                        .button("Auto Detect from ROM...")
                         .on_hover_text("Load a ROM and automatically detect the system type")
                         .clicked()
                     {
@@ -119,7 +119,7 @@ impl MenuBar {
 
                     // Individual system options
                     if ui
-                        .button("🎮 NES")
+                        .button("NES")
                         .on_hover_text("Nintendo Entertainment System")
                         .clicked()
                     {
@@ -128,7 +128,7 @@ impl MenuBar {
                     }
 
                     if ui
-                        .button("🎮 Game Boy")
+                        .button("Game Boy")
                         .on_hover_text("Game Boy / Game Boy Color")
                         .clicked()
                     {
@@ -138,7 +138,7 @@ impl MenuBar {
                     }
 
                     if ui
-                        .button("🎮 Atari 2600")
+                        .button("Atari 2600")
                         .on_hover_text("Atari 2600")
                         .clicked()
                     {
@@ -148,7 +148,7 @@ impl MenuBar {
                     }
 
                     if ui
-                        .button("🎮 SMS")
+                        .button("SMS")
                         .on_hover_text("Sega Master System")
                         .clicked()
                     {
@@ -157,7 +157,7 @@ impl MenuBar {
                     }
 
                     if ui
-                        .button("🎮 ColecoVision")
+                        .button("ColecoVision")
                         .on_hover_text("ColecoVision")
                         .clicked()
                     {
@@ -166,18 +166,14 @@ impl MenuBar {
                         ui.close();
                     }
 
-                    if ui
-                        .button("🎮 SG-1000")
-                        .on_hover_text("Sega SG-1000")
-                        .clicked()
-                    {
+                    if ui.button("SG-1000").on_hover_text("Sega SG-1000").clicked() {
                         self.pending_action =
                             Some(MenuAction::NewProjectSystem("SG-1000".to_string()));
                         ui.close();
                     }
 
                     if ui
-                        .button("🎮 CHIP-8")
+                        .button("CHIP-8")
                         .on_hover_text("CHIP-8 / Super-CHIP / XO-CHIP")
                         .clicked()
                     {
@@ -187,7 +183,7 @@ impl MenuBar {
                     }
 
                     if ui
-                        .button("🎮 SNES")
+                        .button("SNES")
                         .on_hover_text("Super Nintendo Entertainment System")
                         .clicked()
                     {
@@ -196,13 +192,13 @@ impl MenuBar {
                         ui.close();
                     }
 
-                    if ui.button("🎮 N64").on_hover_text("Nintendo 64").clicked() {
+                    if ui.button("N64").on_hover_text("Nintendo 64").clicked() {
                         self.pending_action = Some(MenuAction::NewProjectSystem("N64".to_string()));
                         ui.close();
                     }
 
                     if ui
-                        .button("💻 PC")
+                        .button("PC")
                         .on_hover_text("IBM PC/XT Compatible")
                         .clicked()
                     {
@@ -214,7 +210,7 @@ impl MenuBar {
                 ui.separator();
 
                 // Recent Files submenu
-                ui.menu_button("🕒 Recent Files", |ui| {
+                ui.menu_button("Recent Files", |ui| {
                     if self.recent_files.is_empty() {
                         ui.label(egui::RichText::new("No recent files").weak());
                     } else {
@@ -233,7 +229,7 @@ impl MenuBar {
                         }
                         ui.separator();
                         if ui
-                            .button("🗑️ Clear Recent Files")
+                            .button("Clear Recent Files")
                             .on_hover_text("Remove all recent files from the list")
                             .clicked()
                         {
@@ -245,7 +241,7 @@ impl MenuBar {
 
                 ui.separator();
                 if ui
-                    .button("📁 Open Project...")
+                    .button("Open Project...")
                     .on_hover_text("Load a saved .hemu project file")
                     .clicked()
                 {
@@ -255,7 +251,7 @@ impl MenuBar {
 
                 ui.add_enabled_ui(self.system_loaded, |ui| {
                     if ui
-                        .button("💾 Save Project...")
+                        .button("Save Project...")
                         .on_hover_text(if self.system_loaded {
                             "Save current system configuration to a .hemu project file"
                         } else {
@@ -270,7 +266,7 @@ impl MenuBar {
 
                 ui.separator();
                 if ui
-                    .button("🚪 Exit")
+                    .button("Exit")
                     .on_hover_text("Quit the emulator")
                     .clicked()
                 {
@@ -281,7 +277,7 @@ impl MenuBar {
 
             // Emulation menu - only enabled when a system is loaded
             ui.add_enabled_ui(self.system_loaded, |ui| {
-                ui.menu_button("🎮 Emulation", |ui| {
+                ui.menu_button("Emulation", |ui| {
                     if ui
                         .button("🔄 Reset")
                         .on_hover_text("Reset the emulated system")
@@ -320,7 +316,7 @@ impl MenuBar {
                     // Eject cartridge - only shown if single mount system and ROM loaded
                     ui.add_enabled_ui(self.rom_loaded && self.single_mount_system, |ui| {
                         if ui
-                            .button("⏏️ Eject Cartridge")
+                            .button("Eject Cartridge")
                             .on_hover_text("Eject the current cartridge/ROM")
                             .clicked()
                         {
@@ -332,10 +328,10 @@ impl MenuBar {
                     ui.separator();
 
                     // Speed submenu
-                    ui.menu_button(format!("⏩ Speed ({}%)", self.current_speed), |ui| {
+                    ui.menu_button(format!("Speed ({}%)", self.current_speed), |ui| {
                         for speed in [25, 50, 100, 200, 400] {
                             let label = if speed == self.current_speed {
-                                format!("✓ {}%", speed)
+                                format!("► {}%", speed)
                             } else {
                                 format!("  {}%", speed)
                             };
@@ -350,7 +346,7 @@ impl MenuBar {
 
                     // Save submenu - only enabled if ROM loaded
                     ui.add_enabled_ui(self.rom_loaded, |ui| {
-                        ui.menu_button("💾 Save State", |ui| {
+                        ui.menu_button("Save State", |ui| {
                             for slot in 1..=5 {
                                 if ui
                                     .button(format!("Slot {} (F{})", slot, slot + 4))
@@ -365,7 +361,7 @@ impl MenuBar {
 
                     // Load submenu - only enabled if ROM loaded
                     ui.add_enabled_ui(self.rom_loaded, |ui| {
-                        ui.menu_button("📂 Load State", |ui| {
+                        ui.menu_button("Load State", |ui| {
                             for slot in 1..=5 {
                                 if ui
                                     .button(format!("Slot {} (Shift+F{})", slot, slot + 4))
@@ -434,7 +430,7 @@ impl MenuBar {
                     ];
                     for (filter, name, tooltip) in filters {
                         let label = if self.current_filter == filter {
-                            format!("✓ {}", name)
+                            format!("► {}", name)
                         } else {
                             format!("  {}", name)
                         };

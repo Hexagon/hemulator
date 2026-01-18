@@ -5,15 +5,16 @@
 //! - 0xC000-0xC3FF: RAM (1KB, mirrored to 0xFFFF)
 //!
 //! I/O ports:
-//! - 0xBE: VDP data
-//! - 0xBF: VDP control/status
-//! - 0x7F: PSG
-//! - 0xDC-0xDF: Controller ports
+//! - 0x40-0x7F: PSG (SN76489) - all ports mirrored
+//! - 0x80-0xFF (even): VDP data - mirrored on all even ports
+//! - 0x80-0xFF (odd): VDP control/status - mirrored on all odd ports
+//! - 0xC0-0xFF (even): Controller 1 - mirrored on all even ports
+//! - 0xC0-0xFF (odd): Controller 2 - mirrored on all odd ports
 
 use crate::psg::Sg1000Psg;
-use crate::vdp::Vdp;
 use emu_core::cpu_z80::MemoryZ80;
 use emu_core::logging::{log, LogCategory, LogLevel};
+use emu_core::tms9918a::Tms9918a;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -26,7 +27,7 @@ pub struct Sg1000Memory {
     pub(crate) rom: Vec<u8>,
 
     // Shared components
-    vdp: Rc<RefCell<Vdp>>,
+    vdp: Rc<RefCell<Tms9918a>>,
     psg: Rc<RefCell<Sg1000Psg>>,
 
     // Controller state
@@ -36,7 +37,7 @@ pub struct Sg1000Memory {
 
 impl Sg1000Memory {
     /// Create a new SG-1000 memory bus
-    pub fn new(rom: Vec<u8>, vdp: Rc<RefCell<Vdp>>, psg: Rc<RefCell<Sg1000Psg>>) -> Self {
+    pub fn new(rom: Vec<u8>, vdp: Rc<RefCell<Tms9918a>>, psg: Rc<RefCell<Sg1000Psg>>) -> Self {
         Self {
             ram: [0; 0x400],
             rom,
@@ -118,15 +119,26 @@ impl MemoryZ80 for Sg1000Memory {
     }
 
     fn io_read(&mut self, port: u8) -> u8 {
+        // Per SMS Power! SG-1000 I/O port map:
+        // - VDP Data: all even ports from 0x80-0xFF
+        // - VDP Status: all odd ports from 0x80-0xFF
+        // - Controller 1: all even ports from 0xC0-0xFF
+        // - Controller 2: all odd ports from 0xC0-0xFF
+        // Controller ports at 0xC0+ take priority over VDP
         match port {
-            // VDP data port
-            0xBE => self.vdp.borrow_mut().read_data(),
-            // VDP status port
-            0xBF => self.vdp.borrow_mut().read_status(),
-            // Controller port 1
-            0xDC | 0xDD => self.controller1,
-            // Controller port 2
-            0xDE | 0xDF => self.controller2,
+            // Controller ports (0xC0-0xFF) - these take priority
+            0xC0..=0xFF if (port & 1) == 0 => self.controller1,
+            0xC0..=0xFF => self.controller2,
+            // VDP ports (mirrored on all even/odd from 0x80-0xBF)
+            0x80..=0xBF => {
+                if (port & 1) == 0 {
+                    // Even port = VDP data
+                    self.vdp.borrow_mut().read_data()
+                } else {
+                    // Odd port = VDP status
+                    self.vdp.borrow_mut().read_status()
+                }
+            }
             _ => {
                 log(LogCategory::Bus, LogLevel::Debug, || {
                     format!("SG-1000: Read from unmapped port ${:02X}", port)
@@ -137,13 +149,23 @@ impl MemoryZ80 for Sg1000Memory {
     }
 
     fn io_write(&mut self, port: u8, value: u8) {
+        // Per SMS Power! SG-1000 I/O port map:
+        // - PSG: all ports from 0x40-0x7F (both even and odd)
+        // - VDP Data: all even ports from 0x80-0xFF
+        // - VDP Control: all odd ports from 0x80-0xFF
         match port {
-            // VDP data port
-            0xBE => self.vdp.borrow_mut().write_data(value),
-            // VDP control port
-            0xBF => self.vdp.borrow_mut().write_control(value),
-            // PSG
-            0x7F => self.psg.borrow_mut().write(value),
+            // PSG (mirrored on all ports from 0x40-0x7F)
+            0x40..=0x7F => self.psg.borrow_mut().write(value),
+            // VDP ports (mirrored on all even/odd from 0x80 onwards)
+            0x80..=0xFF => {
+                if (port & 1) == 0 {
+                    // Even port = VDP data
+                    self.vdp.borrow_mut().write_data(value)
+                } else {
+                    // Odd port = VDP control
+                    self.vdp.borrow_mut().write_control(value)
+                }
+            }
             _ => {
                 log(LogCategory::Bus, LogLevel::Debug, || {
                     format!(
