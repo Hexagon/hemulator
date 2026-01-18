@@ -22,7 +22,6 @@ fn linear_to_srgb(linear: u8) -> u8 {
     (srgb_f * 255.0).round().min(255.0) as u8
 }
 
-
 /// Main egui application state
 pub struct EguiApp {
     pub menu_bar: MenuBar,
@@ -103,7 +102,6 @@ impl EguiApp {
 
     /// Render the UI
     pub fn ui(&mut self, ctx: &Context, scaling_mode: ScalingMode) {
-
         let fg_color = egui::Color32::from_rgb(224, 224, 224);
         let white_color = egui::Color32::from_rgb(255, 255, 255);
         let panel_bg = egui::Color32::from_rgb(70, 70, 70);
@@ -113,7 +111,7 @@ impl EguiApp {
         // Set brighter text color globally
         let mut style = (*ctx.style()).clone();
         style.visuals.override_text_color = Some(fg_color);
-        
+
         // Also brighten weak text color
         style.visuals.weak_text_alpha = 0.85;
 
