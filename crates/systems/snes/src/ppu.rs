@@ -2552,7 +2552,11 @@ impl Ppu {
 
         // Check if mosaic is enabled for this layer
         let mosaic_enabled = self.is_mosaic_enabled(bg_index);
-        let _mosaic_size = if mosaic_enabled { self.get_mosaic_size() } else { 1 };
+        let _mosaic_size = if mosaic_enabled {
+            self.get_mosaic_size()
+        } else {
+            1
+        };
 
         // Render all visible tiles
         for screen_y in 0..224 {
@@ -2703,7 +2707,11 @@ impl Ppu {
 
         // Check if mosaic is enabled for this layer
         let mosaic_enabled = self.is_mosaic_enabled(bg_index);
-        let _mosaic_size = if mosaic_enabled { self.get_mosaic_size() } else { 1 };
+        let _mosaic_size = if mosaic_enabled {
+            self.get_mosaic_size()
+        } else {
+            1
+        };
 
         // Render all visible tiles
         for screen_y in 0..224 {
@@ -2863,7 +2871,11 @@ impl Ppu {
 
         // Check if mosaic is enabled for this layer
         let mosaic_enabled = self.is_mosaic_enabled(bg_index);
-        let _mosaic_size = if mosaic_enabled { self.get_mosaic_size() } else { 1 };
+        let _mosaic_size = if mosaic_enabled {
+            self.get_mosaic_size()
+        } else {
+            1
+        };
 
         // Render all visible tiles
         for screen_y in 0..224 {
@@ -3025,7 +3037,11 @@ impl Ppu {
 
         // Check if mosaic is enabled for BG1 (Mode 7 uses BG1)
         let mosaic_enabled = self.is_mosaic_enabled(0); // BG1 = index 0
-        let _mosaic_size = if mosaic_enabled { self.get_mosaic_size() } else { 1 };
+        let _mosaic_size = if mosaic_enabled {
+            self.get_mosaic_size()
+        } else {
+            1
+        };
 
         // Mode 7 tilemap is always 128x128 tiles in VRAM
         // Tile data starts at VRAM address 0
@@ -3167,7 +3183,11 @@ impl Ppu {
 
         // Check if mosaic is enabled for this layer
         let mosaic_enabled = self.is_mosaic_enabled(bg_index);
-        let _mosaic_size = if mosaic_enabled { self.get_mosaic_size() } else { 1 };
+        let _mosaic_size = if mosaic_enabled {
+            self.get_mosaic_size()
+        } else {
+            1
+        };
 
         // Render all visible tiles at 512px width
         // In hi-res mode, each logical pixel is rendered as 2 physical pixels horizontally
@@ -3322,7 +3342,11 @@ impl Ppu {
 
         // Check if mosaic is enabled for this layer
         let mosaic_enabled = self.is_mosaic_enabled(bg_index);
-        let _mosaic_size = if mosaic_enabled { self.get_mosaic_size() } else { 1 };
+        let _mosaic_size = if mosaic_enabled {
+            self.get_mosaic_size()
+        } else {
+            1
+        };
 
         // Render all visible tiles at 512px width
         for screen_y in 0..224 {
@@ -6492,9 +6516,18 @@ mod tests {
         // Test enabling mosaic for BG1 only, size 2x2
         ppu.write_register(0x2106, 0x11); // Size=1 (2x2), BG1 enabled
         assert!(ppu.is_mosaic_enabled(0), "BG1 should have mosaic enabled");
-        assert!(!ppu.is_mosaic_enabled(1), "BG2 should not have mosaic enabled");
-        assert!(!ppu.is_mosaic_enabled(2), "BG3 should not have mosaic enabled");
-        assert!(!ppu.is_mosaic_enabled(3), "BG4 should not have mosaic enabled");
+        assert!(
+            !ppu.is_mosaic_enabled(1),
+            "BG2 should not have mosaic enabled"
+        );
+        assert!(
+            !ppu.is_mosaic_enabled(2),
+            "BG3 should not have mosaic enabled"
+        );
+        assert!(
+            !ppu.is_mosaic_enabled(3),
+            "BG4 should not have mosaic enabled"
+        );
         assert_eq!(ppu.get_mosaic_size(), 2, "Mosaic size should be 2x2");
 
         // Test enabling mosaic for all BGs, size 4x4

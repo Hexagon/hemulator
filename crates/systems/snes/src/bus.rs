@@ -2015,7 +2015,10 @@ mod tests {
         let remainder_high = bus.read(0x4217);
         let remainder = (remainder_high as u16) << 8 | remainder_low as u16;
         assert_eq!(quotient, 0xFFFF, "Division by zero should return 0xFFFF");
-        assert_eq!(remainder, 123, "Division by zero should return dividend as remainder");
+        assert_eq!(
+            remainder, 123,
+            "Division by zero should return dividend as remainder"
+        );
 
         // Test 16-bit dividend: 50000 / 100 = 500
         bus.write(0x4204, 0x50); // Low byte (50000 = 0xC350)
