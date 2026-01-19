@@ -410,6 +410,63 @@ impl GbBus {
         self.cgb_mode
     }
 
+    /// Check if boot ROM is enabled
+    pub fn is_boot_rom_enabled(&self) -> bool {
+        self.boot_rom_enabled
+    }
+
+    /// Apply post-boot I/O register state
+    ///
+    /// This applies the hardware register values that would be set by the boot ROM.
+    /// Allows skipping the boot ROM animation while maintaining correct initialization.
+    ///
+    /// Reference: Pan Docs - Power-Up Sequence
+    pub fn apply_post_boot_io_state(&mut self, io: &crate::boot_rom::IoPostBootState) {
+        // Timer registers
+        self.write(0xFF05, io.tima);
+        self.write(0xFF06, io.tma);
+        self.write(0xFF07, io.tac);
+
+        // APU registers
+        self.apu.write_register(0xFF10, io.nr10);
+        self.apu.write_register(0xFF11, io.nr11);
+        self.apu.write_register(0xFF12, io.nr12);
+        self.apu.write_register(0xFF14, io.nr14);
+        self.apu.write_register(0xFF16, io.nr21);
+        self.apu.write_register(0xFF17, io.nr22);
+        self.apu.write_register(0xFF19, io.nr24);
+        self.apu.write_register(0xFF1A, io.nr30);
+        self.apu.write_register(0xFF1B, io.nr31);
+        self.apu.write_register(0xFF1C, io.nr32);
+        self.apu.write_register(0xFF1E, io.nr34);
+        self.apu.write_register(0xFF20, io.nr41);
+        self.apu.write_register(0xFF21, io.nr42);
+        self.apu.write_register(0xFF22, io.nr43);
+        self.apu.write_register(0xFF23, io.nr44);
+        self.apu.write_register(0xFF24, io.nr50);
+        self.apu.write_register(0xFF25, io.nr51);
+        self.apu.write_register(0xFF26, io.nr52);
+
+        // PPU registers
+        self.ppu.lcdc = io.lcdc;
+        self.ppu.stat = io.stat;
+        self.ppu.scy = io.scy;
+        self.ppu.scx = io.scx;
+        self.ppu.lyc = io.lyc;
+        self.ppu.bgp = io.bgp;
+        self.ppu.obp0 = io.obp0;
+        self.ppu.obp1 = io.obp1;
+        self.ppu.wy = io.wy;
+        self.ppu.wx = io.wx;
+
+        // Interrupt registers
+        self.ie = io.ie;
+        self.if_reg = 0x00; // IF starts at 0
+
+        // Disable boot ROM after applying state
+        self.boot_rom_enabled = false;
+    }
+
     /// Get the KEY1 register (0xFF4D) value
     /// Bit 7 (read): Current speed (0=normal, 1=double)
     /// Bit 0 (read): Speed switch armed flag

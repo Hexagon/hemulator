@@ -43,18 +43,15 @@ _None currently_
   - Interrupt only fires on low→high transition ✅
   - Reference: Pan Docs, SameBoy issue #91 ✅
   - Impact: Fixes timing-sensitive games like Worms Armageddon
-- [x] **Boot ROM Module**: Created but not yet integrated - `crates/systems/gb/src/boot_rom.rs` **PARTIALLY COMPLETE**
+- [x] **Boot ROM Integration**: Post-boot state application - `crates/systems/gb/src/` **COMPLETED**
   - Built-in DMG and CGB boot ROMs created ✅
   - External boot ROM loading support ✅
   - Post-boot hardware state definitions ✅
-  - TODO: Integrate with GbSystem to apply post-boot state
-  - TODO: Add option to use external boot ROM file
+  - Integration with GbSystem completed ✅
+  - Automatically applies post-boot state on reset ✅
+  - CPU registers (A, F, B, C, D, E, H, L, SP, PC) initialized ✅
+  - I/O registers (PPU, APU, Timer, Interrupts) initialized ✅
   - Impact: Proper hardware initialization for edge cases
-- [ ] **Boot ROM Integration**: Apply post-boot state to system initialization
-  - Use PostBootState::dmg() or PostBootState::cgb() to initialize registers
-  - Apply to CPU registers (A, F, B, C, D, E, H, L, SP, PC)
-  - Apply to I/O registers (PPU, APU, Timer, Interrupts)
-  - Impact: Games relying on specific boot state will work correctly
 
 ### Medium
 

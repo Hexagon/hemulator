@@ -165,6 +165,7 @@ pub(crate) mod ppu;
 pub mod ppu_renderer;
 mod timer;
 
+use boot_rom::PostBootState;
 use bus::GbBus;
 use ppu_renderer::{PpuRenderer, SoftwarePpuRenderer};
 
@@ -229,6 +230,42 @@ impl GbSystem {
             instruction_tracer: emu_core::instruction_tracer::InstructionTracer::new(),
             breakpoint_manager: emu_core::breakpoints::BreakpointManager::new(),
         }
+    }
+
+    /// Apply post-boot hardware state
+    ///
+    /// This method applies the CPU and I/O register values that would be set
+    /// after the boot ROM completes. This allows skipping the boot ROM animation
+    /// while maintaining correct hardware initialization.
+    ///
+    /// Call this after creating a new GbSystem to initialize hardware to the
+    /// post-boot state (as if the boot ROM had run and completed).
+    ///
+    /// # Arguments
+    /// * `is_cgb` - True for Game Boy Color mode, false for original Game Boy
+    ///
+    /// Reference: Pan Docs - Power-Up Sequence
+    pub fn apply_post_boot_state(&mut self, is_cgb: bool) {
+        let state = if is_cgb {
+            PostBootState::cgb()
+        } else {
+            PostBootState::dmg()
+        };
+
+        // Apply CPU register state
+        self.cpu.a = state.cpu.a;
+        self.cpu.f = state.cpu.f;
+        self.cpu.b = state.cpu.b;
+        self.cpu.c = state.cpu.c;
+        self.cpu.d = state.cpu.d;
+        self.cpu.e = state.cpu.e;
+        self.cpu.h = state.cpu.h;
+        self.cpu.l = state.cpu.l;
+        self.cpu.sp = state.cpu.sp;
+        self.cpu.pc = state.cpu.pc;
+
+        // Apply I/O register state
+        self.cpu.memory.apply_post_boot_io_state(&state.io);
     }
 
     /// Set controller state (Game Boy buttons)
@@ -380,6 +417,11 @@ impl System for GbSystem {
     fn reset(&mut self) {
         self.cpu.reset();
         self.total_cycles = 0;
+
+        // Apply post-boot hardware state
+        // This skips the boot ROM animation but initializes hardware correctly
+        let is_cgb = self.cpu.memory.is_cgb_mode();
+        self.apply_post_boot_state(is_cgb);
     }
 
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
@@ -2037,5 +2079,91 @@ mod tests {
             let vram_data = sys.cpu.memory.ppu.read_vram(0x0800 + i); // VRAM offset 0x0800 = address 0x8800
             assert_eq!(vram_data, (i + 0x42) as u8, "VRAM byte {} mismatch", i);
         }
+    }
+
+    #[test]
+    fn test_post_boot_state_dmg() {
+        let mut sys = GbSystem::new();
+
+        // Apply DMG post-boot state
+        sys.apply_post_boot_state(false);
+
+        // Verify CPU registers match DMG post-boot values
+        assert_eq!(sys.cpu.a, 0x01, "A register incorrect");
+        assert_eq!(sys.cpu.f, 0xB0, "F register incorrect");
+        assert_eq!(sys.cpu.b, 0x00, "B register incorrect");
+        assert_eq!(sys.cpu.c, 0x13, "C register incorrect");
+        assert_eq!(sys.cpu.d, 0x00, "D register incorrect");
+        assert_eq!(sys.cpu.e, 0xD8, "E register incorrect");
+        assert_eq!(sys.cpu.h, 0x01, "H register incorrect");
+        assert_eq!(sys.cpu.l, 0x4D, "L register incorrect");
+        assert_eq!(sys.cpu.sp, 0xFFFE, "SP incorrect");
+        assert_eq!(sys.cpu.pc, 0x0100, "PC incorrect");
+
+        // Verify I/O registers
+        assert_eq!(sys.cpu.memory.ppu.lcdc, 0x91, "LCDC incorrect");
+        assert_eq!(sys.cpu.memory.ppu.bgp, 0xFC, "BGP incorrect");
+        assert_eq!(sys.cpu.memory.ppu.obp0, 0xFF, "OBP0 incorrect");
+        assert_eq!(sys.cpu.memory.ppu.obp1, 0xFF, "OBP1 incorrect");
+
+        // Verify boot ROM is disabled
+        assert!(
+            !sys.cpu.memory.is_boot_rom_enabled(),
+            "Boot ROM should be disabled"
+        );
+    }
+
+    #[test]
+    fn test_post_boot_state_cgb() {
+        let mut sys = GbSystem::new();
+
+        // Apply CGB post-boot state
+        sys.apply_post_boot_state(true);
+
+        // Verify CPU registers match CGB post-boot values
+        assert_eq!(sys.cpu.a, 0x11, "A register incorrect (CGB mode indicator)");
+        assert_eq!(sys.cpu.f, 0x80, "F register incorrect");
+        assert_eq!(sys.cpu.b, 0x00, "B register incorrect");
+        assert_eq!(sys.cpu.c, 0x00, "C register incorrect");
+        assert_eq!(sys.cpu.d, 0xFF, "D register incorrect");
+        assert_eq!(sys.cpu.e, 0x56, "E register incorrect");
+        assert_eq!(sys.cpu.h, 0x00, "H register incorrect");
+        assert_eq!(sys.cpu.l, 0x0D, "L register incorrect");
+        assert_eq!(sys.cpu.sp, 0xFFFE, "SP incorrect");
+        assert_eq!(sys.cpu.pc, 0x0100, "PC incorrect");
+
+        // Verify I/O registers (same as DMG for most)
+        assert_eq!(sys.cpu.memory.ppu.lcdc, 0x91, "LCDC incorrect");
+        assert_eq!(sys.cpu.memory.ppu.bgp, 0xFC, "BGP incorrect");
+
+        // Verify boot ROM is disabled
+        assert!(
+            !sys.cpu.memory.is_boot_rom_enabled(),
+            "Boot ROM should be disabled"
+        );
+    }
+
+    #[test]
+    fn test_post_boot_state_applied_on_reset() {
+        let mut sys = GbSystem::new();
+
+        // Load a test ROM to trigger reset
+        let mut rom = vec![0; 0x8000];
+        // Set CGB flag at 0x143
+        rom[0x143] = 0x80; // CGB-compatible
+
+        sys.mount("Cartridge", &rom).unwrap();
+
+        // After mount, reset() is called which should apply post-boot state
+        // For CGB-compatible ROM, A register should be 0x11
+        assert_eq!(
+            sys.cpu.a, 0x11,
+            "Post-boot state not applied correctly after reset"
+        );
+        assert_eq!(sys.cpu.pc, 0x0100, "PC should be at 0x0100 after reset");
+        assert!(
+            !sys.cpu.memory.is_boot_rom_enabled(),
+            "Boot ROM should be disabled after reset"
+        );
     }
 }
