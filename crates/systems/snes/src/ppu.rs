@@ -1082,14 +1082,24 @@ impl Ppu {
     /// Read from PPU registers
     pub fn read_register(&self, addr: u16) -> u8 {
         match addr {
-            // $2134 - MPYL - Multiplication Result (low byte) - stub
-            0x2134 => 0,
+            // $2134 - MPYL - Mode 7 Multiplication Result (low byte)
+            // Result = M7A * (M7B >> 8), signed 24-bit
+            0x2134 => {
+                let result = self.get_mode7_multiply_result();
+                (result & 0xFF) as u8
+            }
 
-            // $2135 - MPYM - Multiplication Result (middle byte) - stub
-            0x2135 => 0,
+            // $2135 - MPYM - Mode 7 Multiplication Result (middle byte)
+            0x2135 => {
+                let result = self.get_mode7_multiply_result();
+                ((result >> 8) & 0xFF) as u8
+            }
 
-            // $2136 - MPYH - Multiplication Result (high byte) - stub
-            0x2136 => 0,
+            // $2136 - MPYH - Mode 7 Multiplication Result (high byte)
+            0x2136 => {
+                let result = self.get_mode7_multiply_result();
+                ((result >> 16) & 0xFF) as u8
+            }
 
             // $2137 - SLHV - Software Latch for H/V Counter
             0x2137 => {
@@ -1793,6 +1803,18 @@ impl Ppu {
             1 => 32,  // Increment by 32 words
             _ => 128, // Increment by 128 words (both 2 and 3)
         }
+    }
+
+    /// Calculate Mode 7 multiplication result
+    /// Result = M7A * (M7B >> 8), signed 24-bit
+    /// M7A is signed 16-bit, M7B high byte is treated as signed 8-bit
+    fn get_mode7_multiply_result(&self) -> i32 {
+        // M7A is a signed 16-bit value
+        let m7a = self.m7a as i32;
+        // M7B >> 8 gives the high byte as a signed 8-bit value
+        let m7b_hi = (self.m7b >> 8) as i8 as i32;
+        // The result is a signed 24-bit value
+        m7a * m7b_hi
     }
 
     /// Set V-blank flag (called by system during vertical blanking)
@@ -5267,6 +5289,59 @@ mod tests {
         // Test M7SEL register
         ppu.write_register(0x211A, 0x03); // Flip H and V
         assert_eq!(ppu.m7sel, 0x03, "M7SEL should be 0x03");
+    }
+
+    #[test]
+    fn test_mode7_multiply_result() {
+        let mut ppu = Ppu::new();
+
+        // Test 1: Simple positive multiplication
+        // M7A = 0x0100 (1.0 in 8.8 fixed point = 256)
+        // M7B = 0x0100 (high byte = 1)
+        // Result = 256 * 1 = 256
+        ppu.write_register(0x211B, 0x00); // M7A low
+        ppu.write_register(0x211B, 0x01); // M7A high = 0x0100
+        ppu.write_register(0x211C, 0x00); // M7B low
+        ppu.write_register(0x211C, 0x01); // M7B high = 0x0100
+
+        let result_low = ppu.read_register(0x2134);
+        let result_mid = ppu.read_register(0x2135);
+        let result_high = ppu.read_register(0x2136);
+        let result =
+            (result_low as i32) | ((result_mid as i32) << 8) | ((result_high as i32) << 16);
+        assert_eq!(result, 256, "256 * 1 should equal 256");
+
+        // Test 2: Larger multiplication
+        // M7A = 0x0200 (2.0 in 8.8 = 512)
+        // M7B = 0x0300 (high byte = 3)
+        // Result = 512 * 3 = 1536
+        ppu.write_register(0x211B, 0x00); // M7A low
+        ppu.write_register(0x211B, 0x02); // M7A high = 0x0200
+        ppu.write_register(0x211C, 0x00); // M7B low
+        ppu.write_register(0x211C, 0x03); // M7B high = 0x0300
+
+        let result_low = ppu.read_register(0x2134);
+        let result_mid = ppu.read_register(0x2135);
+        let result_high = ppu.read_register(0x2136);
+        let result =
+            (result_low as i32) | ((result_mid as i32) << 8) | ((result_high as i32) << 16);
+        assert_eq!(result, 1536, "512 * 3 should equal 1536");
+
+        // Test 3: Zero multiplication
+        // M7A = 0x0100
+        // M7B = 0x0000 (high byte = 0)
+        // Result = 256 * 0 = 0
+        ppu.write_register(0x211B, 0x00);
+        ppu.write_register(0x211B, 0x01);
+        ppu.write_register(0x211C, 0x00);
+        ppu.write_register(0x211C, 0x00);
+
+        let result_low = ppu.read_register(0x2134);
+        let result_mid = ppu.read_register(0x2135);
+        let result_high = ppu.read_register(0x2136);
+        let result =
+            (result_low as i32) | ((result_mid as i32) << 8) | ((result_high as i32) << 16);
+        assert_eq!(result, 0, "256 * 0 should equal 0");
     }
 
     #[test]
