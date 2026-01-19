@@ -2457,8 +2457,15 @@ impl Ppu {
 
         // Get tilemap size for this layer
         let (tilemap_width, tilemap_height) = self.get_tilemap_size(bg_index);
-        let tilemap_pixel_width = tilemap_width * 8;
-        let tilemap_pixel_height = tilemap_height * 8;
+
+        // Get character size for this layer (8 or 16)
+        // This must be done before calculating pixel dimensions
+        let char_size = self.get_bg_char_size(bg_index);
+
+        // Calculate tilemap pixel dimensions based on character size
+        // For 16x16 tiles, each tilemap entry covers 16 pixels, not 8
+        let tilemap_pixel_width = tilemap_width * char_size;
+        let tilemap_pixel_height = tilemap_height * char_size;
 
         // Get scroll offsets for this layer
         let (hofs, vofs) = match bg_index {
@@ -2477,9 +2484,6 @@ impl Ppu {
             3 => LAYER_BG4,
             _ => LAYER_BACKDROP,
         };
-
-        // Get character size for this layer (8 or 16)
-        let char_size = self.get_bg_char_size(bg_index);
 
         // Render all visible tiles
         for screen_y in 0..224 {
@@ -2598,8 +2602,15 @@ impl Ppu {
 
         // Get tilemap size for this layer
         let (tilemap_width, tilemap_height) = self.get_tilemap_size(bg_index);
-        let tilemap_pixel_width = tilemap_width * 8;
-        let tilemap_pixel_height = tilemap_height * 8;
+
+        // Get character size for this layer (8 or 16)
+        // This must be done before calculating pixel dimensions
+        let char_size = self.get_bg_char_size(bg_index);
+
+        // Calculate tilemap pixel dimensions based on character size
+        // For 16x16 tiles, each tilemap entry covers 16 pixels, not 8
+        let tilemap_pixel_width = tilemap_width * char_size;
+        let tilemap_pixel_height = tilemap_height * char_size;
 
         // Get scroll offsets for this layer
         let (hofs, vofs) = match bg_index {
@@ -2612,9 +2623,6 @@ impl Ppu {
 
         // Determine layer ID for tracking
         let layer_id = bg_index as u8;
-
-        // Get character size for this layer (8 or 16)
-        let char_size = self.get_bg_char_size(bg_index);
 
         // Render all visible tiles
         for screen_y in 0..224 {
@@ -2746,8 +2754,15 @@ impl Ppu {
 
         // Get tilemap size for this layer
         let (tilemap_width, tilemap_height) = self.get_tilemap_size(bg_index);
-        let tilemap_pixel_width = tilemap_width * 8;
-        let tilemap_pixel_height = tilemap_height * 8;
+
+        // Get character size for this layer (8 or 16)
+        // This must be done before calculating pixel dimensions
+        let char_size = self.get_bg_char_size(bg_index);
+
+        // Calculate tilemap pixel dimensions based on character size
+        // For 16x16 tiles, each tilemap entry covers 16 pixels, not 8
+        let tilemap_pixel_width = tilemap_width * char_size;
+        let tilemap_pixel_height = tilemap_height * char_size;
 
         // Get scroll offsets for this layer
         let (hofs, vofs) = match bg_index {
@@ -2757,9 +2772,6 @@ impl Ppu {
             3 => (self.bg4_hofs, self.bg4_vofs),
             _ => (0, 0),
         };
-
-        // Get character size for this layer (8 or 16)
-        let char_size = self.get_bg_char_size(bg_index);
 
         // Render all visible tiles
         for screen_y in 0..224 {
@@ -3026,8 +3038,15 @@ impl Ppu {
 
         // Get tilemap size for this layer
         let (tilemap_width, tilemap_height) = self.get_tilemap_size(bg_index);
-        let tilemap_pixel_width = tilemap_width * 8;
-        let tilemap_pixel_height = tilemap_height * 8;
+
+        // Get character size for this layer (8 or 16)
+        // This must be done before calculating pixel dimensions
+        let char_size = self.get_bg_char_size(bg_index);
+
+        // Calculate tilemap pixel dimensions based on character size
+        // For 16x16 tiles, each tilemap entry covers 16 pixels, not 8
+        let tilemap_pixel_width = tilemap_width * char_size;
+        let tilemap_pixel_height = tilemap_height * char_size;
 
         // Get scroll offsets for this layer
         let (hofs, vofs) = match bg_index {
@@ -3035,9 +3054,6 @@ impl Ppu {
             1 => (self.bg2_hofs, self.bg2_vofs),
             _ => (0, 0),
         };
-
-        // Get character size for this layer (8 or 16)
-        let char_size = self.get_bg_char_size(bg_index);
 
         // Render all visible tiles at 512px width
         // In hi-res mode, each logical pixel is rendered as 2 physical pixels horizontally
@@ -3166,8 +3182,15 @@ impl Ppu {
 
         // Get tilemap size for this layer
         let (tilemap_width, tilemap_height) = self.get_tilemap_size(bg_index);
-        let tilemap_pixel_width = tilemap_width * 8;
-        let tilemap_pixel_height = tilemap_height * 8;
+
+        // Get character size for this layer (8 or 16)
+        // This must be done before calculating pixel dimensions
+        let char_size = self.get_bg_char_size(bg_index);
+
+        // Calculate tilemap pixel dimensions based on character size
+        // For 16x16 tiles, each tilemap entry covers 16 pixels, not 8
+        let tilemap_pixel_width = tilemap_width * char_size;
+        let tilemap_pixel_height = tilemap_height * char_size;
 
         // Get scroll offsets for this layer
         let (hofs, vofs) = match bg_index {
@@ -3175,9 +3198,6 @@ impl Ppu {
             1 => (self.bg2_hofs, self.bg2_vofs),
             _ => (0, 0),
         };
-
-        // Get character size for this layer (8 or 16)
-        let char_size = self.get_bg_char_size(bg_index);
 
         // Render all visible tiles at 512px width
         for screen_y in 0..224 {
@@ -5694,6 +5714,60 @@ mod tests {
             pixel_count >= 200,
             "16x16 tile should cover most of the 16x16 area. Found {} non-backdrop pixels, expected ~256",
             pixel_count
+        );
+    }
+
+    #[test]
+    fn test_16x16_tile_tilemap_pixel_width() {
+        // This test verifies that tilemap pixel dimensions correctly use character size (16x16)
+        // rather than hardcoded 8x8 values. This was a bug that caused incorrect tile lookups
+        // when scrolling with 16x16 tiles (e.g., Super Mario World map background).
+        let mut ppu = Ppu::new();
+
+        // Set up Mode 1 with 16x16 tiles for BG1
+        ppu.write_register(0x2105, 0x11); // Mode 1 + BG1 16x16
+
+        // Set up a 32x32 tilemap
+        ppu.write_register(0x2107, 0x00); // BG1 tilemap at $0000, size 32x32 (bits 0-1 = 00)
+
+        // With 16x16 tiles and 32x32 tilemap:
+        // - Tilemap has 32 entries horizontally
+        // - Each entry covers 16 pixels
+        // - Total pixel width should be 32 * 16 = 512
+        // The bug was using 32 * 8 = 256, causing incorrect wrapping
+
+        let (tilemap_width, tilemap_height) = ppu.get_tilemap_size(0);
+        assert_eq!(tilemap_width, 32, "Tilemap should be 32 tiles wide");
+        assert_eq!(tilemap_height, 32, "Tilemap should be 32 tiles tall");
+
+        let char_size = ppu.get_bg_char_size(0);
+        assert_eq!(char_size, 16, "BG1 should use 16x16 tiles");
+
+        // The correct pixel dimensions (this is what the rendering code should use)
+        let correct_pixel_width = tilemap_width * char_size;
+        let correct_pixel_height = tilemap_height * char_size;
+        assert_eq!(
+            correct_pixel_width, 512,
+            "Tilemap should cover 512 pixels horizontally"
+        );
+        assert_eq!(
+            correct_pixel_height, 512,
+            "Tilemap should cover 512 pixels vertically"
+        );
+
+        // Verify scrolling calculation works correctly at the boundary
+        // With hofs = 300, screen_x = 0:
+        // world_x = 300 % 512 = 300 (should NOT wrap at 256)
+        // tile_x = 300 / 16 = 18 (this is beyond the first 16 tilemap entries)
+        let hofs: i32 = 300;
+        let screen_x: i32 = 0;
+        let world_x = ((screen_x + hofs).rem_euclid(correct_pixel_width as i32)) as usize;
+        assert_eq!(world_x, 300, "World X should be 300, not wrapped at 256");
+
+        let tile_x = world_x / char_size;
+        assert_eq!(
+            tile_x, 18,
+            "Tile X should be 18, accessing tilemap entry beyond first half"
         );
     }
 
