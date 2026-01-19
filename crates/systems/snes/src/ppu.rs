@@ -1811,10 +1811,10 @@ impl Ppu {
     fn get_mode7_multiply_result(&self) -> i32 {
         // M7A is a signed 16-bit value
         let m7a = self.m7a as i32;
-        // M7B >> 8 gives the high byte as a signed 8-bit value
-        let m7b_hi = (self.m7b >> 8) as i8 as i32;
+        // Extract high byte of M7B and treat as signed 8-bit value
+        let m7b_high_byte = (self.m7b >> 8) as i8;
         // The result is a signed 24-bit value
-        m7a * m7b_hi
+        m7a * (m7b_high_byte as i32)
     }
 
     /// Set V-blank flag (called by system during vertical blanking)

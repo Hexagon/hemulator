@@ -70,6 +70,8 @@ const FLAG_OVERFLOW: u8 = 0b0100_0000;
 const FLAG_MEMORY: u8 = 0b0010_0000; // m flag: 0=16-bit A, 1=8-bit A
 const FLAG_INDEX: u8 = 0b0001_0000; // x flag: 0=16-bit X/Y, 1=8-bit X/Y
 #[allow(dead_code)]
+const FLAG_BREAK: u8 = 0b0001_0000; // B flag (same bit as X, used in emulation mode for BRK)
+#[allow(dead_code)]
 const FLAG_DECIMAL: u8 = 0b0000_1000;
 #[allow(dead_code)]
 const FLAG_IRQ_DISABLE: u8 = 0b0000_0100;
@@ -263,8 +265,8 @@ impl<M: Memory65c816> Cpu65c816<M> {
                     // Push PC+1 (return address after BRK signature byte)
                     self.push_word(self.pc.wrapping_add(1));
                     // Push status with B flag set (to distinguish from IRQ)
-                    self.push_byte(self.status | 0x10); // B flag
-                                                        // Set I flag to disable interrupts
+                    self.push_byte(self.status | FLAG_BREAK);
+                    // Set I flag to disable interrupts
                     self.status |= FLAG_IRQ_DISABLE;
                     // D flag is NOT modified in 6502 emulation mode
                     // Load IRQ/BRK vector from $FFFE-$FFFF
