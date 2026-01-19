@@ -260,6 +260,25 @@ impl Atari2600System {
         }
     }
 
+    /// Set paddle position for a paddle controller (0-3)
+    ///
+    /// Paddle positions are 0-255:
+    /// - 0 = fully counter-clockwise (left/up)
+    /// - 255 = fully clockwise (right/down)
+    /// - 128 = center
+    ///
+    /// The TIA measures paddle position by timing capacitor charge.
+    /// Lower positions charge faster, higher positions charge slower.
+    ///
+    /// # Arguments
+    /// * `paddle` - Paddle number (0-3). Paddles 0-1 are on port 0, paddles 2-3 are on port 1
+    /// * `position` - Position value (0-255)
+    pub fn set_paddle_position(&mut self, paddle: u8, position: u8) {
+        if let Some(bus) = self.cpu.bus_mut() {
+            bus.tia.set_paddle_position(paddle, position);
+        }
+    }
+
     emu_core::impl_instruction_tracer_methods!();
 
     /// Check if instruction tracing is enabled
@@ -1496,5 +1515,38 @@ mod tests {
         let frame = frame.unwrap();
         assert_eq!(frame.width, 160);
         assert_eq!(frame.height, 192);
+    }
+
+    #[test]
+    fn test_set_paddle_position() {
+        let mut system = Atari2600System::new();
+
+        // Load a minimal ROM
+        let rom = vec![0xFF; 4096];
+        system.mount("Cartridge", &rom).unwrap();
+
+        // Set various paddle positions
+        system.set_paddle_position(0, 0); // Paddle 0 fully left (fast charge)
+        system.set_paddle_position(1, 128); // Paddle 1 center
+        system.set_paddle_position(2, 255); // Paddle 2 fully right (slow charge)
+        system.set_paddle_position(3, 64); // Paddle 3 quarter turn
+
+        // Verify the API doesn't panic and positions are accepted
+        // The actual charging simulation is tested in TIA unit tests
+        // This test just verifies the system-level API works
+
+        // We can verify that the system accepts paddle input without crashing
+        for _ in 0..10 {
+            let _ = system.step_frame();
+        }
+
+        // Test boundary conditions
+        system.set_paddle_position(0, 255); // Max position
+        system.set_paddle_position(1, 0); // Min position
+        system.set_paddle_position(2, 128); // Center
+
+        // Verify system still works after setting paddle positions
+        let frame_result = system.step_frame();
+        assert!(frame_result.is_ok(), "System should work with paddle input");
     }
 }

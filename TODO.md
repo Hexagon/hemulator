@@ -48,14 +48,17 @@ _None currently_
   - Proper divide-by-zero handling
 
 #### Atari 2600
-- [ ] **Paddle Controllers**: Implement INPT0-INPT3 analog input - `crates/systems/atari2600/src/riot.rs`
-  - Current: Always return 0, timing circuits not emulated
-  - Impact: High for paddle games (Breakout, Kaboom!, Warlords)
-- [ ] **Exotic Banking Schemes**: Add DPC, FE, 3F, E0 mappers - `crates/systems/atari2600/src/cartridge.rs`
-  - DPC (Pitfall II): Display Processor Chip
-  - FE (Decathlon): Write-based bank switching
-  - 3F (Espial): RAM-based banking
-  - E0 (Parker Bros): Multiple simultaneous banks
+- [x] **Exotic Banking Schemes**: DPC, FE, 3F, E0 mappers implemented - `crates/systems/atari2600/src/cartridge.rs`
+  - DPC (Pitfall II): Display Processor Chip ✅
+  - FE (Decathlon): Write-based bank switching ✅
+  - 3F (Espial): RAM-based banking ✅
+  - E0 (Parker Bros): Multiple simultaneous banks ✅
+  - Impact: Enables compatibility with specific commercial games (Pitfall II, Decathlon, Espial, Parker Bros titles)
+- [x] **Paddle Controllers**: INPT0-INPT3 analog input implemented in TIA - `crates/systems/atari2600/src/tia.rs`
+  - Hardware simulation complete with capacitor charging timing circuits ✅
+  - Public API `set_paddle_position()` available in `Atari2600System` ✅
+  - Impact: Hardware support complete, GUI integration needed for paddle games (Breakout, Kaboom!, Warlords)
+  - Note: TODO was incorrectly listed as `riot.rs` but paddles are part of TIA hardware
 
 #### PC/DOS
 - [ ] **INT 21h DOS API**: Expand file I/O and DOS functions - `crates/systems/pc/src/cpu.rs`
