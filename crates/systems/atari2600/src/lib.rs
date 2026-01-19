@@ -1534,17 +1534,17 @@ mod tests {
         // Verify the API doesn't panic and positions are accepted
         // The actual charging simulation is tested in TIA unit tests
         // This test just verifies the system-level API works
-        
+
         // We can verify that the system accepts paddle input without crashing
         for _ in 0..10 {
             let _ = system.step_frame();
         }
-        
+
         // Test boundary conditions
         system.set_paddle_position(0, 255); // Max position
-        system.set_paddle_position(1, 0);   // Min position
+        system.set_paddle_position(1, 0); // Min position
         system.set_paddle_position(2, 128); // Center
-        
+
         // Verify system still works after setting paddle positions
         let frame_result = system.step_frame();
         assert!(frame_result.is_ok(), "System should work with paddle input");
