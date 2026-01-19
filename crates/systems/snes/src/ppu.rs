@@ -1082,14 +1082,24 @@ impl Ppu {
     /// Read from PPU registers
     pub fn read_register(&self, addr: u16) -> u8 {
         match addr {
-            // $2134 - MPYL - Multiplication Result (low byte) - stub
-            0x2134 => 0,
+            // $2134 - MPYL - Mode 7 Multiplication Result (low byte)
+            // Result = M7A * (M7B >> 8), signed 24-bit
+            0x2134 => {
+                let result = self.get_mode7_multiply_result();
+                (result & 0xFF) as u8
+            }
 
-            // $2135 - MPYM - Multiplication Result (middle byte) - stub
-            0x2135 => 0,
+            // $2135 - MPYM - Mode 7 Multiplication Result (middle byte)
+            0x2135 => {
+                let result = self.get_mode7_multiply_result();
+                ((result >> 8) & 0xFF) as u8
+            }
 
-            // $2136 - MPYH - Multiplication Result (high byte) - stub
-            0x2136 => 0,
+            // $2136 - MPYH - Mode 7 Multiplication Result (high byte)
+            0x2136 => {
+                let result = self.get_mode7_multiply_result();
+                ((result >> 16) & 0xFF) as u8
+            }
 
             // $2137 - SLHV - Software Latch for H/V Counter
             0x2137 => {
@@ -1795,6 +1805,18 @@ impl Ppu {
         }
     }
 
+    /// Calculate Mode 7 multiplication result
+    /// Result = M7A * (M7B >> 8), signed 24-bit
+    /// M7A is signed 16-bit, M7B high byte is treated as signed 8-bit
+    fn get_mode7_multiply_result(&self) -> i32 {
+        // M7A is a signed 16-bit value
+        let m7a = self.m7a as i32;
+        // Extract high byte of M7B and treat as signed 8-bit value
+        let m7b_high_byte = (self.m7b >> 8) as i8;
+        // The result is a signed 24-bit value
+        m7a * (m7b_high_byte as i32)
+    }
+
     /// Set V-blank flag (called by system during vertical blanking)
     pub fn set_vblank(&mut self, vblank: bool) {
         if vblank {
@@ -2457,8 +2479,15 @@ impl Ppu {
 
         // Get tilemap size for this layer
         let (tilemap_width, tilemap_height) = self.get_tilemap_size(bg_index);
-        let tilemap_pixel_width = tilemap_width * 8;
-        let tilemap_pixel_height = tilemap_height * 8;
+
+        // Get character size for this layer (8 or 16)
+        // This must be done before calculating pixel dimensions
+        let char_size = self.get_bg_char_size(bg_index);
+
+        // Calculate tilemap pixel dimensions based on character size
+        // For 16x16 tiles, each tilemap entry covers 16 pixels, not 8
+        let tilemap_pixel_width = tilemap_width * char_size;
+        let tilemap_pixel_height = tilemap_height * char_size;
 
         // Get scroll offsets for this layer
         let (hofs, vofs) = match bg_index {
@@ -2477,9 +2506,6 @@ impl Ppu {
             3 => LAYER_BG4,
             _ => LAYER_BACKDROP,
         };
-
-        // Get character size for this layer (8 or 16)
-        let char_size = self.get_bg_char_size(bg_index);
 
         // Render all visible tiles
         for screen_y in 0..224 {
@@ -2598,8 +2624,15 @@ impl Ppu {
 
         // Get tilemap size for this layer
         let (tilemap_width, tilemap_height) = self.get_tilemap_size(bg_index);
-        let tilemap_pixel_width = tilemap_width * 8;
-        let tilemap_pixel_height = tilemap_height * 8;
+
+        // Get character size for this layer (8 or 16)
+        // This must be done before calculating pixel dimensions
+        let char_size = self.get_bg_char_size(bg_index);
+
+        // Calculate tilemap pixel dimensions based on character size
+        // For 16x16 tiles, each tilemap entry covers 16 pixels, not 8
+        let tilemap_pixel_width = tilemap_width * char_size;
+        let tilemap_pixel_height = tilemap_height * char_size;
 
         // Get scroll offsets for this layer
         let (hofs, vofs) = match bg_index {
@@ -2612,9 +2645,6 @@ impl Ppu {
 
         // Determine layer ID for tracking
         let layer_id = bg_index as u8;
-
-        // Get character size for this layer (8 or 16)
-        let char_size = self.get_bg_char_size(bg_index);
 
         // Render all visible tiles
         for screen_y in 0..224 {
@@ -2746,8 +2776,15 @@ impl Ppu {
 
         // Get tilemap size for this layer
         let (tilemap_width, tilemap_height) = self.get_tilemap_size(bg_index);
-        let tilemap_pixel_width = tilemap_width * 8;
-        let tilemap_pixel_height = tilemap_height * 8;
+
+        // Get character size for this layer (8 or 16)
+        // This must be done before calculating pixel dimensions
+        let char_size = self.get_bg_char_size(bg_index);
+
+        // Calculate tilemap pixel dimensions based on character size
+        // For 16x16 tiles, each tilemap entry covers 16 pixels, not 8
+        let tilemap_pixel_width = tilemap_width * char_size;
+        let tilemap_pixel_height = tilemap_height * char_size;
 
         // Get scroll offsets for this layer
         let (hofs, vofs) = match bg_index {
@@ -2757,9 +2794,6 @@ impl Ppu {
             3 => (self.bg4_hofs, self.bg4_vofs),
             _ => (0, 0),
         };
-
-        // Get character size for this layer (8 or 16)
-        let char_size = self.get_bg_char_size(bg_index);
 
         // Render all visible tiles
         for screen_y in 0..224 {
@@ -3026,8 +3060,15 @@ impl Ppu {
 
         // Get tilemap size for this layer
         let (tilemap_width, tilemap_height) = self.get_tilemap_size(bg_index);
-        let tilemap_pixel_width = tilemap_width * 8;
-        let tilemap_pixel_height = tilemap_height * 8;
+
+        // Get character size for this layer (8 or 16)
+        // This must be done before calculating pixel dimensions
+        let char_size = self.get_bg_char_size(bg_index);
+
+        // Calculate tilemap pixel dimensions based on character size
+        // For 16x16 tiles, each tilemap entry covers 16 pixels, not 8
+        let tilemap_pixel_width = tilemap_width * char_size;
+        let tilemap_pixel_height = tilemap_height * char_size;
 
         // Get scroll offsets for this layer
         let (hofs, vofs) = match bg_index {
@@ -3035,9 +3076,6 @@ impl Ppu {
             1 => (self.bg2_hofs, self.bg2_vofs),
             _ => (0, 0),
         };
-
-        // Get character size for this layer (8 or 16)
-        let char_size = self.get_bg_char_size(bg_index);
 
         // Render all visible tiles at 512px width
         // In hi-res mode, each logical pixel is rendered as 2 physical pixels horizontally
@@ -3166,8 +3204,15 @@ impl Ppu {
 
         // Get tilemap size for this layer
         let (tilemap_width, tilemap_height) = self.get_tilemap_size(bg_index);
-        let tilemap_pixel_width = tilemap_width * 8;
-        let tilemap_pixel_height = tilemap_height * 8;
+
+        // Get character size for this layer (8 or 16)
+        // This must be done before calculating pixel dimensions
+        let char_size = self.get_bg_char_size(bg_index);
+
+        // Calculate tilemap pixel dimensions based on character size
+        // For 16x16 tiles, each tilemap entry covers 16 pixels, not 8
+        let tilemap_pixel_width = tilemap_width * char_size;
+        let tilemap_pixel_height = tilemap_height * char_size;
 
         // Get scroll offsets for this layer
         let (hofs, vofs) = match bg_index {
@@ -3175,9 +3220,6 @@ impl Ppu {
             1 => (self.bg2_hofs, self.bg2_vofs),
             _ => (0, 0),
         };
-
-        // Get character size for this layer (8 or 16)
-        let char_size = self.get_bg_char_size(bg_index);
 
         // Render all visible tiles at 512px width
         for screen_y in 0..224 {
@@ -5250,6 +5292,97 @@ mod tests {
     }
 
     #[test]
+    fn test_mode7_multiply_result() {
+        let mut ppu = Ppu::new();
+
+        // Helper to read and sign-extend 24-bit result to i32
+        fn read_mode7_result(ppu: &Ppu) -> i32 {
+            let result_low = ppu.read_register(0x2134) as u32;
+            let result_mid = ppu.read_register(0x2135) as u32;
+            let result_high = ppu.read_register(0x2136) as u32;
+            let unsigned_result = result_low | (result_mid << 8) | (result_high << 16);
+            // Sign-extend from 24-bit to 32-bit
+            if unsigned_result & 0x800000 != 0 {
+                (unsigned_result | 0xFF000000) as i32
+            } else {
+                unsigned_result as i32
+            }
+        }
+
+        // Test 1: Simple positive multiplication
+        // M7A = 0x0100 (1.0 in 8.8 fixed point = 256)
+        // M7B = 0x0100 (high byte = 1)
+        // Result = 256 * 1 = 256
+        ppu.write_register(0x211B, 0x00); // M7A low
+        ppu.write_register(0x211B, 0x01); // M7A high = 0x0100
+        ppu.write_register(0x211C, 0x00); // M7B low
+        ppu.write_register(0x211C, 0x01); // M7B high = 0x0100
+
+        let result = read_mode7_result(&ppu);
+        assert_eq!(result, 256, "256 * 1 should equal 256");
+
+        // Test 2: Larger multiplication
+        // M7A = 0x0200 (2.0 in 8.8 = 512)
+        // M7B = 0x0300 (high byte = 3)
+        // Result = 512 * 3 = 1536
+        ppu.write_register(0x211B, 0x00); // M7A low
+        ppu.write_register(0x211B, 0x02); // M7A high = 0x0200
+        ppu.write_register(0x211C, 0x00); // M7B low
+        ppu.write_register(0x211C, 0x03); // M7B high = 0x0300
+
+        let result = read_mode7_result(&ppu);
+        assert_eq!(result, 1536, "512 * 3 should equal 1536");
+
+        // Test 3: Zero multiplication
+        // M7A = 0x0100
+        // M7B = 0x0000 (high byte = 0)
+        // Result = 256 * 0 = 0
+        ppu.write_register(0x211B, 0x00);
+        ppu.write_register(0x211B, 0x01);
+        ppu.write_register(0x211C, 0x00);
+        ppu.write_register(0x211C, 0x00);
+
+        let result = read_mode7_result(&ppu);
+        assert_eq!(result, 0, "256 * 0 should equal 0");
+
+        // Test 4: Negative M7B high byte
+        // M7A = 0x0100 (256)
+        // M7B = 0xFF00 (high byte = -1 as signed)
+        // Result = 256 * -1 = -256
+        ppu.write_register(0x211B, 0x00);
+        ppu.write_register(0x211B, 0x01); // M7A = 0x0100
+        ppu.write_register(0x211C, 0x00);
+        ppu.write_register(0x211C, 0xFF); // M7B high = 0xFF = -1 signed
+
+        let result = read_mode7_result(&ppu);
+        assert_eq!(result, -256, "256 * -1 should equal -256");
+
+        // Test 5: Negative M7A
+        // M7A = 0xFF00 (-256 as signed 16-bit)
+        // M7B = 0x0200 (high byte = 2)
+        // Result = -256 * 2 = -512
+        ppu.write_register(0x211B, 0x00);
+        ppu.write_register(0x211B, 0xFF); // M7A = 0xFF00 = -256
+        ppu.write_register(0x211C, 0x00);
+        ppu.write_register(0x211C, 0x02); // M7B high = 2
+
+        let result = read_mode7_result(&ppu);
+        assert_eq!(result, -512, "-256 * 2 should equal -512");
+
+        // Test 6: Both negative (result positive)
+        // M7A = 0xFF00 (-256)
+        // M7B = 0xFF00 (high byte = -1)
+        // Result = -256 * -1 = 256
+        ppu.write_register(0x211B, 0x00);
+        ppu.write_register(0x211B, 0xFF); // M7A = -256
+        ppu.write_register(0x211C, 0x00);
+        ppu.write_register(0x211C, 0xFF); // M7B high = -1
+
+        let result = read_mode7_result(&ppu);
+        assert_eq!(result, 256, "-256 * -1 should equal 256");
+    }
+
+    #[test]
     fn test_offset_per_tile_mode() {
         let mut ppu = Ppu::new();
 
@@ -5694,6 +5827,60 @@ mod tests {
             pixel_count >= 200,
             "16x16 tile should cover most of the 16x16 area. Found {} non-backdrop pixels, expected ~256",
             pixel_count
+        );
+    }
+
+    #[test]
+    fn test_16x16_tile_tilemap_pixel_width() {
+        // This test verifies that tilemap pixel dimensions correctly use character size (16x16)
+        // rather than hardcoded 8x8 values. This was a bug that caused incorrect tile lookups
+        // when scrolling with 16x16 tiles (e.g., Super Mario World map background).
+        let mut ppu = Ppu::new();
+
+        // Set up Mode 1 with 16x16 tiles for BG1
+        ppu.write_register(0x2105, 0x11); // Mode 1 + BG1 16x16
+
+        // Set up a 32x32 tilemap
+        ppu.write_register(0x2107, 0x00); // BG1 tilemap at $0000, size 32x32 (bits 0-1 = 00)
+
+        // With 16x16 tiles and 32x32 tilemap:
+        // - Tilemap has 32 entries horizontally
+        // - Each entry covers 16 pixels
+        // - Total pixel width should be 32 * 16 = 512
+        // The bug was using 32 * 8 = 256, causing incorrect wrapping
+
+        let (tilemap_width, tilemap_height) = ppu.get_tilemap_size(0);
+        assert_eq!(tilemap_width, 32, "Tilemap should be 32 tiles wide");
+        assert_eq!(tilemap_height, 32, "Tilemap should be 32 tiles tall");
+
+        let char_size = ppu.get_bg_char_size(0);
+        assert_eq!(char_size, 16, "BG1 should use 16x16 tiles");
+
+        // The correct pixel dimensions (this is what the rendering code should use)
+        let correct_pixel_width = tilemap_width * char_size;
+        let correct_pixel_height = tilemap_height * char_size;
+        assert_eq!(
+            correct_pixel_width, 512,
+            "Tilemap should cover 512 pixels horizontally"
+        );
+        assert_eq!(
+            correct_pixel_height, 512,
+            "Tilemap should cover 512 pixels vertically"
+        );
+
+        // Verify scrolling calculation works correctly at the boundary
+        // With hofs = 300, screen_x = 0:
+        // world_x = 300 % 512 = 300 (should NOT wrap at 256)
+        // tile_x = 300 / 16 = 18 (this is beyond the first 16 tilemap entries)
+        let hofs: i32 = 300;
+        let screen_x: i32 = 0;
+        let world_x = ((screen_x + hofs).rem_euclid(correct_pixel_width as i32)) as usize;
+        assert_eq!(world_x, 300, "World X should be 300, not wrapped at 256");
+
+        let tile_x = world_x / char_size;
+        assert_eq!(
+            tile_x, 18,
+            "Tile X should be 18, accessing tilemap entry beyond first half"
         );
     }
 

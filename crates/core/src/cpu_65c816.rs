@@ -58,6 +58,8 @@ pub struct Cpu65c816<M: Memory65c816> {
     in_nmi: bool,
     /// WAI (Wait for Interrupt) state - CPU is halted until interrupt occurs
     waiting_for_interrupt: bool,
+    /// STP (Stop Processor) state - CPU is halted until reset
+    stopped: bool,
 }
 
 // Status register flags
@@ -67,6 +69,8 @@ const FLAG_NEGATIVE: u8 = 0b1000_0000;
 const FLAG_OVERFLOW: u8 = 0b0100_0000;
 const FLAG_MEMORY: u8 = 0b0010_0000; // m flag: 0=16-bit A, 1=8-bit A
 const FLAG_INDEX: u8 = 0b0001_0000; // x flag: 0=16-bit X/Y, 1=8-bit X/Y
+#[allow(dead_code)]
+const FLAG_BREAK: u8 = 0b0001_0000; // B flag (same bit as X, used in emulation mode for BRK)
 #[allow(dead_code)]
 const FLAG_DECIMAL: u8 = 0b0000_1000;
 #[allow(dead_code)]
@@ -93,6 +97,7 @@ impl<M: Memory65c816> Cpu65c816<M> {
             memory,
             in_nmi: false,
             waiting_for_interrupt: false,
+            stopped: false,
         }
     }
 
@@ -110,6 +115,7 @@ impl<M: Memory65c816> Cpu65c816<M> {
         self.cycles = 0;
         self.in_nmi = false;
         self.waiting_for_interrupt = false;
+        self.stopped = false;
 
         // Load reset vector from $00FFFC-$00FFFD
         let lo = self.memory.read(0xFFFC) as u16;
@@ -225,6 +231,12 @@ impl<M: Memory65c816> Cpu65c816<M> {
     pub fn step(&mut self) -> u32 {
         let start_cycles = self.cycles;
 
+        // If CPU is stopped (STP instruction), just consume cycles until reset
+        if self.stopped {
+            self.cycles += 1;
+            return (self.cycles - start_cycles) as u32;
+        }
+
         // If CPU is waiting for interrupt (WAI instruction), consume cycles without executing
         if self.waiting_for_interrupt {
             self.cycles += 1;
@@ -248,35 +260,55 @@ impl<M: Memory65c816> Cpu65c816<M> {
         match opcode {
             // BRK - Force Break
             0x00 => {
-                self.push_word(self.pc.wrapping_add(1));
-                self.push_byte(self.status);
                 if self.emulation {
+                    // Emulation mode: 6502-compatible behavior
+                    // Push PC+1 (return address after BRK signature byte)
+                    self.push_word(self.pc.wrapping_add(1));
+                    // Push status with B flag set (to distinguish from IRQ)
+                    self.push_byte(self.status | FLAG_BREAK);
+                    // Set I flag to disable interrupts
+                    self.status |= FLAG_IRQ_DISABLE;
+                    // D flag is NOT modified in 6502 emulation mode
+                    // Load IRQ/BRK vector from $FFFE-$FFFF
                     self.pc = self.read_word(0xFFFE);
-                    self.status |= FLAG_DECIMAL;
+                    self.cycles += 7;
                 } else {
+                    // Native mode: full 24-bit context save
+                    // Order: PBR, PC, Status
                     self.push_byte(self.pbr);
+                    self.push_word(self.pc.wrapping_add(1));
+                    self.push_byte(self.status);
+                    // Set I flag to disable interrupts, clear D flag
+                    self.status |= FLAG_IRQ_DISABLE;
+                    self.status &= !FLAG_DECIMAL;
+                    // Load BRK vector from $FFE6-$FFE7
                     self.pc = self.read_word(0xFFE6);
                     self.pbr = 0;
-                    self.status &= !FLAG_DECIMAL;
+                    self.cycles += 8;
                 }
-                self.status |= FLAG_IRQ_DISABLE;
-                self.cycles += if self.emulation { 7 } else { 8 };
             }
 
             // COP - Coprocessor
             0x02 => {
                 self.fetch_byte(); // Skip signature byte
-                self.push_word(self.pc);
-                self.push_byte(self.status);
-                if !self.emulation {
+                if self.emulation {
+                    // Emulation mode
+                    self.push_word(self.pc);
+                    self.push_byte(self.status);
+                    self.status |= FLAG_IRQ_DISABLE;
+                    self.pc = self.read_word(0xFFF4);
+                    self.cycles += 7;
+                } else {
+                    // Native mode: PBR, PC, Status order
                     self.push_byte(self.pbr);
-                }
-                self.status |= FLAG_IRQ_DISABLE;
-                self.pc = self.read_word(if self.emulation { 0xFFF4 } else { 0xFFE4 });
-                if !self.emulation {
+                    self.push_word(self.pc);
+                    self.push_byte(self.status);
+                    self.status |= FLAG_IRQ_DISABLE;
+                    self.status &= !FLAG_DECIMAL;
+                    self.pc = self.read_word(0xFFE4);
                     self.pbr = 0;
+                    self.cycles += 8;
                 }
-                self.cycles += if self.emulation { 7 } else { 8 };
             }
 
             // ORA - OR with Accumulator
@@ -4259,7 +4291,14 @@ impl<M: Memory65c816> Cpu65c816<M> {
             }
             0xDB => {
                 // STP - Stop Processor
-                // For now, just consume cycles (proper implementation would halt)
+                // CPU is halted until reset
+                self.stopped = true;
+                log(LogCategory::CPU, LogLevel::Info, || {
+                    format!(
+                        "65C816: STP instruction - CPU stopped at ${:02X}:{:04X}",
+                        self.pbr, self.pc
+                    )
+                });
                 self.cycles += 3;
             }
         }
@@ -5334,5 +5373,208 @@ mod tests {
 
         // Verify IRQ was masked
         assert_eq!(cpu.pc, initial_pc); // PC should not change
+    }
+
+    #[test]
+    fn test_brk_emulation_mode() {
+        let mut mem = ArrayMemory::new();
+
+        // Set up BRK/IRQ vector at $FFFE-$FFFF to point to $9000
+        mem.write(0xFFFE, 0x00);
+        mem.write(0xFFFF, 0x90);
+
+        // Set up BRK instruction at $8000
+        mem.write(0x8000, 0x00); // BRK
+        mem.write(0x8001, 0x00); // Signature byte (skipped)
+
+        // Set up RTI at $9000
+        mem.write(0x9000, 0x40); // RTI
+
+        let mut cpu = Cpu65c816::new(mem);
+        cpu.pc = 0x8000;
+        cpu.pbr = 0;
+        cpu.s = 0x01FF;
+        cpu.status = 0x20; // Clear I flag, D flag not set
+        cpu.emulation = true;
+
+        let initial_status = cpu.status;
+
+        // Execute BRK
+        cpu.step();
+
+        // Verify BRK was executed
+        assert_eq!(cpu.pc, 0x9000); // Should jump to BRK handler
+        assert_ne!(cpu.status & FLAG_IRQ_DISABLE, 0); // I flag should be set
+                                                      // D flag should NOT be modified in emulation mode
+        assert_eq!(cpu.status & FLAG_DECIMAL, initial_status & FLAG_DECIMAL);
+
+        // Verify stack contains: status (with B flag set), PC+2 (return address)
+        // Stack grows downward, so after pushing word then byte:
+        // $01FF = PC high, $01FE = PC low, $01FD = status
+        let pushed_status = cpu.memory.read(0x01FD);
+        assert_ne!(
+            pushed_status & FLAG_BREAK,
+            0,
+            "B flag should be set in pushed status"
+        );
+
+        // Execute RTI to return from BRK
+        cpu.step();
+
+        // Verify we returned from BRK
+        assert_eq!(cpu.pc, 0x8002); // Should return to PC+2 (after BRK + signature)
+    }
+
+    #[test]
+    fn test_brk_native_mode() {
+        let mut mem = ArrayMemory::new();
+
+        // Set up BRK vector at $FFE6-$FFE7 to point to $9000
+        mem.write(0xFFE6, 0x00);
+        mem.write(0xFFE7, 0x90);
+
+        // Set up BRK instruction at bank 1, address $8000 (full address $018000)
+        mem.write(0x018000, 0x00); // BRK
+        mem.write(0x018001, 0x00); // Signature byte (skipped)
+
+        // Set up RTI at $9000 (bank 0, since PBR is cleared after BRK)
+        mem.write(0x9000, 0x40); // RTI
+
+        let mut cpu = Cpu65c816::new(mem);
+        cpu.pc = 0x8000;
+        cpu.pbr = 0x01; // Non-zero PBR to test it gets saved
+        cpu.s = 0x01FF;
+        cpu.status = 0x28; // D flag set, I flag clear
+        cpu.emulation = false;
+
+        let initial_pbr = cpu.pbr;
+
+        // Execute BRK
+        cpu.step();
+
+        // Verify BRK was executed
+        assert_eq!(cpu.pc, 0x9000); // Should jump to BRK handler
+        assert_eq!(cpu.pbr, 0); // PBR should be cleared
+        assert_ne!(cpu.status & FLAG_IRQ_DISABLE, 0); // I flag should be set
+        assert_eq!(cpu.status & FLAG_DECIMAL, 0); // D flag should be cleared in native mode
+
+        // Verify stack order: PBR, PC high, PC low, status (native mode)
+        // Stack at $01FF, $01FE, $01FD, $01FC after pushing
+        let pushed_pbr = cpu.memory.read(0x01FF);
+        assert_eq!(pushed_pbr, initial_pbr, "PBR should be pushed first");
+
+        // Execute RTI to return
+        cpu.step();
+
+        // Verify we returned from BRK
+        assert_eq!(cpu.pbr, initial_pbr); // PBR should be restored
+    }
+
+    #[test]
+    fn test_cop_emulation_mode() {
+        let mut mem = ArrayMemory::new();
+
+        // Set up COP vector at $FFF4-$FFF5 to point to $9000
+        mem.write(0xFFF4, 0x00);
+        mem.write(0xFFF5, 0x90);
+
+        // Set up COP instruction at $8000
+        mem.write(0x8000, 0x02); // COP
+        mem.write(0x8001, 0x00); // Signature byte
+
+        // Set up RTI at $9000
+        mem.write(0x9000, 0x40); // RTI
+
+        let mut cpu = Cpu65c816::new(mem);
+        cpu.pc = 0x8000;
+        cpu.pbr = 0;
+        cpu.s = 0x01FF;
+        cpu.status = 0x20; // Clear I flag
+        cpu.emulation = true;
+
+        // Execute COP
+        cpu.step();
+
+        // Verify COP was executed
+        assert_eq!(cpu.pc, 0x9000); // Should jump to COP handler
+        assert_ne!(cpu.status & FLAG_IRQ_DISABLE, 0); // I flag should be set
+    }
+
+    #[test]
+    fn test_cop_native_mode() {
+        let mut mem = ArrayMemory::new();
+
+        // Set up COP vector at $FFE4-$FFE5 to point to $9000
+        mem.write(0xFFE4, 0x00);
+        mem.write(0xFFE5, 0x90);
+
+        // Set up COP instruction at bank 1, address $8000 (full address $018000)
+        mem.write(0x018000, 0x02); // COP
+        mem.write(0x018001, 0x00); // Signature byte
+
+        // Set up RTI at $9000 (bank 0, since PBR is cleared after COP)
+        mem.write(0x9000, 0x40); // RTI
+
+        let mut cpu = Cpu65c816::new(mem);
+        cpu.pc = 0x8000;
+        cpu.pbr = 0x01; // Non-zero PBR
+        cpu.s = 0x01FF;
+        cpu.status = 0x28; // D flag set, I flag clear
+        cpu.emulation = false;
+
+        let initial_pbr = cpu.pbr;
+
+        // Execute COP
+        cpu.step();
+
+        // Verify COP was executed
+        assert_eq!(cpu.pc, 0x9000); // Should jump to COP handler
+        assert_eq!(cpu.pbr, 0); // PBR should be cleared
+        assert_ne!(cpu.status & FLAG_IRQ_DISABLE, 0); // I flag should be set
+        assert_eq!(cpu.status & FLAG_DECIMAL, 0); // D flag should be cleared in native mode
+
+        // Verify stack order: PBR, PC high, PC low, status (native mode)
+        let pushed_pbr = cpu.memory.read(0x01FF);
+        assert_eq!(pushed_pbr, initial_pbr, "PBR should be pushed first");
+
+        // Execute RTI to return
+        cpu.step();
+
+        // Verify we returned from COP
+        assert_eq!(cpu.pbr, initial_pbr); // PBR should be restored
+    }
+
+    #[test]
+    fn test_stp_halts_cpu() {
+        let mut mem = ArrayMemory::new();
+
+        // Set up STP instruction at $8000
+        mem.write(0x8000, 0xDB); // STP
+
+        // Set up a NOP after STP (should never be executed)
+        mem.write(0x8001, 0xEA); // NOP
+
+        let mut cpu = Cpu65c816::new(mem);
+        cpu.pc = 0x8000;
+        cpu.emulation = true;
+
+        // Execute STP
+        let cycles1 = cpu.step();
+        assert!(cycles1 > 0); // STP should consume some cycles
+
+        // Verify CPU is stopped
+        assert!(cpu.stopped, "CPU should be in stopped state after STP");
+        assert_eq!(cpu.pc, 0x8001); // PC should have advanced past STP
+
+        // Try to execute another instruction - should just consume cycles
+        let initial_pc = cpu.pc;
+        let cycles2 = cpu.step();
+        assert!(cycles2 > 0); // Should consume cycles
+        assert_eq!(cpu.pc, initial_pc); // But PC should NOT advance
+        assert!(cpu.stopped); // Should still be stopped
+
+        // Verify reset clears stopped state
+        cpu.reset();
+        assert!(!cpu.stopped, "Reset should clear stopped state");
     }
 }
