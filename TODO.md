@@ -39,12 +39,13 @@ _None currently_
 ### Medium
 
 #### SNES
-- [ ] **Mosaic Effect**: Implement $2106 register - `crates/systems/snes/src/ppu.rs`
-  - Current: Stub - accepts writes but doesn't implement
-  - Impact: Some games use mosaic for visual effects
-- [ ] **Hardware Multiply/Divide**: Implement $4202-$4206 registers - `crates/systems/snes/src/bus.rs`
-  - Current: Stubbed
-  - Impact: Performance optimization for games using these features
+- [x] ~~**Mosaic Effect**: Implement $2106 register - `crates/systems/snes/src/ppu.rs`~~ **COMPLETED**
+  - Fully implemented with per-layer enable and configurable size (1x1 to 16x16)
+  - Applied to all background layers and Mode 7
+- [x] ~~**Hardware Multiply/Divide**: Implement $4202-$4206 registers - `crates/systems/snes/src/bus.rs`~~ **COMPLETED**
+  - Full 8-bit multiplication with 16-bit result
+  - Full 16-bit division with quotient and remainder
+  - Proper divide-by-zero handling
 
 #### Atari 2600
 - [ ] **Paddle Controllers**: Implement INPT0-INPT3 analog input - `crates/systems/atari2600/src/riot.rs`

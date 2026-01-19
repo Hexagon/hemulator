@@ -99,6 +99,13 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
   - VRAM access protection during active display
   - Reference: [VRAM](https://snes.nesdev.org/wiki/PPU_registers#VRAM)
 
+- ✅ **Mosaic Effect** - Pixelation effect for backgrounds ($2106)
+  - Configurable pixel size from 1x1 to 16x16
+  - Per-layer enable/disable (BG1, BG2, BG3, BG4)
+  - Works with all background modes (0-7) including Mode 7
+  - Applied during rendering for hardware-accurate visuals
+  - Reference: [Mosaic](https://snes.nesdev.org/wiki/PPU_registers#MOSAIC)
+
 - ✅ **Window Masking** - Complete window system implementation
   - Two independent windows with configurable left/right boundaries
   - Per-layer window enable and inversion controls
@@ -139,6 +146,13 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
   - Full SNES controller support (12 buttons)
   - Auto-joypad read during VBlank
   - Reference: [Controllers](https://snes.nesdev.org/wiki/Input_devices)
+
+- ✅ **Hardware Multiply/Divide** - Fast math operations ($4202-$4206)
+  - 8-bit × 8-bit → 16-bit unsigned multiplication (WRMPYA/WRMPYB → RDMPYL/RDMPYH)
+  - 16-bit ÷ 8-bit → 16-bit quotient + 16-bit remainder (WRDIVL/WRDIVH/WRDIVB → RDDIVL/RDDIVH + RDMPYL/RDMPYH)
+  - Divide-by-zero returns 0xFFFF quotient and dividend as remainder
+  - Used by games for fast calculations without CPU overhead
+  - Reference: [Math Registers](https://snes.nesdev.org/wiki/Registers#Math_Registers)
 
 #### APU (Audio Processing Unit)
 - ✅ **SPC700 CPU** - Complete audio processor implementation
@@ -293,8 +307,6 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
     
   - Reference: [Color Math](https://wiki.superfamicom.org/rendering-the-screen#color-math), [Transparency](https://wiki.superfamicom.org/transparency)
 
-- ❌ **Mosaic** - No mosaic effect ($2106)
-
 - ✅ **Sub-screen** - Fully implemented for color math ($212D)
   - TS register controls which layers appear on sub-screen
   - Sub-screen pixels blended with main screen via color math
@@ -418,7 +430,6 @@ The emulator now includes a framework for enhancement chip (coprocessor) support
 - ❌ **IRQ** - H/V timer interrupts not implemented
 - ❌ **PAL** - NTSC timing only
 - ❌ **Interlace** - No interlace mode support
-- ❌ **Hardware Multiply/Divide** - Registers stubbed
 
 ## Register Implementation Status
 
