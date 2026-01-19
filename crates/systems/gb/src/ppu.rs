@@ -226,6 +226,15 @@ pub struct Ppu {
     /// Window internal line counter
     /// Increments only when the window is visible on a scanline, persists across scanlines
     window_line_counter: u8,
+    /// STAT interrupt line state (for edge-triggered interrupt blocking)
+    ///
+    /// The STAT interrupt is edge-triggered: it only fires on a transition from low (false) to high (true).
+    /// Multiple STAT sources (Mode 0/1/2, LYC=LY) are ORed together. If the line stays high
+    /// because one source keeps it active while another activates, no interrupt fires.
+    /// This implements the "STAT blocking" behavior found in real hardware.
+    ///
+    /// Reference: Pan Docs - Interrupt Sources, SameBoy issue #91
+    stat_interrupt_line: bool,
 }
 
 // LCDC bits
@@ -270,6 +279,7 @@ impl Ppu {
             scanline_states: [ScanlineState::default(); 144],
             scanline_states_captured: false,
             window_line_counter: 0,
+            stat_interrupt_line: false,
         }
     }
 
@@ -1084,7 +1094,6 @@ impl Ppu {
         self.cycle_counter += cycles;
 
         let mut vblank_started = false;
-        let mut lyc_ly_interrupt = false;
 
         // Process complete scanlines (456 cycles each)
         while self.cycle_counter >= 456 {
@@ -1111,16 +1120,12 @@ impl Ppu {
 
             self.ly = (self.ly + 1) % 154;
 
-            // Check LYC=LY coincidence flag and detect transition
-            let old_coincidence = (self.stat & 0x04) != 0;
+            // Update LYC=LY coincidence flag (bit 2 of STAT)
+            // The interrupt line calculation in update_stat_mode() will check this flag
             if self.ly == self.lyc {
                 self.stat |= 0x04; // Set coincidence flag
-                                   // Trigger interrupt only on transition from non-coincidence to coincidence
-                if !old_coincidence && (self.stat & 0x40) != 0 {
-                    lyc_ly_interrupt = true;
-                }
             } else {
-                self.stat &= !0x04;
+                self.stat &= !0x04; // Clear coincidence flag
             }
 
             // V-Blank is lines 144-153
@@ -1137,11 +1142,9 @@ impl Ppu {
             }
         }
 
-        // Update STAT mode bits and check for STAT interrupt and HBlank entry
-        let (mut stat_interrupt, hblank_entered) = self.update_stat_mode();
-
-        // Combine mode-based STAT interrupt with LYC=LY interrupt
-        stat_interrupt = stat_interrupt || lyc_ly_interrupt;
+        // Update STAT mode bits and check for STAT interrupt (with edge-triggered blocking) and HBlank entry
+        // The LYC=LY source is now integrated into the interrupt line calculation
+        let (stat_interrupt, hblank_entered) = self.update_stat_mode();
 
         (vblank_started, stat_interrupt, hblank_entered)
     }
@@ -1154,6 +1157,13 @@ impl Ppu {
     /// - LY < 144 and cycle_counter < 252: Mode 3 (Pixel Transfer)
     /// - LY < 144 and cycle_counter >= 252: Mode 0 (HBlank)
     ///
+    /// This implements edge-triggered STAT interrupt blocking:
+    /// - Multiple STAT sources (Mode 0/1/2, LYC=LY) are ORed together into a single interrupt line
+    /// - The interrupt only fires on a rising edge (low→high transition) of this line
+    /// - If the line stays high (multiple sources active), no new interrupt fires (blocking)
+    ///
+    /// Reference: Pan Docs - Interrupt Sources, SameBoy issue #91
+    ///
     /// Returns (stat_interrupt, hblank_entered)
     fn update_stat_mode(&mut self) -> (bool, bool) {
         // Get previous mode before updating
@@ -1164,7 +1174,8 @@ impl Ppu {
 
         // Check if LCD is enabled
         if (self.lcdc & LCDC_ENABLE) == 0 {
-            // LCD disabled: mode is always 0
+            // LCD disabled: mode is always 0, interrupt line is low
+            self.stat_interrupt_line = false;
             return (false, false);
         }
 
@@ -1188,25 +1199,28 @@ impl Ppu {
         // Check if we just entered HBlank
         let hblank_entered = mode == 0 && prev_mode != 0;
 
-        // Check if mode changed
-        let mut stat_interrupt = false;
-        if mode != prev_mode {
-            // Store new mode for next iteration
-            self.prev_mode = mode;
+        // Store new mode for next iteration
+        self.prev_mode = mode;
 
-            // Check if STAT interrupt should be triggered for this mode
-            // STAT interrupts are enabled via bits 3-6:
-            // Bit 3: Mode 0 (HBlank) interrupt enable
-            // Bit 4: Mode 1 (VBlank) interrupt enable
-            // Bit 5: Mode 2 (OAM) interrupt enable
-            // Bit 6: LYC=LY interrupt enable
-            stat_interrupt = match mode {
-                0 => (self.stat & 0x08) != 0, // HBlank interrupt (bit 3)
-                1 => (self.stat & 0x10) != 0, // VBlank interrupt (bit 4)
-                2 => (self.stat & 0x20) != 0, // OAM interrupt (bit 5)
-                _ => false,                   // Mode 3 doesn't have interrupt
-            };
-        }
+        // Calculate new STAT interrupt line state by ORing all enabled sources
+        // STAT interrupts are enabled via bits 3-6:
+        // Bit 3: Mode 0 (HBlank) interrupt enable
+        // Bit 4: Mode 1 (VBlank) interrupt enable
+        // Bit 5: Mode 2 (OAM) interrupt enable
+        // Bit 6: LYC=LY interrupt enable (checked in step() method)
+        let mode_0_source = mode == 0 && (self.stat & 0x08) != 0;
+        let mode_1_source = mode == 1 && (self.stat & 0x10) != 0;
+        let mode_2_source = mode == 2 && (self.stat & 0x20) != 0;
+        let lyc_ly_source = (self.stat & 0x04) != 0 && (self.stat & 0x40) != 0;
+
+        // OR all sources together to get the new line state
+        let new_line_state = mode_0_source || mode_1_source || mode_2_source || lyc_ly_source;
+
+        // Detect rising edge: interrupt fires only if line transitions from low to high
+        let stat_interrupt = !self.stat_interrupt_line && new_line_state;
+
+        // Update stored line state for next check
+        self.stat_interrupt_line = new_line_state;
 
         (stat_interrupt, hblank_entered)
     }
@@ -2093,5 +2107,112 @@ mod tests {
             color_tile2,
             "In window (scanline 100) should show window"
         );
+    }
+
+    #[test]
+    fn test_stat_blocking_mode_0_to_mode_1() {
+        // Test STAT blocking: if both Mode 0 (HBlank) and Mode 1 (VBlank) interrupts are enabled,
+        // transitioning from Mode 0 to Mode 1 should NOT fire an interrupt because the line stays high
+        let mut ppu = Ppu::new();
+        ppu.lcdc = 0x91; // Enable LCD
+        ppu.stat |= 0x08 | 0x10; // Enable both HBlank (bit 3) and VBlank (bit 4) interrupts
+        ppu.ly = 143;
+        ppu.cycle_counter = 300; // In Mode 0 (HBlank)
+
+        // First, step to establish Mode 0 and set the interrupt line high
+        let (_vblank, _stat, _hblank) = ppu.step(10);
+        // This might or might not fire depending on initial state, just establish we're in Mode 0
+        assert_eq!(ppu.stat & 0x03, 0); // Mode 0 (HBlank)
+
+        // Now step to line 144 (VBlank) - should NOT fire interrupt because line was already high from Mode 0
+        let (_vblank, stat, _hblank) = ppu.step(146); // Step to next line (456 - 310 = 146)
+        assert!(!stat, "STAT interrupt should be blocked (line stays high from Mode 0 to Mode 1)");
+        assert_eq!(ppu.ly, 144);
+        assert_eq!(ppu.stat & 0x03, 1); // Mode 1 (VBlank)
+    }
+
+    #[test]
+    fn test_stat_blocking_mode_2_to_lyc() {
+        // Test STAT blocking: if Mode 2 and LYC=LY are both enabled and active,
+        // the line stays high and no new interrupt fires
+        let mut ppu = Ppu::new();
+        ppu.lcdc = 0x91; // Enable LCD
+        ppu.stat |= 0x20 | 0x40; // Enable Mode 2 (OAM) and LYC=LY interrupts
+        ppu.ly = 10;
+        ppu.lyc = 11;
+        ppu.cycle_counter = 400; // Near end of line
+
+        // Step to line 11 with Mode 2 (OAM search) - both sources active
+        let (_vblank, stat, _hblank) = ppu.step(60);
+        // First interrupt should fire (rising edge from low to high)
+        assert!(stat, "First STAT interrupt should fire (rising edge)");
+        assert_eq!(ppu.ly, 11);
+        assert_eq!(ppu.stat & 0x03, 2); // Mode 2
+
+        // Step within the same scanline - line stays high, no new interrupt
+        let (_vblank, stat, _hblank) = ppu.step(20);
+        assert!(!stat, "No new interrupt while line stays high");
+    }
+
+    #[test]
+    fn test_stat_edge_trigger_falling_then_rising() {
+        // Test that interrupt fires again after line goes low then high
+        let mut ppu = Ppu::new();
+        ppu.lcdc = 0x91; // Enable LCD
+        ppu.stat |= 0x08; // Enable HBlank interrupt
+        ppu.ly = 0;
+        ppu.cycle_counter = 0;
+
+        // Enter Mode 0 (HBlank) - interrupt fires
+        let (_vblank, stat, _hblank) = ppu.step(300); // Cycle 300 is in Mode 0
+        assert!(stat, "First HBlank interrupt should fire");
+
+        // Go to next scanline Mode 2 - line goes low
+        let (_vblank, stat, _hblank) = ppu.step(200); // Complete scanline and enter Mode 2
+        assert!(!stat, "No interrupt in Mode 2");
+
+        // Enter Mode 0 again - interrupt fires again (new rising edge)
+        let (_vblank, stat, _hblank) = ppu.step(300); // Enter Mode 0 on next line
+        assert!(stat, "Second HBlank interrupt should fire (new rising edge)");
+    }
+
+    #[test]
+    fn test_stat_lyc_only_triggers_once() {
+        // Test that LYC=LY interrupt only fires once per coincidence, not repeatedly
+        let mut ppu = Ppu::new();
+        ppu.lcdc = 0x91; // Enable LCD
+        ppu.stat |= 0x40; // Enable LYC=LY interrupt
+        ppu.ly = 10;
+        ppu.lyc = 11;
+
+        // Step to line 11 - interrupt fires
+        let (_vblank, stat, _hblank) = ppu.step(456);
+        assert!(stat, "LYC=LY interrupt should fire when coincidence occurs");
+        assert_eq!(ppu.ly, 11);
+
+        // Step more cycles on same line - no new interrupt (line stays high)
+        let (_vblank, stat, _hblank) = ppu.step(100);
+        assert!(!stat, "LYC=LY interrupt should not fire again while coincidence persists");
+        assert_eq!(ppu.ly, 11);
+    }
+
+    #[test]
+    fn test_stat_all_sources_disabled() {
+        // Test that no interrupt fires when all sources are disabled
+        let mut ppu = Ppu::new();
+        ppu.lcdc = 0x91; // Enable LCD
+        ppu.stat = 0x00; // All interrupt sources disabled
+        ppu.ly = 0;
+        ppu.lyc = 0; // Even with coincidence
+
+        // Step through various modes - no interrupts should fire
+        let (_vblank, stat, _hblank) = ppu.step(100);
+        assert!(!stat, "No interrupt when all sources disabled (Mode 2)");
+
+        let (_vblank, stat, _hblank) = ppu.step(200);
+        assert!(!stat, "No interrupt when all sources disabled (Mode 0)");
+
+        let (_vblank, stat, _hblank) = ppu.step(200);
+        assert!(!stat, "No interrupt when all sources disabled (next line)");
     }
 }
