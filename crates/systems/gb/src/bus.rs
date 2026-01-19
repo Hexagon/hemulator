@@ -411,6 +411,7 @@ impl GbBus {
     }
 
     /// Check if boot ROM is enabled
+    #[allow(dead_code)] // Used in tests
     pub fn is_boot_rom_enabled(&self) -> bool {
         self.boot_rom_enabled
     }
