@@ -583,9 +583,9 @@ impl TabManager {
                     ui.add_space(60.0);
 
                     ui.add(
-                        egui::Image::new(
-                            egui::include_image!("../../../../../assets/icon_256.png"),
-                        )
+                        egui::Image::new(egui::include_image!(
+                            "../../../../../assets/icon_256.png"
+                        ))
                         .max_width(200.0)
                         .corner_radius(10.0),
                     );
