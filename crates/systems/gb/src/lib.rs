@@ -157,6 +157,7 @@ use emu_core::debug::Debugger;
 use emu_core::{cpu_lr35902::CpuLr35902, types::Frame, MountPointInfo, System};
 
 mod apu;
+mod boot_rom;
 mod bus;
 mod debugger;
 mod mappers;
@@ -164,6 +165,7 @@ pub(crate) mod ppu;
 pub mod ppu_renderer;
 mod timer;
 
+use boot_rom::{BootRom, BootRomType, PostBootState};
 use bus::GbBus;
 use ppu_renderer::{PpuRenderer, SoftwarePpuRenderer};
 

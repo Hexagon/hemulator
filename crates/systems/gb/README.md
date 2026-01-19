@@ -22,7 +22,8 @@ The Game Boy emulator is **fully working** with ~99% game coverage through MBC0/
 - ✅ **Speed Switching** - KEY1 register for CGB double-speed mode
 - ✅ **Joypad** - Full input support
 - ✅ **Timer** - DIV, TIMA, TMA, TAC with interrupts
-- ✅ **Interrupts** - VBlank and Timer interrupts
+- ✅ **Interrupts** - VBlank, STAT (with edge-triggered blocking), Timer
+- ✅ **STAT Interrupt Blocking** - Hardware-accurate edge-triggered STAT interrupts (fixes Worms Armageddon)
 - ✅ **Save States** - Complete state serialization
 
 ### Supported Memory Bank Controllers

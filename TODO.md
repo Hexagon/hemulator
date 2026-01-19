@@ -36,6 +36,26 @@ _None currently_
   - PIT tracks frequency/state but audio generation not connected to frontend
   - Impact: No sound output from DOS programs
 
+#### Game Boy / Game Boy Color
+- [x] **STAT Interrupt Blocking**: Implement edge-triggered STAT interrupts - `crates/systems/gb/src/ppu.rs` **COMPLETED**
+  - Proper rising-edge detection for STAT interrupt line ✅
+  - Multiple sources (Mode 0/1/2, LYC=LY) ORed together ✅
+  - Interrupt only fires on low→high transition ✅
+  - Reference: Pan Docs, SameBoy issue #91 ✅
+  - Impact: Fixes timing-sensitive games like Worms Armageddon
+- [x] **Boot ROM Module**: Created but not yet integrated - `crates/systems/gb/src/boot_rom.rs` **PARTIALLY COMPLETE**
+  - Built-in DMG and CGB boot ROMs created ✅
+  - External boot ROM loading support ✅
+  - Post-boot hardware state definitions ✅
+  - TODO: Integrate with GbSystem to apply post-boot state
+  - TODO: Add option to use external boot ROM file
+  - Impact: Proper hardware initialization for edge cases
+- [ ] **Boot ROM Integration**: Apply post-boot state to system initialization
+  - Use PostBootState::dmg() or PostBootState::cgb() to initialize registers
+  - Apply to CPU registers (A, F, B, C, D, E, H, L, SP, PC)
+  - Apply to I/O registers (PPU, APU, Timer, Interrupts)
+  - Impact: Games relying on specific boot state will work correctly
+
 ### Medium
 
 #### SNES
