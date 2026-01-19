@@ -839,6 +839,9 @@ impl Ppu {
 
             // $2121 - CGADD - CGRAM Address
             0x2121 => {
+                log(LogCategory::PPU, LogLevel::Trace, || {
+                    format!("SNES PPU: CGRAM address set to ${:02X}", val)
+                });
                 self.cgram_addr = val;
                 self.cgram_write_latch = false; // Reset write latch
             }
