@@ -582,39 +582,13 @@ impl TabManager {
                 ui.vertical_centered(|ui| {
                     ui.add_space(60.0);
 
-                    // Try to show embedded app icon from assets/icon_256.png.
-                    // Fall back to the original text heading if decoding fails.
-                    // Decode embedded PNG (assets/icon_256.png) to an egui::ColorImage
-                    match image::load_from_memory(include_bytes!(
-                        "../../../../../assets/icon_256.png",
-                    )) {
-                        Ok(img) => {
-                            let rgba = img.to_rgba8();
-                            let (w, h) = rgba.dimensions();
-                            let pixels = rgba.into_raw();
-                            let color_image = egui::ColorImage::from_rgba_unmultiplied(
-                                [w as usize, h as usize],
-                                &pixels,
-                            );
-
-                            let texture = ui.ctx().load_texture(
-                                "hemulator_logo",
-                                color_image,
-                                egui::TextureOptions::default(),
-                            );
-                            let image = egui::Image::from_texture(&texture)
-                                .fit_to_exact_size(egui::vec2(128.0, 128.0));
-                            ui.add(image);
-                        }
-                        Err(e) => {
-                            ui.heading(
-                                egui::RichText::new("🎮 Welcome to Hemulator")
-                                    .size(32.0)
-                                    .strong(),
-                            );
-                            eprintln!("Failed to load embedded app icon for welcome screen: {}", e);
-                        }
-                    }
+                    ui.add(
+                        egui::Image::new(
+                            egui::include_image!("../../../../../assets/icon_256.png"),
+                        )
+                        .max_width(200.0)
+                        .corner_radius(10.0),
+                    );
                     ui.add_space(15.0);
                     ui.label(
                         egui::RichText::new("Multi-System Console Emulator")

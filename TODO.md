@@ -75,9 +75,6 @@ _None currently_
 
 #### UI
 - [ ] Make links in about tab work
-- [ ] Make menu Help → User Manual cross platform (currently uses Windows libs)
-- [ ] Simplify logo import for welcome tab
-- [ ] Use a more common working arrow icon for "selected" (like in View → Filters)
 
 #### SNES
 - [ ] **Upload Protocol Test**: Investigate SPC700 index echoing issue - `crates/systems/snes/src/lib.rs`

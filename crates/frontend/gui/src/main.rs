@@ -3203,6 +3203,11 @@ fn main() {
         }
     };
 
+    // Ensure egui_extras image loaders are installed for this egui context.
+    // Some platforms/paths may create contexts elsewhere; installing here
+    // is a defensive measure so `egui::include_image!` works at runtime.
+    egui_extras::install_image_loaders(egui_backend.egui_ctx());
+
     // Initialize egui app
     let mut egui_app = EguiApp::new();
     egui_app.property_pane.system_name = sys.system_name().to_string();
