@@ -160,8 +160,12 @@ Unit tests now cover:
 - Save state roundtrip
 
 ### TMS9918A Sprite Fixes (January 2026)
+- **Fixed display blanking**: When bit 6 of register 1 is set (display blanked), the entire display now shows only the backdrop color (register 7, lower 4 bits)
+  - **Previous behavior**: Only sprites were disabled when blanked, but background tiles were still rendered
+  - **Correct behavior**: Both tiles and sprites are disabled when blanked, matching TMS9918A hardware behavior
+  - **Impact**: Fixes games that use display blanking during initialization or screen transitions
 - **Fixed sprite transparency**: Sprites with color code 0 are now properly treated as transparent and not drawn, matching TMS9918A hardware behavior
-- **Impact**: Resolves rendering issues in games where sprites were incorrectly appearing as black/invisible when they should be completely transparent
+  - **Impact**: Resolves rendering issues in games where sprites were incorrectly appearing as black/invisible when they should be completely transparent
 
 ## References
 

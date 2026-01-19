@@ -83,6 +83,12 @@ The SG-1000 only requires a cartridge ROM to run - no BIOS is needed.
 
 ## Recent Fixes
 
+### TMS9918A Display Blank Bit (January 2026)
+- **Fixed display blanking**: When bit 6 of register 1 is set (display blanked), the entire display now shows only the backdrop color (register 7, lower 4 bits)
+- **Previous behavior**: Only sprites were disabled when blanked, but background tiles were still rendered
+- **Correct behavior**: Both tiles and sprites are disabled when blanked, matching TMS9918A hardware behavior
+- **Impact**: Fixes games like Bomb Jack that show only a blue screen instead of graphics (game was blanking display during initialization)
+
 ### TMS9918A Sprite Rendering (January 2026)
 - **Fixed sprite transparency**: Sprites with color code 0 are now properly treated as transparent and not drawn, matching TMS9918A hardware behavior
 - **Impact**: Fixes missing sprites in games like 007 where sprites were incorrectly rendered as invisible black rectangles

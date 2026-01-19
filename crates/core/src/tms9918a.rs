@@ -325,8 +325,9 @@ impl Tms9918a {
 
     /// Render a single scanline
     fn render_scanline(&mut self, line: u8) {
-        // Get graphics mode from registers
-        let mode = self.get_graphics_mode();
+        // Bit 6 of register 1 is the blank bit (0=display enabled, 1=blanked)
+        // When blanked, only the backdrop color should be shown
+        let display_blanked = (self.registers[1] & 0x40) != 0;
 
         // Clear scanline to backdrop color (register 7, lower 4 bits)
         let backdrop_color = self.palette[(self.registers[7] & 0x0F) as usize];
@@ -335,19 +336,21 @@ impl Tms9918a {
             self.frame.pixels[line_offset + x] = backdrop_color;
         }
 
-        // Render based on graphics mode
-        match mode {
-            0 => self.render_graphics_i(line, line_offset),
-            1 => self.render_text_mode(line, line_offset),
-            2 => self.render_graphics_ii(line, line_offset),
-            3 => self.render_multicolor_mode(line, line_offset),
-            _ => {} // Invalid mode
-        }
-
-        // Render sprites (always active unless display is blanked)
-        // Bit 6 of register 1 is the blank bit (0=display enabled, 1=blanked)
-        let display_blanked = (self.registers[1] & 0x40) != 0;
+        // Only render tiles and sprites if display is not blanked
         if !display_blanked {
+            // Get graphics mode from registers
+            let mode = self.get_graphics_mode();
+
+            // Render based on graphics mode
+            match mode {
+                0 => self.render_graphics_i(line, line_offset),
+                1 => self.render_text_mode(line, line_offset),
+                2 => self.render_graphics_ii(line, line_offset),
+                3 => self.render_multicolor_mode(line, line_offset),
+                _ => {} // Invalid mode
+            }
+
+            // Render sprites
             self.render_sprites(line, line_offset);
         }
     }
