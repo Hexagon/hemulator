@@ -24,6 +24,7 @@
 //! - Mode 7 rotation/scaling matrix transformation (M7A-M7D, M7X, M7Y, M7SEL registers)
 //! - Offset-per-tile scrolling for Modes 2, 4, 6
 //! - True hi-res 512px rendering for Modes 5-6
+//! - Mosaic effect ($2106) with per-layer enable and configurable size (1x1 to 16x16)
 //! - Complete window system ($2123-$212B):
 //!   - Window masking for BG layers and sprites
 //!   - Color window for clipping and math control
@@ -40,7 +41,6 @@
 //!
 //! **NOT Implemented** (future enhancements):
 //! - Direct color mode (CGWSEL bits 0-1)
-//! - Mosaic effects ($2106)
 
 use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::types::Frame;
@@ -166,6 +166,14 @@ pub struct Ppu {
     /// Main screen designation ($212C)
     /// Bits 0-4: Enable BG1-4 and OBJ on main screen
     tm: u8,
+
+    /// Mosaic register ($2106)
+    /// Bits 0-3: Mosaic pixel size (0 = 1x1 (no mosaic), 1 = 2x2, ..., 15 = 16x16)
+    /// Bit 4: Enable mosaic on BG1
+    /// Bit 5: Enable mosaic on BG2
+    /// Bit 6: Enable mosaic on BG3
+    /// Bit 7: Enable mosaic on BG4
+    mosaic: u8,
 
     /// BG1 horizontal scroll offset ($210D) - 10-bit value, written twice
     bg1_hofs: u16,
@@ -466,6 +474,7 @@ impl Ppu {
             bg34nba: 0,
             obsel: 0,
             tm: 0,
+            mosaic: 0,
             bg1_hofs: 0,
             bg1_vofs: 0,
             bg2_hofs: 0,
@@ -889,9 +898,21 @@ impl Ppu {
                 self.tm = val;
             }
 
-            // $2106 - MOSAIC - Mosaic Size and Enable (stub - not implemented)
+            // $2106 - MOSAIC - Mosaic Size and Enable
             0x2106 => {
-                // Stub: Accept write but don't implement mosaic
+                self.mosaic = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    let size = (val & 0x0F) + 1;
+                    format!(
+                        "SNES PPU: Mosaic size={}x{} (BG1={} BG2={} BG3={} BG4={})",
+                        size,
+                        size,
+                        if val & 0x10 != 0 { "ON" } else { "OFF" },
+                        if val & 0x20 != 0 { "ON" } else { "OFF" },
+                        if val & 0x40 != 0 { "ON" } else { "OFF" },
+                        if val & 0x80 != 0 { "ON" } else { "OFF" }
+                    )
+                });
             }
 
             // $2123-$212B - Window registers
@@ -1817,6 +1838,28 @@ impl Ppu {
         m7a * (m7b_high_byte as i32)
     }
 
+    /// Get mosaic pixel size (1 to 16)
+    fn get_mosaic_size(&self) -> usize {
+        ((self.mosaic & 0x0F) + 1) as usize
+    }
+
+    /// Check if mosaic is enabled for a background layer (0-3)
+    fn is_mosaic_enabled(&self, bg_index: usize) -> bool {
+        if bg_index >= 4 {
+            return false;
+        }
+        (self.mosaic & (0x10 << bg_index)) != 0
+    }
+
+    /// Apply mosaic effect to screen coordinates
+    /// Returns the coordinates of the top-left pixel in the mosaic block
+    fn apply_mosaic(&self, x: usize, y: usize) -> (usize, usize) {
+        let size = self.get_mosaic_size();
+        let mosaic_x = (x / size) * size;
+        let mosaic_y = (y / size) * size;
+        (mosaic_x, mosaic_y)
+    }
+
     /// Set V-blank flag (called by system during vertical blanking)
     pub fn set_vblank(&mut self, vblank: bool) {
         if vblank {
@@ -2507,12 +2550,28 @@ impl Ppu {
             _ => LAYER_BACKDROP,
         };
 
+        // Check if mosaic is enabled for this layer
+        let mosaic_enabled = self.is_mosaic_enabled(bg_index);
+        let _mosaic_size = if mosaic_enabled {
+            self.get_mosaic_size()
+        } else {
+            1
+        };
+
         // Render all visible tiles
         for screen_y in 0..224 {
             for screen_x in 0..256 {
-                // Calculate world position with scrolling
-                let world_x = ((screen_x as u16 + hofs) % tilemap_pixel_width as u16) as usize;
-                let world_y = ((screen_y as u16 + vofs) % tilemap_pixel_height as u16) as usize;
+                // Apply mosaic effect to screen coordinates if enabled
+                // Mosaic groups pixels into NxN blocks using the color from the block's top-left pixel
+                let (render_x, render_y) = if mosaic_enabled {
+                    self.apply_mosaic(screen_x, screen_y)
+                } else {
+                    (screen_x, screen_y)
+                };
+
+                // Calculate world position with scrolling (using mosaic-adjusted coordinates)
+                let world_x = ((render_x as u16 + hofs) % tilemap_pixel_width as u16) as usize;
+                let world_y = ((render_y as u16 + vofs) % tilemap_pixel_height as u16) as usize;
 
                 // Get tile and pixel position based on character size
                 let tile_x = world_x / char_size;
@@ -2646,13 +2705,28 @@ impl Ppu {
         // Determine layer ID for tracking
         let layer_id = bg_index as u8;
 
+        // Check if mosaic is enabled for this layer
+        let mosaic_enabled = self.is_mosaic_enabled(bg_index);
+        let _mosaic_size = if mosaic_enabled {
+            self.get_mosaic_size()
+        } else {
+            1
+        };
+
         // Render all visible tiles
         for screen_y in 0..224 {
             for screen_x in 0..256 {
+                // Apply mosaic effect to screen coordinates if enabled
+                let (render_x, render_y) = if mosaic_enabled {
+                    self.apply_mosaic(screen_x, screen_y)
+                } else {
+                    (screen_x, screen_y)
+                };
+
                 // Get offset-per-tile if enabled (Modes 2, 4, 6)
                 let (h_offset, v_offset) = if self.is_offset_per_tile_enabled() && bg_index < 2 {
                     // Offset-per-tile only applies to BG1 and BG2
-                    self.get_offset_per_tile(screen_x, screen_y)
+                    self.get_offset_per_tile(render_x, render_y)
                 } else {
                     (0, 0)
                 };
@@ -2795,21 +2869,36 @@ impl Ppu {
             _ => (0, 0),
         };
 
+        // Check if mosaic is enabled for this layer
+        let mosaic_enabled = self.is_mosaic_enabled(bg_index);
+        let _mosaic_size = if mosaic_enabled {
+            self.get_mosaic_size()
+        } else {
+            1
+        };
+
         // Render all visible tiles
         for screen_y in 0..224 {
             for screen_x in 0..256 {
+                // Apply mosaic effect to screen coordinates if enabled
+                let (render_x, render_y) = if mosaic_enabled {
+                    self.apply_mosaic(screen_x, screen_y)
+                } else {
+                    (screen_x, screen_y)
+                };
+
                 // Get offset-per-tile if enabled (Mode 4)
                 let (h_offset, v_offset) = if self.is_offset_per_tile_enabled() && bg_index == 0 {
                     // In Mode 4, offset-per-tile only applies to BG1
-                    self.get_offset_per_tile(screen_x, screen_y)
+                    self.get_offset_per_tile(render_x, render_y)
                 } else {
                     (0, 0)
                 };
 
                 // Calculate world position with scrolling and offset-per-tile
-                let world_x = ((screen_x as i32 + hofs as i32 + h_offset as i32)
+                let world_x = ((render_x as i32 + hofs as i32 + h_offset as i32)
                     .rem_euclid(tilemap_pixel_width as i32)) as usize;
-                let world_y = ((screen_y as i32 + vofs as i32 + v_offset as i32)
+                let world_y = ((render_y as i32 + vofs as i32 + v_offset as i32)
                     .rem_euclid(tilemap_pixel_height as i32))
                     as usize;
 
@@ -2946,22 +3035,37 @@ impl Ppu {
         let flip_h = (self.m7sel & 0x01) != 0;
         let flip_v = (self.m7sel & 0x02) != 0;
 
+        // Check if mosaic is enabled for BG1 (Mode 7 uses BG1)
+        let mosaic_enabled = self.is_mosaic_enabled(0); // BG1 = index 0
+        let _mosaic_size = if mosaic_enabled {
+            self.get_mosaic_size()
+        } else {
+            1
+        };
+
         // Mode 7 tilemap is always 128x128 tiles in VRAM
         // Tile data starts at VRAM address 0
         // Tilemap starts at VRAM address 0 (interleaved with tile data)
 
         for screen_y in 0..224 {
             for screen_x in 0..256 {
-                // Apply horizontal/vertical flip to screen coordinates
-                let sx = if flip_h {
-                    255 - screen_x as i32
+                // Apply mosaic effect to screen coordinates if enabled
+                let (render_x, render_y) = if mosaic_enabled {
+                    self.apply_mosaic(screen_x, screen_y)
                 } else {
-                    screen_x as i32
+                    (screen_x, screen_y)
+                };
+
+                // Apply horizontal/vertical flip to screen coordinates (using mosaic-adjusted coordinates)
+                let sx = if flip_h {
+                    255 - render_x as i32
+                } else {
+                    render_x as i32
                 };
                 let sy = if flip_v {
-                    223 - screen_y as i32
+                    223 - render_y as i32
                 } else {
-                    screen_y as i32
+                    render_y as i32
                 };
 
                 // Transform screen coordinates to tilemap coordinates
@@ -3077,16 +3181,31 @@ impl Ppu {
             _ => (0, 0),
         };
 
+        // Check if mosaic is enabled for this layer
+        let mosaic_enabled = self.is_mosaic_enabled(bg_index);
+        let _mosaic_size = if mosaic_enabled {
+            self.get_mosaic_size()
+        } else {
+            1
+        };
+
         // Render all visible tiles at 512px width
         // In hi-res mode, each logical pixel is rendered as 2 physical pixels horizontally
         for screen_y in 0..224 {
             for screen_x in 0..512 {
+                // Apply mosaic effect to screen coordinates if enabled
+                let (render_x, render_y) = if mosaic_enabled {
+                    self.apply_mosaic(screen_x, screen_y)
+                } else {
+                    (screen_x, screen_y)
+                };
+
                 // In hi-res, divide screen_x by 2 to get the logical pixel coordinate
-                let logical_x = screen_x / 2;
+                let logical_x = render_x / 2;
 
                 // Get offset-per-tile if enabled (Mode 6)
                 let (h_offset, v_offset) = if self.is_offset_per_tile_enabled() && bg_index == 0 {
-                    self.get_offset_per_tile(logical_x, screen_y)
+                    self.get_offset_per_tile(logical_x, render_y)
                 } else {
                     (0, 0)
                 };
@@ -3094,7 +3213,7 @@ impl Ppu {
                 // Calculate world position with scrolling and offset-per-tile
                 let world_x = ((logical_x as i32 + hofs as i32 + h_offset as i32)
                     .rem_euclid(tilemap_pixel_width as i32)) as usize;
-                let world_y = ((screen_y as i32 + vofs as i32 + v_offset as i32)
+                let world_y = ((render_y as i32 + vofs as i32 + v_offset as i32)
                     .rem_euclid(tilemap_pixel_height as i32))
                     as usize;
 
@@ -3221,16 +3340,31 @@ impl Ppu {
             _ => (0, 0),
         };
 
+        // Check if mosaic is enabled for this layer
+        let mosaic_enabled = self.is_mosaic_enabled(bg_index);
+        let _mosaic_size = if mosaic_enabled {
+            self.get_mosaic_size()
+        } else {
+            1
+        };
+
         // Render all visible tiles at 512px width
         for screen_y in 0..224 {
             for screen_x in 0..512 {
+                // Apply mosaic effect to screen coordinates if enabled
+                let (render_x, render_y) = if mosaic_enabled {
+                    self.apply_mosaic(screen_x, screen_y)
+                } else {
+                    (screen_x, screen_y)
+                };
+
                 // In hi-res, divide screen_x by 2 to get the logical pixel coordinate
-                let logical_x = screen_x / 2;
+                let logical_x = render_x / 2;
 
                 // Calculate world position with scrolling
                 let world_x = ((logical_x as i32 + hofs as i32)
                     .rem_euclid(tilemap_pixel_width as i32)) as usize;
-                let world_y = ((screen_y as i32 + vofs as i32)
+                let world_y = ((render_y as i32 + vofs as i32)
                     .rem_euclid(tilemap_pixel_height as i32))
                     as usize;
 
@@ -6366,5 +6500,109 @@ mod tests {
         // The OAM address register can store values up to 511 (9 bits)
         // But sprite indices are derived from even addresses (2 bytes per sprite main entry)
         // The formula ensures we get a sprite index from 0-127
+    }
+
+    #[test]
+    fn test_mosaic_register() {
+        let mut ppu = Ppu::new();
+
+        // Test default: mosaic disabled, size 1x1
+        assert!(!ppu.is_mosaic_enabled(0));
+        assert!(!ppu.is_mosaic_enabled(1));
+        assert!(!ppu.is_mosaic_enabled(2));
+        assert!(!ppu.is_mosaic_enabled(3));
+        assert_eq!(ppu.get_mosaic_size(), 1);
+
+        // Test enabling mosaic for BG1 only, size 2x2
+        ppu.write_register(0x2106, 0x11); // Size=1 (2x2), BG1 enabled
+        assert!(ppu.is_mosaic_enabled(0), "BG1 should have mosaic enabled");
+        assert!(
+            !ppu.is_mosaic_enabled(1),
+            "BG2 should not have mosaic enabled"
+        );
+        assert!(
+            !ppu.is_mosaic_enabled(2),
+            "BG3 should not have mosaic enabled"
+        );
+        assert!(
+            !ppu.is_mosaic_enabled(3),
+            "BG4 should not have mosaic enabled"
+        );
+        assert_eq!(ppu.get_mosaic_size(), 2, "Mosaic size should be 2x2");
+
+        // Test enabling mosaic for all BGs, size 4x4
+        ppu.write_register(0x2106, 0xF3); // Size=3 (4x4), all BGs enabled
+        assert!(ppu.is_mosaic_enabled(0));
+        assert!(ppu.is_mosaic_enabled(1));
+        assert!(ppu.is_mosaic_enabled(2));
+        assert!(ppu.is_mosaic_enabled(3));
+        assert_eq!(ppu.get_mosaic_size(), 4, "Mosaic size should be 4x4");
+
+        // Test maximum mosaic size 16x16
+        ppu.write_register(0x2106, 0x0F); // Size=15 (16x16), no BGs enabled
+        assert_eq!(ppu.get_mosaic_size(), 16, "Mosaic size should be 16x16");
+        assert!(!ppu.is_mosaic_enabled(0));
+        assert!(!ppu.is_mosaic_enabled(1));
+        assert!(!ppu.is_mosaic_enabled(2));
+        assert!(!ppu.is_mosaic_enabled(3));
+
+        // Test enabling selective BGs
+        ppu.write_register(0x2106, 0x62); // Size=2 (3x3), BG2 and BG3 enabled
+        assert!(!ppu.is_mosaic_enabled(0));
+        assert!(ppu.is_mosaic_enabled(1), "BG2 should have mosaic enabled");
+        assert!(ppu.is_mosaic_enabled(2), "BG3 should have mosaic enabled");
+        assert!(!ppu.is_mosaic_enabled(3));
+        assert_eq!(ppu.get_mosaic_size(), 3, "Mosaic size should be 3x3");
+    }
+
+    #[test]
+    fn test_mosaic_coordinate_transformation() {
+        let mut ppu = Ppu::new();
+
+        // Test 2x2 mosaic
+        ppu.write_register(0x2106, 0x11); // Size=1 (2x2)
+
+        // Top-left block (0,0)-(1,1) should all map to (0,0)
+        assert_eq!(ppu.apply_mosaic(0, 0), (0, 0));
+        assert_eq!(ppu.apply_mosaic(1, 0), (0, 0));
+        assert_eq!(ppu.apply_mosaic(0, 1), (0, 0));
+        assert_eq!(ppu.apply_mosaic(1, 1), (0, 0));
+
+        // Next block (2,0)-(3,1) should all map to (2,0)
+        assert_eq!(ppu.apply_mosaic(2, 0), (2, 0));
+        assert_eq!(ppu.apply_mosaic(3, 0), (2, 0));
+        assert_eq!(ppu.apply_mosaic(2, 1), (2, 0));
+        assert_eq!(ppu.apply_mosaic(3, 1), (2, 0));
+
+        // Test 4x4 mosaic
+        ppu.write_register(0x2106, 0x13); // Size=3 (4x4)
+
+        // Block (0,0)-(3,3) should all map to (0,0)
+        assert_eq!(ppu.apply_mosaic(0, 0), (0, 0));
+        assert_eq!(ppu.apply_mosaic(3, 3), (0, 0));
+        assert_eq!(ppu.apply_mosaic(2, 1), (0, 0));
+
+        // Block (4,0)-(7,3) should all map to (4,0)
+        assert_eq!(ppu.apply_mosaic(4, 0), (4, 0));
+        assert_eq!(ppu.apply_mosaic(7, 3), (4, 0));
+        assert_eq!(ppu.apply_mosaic(5, 2), (4, 0));
+
+        // Block (0,4)-(3,7) should all map to (0,4)
+        assert_eq!(ppu.apply_mosaic(0, 4), (0, 4));
+        assert_eq!(ppu.apply_mosaic(3, 7), (0, 4));
+        assert_eq!(ppu.apply_mosaic(1, 6), (0, 4));
+
+        // Test 16x16 mosaic (maximum size)
+        ppu.write_register(0x2106, 0x0F); // Size=15 (16x16)
+
+        // Block (0,0)-(15,15) should all map to (0,0)
+        assert_eq!(ppu.apply_mosaic(0, 0), (0, 0));
+        assert_eq!(ppu.apply_mosaic(15, 15), (0, 0));
+        assert_eq!(ppu.apply_mosaic(8, 8), (0, 0));
+
+        // Block (16,0)-(31,15) should all map to (16,0)
+        assert_eq!(ppu.apply_mosaic(16, 0), (16, 0));
+        assert_eq!(ppu.apply_mosaic(31, 15), (16, 0));
+        assert_eq!(ppu.apply_mosaic(20, 10), (16, 0));
     }
 }
