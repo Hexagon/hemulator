@@ -414,8 +414,8 @@ impl Vdp {
         // Check if Mode 4 is enabled (register 0, bit 2)
         let mode_4_enabled = (self.registers[0] & 0x04) != 0;
 
-        // In Mode 4, display is always on (bit 6 of register 1 controls other features)
-        // In TMS modes (0-3), bit 6 of register 1 controls display blanking
+        // In Mode 4, display is always on (bit 6 of register 1 controls 224-line mode)
+        // In TMS modes (0-3), bit 6 of register 1 controls display blanking (0=blank, 1=display)
         let display_enabled = mode_4_enabled || (self.registers[1] & 0x40) != 0;
 
         // Render background if display enabled
@@ -423,8 +423,9 @@ impl Vdp {
             self.render_background(line, line_offset);
         }
 
-        // Render sprites if enabled (bit 3 of register 1)
-        if display_enabled && (self.registers[1] & 0x08) != 0 {
+        // Render sprites if enabled (bit 3 of register 1) and display is on
+        let sprites_enabled = (self.registers[1] & 0x08) != 0;
+        if display_enabled && sprites_enabled {
             self.render_sprites(line, line_offset);
         }
     }
