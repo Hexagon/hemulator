@@ -165,7 +165,6 @@ pub(crate) mod ppu;
 pub mod ppu_renderer;
 mod timer;
 
-use boot_rom::{BootRom, BootRomType, PostBootState};
 use bus::GbBus;
 use ppu_renderer::{PpuRenderer, SoftwarePpuRenderer};
 

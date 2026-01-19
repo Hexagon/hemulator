@@ -2126,7 +2126,10 @@ mod tests {
 
         // Now step to line 144 (VBlank) - should NOT fire interrupt because line was already high from Mode 0
         let (_vblank, stat, _hblank) = ppu.step(146); // Step to next line (456 - 310 = 146)
-        assert!(!stat, "STAT interrupt should be blocked (line stays high from Mode 0 to Mode 1)");
+        assert!(
+            !stat,
+            "STAT interrupt should be blocked (line stays high from Mode 0 to Mode 1)"
+        );
         assert_eq!(ppu.ly, 144);
         assert_eq!(ppu.stat & 0x03, 1); // Mode 1 (VBlank)
     }
@@ -2173,7 +2176,10 @@ mod tests {
 
         // Enter Mode 0 again - interrupt fires again (new rising edge)
         let (_vblank, stat, _hblank) = ppu.step(300); // Enter Mode 0 on next line
-        assert!(stat, "Second HBlank interrupt should fire (new rising edge)");
+        assert!(
+            stat,
+            "Second HBlank interrupt should fire (new rising edge)"
+        );
     }
 
     #[test]
@@ -2192,7 +2198,10 @@ mod tests {
 
         // Step more cycles on same line - no new interrupt (line stays high)
         let (_vblank, stat, _hblank) = ppu.step(100);
-        assert!(!stat, "LYC=LY interrupt should not fire again while coincidence persists");
+        assert!(
+            !stat,
+            "LYC=LY interrupt should not fire again while coincidence persists"
+        );
         assert_eq!(ppu.ly, 11);
     }
 

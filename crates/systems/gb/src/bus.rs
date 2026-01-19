@@ -321,15 +321,15 @@ impl GbBus {
     }
 
     /// Perform General Purpose DMA (immediate transfer)
-    /// 
+    ///
     /// # Timing
     /// General Purpose DMA (GDMA) transfers all blocks immediately when initiated.
     /// On real hardware, this blocks the CPU during the transfer.
     /// Each 16-byte block takes approximately 8 M-cycles (32 T-cycles).
-    /// 
+    ///
     /// For a full transfer of 128 blocks (2048 bytes, maximum), this would take
     /// approximately 1024 M-cycles (4096 T-cycles), during which the CPU is halted.
-    /// 
+    ///
     /// This implementation transfers all data instantly but defers execution to
     /// avoid nested read/write conflicts (executed via execute_pending_gdma).
     fn perform_gdma(&mut self) {
@@ -352,7 +352,7 @@ impl GbBus {
     }
 
     /// Execute pending GDMA if flagged
-    /// 
+    ///
     /// Should be called from the main loop to avoid nested read/write issues.
     /// This is called before each CPU instruction to ensure GDMA completes
     /// before the next instruction executes, matching hardware behavior.
@@ -365,15 +365,15 @@ impl GbBus {
     }
 
     /// Perform one block of HBlank DMA
-    /// 
+    ///
     /// # Timing
     /// This should be called during HBlank period (PPU Mode 0).
     /// On real hardware, HDMA transfers occur at approximately cycle 252-455 of each scanline.
     /// Each 16-byte block transfer takes approximately 8 M-cycles (32 T-cycles).
-    /// 
+    ///
     /// The transfer happens after the PPU enters HBlank, ensuring VRAM is accessible
     /// and the data is ready for the next scanline's rendering.
-    /// 
+    ///
     /// # Returns
     /// Returns true if transfer is complete (all blocks transferred)
     pub fn step_hdma(&mut self) -> bool {

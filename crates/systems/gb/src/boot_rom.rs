@@ -17,6 +17,9 @@
 //! - DMG Boot ROM disassembly
 //! - Hardware register initial values from various test ROMs
 
+// Allow dead code until boot ROM integration is complete
+#![allow(dead_code)]
+
 /// Built-in boot ROM data
 ///
 /// This is a minimal boot ROM that initializes hardware and immediately
@@ -104,7 +107,7 @@ impl BootRom {
             BootRomType::Cgb => {
                 if addr < 0x0100 {
                     self.data[addr as usize]
-                } else if addr >= 0x0200 && addr < 0x0900 {
+                } else if (0x0200..0x0900).contains(&addr) {
                     self.data[(addr - 0x0100) as usize]
                 } else {
                     0xFF
@@ -215,44 +218,44 @@ pub struct CpuPostBootState {
 /// Hardware I/O register state after boot
 pub struct IoPostBootState {
     // Timer registers
-    pub tima: u8,  // 0xFF05
-    pub tma: u8,   // 0xFF06
-    pub tac: u8,   // 0xFF07
+    pub tima: u8, // 0xFF05
+    pub tma: u8,  // 0xFF06
+    pub tac: u8,  // 0xFF07
 
     // APU registers
-    pub nr10: u8,  // 0xFF10
-    pub nr11: u8,  // 0xFF11
-    pub nr12: u8,  // 0xFF12
-    pub nr14: u8,  // 0xFF14
-    pub nr21: u8,  // 0xFF16
-    pub nr22: u8,  // 0xFF17
-    pub nr24: u8,  // 0xFF19
-    pub nr30: u8,  // 0xFF1A
-    pub nr31: u8,  // 0xFF1B
-    pub nr32: u8,  // 0xFF1C
-    pub nr34: u8,  // 0xFF1E
-    pub nr41: u8,  // 0xFF20
-    pub nr42: u8,  // 0xFF21
-    pub nr43: u8,  // 0xFF22
-    pub nr44: u8,  // 0xFF23
-    pub nr50: u8,  // 0xFF24
-    pub nr51: u8,  // 0xFF25
-    pub nr52: u8,  // 0xFF26
+    pub nr10: u8, // 0xFF10
+    pub nr11: u8, // 0xFF11
+    pub nr12: u8, // 0xFF12
+    pub nr14: u8, // 0xFF14
+    pub nr21: u8, // 0xFF16
+    pub nr22: u8, // 0xFF17
+    pub nr24: u8, // 0xFF19
+    pub nr30: u8, // 0xFF1A
+    pub nr31: u8, // 0xFF1B
+    pub nr32: u8, // 0xFF1C
+    pub nr34: u8, // 0xFF1E
+    pub nr41: u8, // 0xFF20
+    pub nr42: u8, // 0xFF21
+    pub nr43: u8, // 0xFF22
+    pub nr44: u8, // 0xFF23
+    pub nr50: u8, // 0xFF24
+    pub nr51: u8, // 0xFF25
+    pub nr52: u8, // 0xFF26
 
     // PPU registers
-    pub lcdc: u8,  // 0xFF40
-    pub stat: u8,  // 0xFF41
-    pub scy: u8,   // 0xFF42
-    pub scx: u8,   // 0xFF43
-    pub lyc: u8,   // 0xFF45
-    pub bgp: u8,   // 0xFF47
-    pub obp0: u8,  // 0xFF48
-    pub obp1: u8,  // 0xFF49
-    pub wy: u8,    // 0xFF4A
-    pub wx: u8,    // 0xFF4B
+    pub lcdc: u8, // 0xFF40
+    pub stat: u8, // 0xFF41
+    pub scy: u8,  // 0xFF42
+    pub scx: u8,  // 0xFF43
+    pub lyc: u8,  // 0xFF45
+    pub bgp: u8,  // 0xFF47
+    pub obp0: u8, // 0xFF48
+    pub obp1: u8, // 0xFF49
+    pub wy: u8,   // 0xFF4A
+    pub wx: u8,   // 0xFF4B
 
     // Interrupt registers
-    pub ie: u8,    // 0xFFFF
+    pub ie: u8, // 0xFFFF
 }
 
 impl PostBootState {
