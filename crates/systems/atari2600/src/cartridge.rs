@@ -106,14 +106,16 @@
 //! # Implementation Details
 //!
 //! This implementation:
-//! - ✅ Supports all 6 standard banking schemes (2K, 4K, F8, FA, F6, F4)
-//! - ✅ Auto-detects banking from ROM size
+//! - ✅ Supports all 10 banking schemes (2K, 4K, F8, FA, F6, F4, FE, 3F, E0, DPC)
+//! - ✅ Auto-detects banking from ROM size and signature patterns
 //! - ✅ Properly handles bank switching via read/write access
 //! - ✅ Maintains current bank state across frames
 //! - ✅ Supports save states (bank state is serializable)
-//! - ❌ Does not support more exotic schemes (e.g., DPC, FE, 3F, E0, etc.)
+//! - ✅ Signature-based detection for exotic schemes (FE, 3F, E0, DPC)
 //!
-//! The implemented schemes cover the vast majority of commercially released Atari 2600 games.
+//! The implemented schemes cover nearly all commercially released Atari 2600 games,
+//! including those using exotic banking schemes like Pitfall II (DPC), Decathlon (FE),
+//! Espial (3F), and Parker Bros titles (E0).
 
 use serde::{Deserialize, Serialize};
 use std::cell::Cell;
