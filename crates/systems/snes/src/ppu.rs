@@ -5295,6 +5295,20 @@ mod tests {
     fn test_mode7_multiply_result() {
         let mut ppu = Ppu::new();
 
+        // Helper to read and sign-extend 24-bit result to i32
+        fn read_mode7_result(ppu: &Ppu) -> i32 {
+            let result_low = ppu.read_register(0x2134) as u32;
+            let result_mid = ppu.read_register(0x2135) as u32;
+            let result_high = ppu.read_register(0x2136) as u32;
+            let unsigned_result = result_low | (result_mid << 8) | (result_high << 16);
+            // Sign-extend from 24-bit to 32-bit
+            if unsigned_result & 0x800000 != 0 {
+                (unsigned_result | 0xFF000000) as i32
+            } else {
+                unsigned_result as i32
+            }
+        }
+
         // Test 1: Simple positive multiplication
         // M7A = 0x0100 (1.0 in 8.8 fixed point = 256)
         // M7B = 0x0100 (high byte = 1)
@@ -5304,11 +5318,7 @@ mod tests {
         ppu.write_register(0x211C, 0x00); // M7B low
         ppu.write_register(0x211C, 0x01); // M7B high = 0x0100
 
-        let result_low = ppu.read_register(0x2134);
-        let result_mid = ppu.read_register(0x2135);
-        let result_high = ppu.read_register(0x2136);
-        let result =
-            (result_low as i32) | ((result_mid as i32) << 8) | ((result_high as i32) << 16);
+        let result = read_mode7_result(&ppu);
         assert_eq!(result, 256, "256 * 1 should equal 256");
 
         // Test 2: Larger multiplication
@@ -5320,11 +5330,7 @@ mod tests {
         ppu.write_register(0x211C, 0x00); // M7B low
         ppu.write_register(0x211C, 0x03); // M7B high = 0x0300
 
-        let result_low = ppu.read_register(0x2134);
-        let result_mid = ppu.read_register(0x2135);
-        let result_high = ppu.read_register(0x2136);
-        let result =
-            (result_low as i32) | ((result_mid as i32) << 8) | ((result_high as i32) << 16);
+        let result = read_mode7_result(&ppu);
         assert_eq!(result, 1536, "512 * 3 should equal 1536");
 
         // Test 3: Zero multiplication
@@ -5336,12 +5342,44 @@ mod tests {
         ppu.write_register(0x211C, 0x00);
         ppu.write_register(0x211C, 0x00);
 
-        let result_low = ppu.read_register(0x2134);
-        let result_mid = ppu.read_register(0x2135);
-        let result_high = ppu.read_register(0x2136);
-        let result =
-            (result_low as i32) | ((result_mid as i32) << 8) | ((result_high as i32) << 16);
+        let result = read_mode7_result(&ppu);
         assert_eq!(result, 0, "256 * 0 should equal 0");
+
+        // Test 4: Negative M7B high byte
+        // M7A = 0x0100 (256)
+        // M7B = 0xFF00 (high byte = -1 as signed)
+        // Result = 256 * -1 = -256
+        ppu.write_register(0x211B, 0x00);
+        ppu.write_register(0x211B, 0x01); // M7A = 0x0100
+        ppu.write_register(0x211C, 0x00);
+        ppu.write_register(0x211C, 0xFF); // M7B high = 0xFF = -1 signed
+
+        let result = read_mode7_result(&ppu);
+        assert_eq!(result, -256, "256 * -1 should equal -256");
+
+        // Test 5: Negative M7A
+        // M7A = 0xFF00 (-256 as signed 16-bit)
+        // M7B = 0x0200 (high byte = 2)
+        // Result = -256 * 2 = -512
+        ppu.write_register(0x211B, 0x00);
+        ppu.write_register(0x211B, 0xFF); // M7A = 0xFF00 = -256
+        ppu.write_register(0x211C, 0x00);
+        ppu.write_register(0x211C, 0x02); // M7B high = 2
+
+        let result = read_mode7_result(&ppu);
+        assert_eq!(result, -512, "-256 * 2 should equal -512");
+
+        // Test 6: Both negative (result positive)
+        // M7A = 0xFF00 (-256)
+        // M7B = 0xFF00 (high byte = -1)
+        // Result = -256 * -1 = 256
+        ppu.write_register(0x211B, 0x00);
+        ppu.write_register(0x211B, 0xFF); // M7A = -256
+        ppu.write_register(0x211C, 0x00);
+        ppu.write_register(0x211C, 0xFF); // M7B high = -1
+
+        let result = read_mode7_result(&ppu);
+        assert_eq!(result, 256, "-256 * -1 should equal 256");
     }
 
     #[test]
