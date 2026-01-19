@@ -762,7 +762,11 @@ impl Ppu {
                     format!(
                         "SNES PPU: VMAIN=${:02X} (inc:{}, mapping:{}, inc_byte:{})",
                         val,
-                        match val & 0x03 { 0 => 1, 1 => 32, _ => 128 },
+                        match val & 0x03 {
+                            0 => 1,
+                            1 => 32,
+                            _ => 128,
+                        },
                         (val >> 2) & 0x03,
                         if val & 0x80 != 0 { "high" } else { "low" }
                     )
@@ -806,7 +810,12 @@ impl Ppu {
                 self.vram[addr * 2] = val;
                 log(LogCategory::PPU, LogLevel::Trace, || {
                     if orig_addr as usize != addr {
-                        format!("SNES PPU: VRAM Write L ${:04X}->${:04X} = ${:02X} (remapped)", orig_addr, addr * 2, val)
+                        format!(
+                            "SNES PPU: VRAM Write L ${:04X}->${:04X} = ${:02X} (remapped)",
+                            orig_addr,
+                            addr * 2,
+                            val
+                        )
                     } else {
                         format!("SNES PPU: VRAM Write L ${:04X} = ${:02X}", addr * 2, val)
                     }
@@ -839,9 +848,18 @@ impl Ppu {
                 self.vram[addr * 2 + 1] = val;
                 log(LogCategory::PPU, LogLevel::Trace, || {
                     if orig_addr as usize != addr {
-                        format!("SNES PPU: VRAM Write H ${:04X}->${:04X} = ${:02X} (remapped)", orig_addr, addr * 2 + 1, val)
+                        format!(
+                            "SNES PPU: VRAM Write H ${:04X}->${:04X} = ${:02X} (remapped)",
+                            orig_addr,
+                            addr * 2 + 1,
+                            val
+                        )
                     } else {
-                        format!("SNES PPU: VRAM Write H ${:04X} = ${:02X}", addr * 2 + 1, val)
+                        format!(
+                            "SNES PPU: VRAM Write H ${:04X} = ${:02X}",
+                            addr * 2 + 1,
+                            val
+                        )
                     }
                 });
                 // Auto-increment VRAM address if VMAIN bit 7 is SET (increment on high byte write)
@@ -1845,7 +1863,7 @@ impl Ppu {
 
     /// Get remapped VRAM address based on VMAIN bits 2-3
     /// This handles the address translation used for efficient tilemap writing
-    /// 
+    ///
     /// Address Remapping (bits 2-3):
     /// - 00: No remapping
     /// - 01: Remap addressing aaaaaaaaBBBccccc => aaaaaaaacccccBBB
