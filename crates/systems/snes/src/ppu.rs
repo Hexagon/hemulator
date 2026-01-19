@@ -2375,7 +2375,8 @@ impl Ppu {
 
         // Return CGRAM index (palette * 16 + color_index)
         // Mode 1: each BG layer has 8 palettes of 16 colors each
-        (palette * 16 + color_index as usize) as u8
+        // Clamp to ensure valid CGRAM index (0-255)
+        ((palette * 16 + color_index as usize).min(255)) as u8
     }
 
     /// Get tile pixel color in 8bpp mode (256 colors)
@@ -3847,7 +3848,9 @@ impl Ppu {
                         }
 
                         // Sprites use palettes 128-255 (palette 0-7 maps to CGRAM 128-255)
-                        let cgram_index = (128 + palette * 16 + color_index as usize) as u8;
+                        // Explicitly clamp to ensure we stay within valid CGRAM range
+                        let cgram_offset = (palette * 16 + color_index as usize).min(127);
+                        let cgram_index = (128 + cgram_offset) as u8;
                         let color = self.get_color(cgram_index);
 
                         // Draw pixel if it has equal or higher priority (later layers paint on top)
@@ -4018,7 +4021,15 @@ impl Ppu {
 
         // Normal CGRAM lookup
         let addr = (index as usize) * 2;
-        if addr + 1 >= CGRAM_SIZE {
+        // Bounds check: CGRAM is 512 bytes (256 colors * 2 bytes each)
+        // Index can be 0-255, so addr can be 0-510, and addr+1 can be 1-511
+        if addr >= CGRAM_SIZE || addr + 1 >= CGRAM_SIZE {
+            log(LogCategory::PPU, LogLevel::Warn, || {
+                format!(
+                    "SNES PPU: CGRAM read out of bounds - index={}, addr={}, CGRAM_SIZE={}",
+                    index, addr, CGRAM_SIZE
+                )
+            });
             return 0xFF000000; // Black
         }
 
