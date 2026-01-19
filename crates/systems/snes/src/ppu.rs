@@ -4026,7 +4026,7 @@ impl Ppu {
         let addr = (index as usize) * 2;
         // Bounds check: CGRAM is 512 bytes (256 colors * 2 bytes each)
         // Index can be 0-255, so addr can be 0-510, and addr+1 can be 1-511
-        if addr >= CGRAM_SIZE || addr + 1 >= CGRAM_SIZE {
+        if addr + 1 >= CGRAM_SIZE {
             log(LogCategory::PPU, LogLevel::Warn, || {
                 format!(
                     "SNES PPU: CGRAM read out of bounds - index={}, addr={}, CGRAM_SIZE={}",
