@@ -58,6 +58,8 @@ pub struct Cpu65c816<M: Memory65c816> {
     in_nmi: bool,
     /// WAI (Wait for Interrupt) state - CPU is halted until interrupt occurs
     waiting_for_interrupt: bool,
+    /// STP (Stop Processor) state - CPU is halted until reset
+    stopped: bool,
 }
 
 // Status register flags
@@ -93,6 +95,7 @@ impl<M: Memory65c816> Cpu65c816<M> {
             memory,
             in_nmi: false,
             waiting_for_interrupt: false,
+            stopped: false,
         }
     }
 
@@ -110,6 +113,7 @@ impl<M: Memory65c816> Cpu65c816<M> {
         self.cycles = 0;
         self.in_nmi = false;
         self.waiting_for_interrupt = false;
+        self.stopped = false;
 
         // Load reset vector from $00FFFC-$00FFFD
         let lo = self.memory.read(0xFFFC) as u16;
@@ -225,6 +229,12 @@ impl<M: Memory65c816> Cpu65c816<M> {
     pub fn step(&mut self) -> u32 {
         let start_cycles = self.cycles;
 
+        // If CPU is stopped (STP instruction), just consume cycles until reset
+        if self.stopped {
+            self.cycles += 1;
+            return (self.cycles - start_cycles) as u32;
+        }
+
         // If CPU is waiting for interrupt (WAI instruction), consume cycles without executing
         if self.waiting_for_interrupt {
             self.cycles += 1;
@@ -248,35 +258,55 @@ impl<M: Memory65c816> Cpu65c816<M> {
         match opcode {
             // BRK - Force Break
             0x00 => {
-                self.push_word(self.pc.wrapping_add(1));
-                self.push_byte(self.status);
                 if self.emulation {
+                    // Emulation mode: 6502-compatible behavior
+                    // Push PC+1 (return address after BRK signature byte)
+                    self.push_word(self.pc.wrapping_add(1));
+                    // Push status with B flag set (to distinguish from IRQ)
+                    self.push_byte(self.status | 0x10); // B flag
+                                                        // Set I flag to disable interrupts
+                    self.status |= FLAG_IRQ_DISABLE;
+                    // D flag is NOT modified in 6502 emulation mode
+                    // Load IRQ/BRK vector from $FFFE-$FFFF
                     self.pc = self.read_word(0xFFFE);
-                    self.status |= FLAG_DECIMAL;
+                    self.cycles += 7;
                 } else {
+                    // Native mode: full 24-bit context save
+                    // Order: PBR, PC, Status
                     self.push_byte(self.pbr);
+                    self.push_word(self.pc.wrapping_add(1));
+                    self.push_byte(self.status);
+                    // Set I flag to disable interrupts, clear D flag
+                    self.status |= FLAG_IRQ_DISABLE;
+                    self.status &= !FLAG_DECIMAL;
+                    // Load BRK vector from $FFE6-$FFE7
                     self.pc = self.read_word(0xFFE6);
                     self.pbr = 0;
-                    self.status &= !FLAG_DECIMAL;
+                    self.cycles += 8;
                 }
-                self.status |= FLAG_IRQ_DISABLE;
-                self.cycles += if self.emulation { 7 } else { 8 };
             }
 
             // COP - Coprocessor
             0x02 => {
                 self.fetch_byte(); // Skip signature byte
-                self.push_word(self.pc);
-                self.push_byte(self.status);
-                if !self.emulation {
+                if self.emulation {
+                    // Emulation mode
+                    self.push_word(self.pc);
+                    self.push_byte(self.status);
+                    self.status |= FLAG_IRQ_DISABLE;
+                    self.pc = self.read_word(0xFFF4);
+                    self.cycles += 7;
+                } else {
+                    // Native mode: PBR, PC, Status order
                     self.push_byte(self.pbr);
-                }
-                self.status |= FLAG_IRQ_DISABLE;
-                self.pc = self.read_word(if self.emulation { 0xFFF4 } else { 0xFFE4 });
-                if !self.emulation {
+                    self.push_word(self.pc);
+                    self.push_byte(self.status);
+                    self.status |= FLAG_IRQ_DISABLE;
+                    self.status &= !FLAG_DECIMAL;
+                    self.pc = self.read_word(0xFFE4);
                     self.pbr = 0;
+                    self.cycles += 8;
                 }
-                self.cycles += if self.emulation { 7 } else { 8 };
             }
 
             // ORA - OR with Accumulator
@@ -4259,7 +4289,14 @@ impl<M: Memory65c816> Cpu65c816<M> {
             }
             0xDB => {
                 // STP - Stop Processor
-                // For now, just consume cycles (proper implementation would halt)
+                // CPU is halted until reset
+                self.stopped = true;
+                log(LogCategory::CPU, LogLevel::Info, || {
+                    format!(
+                        "65C816: STP instruction - CPU stopped at ${:02X}:{:04X}",
+                        self.pbr, self.pc
+                    )
+                });
                 self.cycles += 3;
             }
         }
