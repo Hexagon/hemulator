@@ -106,9 +106,12 @@ impl BootRom {
             }
             BootRomType::Cgb => {
                 if addr < 0x0100 {
+                    // First section: 0x0000-0x00FF maps to data[0..256]
                     self.data[addr as usize]
                 } else if (0x0200..0x0900).contains(&addr) {
-                    self.data[(addr - 0x0100) as usize]
+                    // Second section: 0x0200-0x08FF maps to data[256..2304]
+                    // Offset: addr - 0x0200 + 256
+                    self.data[(addr - 0x0200 + 256) as usize]
                 } else {
                     0xFF
                 }

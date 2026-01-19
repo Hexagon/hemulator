@@ -233,6 +233,8 @@ pub struct Ppu {
     /// because one source keeps it active while another activates, no interrupt fires.
     /// This implements the "STAT blocking" behavior found in real hardware.
     ///
+    /// Initial state: false (low), allowing the first STAT source to trigger an interrupt.
+    ///
     /// Reference: Pan Docs - Interrupt Sources, SameBoy issue #91
     stat_interrupt_line: bool,
 }
