@@ -758,6 +758,15 @@ impl Ppu {
             // $2115 - VMAIN - VRAM Address Increment Mode
             0x2115 => {
                 self.vmain = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!(
+                        "SNES PPU: VMAIN=${:02X} (inc:{}, mapping:{}, inc_byte:{})",
+                        val,
+                        match val & 0x03 { 0 => 1, 1 => 32, _ => 128 },
+                        (val >> 2) & 0x03,
+                        if val & 0x80 != 0 { "high" } else { "low" }
+                    )
+                });
             }
 
             // $2116 - VMADDL - VRAM Address (low byte)
@@ -791,10 +800,16 @@ impl Ppu {
                     return; // Ignore write during active display
                 }
 
-                let addr = (self.vram_addr.get() as usize) % (VRAM_SIZE / 2);
+                // Use remapped address for writing
+                let orig_addr = self.vram_addr.get();
+                let addr = self.get_remapped_vram_addr();
                 self.vram[addr * 2] = val;
                 log(LogCategory::PPU, LogLevel::Trace, || {
-                    format!("SNES PPU: VRAM Write L ${:04X} = ${:02X}", addr * 2, val)
+                    if orig_addr as usize != addr {
+                        format!("SNES PPU: VRAM Write L ${:04X}->${:04X} = ${:02X} (remapped)", orig_addr, addr * 2, val)
+                    } else {
+                        format!("SNES PPU: VRAM Write L ${:04X} = ${:02X}", addr * 2, val)
+                    }
                 });
                 // Auto-increment VRAM address if VMAIN bit 7 is CLEAR (increment on low byte write)
                 // Hardware: bit 7 = 0 means increment after low byte, bit 7 = 1 means increment after high byte
@@ -819,14 +834,15 @@ impl Ppu {
                 }
 
                 // For high byte write, always use the current address (no subtraction needed)
-                let addr = (self.vram_addr.get() as usize) % (VRAM_SIZE / 2);
+                let orig_addr = self.vram_addr.get();
+                let addr = self.get_remapped_vram_addr();
                 self.vram[addr * 2 + 1] = val;
                 log(LogCategory::PPU, LogLevel::Trace, || {
-                    format!(
-                        "SNES PPU: VRAM Write H ${:04X} = ${:02X}",
-                        addr * 2 + 1,
-                        val
-                    )
+                    if orig_addr as usize != addr {
+                        format!("SNES PPU: VRAM Write H ${:04X}->${:04X} = ${:02X} (remapped)", orig_addr, addr * 2 + 1, val)
+                    } else {
+                        format!("SNES PPU: VRAM Write H ${:04X} = ${:02X}", addr * 2 + 1, val)
+                    }
                 });
                 // Auto-increment VRAM address if VMAIN bit 7 is SET (increment on high byte write)
                 // Hardware: bit 7 = 0 means increment after low byte, bit 7 = 1 means increment after high byte
@@ -1142,18 +1158,28 @@ impl Ppu {
             // $2139 - VMDATALREAD - VRAM Data Read (low byte)
             0x2139 => {
                 // Return buffered low byte (hardware prefetch behavior)
-                (self.vram_read_buffer.get() & 0xFF) as u8
+                let result = (self.vram_read_buffer.get() & 0xFF) as u8;
+                // Auto-increment if increment mode is 0 (increment on low byte)
+                if self.vmain & 0x80 == 0 {
+                    let current = self.vram_addr.get();
+                    self.vram_addr
+                        .set(current.wrapping_add(self.get_vram_increment()));
+                    self.prefetch_vram();
+                }
+                result
             }
 
             // $213A - VMDATAHREAD - VRAM Data Read (high byte)
             0x213A => {
                 // Return buffered high byte
                 let result = (self.vram_read_buffer.get() >> 8) as u8;
-                // Auto-increment address after high byte read and prefetch next word
-                let current = self.vram_addr.get();
-                self.vram_addr
-                    .set(current.wrapping_add(self.get_vram_increment()));
-                self.prefetch_vram();
+                // Auto-increment if increment mode is 1 (increment on high byte)
+                if self.vmain & 0x80 != 0 {
+                    let current = self.vram_addr.get();
+                    self.vram_addr
+                        .set(current.wrapping_add(self.get_vram_increment()));
+                    self.prefetch_vram();
+                }
                 result
             }
 
@@ -1817,6 +1843,43 @@ impl Ppu {
         }
     }
 
+    /// Get remapped VRAM address based on VMAIN bits 2-3
+    /// This handles the address translation used for efficient tilemap writing
+    /// 
+    /// Address Remapping (bits 2-3):
+    /// - 00: No remapping
+    /// - 01: Remap addressing aaaaaaaaBBBccccc => aaaaaaaacccccBBB
+    /// - 10: Remap addressing aaaaaaaBBBBcccc => aaaaaaaccccBBBB  
+    /// - 11: Remap addressing aaaaaaBBBBBccccc => aaaaaacccccBBBBB
+    ///
+    /// Reference: https://snes.nesdev.org/wiki/PPU_registers#VMAIN_-_Video_Port_Control
+    fn get_remapped_vram_addr(&self) -> usize {
+        let addr = self.vram_addr.get() as usize;
+        let mapping = (self.vmain >> 2) & 0x03;
+
+        let remapped = match mapping {
+            0 => addr, // No remapping
+            1 => {
+                // Mode 1: aaaaaaaaBBBccccc => aaaaaaaacccccBBB (8-bit)
+                // Takes bits 5-7 (BBB) and bits 0-4 (ccccc) and swaps them
+                (addr & 0xFF00) | ((addr & 0x00E0) >> 5) | ((addr & 0x001F) << 3)
+            }
+            2 => {
+                // Mode 2: aaaaaaaBBBBcccc => aaaaaaaccccBBBB (9-bit)
+                // Takes bits 4-7 (BBBB) and bits 0-3 (cccc) and swaps them
+                (addr & 0xFE00) | ((addr & 0x00F0) >> 4) | ((addr & 0x000F) << 4)
+            }
+            3 => {
+                // Mode 3: aaaaaaBBBBBccccc => aaaaaacccccBBBBB (10-bit)
+                // Takes bits 5-9 (BBBBB) and bits 0-4 (ccccc) and swaps them
+                (addr & 0xFC00) | ((addr & 0x03E0) >> 5) | ((addr & 0x001F) << 5)
+            }
+            _ => addr,
+        };
+
+        remapped % (VRAM_SIZE / 2)
+    }
+
     /// Get VRAM address increment amount based on VMAIN register
     fn get_vram_increment(&self) -> u16 {
         match self.vmain & 0x03 {
@@ -1971,7 +2034,8 @@ impl Ppu {
     /// Hardware behavior: When VRAM address is set or after a read, the word at that
     /// address is immediately loaded into the read buffer for subsequent read operations
     fn prefetch_vram(&self) {
-        let addr = (self.vram_addr.get() as usize) % (VRAM_SIZE / 2);
+        // Apply address remapping for CPU access
+        let addr = self.get_remapped_vram_addr();
         let low_byte = self.vram.get(addr * 2).copied().unwrap_or(0);
         let high_byte = self.vram.get(addr * 2 + 1).copied().unwrap_or(0);
         self.vram_read_buffer
@@ -6604,5 +6668,57 @@ mod tests {
         assert_eq!(ppu.apply_mosaic(16, 0), (16, 0));
         assert_eq!(ppu.apply_mosaic(31, 15), (16, 0));
         assert_eq!(ppu.apply_mosaic(20, 10), (16, 0));
+    }
+
+    #[test]
+    fn test_vram_address_remapping() {
+        let mut ppu = Ppu::new();
+
+        // Mode 0: No remapping
+        ppu.write_register(0x2115, 0x00);
+        ppu.write_register(0x2116, 0x20); // Address $0020
+        ppu.write_register(0x2117, 0x00);
+        assert_eq!(ppu.get_remapped_vram_addr(), 0x0020);
+
+        // Mode 1: 8-bit remapping (aaaaaaaaBBBccccc => aaaaaaaacccccBBB)
+        // Example: $0020 = 0b00000000_00100000 = 0b00000000_BBBccccc
+        //   BBB = 001 (bits 5-7), ccccc = 00000 (bits 0-4)
+        //   Result: 0b00000000_00000001 = $0001
+        ppu.write_register(0x2115, 0x04); // Bits 2-3 = 01
+        ppu.write_register(0x2116, 0x20);
+        ppu.write_register(0x2117, 0x00);
+        assert_eq!(ppu.get_remapped_vram_addr(), 0x0001);
+
+        // Another example: $00FF = 0b00000000_11111111
+        //   BBB = 111 (bits 5-7), ccccc = 11111 (bits 0-4)
+        //   Result: 0b00000000_11111111 = $00FF (same because all bits set)
+        ppu.write_register(0x2116, 0xFF);
+        ppu.write_register(0x2117, 0x00);
+        assert_eq!(ppu.get_remapped_vram_addr(), 0x00FF);
+
+        // Example: $0007 = 0b00000000_00000111
+        //   BBB = 000, ccccc = 00111
+        //   Result: 0b00000000_00111000 = $0038
+        ppu.write_register(0x2116, 0x07);
+        ppu.write_register(0x2117, 0x00);
+        assert_eq!(ppu.get_remapped_vram_addr(), 0x0038);
+
+        // Mode 2: 9-bit remapping (aaaaaaaBBBBcccc => aaaaaaaccccBBBB)
+        // Example: $0080 = 0b00000000_10000000
+        //   BBBB = 1000 (bits 4-7), cccc = 0000 (bits 0-3)
+        //   Result: 0b00000000_00001000 = $0008
+        ppu.write_register(0x2115, 0x08); // Bits 2-3 = 10
+        ppu.write_register(0x2116, 0x80);
+        ppu.write_register(0x2117, 0x00);
+        assert_eq!(ppu.get_remapped_vram_addr(), 0x0008);
+
+        // Mode 3: 10-bit remapping (aaaaaaBBBBBccccc => aaaaaacccccBBBBB)
+        // Example: $0100 = 0b00000001_00000000
+        //   BBBBB = 01000 (bits 5-9), ccccc = 00000 (bits 0-4)
+        //   Result: 0b00000000_00001000 = $0008
+        ppu.write_register(0x2115, 0x0C); // Bits 2-3 = 11
+        ppu.write_register(0x2116, 0x00);
+        ppu.write_register(0x2117, 0x01);
+        assert_eq!(ppu.get_remapped_vram_addr(), 0x0008);
     }
 }
