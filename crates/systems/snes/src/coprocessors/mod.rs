@@ -156,4 +156,10 @@ pub trait EnhancementChip {
     /// Deserialize chip state from save states
     /// Restores the chip's state from a JSON string
     fn load_state(&mut self, state: &str) -> Result<(), String>;
+
+    /// Tick the chip for the given number of cycles (for coprocessors that run asynchronously)
+    /// Default implementation does nothing (for chips that don't need continuous execution)
+    fn tick(&mut self, _cycles: u64) {
+        // Default: do nothing
+    }
 }

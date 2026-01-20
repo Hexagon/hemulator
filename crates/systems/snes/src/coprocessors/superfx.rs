@@ -665,11 +665,180 @@ impl SuperFx {
                 self.update_zs_flags(self.regs[dest]);
                 1
             }
-            // Unimplemented opcodes
-            _ => {
-                // For now, treat as NOP
+            // LEA/LINK - Load effective address / Link
+            0xE0..=0xEF if self.flags_alt1 => {
+                // LINK - Link (used in function calls)
+                let n = (opcode & 0x0F) as usize;
+                self.regs[11] = self.regs[n];
+                self.flags_alt1 = false;
                 1
             }
+            // LEA Rn (0xE0-0xEF) - Load effective address
+            0xE0..=0xEF => {
+                let n = (opcode & 0x0F) as usize;
+                // LEA loads address of Rn into destination
+                self.regs[self.dreg()] = self.regs[n];
+                1
+            }
+            // UMULT/FMULT - Unsigned multiply / Fractional multiply
+            0xF0..=0xFF if self.flags_alt1 && self.flags_alt2 => {
+                // LMULT - Long multiply (returns full 32-bit result)
+                let n = (opcode & 0x0F) as usize;
+                let r6 = self.regs[6] as u32;
+                let rn = self.regs[n] as u32;
+                self.mult_result = r6 * rn;
+                self.regs[4] = (self.mult_result & 0xFFFF) as u16;
+                self.regs[5] = ((self.mult_result >> 16) & 0xFFFF) as u16;
+                self.update_zs_flags(self.regs[4]);
+                self.flags_alt1 = false;
+                self.flags_alt2 = false;
+                1
+            }
+            // UMULT Rn (0xF0-0xFF with ALT1) - Unsigned multiply
+            0xF0..=0xFF if self.flags_alt1 => {
+                let n = (opcode & 0x0F) as usize;
+                let r6 = self.regs[6] as u32;
+                let rn = self.regs[n] as u32;
+                self.mult_result = r6 * rn;
+                self.regs[4] = (self.mult_result & 0xFFFF) as u16;
+                self.regs[5] = ((self.mult_result >> 16) & 0xFFFF) as u16;
+                self.update_zs_flags(self.regs[4]);
+                self.flags_alt1 = false;
+                1
+            }
+            // FMULT Rn (0xF0-0xFF with ALT2) - Fractional multiply
+            0xF0..=0xFF if self.flags_alt2 => {
+                let n = (opcode & 0x0F) as usize;
+                let r6 = self.regs[6] as i16;
+                let rn = self.regs[n] as i16;
+                // Fractional multiply: (a * b) >> 1
+                let result = ((r6 as i32) * (rn as i32)) >> 1;
+                self.mult_result = result as u32;
+                self.regs[4] = (self.mult_result & 0xFFFF) as u16;
+                self.regs[5] = ((self.mult_result >> 16) & 0xFFFF) as u16;
+                self.update_zs_flags(self.regs[4]);
+                self.flags_alt2 = false;
+                1
+            }
+            // GETB/GETBL/GETBH Rn (0xF0-0xFF) - Get byte/low/high
+            0xF0..=0xFF => {
+                let n = (opcode & 0x0F) as usize;
+                // GETB: Read byte from ROM buffer into register low byte
+                self.regs[n] = (self.regs[n] & 0xFF00) | (self.rom_buffer as u16);
+                1
+            }
+            // ASR/ASL/LSR - Shift operations with ALT flags
+            0x03 if self.flags_alt1 => {
+                // ASR - Arithmetic shift right
+                let src = self.sreg();
+                let val = self.regs[src] as i16;
+                self.flags_cy = (val & 1) != 0;
+                self.regs[src] = (val >> 1) as u16;
+                self.update_zs_flags(self.regs[src]);
+                self.flags_alt1 = false;
+                1
+            }
+            // ROR - Rotate right
+            0x04 if self.flags_alt1 => {
+                let src = self.sreg();
+                let val = self.regs[src];
+                let cy = if self.flags_cy { 0x8000 } else { 0 };
+                self.flags_cy = (val & 1) != 0;
+                self.regs[src] = (val >> 1) | cy;
+                self.update_zs_flags(self.regs[src]);
+                self.flags_alt1 = false;
+                1
+            }
+            // LOB - Get low byte
+            0x0E if !self.flags_alt1 => {
+                let src = self.sreg();
+                self.regs[src] = self.regs[src] & 0xFF;
+                self.update_zs_flags(self.regs[src]);
+                1
+            }
+            // HIB - Get high byte  
+            0x0E if self.flags_alt1 => {
+                let src = self.sreg();
+                self.regs[src] = (self.regs[src] >> 8) & 0xFF;
+                self.update_zs_flags(self.regs[src]);
+                self.flags_alt1 = false;
+                1
+            }
+            // BIC - Branch if carry
+            0x07 if self.flags_alt1 => {
+                if !self.flags_cy {
+                    let offset_addr = ((self.pbr as u32) << 16) | ((self.pc() + 1) as u32);
+                    let offset = self.read_byte(offset_addr) as i8;
+                    let new_pc = ((self.pc() + 2) as i32 + offset as i32) as u16;
+                    self.set_pc(new_pc);
+                    self.flags_alt1 = false;
+                    0
+                } else {
+                    self.flags_alt1 = false;
+                    2
+                }
+            }
+            // BVS/BVC - Branch on overflow
+            0x06 if self.flags_alt1 => {
+                // BVC - Branch if overflow clear
+                if !self.flags_ov {
+                    let offset_addr = ((self.pbr as u32) << 16) | ((self.pc() + 1) as u32);
+                    let offset = self.read_byte(offset_addr) as i8;
+                    let new_pc = ((self.pc() + 2) as i32 + offset as i32) as u16;
+                    self.set_pc(new_pc);
+                    self.flags_alt1 = false;
+                    0
+                } else {
+                    self.flags_alt1 = false;
+                    2
+                }
+            }
+            // BEQ/BNE - Branch on zero
+            0x05 if self.flags_alt1 => {
+                // BNE - Branch if not zero
+                if !self.flags_z {
+                    let offset_addr = ((self.pbr as u32) << 16) | ((self.pc() + 1) as u32);
+                    let offset = self.read_byte(offset_addr) as i8;
+                    let new_pc = ((self.pc() + 2) as i32 + offset as i32) as u16;
+                    self.set_pc(new_pc);
+                    self.flags_alt1 = false;
+                    0
+                } else {
+                    self.flags_alt1 = false;
+                    2
+                }
+            }
+            0x05 if self.flags_alt2 => {
+                // BEQ - Branch if zero
+                if self.flags_z {
+                    let offset_addr = ((self.pbr as u32) << 16) | ((self.pc() + 1) as u32);
+                    let offset = self.read_byte(offset_addr) as i8;
+                    let new_pc = ((self.pc() + 2) as i32 + offset as i32) as u16;
+                    self.set_pc(new_pc);
+                    self.flags_alt2 = false;
+                    0
+                } else {
+                    self.flags_alt2 = false;
+                    2
+                }
+            }
+            // BMI/BPL - Branch on sign
+            0x06 if self.flags_alt2 => {
+                // BMI - Branch if minus (sign set)
+                if self.flags_s {
+                    let offset_addr = ((self.pbr as u32) << 16) | ((self.pc() + 1) as u32);
+                    let offset = self.read_byte(offset_addr) as i8;
+                    let new_pc = ((self.pc() + 2) as i32 + offset as i32) as u16;
+                    self.set_pc(new_pc);
+                    self.flags_alt2 = false;
+                    0
+                } else {
+                    self.flags_alt2 = false;
+                    2
+                }
+            }
+            // Unimplemented opcodes - treat as NOP
+            _ => 1
         };
 
         // Increment cycle counter
@@ -757,9 +926,16 @@ impl SuperFx {
                 flags.set_sfr_low(val);
                 self.set_flags(flags);
                 // Writing to G flag starts/stops GSU
+                // The GSU will now run asynchronously via the tick() method
+                use emu_core::logging::{log, LogCategory, LogLevel};
                 if self.flags_g {
-                    // Start GSU execution
-                    self.run(1000); // Run for some cycles
+                    log(LogCategory::Bus, LogLevel::Info, || {
+                        format!("SuperFX: GO flag set, PC=${:04X}, starting execution", self.pc())
+                    });
+                } else {
+                    log(LogCategory::Bus, LogLevel::Info, || {
+                        format!("SuperFX: GO flag cleared, PC=${:04X}, stopping execution", self.pc())
+                    });
                 }
             }
             0x31 => {
@@ -804,11 +980,29 @@ impl EnhancementChip for SuperFx {
             return self.read_register(addr);
         }
 
-        // GSU RAM access at $700000-$71FFFF (simplified)
-        if (0x70..=0x71).contains(&bank) {
+        // GSU RAM access at $700000-$73FFFF (128KB-256KB)
+        if (0x70..=0x73).contains(&bank) {
             let ram_offset = (((bank - 0x70) as usize) << 16) | (offset as usize);
             if ram_offset < self.ram.len() {
                 return self.ram[ram_offset];
+            }
+        }
+
+        // SuperFX ROM passthrough for CPU access
+        // Banks $00-$3F, $80-$BF at $8000-$FFFF access ROM
+        if matches!(bank, 0x00..=0x3F | 0x80..=0xBF) && offset >= 0x8000 {
+            let effective_bank = bank & 0x3F; // Remove mirror bit
+            let rom_offset = ((effective_bank as usize) << 15) | ((offset as usize - 0x8000) & 0x7FFF);
+            if rom_offset < self.rom.len() {
+                return self.rom[rom_offset];
+            }
+        }
+
+        // Banks $40-$5F for extended ROM (LoROM upper banks)
+        if matches!(bank, 0x40..=0x5F) {
+            let rom_offset = (((bank - 0x40) as usize) << 16) | (offset as usize);
+            if rom_offset < self.rom.len() {
+                return self.rom[rom_offset];
             }
         }
 
@@ -872,6 +1066,17 @@ impl EnhancementChip for SuperFx {
         // Replace current state
         *self = loaded;
         Ok(())
+    }
+
+    fn tick(&mut self, cycles: u64) {
+        // Run SuperFX for the given number of cycles if the GO flag is set
+        if self.flags_g {
+            use emu_core::logging::{log, LogCategory, LogLevel};
+            log(LogCategory::Bus, LogLevel::Trace, || {
+                format!("SuperFX: Running {} cycles, PC=${:04X}, GO={}", cycles, self.pc(), self.flags_g)
+            });
+            self.run(cycles);
+        }
     }
 }
 

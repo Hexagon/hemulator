@@ -277,6 +277,15 @@ impl SnesBus {
     pub fn tick_cycles(&mut self, cycles: u32) {
         self.frame_cycle += cycles;
 
+        // Tick cartridge enhancement chip (e.g., SuperFX) with master cycles
+        // SuperFX runs at the master clock frequency (21.48 MHz)
+        // Main CPU cycles are abstract units, but we approximate master cycles as CPU cycles * 6
+        // (since most CPU operations take 6 master cycles)
+        if let Some(ref mut cart) = self.cartridge {
+            let master_cycles = cycles * 6;
+            cart.tick_chip(master_cycles);
+        }
+
         // Convert main CPU cycles to SPC700 cycles using proper clock ratio
         // Main CPU: ~3.58 MHz (NTSC)
         // SPC700: ~1.024 MHz
