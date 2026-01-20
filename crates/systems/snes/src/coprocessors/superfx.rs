@@ -908,7 +908,15 @@ impl SuperFx {
 
     /// Write to a GSU register (SNES CPU perspective)
     fn write_register(&mut self, addr: u32, val: u8) {
+        use emu_core::logging::{log, LogCategory, LogLevel};
         let offset = (addr & 0xFF) as u8;
+
+        // Log important register writes
+        if matches!(offset, 0x30..=0x31 | 0x34 | 0x36) {
+            log(LogCategory::Bus, LogLevel::Debug, || {
+                format!("SuperFX: Write register ${:02X} = ${:02X}", offset, val)
+            });
+        }
 
         match offset {
             // R0-R15 (low bytes at $00-$1E, high bytes at $01-$1F)

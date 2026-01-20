@@ -96,6 +96,7 @@ _None currently_
 
 #### UI
 - [ ] Make links in about tab work
+- [ ] Check that áll systems has the enhanced debugger state
 
 #### SNES
 - [ ] **Upload Protocol Test**: Investigate SPC700 index echoing issue - `crates/systems/snes/src/lib.rs`
