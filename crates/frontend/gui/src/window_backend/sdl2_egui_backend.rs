@@ -495,8 +495,7 @@ impl Sdl2EguiBackend {
 
     /// Load an SDL surface from PNG data
     ///
-    /// Decodes PNG data and creates an SDL surface with RGBA8888 pixel format.
-    /// The PNG crate outputs RGBA data which is copied directly to the surface.
+    /// Decodes PNG data using the image crate and creates an SDL surface with RGBA8888 pixel format.
     ///
     /// # Arguments
     /// * `png_data` - Raw PNG file data as bytes
@@ -505,34 +504,23 @@ impl Sdl2EguiBackend {
     /// * `Ok(Surface)` - SDL surface with decoded image data
     /// * `Err(String)` - Error message if decoding or copying fails
     fn load_icon_from_png(png_data: &[u8]) -> Result<sdl2::surface::Surface<'static>, String> {
-        use std::io::Cursor;
+        // Decode image using the image crate (simpler than png crate directly)
+        let img = image::load_from_memory(png_data)
+            .map_err(|e| format!("Failed to decode PNG: {}", e))?
+            .to_rgba8();
 
-        // Decode PNG using the png crate
-        let decoder = png::Decoder::new(Cursor::new(png_data));
-        let mut reader = decoder
-            .read_info()
-            .map_err(|e| format!("PNG decode error: {}", e))?;
-
-        let info = reader.info();
-        let width = info.width;
-        let height = info.height;
-
-        // Read the image data
-        let mut buf = vec![0; reader.output_buffer_size()];
-        let info = reader
-            .next_frame(&mut buf)
-            .map_err(|e| format!("PNG read error: {}", e))?;
-        let bytes = &buf[..info.buffer_size()];
+        let width = img.width();
+        let height = img.height();
+        let rgba_data = img.into_raw();
 
         // Create SDL surface from the decoded RGBA data
-        // PNG crate outputs RGBA, so we use RGBA8888 format directly
         let mut surface =
             sdl2::surface::Surface::new(width, height, sdl2::pixels::PixelFormatEnum::RGBA8888)
                 .map_err(|e| format!("Failed to create surface: {}", e))?;
 
-        // Copy RGBA data directly to surface (no conversion needed)
+        // Copy RGBA data to surface
         surface.with_lock_mut(|pixels: &mut [u8]| {
-            pixels.copy_from_slice(bytes);
+            pixels.copy_from_slice(&rgba_data);
         });
 
         Ok(surface)

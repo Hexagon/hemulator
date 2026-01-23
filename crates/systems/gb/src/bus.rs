@@ -321,12 +321,23 @@ impl GbBus {
     }
 
     /// Perform General Purpose DMA (immediate transfer)
+    ///
+    /// # Timing
+    /// General Purpose DMA (GDMA) transfers all blocks immediately when initiated.
+    /// On real hardware, this blocks the CPU during the transfer.
+    /// Each 16-byte block takes approximately 8 M-cycles (32 T-cycles).
+    ///
+    /// For a full transfer of 128 blocks (2048 bytes, maximum), this would take
+    /// approximately 1024 M-cycles (4096 T-cycles), during which the CPU is halted.
+    ///
+    /// This implementation transfers all data instantly but defers execution to
+    /// avoid nested read/write conflicts (executed via execute_pending_gdma).
     fn perform_gdma(&mut self) {
         // Transfer all blocks immediately
         let blocks = self.hdma_remaining;
 
         for _ in 0..blocks {
-            // Transfer one 16-byte block
+            // Transfer one 16-byte block (~8 M-cycles on hardware)
             for i in 0..16 {
                 let byte = self.read(self.hdma_source + i);
                 self.ppu.write_vram(self.hdma_dest - 0x8000 + i, byte);
@@ -341,7 +352,10 @@ impl GbBus {
     }
 
     /// Execute pending GDMA if flagged
-    /// Should be called from the main loop to avoid nested read/write issues
+    ///
+    /// Should be called from the main loop to avoid nested read/write issues.
+    /// This is called before each CPU instruction to ensure GDMA completes
+    /// before the next instruction executes, matching hardware behavior.
     pub fn execute_pending_gdma(&mut self) {
         if self.gdma_pending {
             self.gdma_pending = false;
@@ -351,14 +365,24 @@ impl GbBus {
     }
 
     /// Perform one block of HBlank DMA
-    /// Should be called during HBlank period
-    /// Returns true if transfer is complete
+    ///
+    /// # Timing
+    /// This should be called during HBlank period (PPU Mode 0).
+    /// On real hardware, HDMA transfers occur at approximately cycle 252-455 of each scanline.
+    /// Each 16-byte block transfer takes approximately 8 M-cycles (32 T-cycles).
+    ///
+    /// The transfer happens after the PPU enters HBlank, ensuring VRAM is accessible
+    /// and the data is ready for the next scanline's rendering.
+    ///
+    /// # Returns
+    /// Returns true if transfer is complete (all blocks transferred)
     pub fn step_hdma(&mut self) -> bool {
         if !self.hdma_active || self.hdma_remaining == 0 {
             return false;
         }
 
         // Transfer one 16-byte block during HBlank
+        // Hardware timing: ~8 M-cycles (32 T-cycles) per block
         for i in 0..16 {
             let byte = self.read(self.hdma_source + i);
             self.ppu.write_vram(self.hdma_dest - 0x8000 + i, byte);
@@ -384,6 +408,64 @@ impl GbBus {
     #[allow(dead_code)] // Will be used when CGB features are fully implemented
     pub fn is_cgb_mode(&self) -> bool {
         self.cgb_mode
+    }
+
+    /// Check if boot ROM is enabled
+    #[allow(dead_code)] // Used in tests
+    pub fn is_boot_rom_enabled(&self) -> bool {
+        self.boot_rom_enabled
+    }
+
+    /// Apply post-boot I/O register state
+    ///
+    /// This applies the hardware register values that would be set by the boot ROM.
+    /// Allows skipping the boot ROM animation while maintaining correct initialization.
+    ///
+    /// Reference: Pan Docs - Power-Up Sequence
+    pub fn apply_post_boot_io_state(&mut self, io: &crate::boot_rom::IoPostBootState) {
+        // Timer registers
+        self.write(0xFF05, io.tima);
+        self.write(0xFF06, io.tma);
+        self.write(0xFF07, io.tac);
+
+        // APU registers
+        self.apu.write_register(0xFF10, io.nr10);
+        self.apu.write_register(0xFF11, io.nr11);
+        self.apu.write_register(0xFF12, io.nr12);
+        self.apu.write_register(0xFF14, io.nr14);
+        self.apu.write_register(0xFF16, io.nr21);
+        self.apu.write_register(0xFF17, io.nr22);
+        self.apu.write_register(0xFF19, io.nr24);
+        self.apu.write_register(0xFF1A, io.nr30);
+        self.apu.write_register(0xFF1B, io.nr31);
+        self.apu.write_register(0xFF1C, io.nr32);
+        self.apu.write_register(0xFF1E, io.nr34);
+        self.apu.write_register(0xFF20, io.nr41);
+        self.apu.write_register(0xFF21, io.nr42);
+        self.apu.write_register(0xFF22, io.nr43);
+        self.apu.write_register(0xFF23, io.nr44);
+        self.apu.write_register(0xFF24, io.nr50);
+        self.apu.write_register(0xFF25, io.nr51);
+        self.apu.write_register(0xFF26, io.nr52);
+
+        // PPU registers
+        self.ppu.lcdc = io.lcdc;
+        self.ppu.stat = io.stat;
+        self.ppu.scy = io.scy;
+        self.ppu.scx = io.scx;
+        self.ppu.lyc = io.lyc;
+        self.ppu.bgp = io.bgp;
+        self.ppu.obp0 = io.obp0;
+        self.ppu.obp1 = io.obp1;
+        self.ppu.wy = io.wy;
+        self.ppu.wx = io.wx;
+
+        // Interrupt registers
+        self.ie = io.ie;
+        self.if_reg = 0x00; // IF starts at 0
+
+        // Disable boot ROM after applying state
+        self.boot_rom_enabled = false;
     }
 
     /// Get the KEY1 register (0xFF4D) value

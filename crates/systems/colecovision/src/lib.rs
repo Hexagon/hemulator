@@ -221,8 +221,8 @@ mod tests {
 
         let mut vdp = Tms9918a::new();
 
-        // Enable display (bit 6 clear in register 1 = display enabled)
-        vdp.write_control(0x00); // No flags set = display enabled, 8x8 sprites, no mag
+        // Enable display (bit 6 set in register 1 = display enabled)
+        vdp.write_control(0x40); // Bit 6 set = display enabled, 8x8 sprites, no mag
         vdp.write_control(0x81); // Write to register 1
 
         // Set name table at 0x3800 (register 2)
@@ -322,8 +322,8 @@ mod tests {
 
         let mut vdp = Tms9918a::new();
 
-        // Enable display (bit 6 clear = display enabled)
-        vdp.write_control(0x00);
+        // Enable display (bit 6 set = display enabled)
+        vdp.write_control(0x40);
         vdp.write_control(0x81);
 
         // Set up sprite attribute table at 0x3F00

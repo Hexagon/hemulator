@@ -286,6 +286,15 @@ impl SnesBus {
     pub fn tick_cycles(&mut self, cycles: u32) {
         self.frame_cycle += cycles;
 
+        // Tick cartridge enhancement chip (e.g., SuperFX) with master cycles
+        // SuperFX runs at the master clock frequency (21.48 MHz)
+        // Main CPU cycles are abstract units, but we approximate master cycles as CPU cycles * 6
+        // (since most CPU operations take 6 master cycles)
+        if let Some(ref mut cart) = self.cartridge {
+            let master_cycles = cycles * 6;
+            cart.tick_chip(master_cycles);
+        }
+
         // Convert main CPU cycles to SPC700 cycles using proper clock ratio
         // Main CPU: ~3.58 MHz (NTSC)
         // SPC700: ~1.024 MHz
@@ -1940,5 +1949,96 @@ mod tests {
             cycles, 32,
             "Mode 4 HDMA should transfer 4 bytes to 4 registers"
         );
+    }
+
+    #[test]
+    fn test_hardware_multiply() {
+        let mut bus = SnesBus::new();
+
+        // Test basic multiplication: 10 * 20 = 200
+        bus.write(0x4202, 10); // WRMPYA
+        bus.write(0x4203, 20); // WRMPYB (triggers multiplication)
+
+        // Read result from $4216-$4217
+        let result_low = bus.read(0x4216);
+        let result_high = bus.read(0x4217);
+        let result = (result_high as u16) << 8 | result_low as u16;
+        assert_eq!(result, 200, "10 * 20 should equal 200");
+
+        // Test maximum values: 255 * 255 = 65025
+        bus.write(0x4202, 255);
+        bus.write(0x4203, 255);
+        let result_low = bus.read(0x4216);
+        let result_high = bus.read(0x4217);
+        let result = (result_high as u16) << 8 | result_low as u16;
+        assert_eq!(result, 65025, "255 * 255 should equal 65025");
+
+        // Test zero multiplication
+        bus.write(0x4202, 100);
+        bus.write(0x4203, 0);
+        let result_low = bus.read(0x4216);
+        let result_high = bus.read(0x4217);
+        let result = (result_high as u16) << 8 | result_low as u16;
+        assert_eq!(result, 0, "100 * 0 should equal 0");
+    }
+
+    #[test]
+    fn test_hardware_divide() {
+        let mut bus = SnesBus::new();
+
+        // Test basic division: 100 / 5 = 20 remainder 0
+        bus.write(0x4204, 100); // WRDIVL
+        bus.write(0x4205, 0); // WRDIVH
+        bus.write(0x4206, 5); // WRDIVB (triggers division)
+
+        // Read quotient from $4214-$4215
+        let quotient_low = bus.read(0x4214);
+        let quotient_high = bus.read(0x4215);
+        let quotient = (quotient_high as u16) << 8 | quotient_low as u16;
+        assert_eq!(quotient, 20, "100 / 5 should equal 20");
+
+        // Read remainder from $4216-$4217
+        let remainder_low = bus.read(0x4216);
+        let remainder_high = bus.read(0x4217);
+        let remainder = (remainder_high as u16) << 8 | remainder_low as u16;
+        assert_eq!(remainder, 0, "100 % 5 should equal 0");
+
+        // Test division with remainder: 107 / 10 = 10 remainder 7
+        bus.write(0x4204, 107);
+        bus.write(0x4205, 0);
+        bus.write(0x4206, 10);
+        let quotient_low = bus.read(0x4214);
+        let quotient_high = bus.read(0x4215);
+        let quotient = (quotient_high as u16) << 8 | quotient_low as u16;
+        let remainder_low = bus.read(0x4216);
+        let remainder_high = bus.read(0x4217);
+        let remainder = (remainder_high as u16) << 8 | remainder_low as u16;
+        assert_eq!(quotient, 10, "107 / 10 should equal 10");
+        assert_eq!(remainder, 7, "107 % 10 should equal 7");
+
+        // Test division by zero: should return 0xFFFF quotient and dividend as remainder
+        bus.write(0x4204, 123);
+        bus.write(0x4205, 0);
+        bus.write(0x4206, 0); // Divide by zero
+        let quotient_low = bus.read(0x4214);
+        let quotient_high = bus.read(0x4215);
+        let quotient = (quotient_high as u16) << 8 | quotient_low as u16;
+        let remainder_low = bus.read(0x4216);
+        let remainder_high = bus.read(0x4217);
+        let remainder = (remainder_high as u16) << 8 | remainder_low as u16;
+        assert_eq!(quotient, 0xFFFF, "Division by zero should return 0xFFFF");
+        assert_eq!(
+            remainder, 123,
+            "Division by zero should return dividend as remainder"
+        );
+
+        // Test 16-bit dividend: 50000 / 100 = 500
+        bus.write(0x4204, 0x50); // Low byte (50000 = 0xC350)
+        bus.write(0x4205, 0xC3); // High byte
+        bus.write(0x4206, 100);
+        let quotient_low = bus.read(0x4214);
+        let quotient_high = bus.read(0x4215);
+        let quotient = (quotient_high as u16) << 8 | quotient_low as u16;
+        assert_eq!(quotient, 500, "50000 / 100 should equal 500");
     }
 }

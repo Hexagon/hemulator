@@ -24,6 +24,7 @@
 //! - Mode 7 rotation/scaling matrix transformation (M7A-M7D, M7X, M7Y, M7SEL registers)
 //! - Offset-per-tile scrolling for Modes 2, 4, 6
 //! - True hi-res 512px rendering for Modes 5-6
+//! - Mosaic effect ($2106) with per-layer enable and configurable size (1x1 to 16x16)
 //! - Complete window system ($2123-$212B):
 //!   - Window masking for BG layers and sprites
 //!   - Color window for clipping and math control
@@ -40,7 +41,6 @@
 //!
 //! **NOT Implemented** (future enhancements):
 //! - Direct color mode (CGWSEL bits 0-1)
-//! - Mosaic effects ($2106)
 
 use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::types::Frame;
@@ -166,6 +166,14 @@ pub struct Ppu {
     /// Main screen designation ($212C)
     /// Bits 0-4: Enable BG1-4 and OBJ on main screen
     tm: u8,
+
+    /// Mosaic register ($2106)
+    /// Bits 0-3: Mosaic pixel size (0 = 1x1 (no mosaic), 1 = 2x2, ..., 15 = 16x16)
+    /// Bit 4: Enable mosaic on BG1
+    /// Bit 5: Enable mosaic on BG2
+    /// Bit 6: Enable mosaic on BG3
+    /// Bit 7: Enable mosaic on BG4
+    mosaic: u8,
 
     /// BG1 horizontal scroll offset ($210D) - 10-bit value, written twice
     bg1_hofs: u16,
@@ -466,6 +474,7 @@ impl Ppu {
             bg34nba: 0,
             obsel: 0,
             tm: 0,
+            mosaic: 0,
             bg1_hofs: 0,
             bg1_vofs: 0,
             bg2_hofs: 0,
@@ -749,6 +758,19 @@ impl Ppu {
             // $2115 - VMAIN - VRAM Address Increment Mode
             0x2115 => {
                 self.vmain = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!(
+                        "SNES PPU: VMAIN=${:02X} (inc:{}, mapping:{}, inc_byte:{})",
+                        val,
+                        match val & 0x03 {
+                            0 => 1,
+                            1 => 32,
+                            _ => 128,
+                        },
+                        (val >> 2) & 0x03,
+                        if val & 0x80 != 0 { "high" } else { "low" }
+                    )
+                });
             }
 
             // $2116 - VMADDL - VRAM Address (low byte)
@@ -782,10 +804,21 @@ impl Ppu {
                     return; // Ignore write during active display
                 }
 
-                let addr = (self.vram_addr.get() as usize) % (VRAM_SIZE / 2);
+                // Use remapped address for writing
+                let orig_addr = self.vram_addr.get();
+                let addr = self.get_remapped_vram_addr();
                 self.vram[addr * 2] = val;
                 log(LogCategory::PPU, LogLevel::Trace, || {
-                    format!("SNES PPU: VRAM Write L ${:04X} = ${:02X}", addr * 2, val)
+                    if orig_addr as usize != addr {
+                        format!(
+                            "SNES PPU: VRAM Write L ${:04X}->${:04X} = ${:02X} (remapped)",
+                            orig_addr,
+                            addr * 2,
+                            val
+                        )
+                    } else {
+                        format!("SNES PPU: VRAM Write L ${:04X} = ${:02X}", addr * 2, val)
+                    }
                 });
                 // Auto-increment VRAM address if VMAIN bit 7 is CLEAR (increment on low byte write)
                 // Hardware: bit 7 = 0 means increment after low byte, bit 7 = 1 means increment after high byte
@@ -810,14 +843,24 @@ impl Ppu {
                 }
 
                 // For high byte write, always use the current address (no subtraction needed)
-                let addr = (self.vram_addr.get() as usize) % (VRAM_SIZE / 2);
+                let orig_addr = self.vram_addr.get();
+                let addr = self.get_remapped_vram_addr();
                 self.vram[addr * 2 + 1] = val;
                 log(LogCategory::PPU, LogLevel::Trace, || {
-                    format!(
-                        "SNES PPU: VRAM Write H ${:04X} = ${:02X}",
-                        addr * 2 + 1,
-                        val
-                    )
+                    if orig_addr as usize != addr {
+                        format!(
+                            "SNES PPU: VRAM Write H ${:04X}->${:04X} = ${:02X} (remapped)",
+                            orig_addr,
+                            addr * 2 + 1,
+                            val
+                        )
+                    } else {
+                        format!(
+                            "SNES PPU: VRAM Write H ${:04X} = ${:02X}",
+                            addr * 2 + 1,
+                            val
+                        )
+                    }
                 });
                 // Auto-increment VRAM address if VMAIN bit 7 is SET (increment on high byte write)
                 // Hardware: bit 7 = 0 means increment after low byte, bit 7 = 1 means increment after high byte
@@ -889,9 +932,21 @@ impl Ppu {
                 self.tm = val;
             }
 
-            // $2106 - MOSAIC - Mosaic Size and Enable (stub - not implemented)
+            // $2106 - MOSAIC - Mosaic Size and Enable
             0x2106 => {
-                // Stub: Accept write but don't implement mosaic
+                self.mosaic = val;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    let size = (val & 0x0F) + 1;
+                    format!(
+                        "SNES PPU: Mosaic size={}x{} (BG1={} BG2={} BG3={} BG4={})",
+                        size,
+                        size,
+                        if val & 0x10 != 0 { "ON" } else { "OFF" },
+                        if val & 0x20 != 0 { "ON" } else { "OFF" },
+                        if val & 0x40 != 0 { "ON" } else { "OFF" },
+                        if val & 0x80 != 0 { "ON" } else { "OFF" }
+                    )
+                });
             }
 
             // $2123-$212B - Window registers
@@ -1082,14 +1137,24 @@ impl Ppu {
     /// Read from PPU registers
     pub fn read_register(&self, addr: u16) -> u8 {
         match addr {
-            // $2134 - MPYL - Multiplication Result (low byte) - stub
-            0x2134 => 0,
+            // $2134 - MPYL - Mode 7 Multiplication Result (low byte)
+            // Result = M7A * (M7B >> 8), signed 24-bit
+            0x2134 => {
+                let result = self.get_mode7_multiply_result();
+                (result & 0xFF) as u8
+            }
 
-            // $2135 - MPYM - Multiplication Result (middle byte) - stub
-            0x2135 => 0,
+            // $2135 - MPYM - Mode 7 Multiplication Result (middle byte)
+            0x2135 => {
+                let result = self.get_mode7_multiply_result();
+                ((result >> 8) & 0xFF) as u8
+            }
 
-            // $2136 - MPYH - Multiplication Result (high byte) - stub
-            0x2136 => 0,
+            // $2136 - MPYH - Mode 7 Multiplication Result (high byte)
+            0x2136 => {
+                let result = self.get_mode7_multiply_result();
+                ((result >> 16) & 0xFF) as u8
+            }
 
             // $2137 - SLHV - Software Latch for H/V Counter
             0x2137 => {
@@ -1111,18 +1176,28 @@ impl Ppu {
             // $2139 - VMDATALREAD - VRAM Data Read (low byte)
             0x2139 => {
                 // Return buffered low byte (hardware prefetch behavior)
-                (self.vram_read_buffer.get() & 0xFF) as u8
+                let result = (self.vram_read_buffer.get() & 0xFF) as u8;
+                // Auto-increment if increment mode is 0 (increment on low byte)
+                if self.vmain & 0x80 == 0 {
+                    let current = self.vram_addr.get();
+                    self.vram_addr
+                        .set(current.wrapping_add(self.get_vram_increment()));
+                    self.prefetch_vram();
+                }
+                result
             }
 
             // $213A - VMDATAHREAD - VRAM Data Read (high byte)
             0x213A => {
                 // Return buffered high byte
                 let result = (self.vram_read_buffer.get() >> 8) as u8;
-                // Auto-increment address after high byte read and prefetch next word
-                let current = self.vram_addr.get();
-                self.vram_addr
-                    .set(current.wrapping_add(self.get_vram_increment()));
-                self.prefetch_vram();
+                // Auto-increment if increment mode is 1 (increment on high byte)
+                if self.vmain & 0x80 != 0 {
+                    let current = self.vram_addr.get();
+                    self.vram_addr
+                        .set(current.wrapping_add(self.get_vram_increment()));
+                    self.prefetch_vram();
+                }
                 result
             }
 
@@ -1786,6 +1861,43 @@ impl Ppu {
         }
     }
 
+    /// Get remapped VRAM address based on VMAIN bits 2-3
+    /// This handles the address translation used for efficient tilemap writing
+    ///
+    /// Address Remapping (bits 2-3):
+    /// - 00: No remapping
+    /// - 01: Remap addressing aaaaaaaaBBBccccc => aaaaaaaacccccBBB
+    /// - 10: Remap addressing aaaaaaaBBBBcccc => aaaaaaaccccBBBB  
+    /// - 11: Remap addressing aaaaaaBBBBBccccc => aaaaaacccccBBBBB
+    ///
+    /// Reference: https://snes.nesdev.org/wiki/PPU_registers#VMAIN_-_Video_Port_Control
+    fn get_remapped_vram_addr(&self) -> usize {
+        let addr = self.vram_addr.get() as usize;
+        let mapping = (self.vmain >> 2) & 0x03;
+
+        let remapped = match mapping {
+            0 => addr, // No remapping
+            1 => {
+                // Mode 1: aaaaaaaaBBBccccc => aaaaaaaacccccBBB (8-bit)
+                // Takes bits 5-7 (BBB) and bits 0-4 (ccccc) and swaps them
+                (addr & 0xFF00) | ((addr & 0x00E0) >> 5) | ((addr & 0x001F) << 3)
+            }
+            2 => {
+                // Mode 2: aaaaaaaBBBBcccc => aaaaaaaccccBBBB (9-bit)
+                // Takes bits 4-7 (BBBB) and bits 0-3 (cccc) and swaps them
+                (addr & 0xFE00) | ((addr & 0x00F0) >> 4) | ((addr & 0x000F) << 4)
+            }
+            3 => {
+                // Mode 3: aaaaaaBBBBBccccc => aaaaaacccccBBBBB (10-bit)
+                // Takes bits 5-9 (BBBBB) and bits 0-4 (ccccc) and swaps them
+                (addr & 0xFC00) | ((addr & 0x03E0) >> 5) | ((addr & 0x001F) << 5)
+            }
+            _ => addr,
+        };
+
+        remapped % (VRAM_SIZE / 2)
+    }
+
     /// Get VRAM address increment amount based on VMAIN register
     #[inline]
     fn get_vram_increment(&self) -> u16 {
@@ -1794,6 +1906,40 @@ impl Ppu {
             1 => 32,  // Increment by 32 words
             _ => 128, // Increment by 128 words (both 2 and 3)
         }
+    }
+
+    /// Calculate Mode 7 multiplication result
+    /// Result = M7A * (M7B >> 8), signed 24-bit
+    /// M7A is signed 16-bit, M7B high byte is treated as signed 8-bit
+    fn get_mode7_multiply_result(&self) -> i32 {
+        // M7A is a signed 16-bit value
+        let m7a = self.m7a as i32;
+        // Extract high byte of M7B and treat as signed 8-bit value
+        let m7b_high_byte = (self.m7b >> 8) as i8;
+        // The result is a signed 24-bit value
+        m7a * (m7b_high_byte as i32)
+    }
+
+    /// Get mosaic pixel size (1 to 16)
+    fn get_mosaic_size(&self) -> usize {
+        ((self.mosaic & 0x0F) + 1) as usize
+    }
+
+    /// Check if mosaic is enabled for a background layer (0-3)
+    fn is_mosaic_enabled(&self, bg_index: usize) -> bool {
+        if bg_index >= 4 {
+            return false;
+        }
+        (self.mosaic & (0x10 << bg_index)) != 0
+    }
+
+    /// Apply mosaic effect to screen coordinates
+    /// Returns the coordinates of the top-left pixel in the mosaic block
+    fn apply_mosaic(&self, x: usize, y: usize) -> (usize, usize) {
+        let size = self.get_mosaic_size();
+        let mosaic_x = (x / size) * size;
+        let mosaic_y = (y / size) * size;
+        (mosaic_x, mosaic_y)
     }
 
     /// Set V-blank flag (called by system during vertical blanking)
@@ -1907,7 +2053,8 @@ impl Ppu {
     /// Hardware behavior: When VRAM address is set or after a read, the word at that
     /// address is immediately loaded into the read buffer for subsequent read operations
     fn prefetch_vram(&self) {
-        let addr = (self.vram_addr.get() as usize) % (VRAM_SIZE / 2);
+        // Apply address remapping for CPU access
+        let addr = self.get_remapped_vram_addr();
         let low_byte = self.vram.get(addr * 2).copied().unwrap_or(0);
         let high_byte = self.vram.get(addr * 2 + 1).copied().unwrap_or(0);
         self.vram_read_buffer
@@ -2458,8 +2605,15 @@ impl Ppu {
 
         // Get tilemap size for this layer
         let (tilemap_width, tilemap_height) = self.get_tilemap_size(bg_index);
-        let tilemap_pixel_width = tilemap_width * 8;
-        let tilemap_pixel_height = tilemap_height * 8;
+
+        // Get character size for this layer (8 or 16)
+        // This must be done before calculating pixel dimensions
+        let char_size = self.get_bg_char_size(bg_index);
+
+        // Calculate tilemap pixel dimensions based on character size
+        // For 16x16 tiles, each tilemap entry covers 16 pixels, not 8
+        let tilemap_pixel_width = tilemap_width * char_size;
+        let tilemap_pixel_height = tilemap_height * char_size;
 
         // Get scroll offsets for this layer
         let (hofs, vofs) = match bg_index {
@@ -2479,15 +2633,28 @@ impl Ppu {
             _ => LAYER_BACKDROP,
         };
 
-        // Get character size for this layer (8 or 16)
-        let char_size = self.get_bg_char_size(bg_index);
+        // Check if mosaic is enabled for this layer
+        let mosaic_enabled = self.is_mosaic_enabled(bg_index);
+        let _mosaic_size = if mosaic_enabled {
+            self.get_mosaic_size()
+        } else {
+            1
+        };
 
         // Render all visible tiles
         for screen_y in 0..224 {
             for screen_x in 0..256 {
-                // Calculate world position with scrolling
-                let world_x = ((screen_x as u16 + hofs) % tilemap_pixel_width as u16) as usize;
-                let world_y = ((screen_y as u16 + vofs) % tilemap_pixel_height as u16) as usize;
+                // Apply mosaic effect to screen coordinates if enabled
+                // Mosaic groups pixels into NxN blocks using the color from the block's top-left pixel
+                let (render_x, render_y) = if mosaic_enabled {
+                    self.apply_mosaic(screen_x, screen_y)
+                } else {
+                    (screen_x, screen_y)
+                };
+
+                // Calculate world position with scrolling (using mosaic-adjusted coordinates)
+                let world_x = ((render_x as u16 + hofs) % tilemap_pixel_width as u16) as usize;
+                let world_y = ((render_y as u16 + vofs) % tilemap_pixel_height as u16) as usize;
 
                 // Get tile and pixel position based on character size
                 let tile_x = world_x / char_size;
@@ -2599,8 +2766,15 @@ impl Ppu {
 
         // Get tilemap size for this layer
         let (tilemap_width, tilemap_height) = self.get_tilemap_size(bg_index);
-        let tilemap_pixel_width = tilemap_width * 8;
-        let tilemap_pixel_height = tilemap_height * 8;
+
+        // Get character size for this layer (8 or 16)
+        // This must be done before calculating pixel dimensions
+        let char_size = self.get_bg_char_size(bg_index);
+
+        // Calculate tilemap pixel dimensions based on character size
+        // For 16x16 tiles, each tilemap entry covers 16 pixels, not 8
+        let tilemap_pixel_width = tilemap_width * char_size;
+        let tilemap_pixel_height = tilemap_height * char_size;
 
         // Get scroll offsets for this layer
         let (hofs, vofs) = match bg_index {
@@ -2614,16 +2788,28 @@ impl Ppu {
         // Determine layer ID for tracking
         let layer_id = bg_index as u8;
 
-        // Get character size for this layer (8 or 16)
-        let char_size = self.get_bg_char_size(bg_index);
+        // Check if mosaic is enabled for this layer
+        let mosaic_enabled = self.is_mosaic_enabled(bg_index);
+        let _mosaic_size = if mosaic_enabled {
+            self.get_mosaic_size()
+        } else {
+            1
+        };
 
         // Render all visible tiles
         for screen_y in 0..224 {
             for screen_x in 0..256 {
+                // Apply mosaic effect to screen coordinates if enabled
+                let (render_x, render_y) = if mosaic_enabled {
+                    self.apply_mosaic(screen_x, screen_y)
+                } else {
+                    (screen_x, screen_y)
+                };
+
                 // Get offset-per-tile if enabled (Modes 2, 4, 6)
                 let (h_offset, v_offset) = if self.is_offset_per_tile_enabled() && bg_index < 2 {
                     // Offset-per-tile only applies to BG1 and BG2
-                    self.get_offset_per_tile(screen_x, screen_y)
+                    self.get_offset_per_tile(render_x, render_y)
                 } else {
                     (0, 0)
                 };
@@ -2747,8 +2933,15 @@ impl Ppu {
 
         // Get tilemap size for this layer
         let (tilemap_width, tilemap_height) = self.get_tilemap_size(bg_index);
-        let tilemap_pixel_width = tilemap_width * 8;
-        let tilemap_pixel_height = tilemap_height * 8;
+
+        // Get character size for this layer (8 or 16)
+        // This must be done before calculating pixel dimensions
+        let char_size = self.get_bg_char_size(bg_index);
+
+        // Calculate tilemap pixel dimensions based on character size
+        // For 16x16 tiles, each tilemap entry covers 16 pixels, not 8
+        let tilemap_pixel_width = tilemap_width * char_size;
+        let tilemap_pixel_height = tilemap_height * char_size;
 
         // Get scroll offsets for this layer
         let (hofs, vofs) = match bg_index {
@@ -2759,24 +2952,36 @@ impl Ppu {
             _ => (0, 0),
         };
 
-        // Get character size for this layer (8 or 16)
-        let char_size = self.get_bg_char_size(bg_index);
+        // Check if mosaic is enabled for this layer
+        let mosaic_enabled = self.is_mosaic_enabled(bg_index);
+        let _mosaic_size = if mosaic_enabled {
+            self.get_mosaic_size()
+        } else {
+            1
+        };
 
         // Render all visible tiles
         for screen_y in 0..224 {
             for screen_x in 0..256 {
+                // Apply mosaic effect to screen coordinates if enabled
+                let (render_x, render_y) = if mosaic_enabled {
+                    self.apply_mosaic(screen_x, screen_y)
+                } else {
+                    (screen_x, screen_y)
+                };
+
                 // Get offset-per-tile if enabled (Mode 4)
                 let (h_offset, v_offset) = if self.is_offset_per_tile_enabled() && bg_index == 0 {
                     // In Mode 4, offset-per-tile only applies to BG1
-                    self.get_offset_per_tile(screen_x, screen_y)
+                    self.get_offset_per_tile(render_x, render_y)
                 } else {
                     (0, 0)
                 };
 
                 // Calculate world position with scrolling and offset-per-tile
-                let world_x = ((screen_x as i32 + hofs as i32 + h_offset as i32)
+                let world_x = ((render_x as i32 + hofs as i32 + h_offset as i32)
                     .rem_euclid(tilemap_pixel_width as i32)) as usize;
-                let world_y = ((screen_y as i32 + vofs as i32 + v_offset as i32)
+                let world_y = ((render_y as i32 + vofs as i32 + v_offset as i32)
                     .rem_euclid(tilemap_pixel_height as i32))
                     as usize;
 
@@ -2913,22 +3118,37 @@ impl Ppu {
         let flip_h = (self.m7sel & 0x01) != 0;
         let flip_v = (self.m7sel & 0x02) != 0;
 
+        // Check if mosaic is enabled for BG1 (Mode 7 uses BG1)
+        let mosaic_enabled = self.is_mosaic_enabled(0); // BG1 = index 0
+        let _mosaic_size = if mosaic_enabled {
+            self.get_mosaic_size()
+        } else {
+            1
+        };
+
         // Mode 7 tilemap is always 128x128 tiles in VRAM
         // Tile data starts at VRAM address 0
         // Tilemap starts at VRAM address 0 (interleaved with tile data)
 
         for screen_y in 0..224 {
             for screen_x in 0..256 {
-                // Apply horizontal/vertical flip to screen coordinates
-                let sx = if flip_h {
-                    255 - screen_x as i32
+                // Apply mosaic effect to screen coordinates if enabled
+                let (render_x, render_y) = if mosaic_enabled {
+                    self.apply_mosaic(screen_x, screen_y)
                 } else {
-                    screen_x as i32
+                    (screen_x, screen_y)
+                };
+
+                // Apply horizontal/vertical flip to screen coordinates (using mosaic-adjusted coordinates)
+                let sx = if flip_h {
+                    255 - render_x as i32
+                } else {
+                    render_x as i32
                 };
                 let sy = if flip_v {
-                    223 - screen_y as i32
+                    223 - render_y as i32
                 } else {
-                    screen_y as i32
+                    render_y as i32
                 };
 
                 // Transform screen coordinates to tilemap coordinates
@@ -3027,8 +3247,15 @@ impl Ppu {
 
         // Get tilemap size for this layer
         let (tilemap_width, tilemap_height) = self.get_tilemap_size(bg_index);
-        let tilemap_pixel_width = tilemap_width * 8;
-        let tilemap_pixel_height = tilemap_height * 8;
+
+        // Get character size for this layer (8 or 16)
+        // This must be done before calculating pixel dimensions
+        let char_size = self.get_bg_char_size(bg_index);
+
+        // Calculate tilemap pixel dimensions based on character size
+        // For 16x16 tiles, each tilemap entry covers 16 pixels, not 8
+        let tilemap_pixel_width = tilemap_width * char_size;
+        let tilemap_pixel_height = tilemap_height * char_size;
 
         // Get scroll offsets for this layer
         let (hofs, vofs) = match bg_index {
@@ -3037,19 +3264,31 @@ impl Ppu {
             _ => (0, 0),
         };
 
-        // Get character size for this layer (8 or 16)
-        let char_size = self.get_bg_char_size(bg_index);
+        // Check if mosaic is enabled for this layer
+        let mosaic_enabled = self.is_mosaic_enabled(bg_index);
+        let _mosaic_size = if mosaic_enabled {
+            self.get_mosaic_size()
+        } else {
+            1
+        };
 
         // Render all visible tiles at 512px width
         // In hi-res mode, each logical pixel is rendered as 2 physical pixels horizontally
         for screen_y in 0..224 {
             for screen_x in 0..512 {
+                // Apply mosaic effect to screen coordinates if enabled
+                let (render_x, render_y) = if mosaic_enabled {
+                    self.apply_mosaic(screen_x, screen_y)
+                } else {
+                    (screen_x, screen_y)
+                };
+
                 // In hi-res, divide screen_x by 2 to get the logical pixel coordinate
-                let logical_x = screen_x / 2;
+                let logical_x = render_x / 2;
 
                 // Get offset-per-tile if enabled (Mode 6)
                 let (h_offset, v_offset) = if self.is_offset_per_tile_enabled() && bg_index == 0 {
-                    self.get_offset_per_tile(logical_x, screen_y)
+                    self.get_offset_per_tile(logical_x, render_y)
                 } else {
                     (0, 0)
                 };
@@ -3057,7 +3296,7 @@ impl Ppu {
                 // Calculate world position with scrolling and offset-per-tile
                 let world_x = ((logical_x as i32 + hofs as i32 + h_offset as i32)
                     .rem_euclid(tilemap_pixel_width as i32)) as usize;
-                let world_y = ((screen_y as i32 + vofs as i32 + v_offset as i32)
+                let world_y = ((render_y as i32 + vofs as i32 + v_offset as i32)
                     .rem_euclid(tilemap_pixel_height as i32))
                     as usize;
 
@@ -3167,8 +3406,15 @@ impl Ppu {
 
         // Get tilemap size for this layer
         let (tilemap_width, tilemap_height) = self.get_tilemap_size(bg_index);
-        let tilemap_pixel_width = tilemap_width * 8;
-        let tilemap_pixel_height = tilemap_height * 8;
+
+        // Get character size for this layer (8 or 16)
+        // This must be done before calculating pixel dimensions
+        let char_size = self.get_bg_char_size(bg_index);
+
+        // Calculate tilemap pixel dimensions based on character size
+        // For 16x16 tiles, each tilemap entry covers 16 pixels, not 8
+        let tilemap_pixel_width = tilemap_width * char_size;
+        let tilemap_pixel_height = tilemap_height * char_size;
 
         // Get scroll offsets for this layer
         let (hofs, vofs) = match bg_index {
@@ -3177,19 +3423,31 @@ impl Ppu {
             _ => (0, 0),
         };
 
-        // Get character size for this layer (8 or 16)
-        let char_size = self.get_bg_char_size(bg_index);
+        // Check if mosaic is enabled for this layer
+        let mosaic_enabled = self.is_mosaic_enabled(bg_index);
+        let _mosaic_size = if mosaic_enabled {
+            self.get_mosaic_size()
+        } else {
+            1
+        };
 
         // Render all visible tiles at 512px width
         for screen_y in 0..224 {
             for screen_x in 0..512 {
+                // Apply mosaic effect to screen coordinates if enabled
+                let (render_x, render_y) = if mosaic_enabled {
+                    self.apply_mosaic(screen_x, screen_y)
+                } else {
+                    (screen_x, screen_y)
+                };
+
                 // In hi-res, divide screen_x by 2 to get the logical pixel coordinate
-                let logical_x = screen_x / 2;
+                let logical_x = render_x / 2;
 
                 // Calculate world position with scrolling
                 let world_x = ((logical_x as i32 + hofs as i32)
                     .rem_euclid(tilemap_pixel_width as i32)) as usize;
-                let world_y = ((screen_y as i32 + vofs as i32)
+                let world_y = ((render_y as i32 + vofs as i32)
                     .rem_euclid(tilemap_pixel_height as i32))
                     as usize;
 
@@ -5256,6 +5514,97 @@ mod tests {
     }
 
     #[test]
+    fn test_mode7_multiply_result() {
+        let mut ppu = Ppu::new();
+
+        // Helper to read and sign-extend 24-bit result to i32
+        fn read_mode7_result(ppu: &Ppu) -> i32 {
+            let result_low = ppu.read_register(0x2134) as u32;
+            let result_mid = ppu.read_register(0x2135) as u32;
+            let result_high = ppu.read_register(0x2136) as u32;
+            let unsigned_result = result_low | (result_mid << 8) | (result_high << 16);
+            // Sign-extend from 24-bit to 32-bit
+            if unsigned_result & 0x800000 != 0 {
+                (unsigned_result | 0xFF000000) as i32
+            } else {
+                unsigned_result as i32
+            }
+        }
+
+        // Test 1: Simple positive multiplication
+        // M7A = 0x0100 (1.0 in 8.8 fixed point = 256)
+        // M7B = 0x0100 (high byte = 1)
+        // Result = 256 * 1 = 256
+        ppu.write_register(0x211B, 0x00); // M7A low
+        ppu.write_register(0x211B, 0x01); // M7A high = 0x0100
+        ppu.write_register(0x211C, 0x00); // M7B low
+        ppu.write_register(0x211C, 0x01); // M7B high = 0x0100
+
+        let result = read_mode7_result(&ppu);
+        assert_eq!(result, 256, "256 * 1 should equal 256");
+
+        // Test 2: Larger multiplication
+        // M7A = 0x0200 (2.0 in 8.8 = 512)
+        // M7B = 0x0300 (high byte = 3)
+        // Result = 512 * 3 = 1536
+        ppu.write_register(0x211B, 0x00); // M7A low
+        ppu.write_register(0x211B, 0x02); // M7A high = 0x0200
+        ppu.write_register(0x211C, 0x00); // M7B low
+        ppu.write_register(0x211C, 0x03); // M7B high = 0x0300
+
+        let result = read_mode7_result(&ppu);
+        assert_eq!(result, 1536, "512 * 3 should equal 1536");
+
+        // Test 3: Zero multiplication
+        // M7A = 0x0100
+        // M7B = 0x0000 (high byte = 0)
+        // Result = 256 * 0 = 0
+        ppu.write_register(0x211B, 0x00);
+        ppu.write_register(0x211B, 0x01);
+        ppu.write_register(0x211C, 0x00);
+        ppu.write_register(0x211C, 0x00);
+
+        let result = read_mode7_result(&ppu);
+        assert_eq!(result, 0, "256 * 0 should equal 0");
+
+        // Test 4: Negative M7B high byte
+        // M7A = 0x0100 (256)
+        // M7B = 0xFF00 (high byte = -1 as signed)
+        // Result = 256 * -1 = -256
+        ppu.write_register(0x211B, 0x00);
+        ppu.write_register(0x211B, 0x01); // M7A = 0x0100
+        ppu.write_register(0x211C, 0x00);
+        ppu.write_register(0x211C, 0xFF); // M7B high = 0xFF = -1 signed
+
+        let result = read_mode7_result(&ppu);
+        assert_eq!(result, -256, "256 * -1 should equal -256");
+
+        // Test 5: Negative M7A
+        // M7A = 0xFF00 (-256 as signed 16-bit)
+        // M7B = 0x0200 (high byte = 2)
+        // Result = -256 * 2 = -512
+        ppu.write_register(0x211B, 0x00);
+        ppu.write_register(0x211B, 0xFF); // M7A = 0xFF00 = -256
+        ppu.write_register(0x211C, 0x00);
+        ppu.write_register(0x211C, 0x02); // M7B high = 2
+
+        let result = read_mode7_result(&ppu);
+        assert_eq!(result, -512, "-256 * 2 should equal -512");
+
+        // Test 6: Both negative (result positive)
+        // M7A = 0xFF00 (-256)
+        // M7B = 0xFF00 (high byte = -1)
+        // Result = -256 * -1 = 256
+        ppu.write_register(0x211B, 0x00);
+        ppu.write_register(0x211B, 0xFF); // M7A = -256
+        ppu.write_register(0x211C, 0x00);
+        ppu.write_register(0x211C, 0xFF); // M7B high = -1
+
+        let result = read_mode7_result(&ppu);
+        assert_eq!(result, 256, "-256 * -1 should equal 256");
+    }
+
+    #[test]
     fn test_offset_per_tile_mode() {
         let mut ppu = Ppu::new();
 
@@ -5700,6 +6049,60 @@ mod tests {
             pixel_count >= 200,
             "16x16 tile should cover most of the 16x16 area. Found {} non-backdrop pixels, expected ~256",
             pixel_count
+        );
+    }
+
+    #[test]
+    fn test_16x16_tile_tilemap_pixel_width() {
+        // This test verifies that tilemap pixel dimensions correctly use character size (16x16)
+        // rather than hardcoded 8x8 values. This was a bug that caused incorrect tile lookups
+        // when scrolling with 16x16 tiles (e.g., Super Mario World map background).
+        let mut ppu = Ppu::new();
+
+        // Set up Mode 1 with 16x16 tiles for BG1
+        ppu.write_register(0x2105, 0x11); // Mode 1 + BG1 16x16
+
+        // Set up a 32x32 tilemap
+        ppu.write_register(0x2107, 0x00); // BG1 tilemap at $0000, size 32x32 (bits 0-1 = 00)
+
+        // With 16x16 tiles and 32x32 tilemap:
+        // - Tilemap has 32 entries horizontally
+        // - Each entry covers 16 pixels
+        // - Total pixel width should be 32 * 16 = 512
+        // The bug was using 32 * 8 = 256, causing incorrect wrapping
+
+        let (tilemap_width, tilemap_height) = ppu.get_tilemap_size(0);
+        assert_eq!(tilemap_width, 32, "Tilemap should be 32 tiles wide");
+        assert_eq!(tilemap_height, 32, "Tilemap should be 32 tiles tall");
+
+        let char_size = ppu.get_bg_char_size(0);
+        assert_eq!(char_size, 16, "BG1 should use 16x16 tiles");
+
+        // The correct pixel dimensions (this is what the rendering code should use)
+        let correct_pixel_width = tilemap_width * char_size;
+        let correct_pixel_height = tilemap_height * char_size;
+        assert_eq!(
+            correct_pixel_width, 512,
+            "Tilemap should cover 512 pixels horizontally"
+        );
+        assert_eq!(
+            correct_pixel_height, 512,
+            "Tilemap should cover 512 pixels vertically"
+        );
+
+        // Verify scrolling calculation works correctly at the boundary
+        // With hofs = 300, screen_x = 0:
+        // world_x = 300 % 512 = 300 (should NOT wrap at 256)
+        // tile_x = 300 / 16 = 18 (this is beyond the first 16 tilemap entries)
+        let hofs: i32 = 300;
+        let screen_x: i32 = 0;
+        let world_x = ((screen_x + hofs).rem_euclid(correct_pixel_width as i32)) as usize;
+        assert_eq!(world_x, 300, "World X should be 300, not wrapped at 256");
+
+        let tile_x = world_x / char_size;
+        assert_eq!(
+            tile_x, 18,
+            "Tile X should be 18, accessing tilemap entry beyond first half"
         );
     }
 
@@ -6185,5 +6588,161 @@ mod tests {
         // The OAM address register can store values up to 511 (9 bits)
         // But sprite indices are derived from even addresses (2 bytes per sprite main entry)
         // The formula ensures we get a sprite index from 0-127
+    }
+
+    #[test]
+    fn test_mosaic_register() {
+        let mut ppu = Ppu::new();
+
+        // Test default: mosaic disabled, size 1x1
+        assert!(!ppu.is_mosaic_enabled(0));
+        assert!(!ppu.is_mosaic_enabled(1));
+        assert!(!ppu.is_mosaic_enabled(2));
+        assert!(!ppu.is_mosaic_enabled(3));
+        assert_eq!(ppu.get_mosaic_size(), 1);
+
+        // Test enabling mosaic for BG1 only, size 2x2
+        ppu.write_register(0x2106, 0x11); // Size=1 (2x2), BG1 enabled
+        assert!(ppu.is_mosaic_enabled(0), "BG1 should have mosaic enabled");
+        assert!(
+            !ppu.is_mosaic_enabled(1),
+            "BG2 should not have mosaic enabled"
+        );
+        assert!(
+            !ppu.is_mosaic_enabled(2),
+            "BG3 should not have mosaic enabled"
+        );
+        assert!(
+            !ppu.is_mosaic_enabled(3),
+            "BG4 should not have mosaic enabled"
+        );
+        assert_eq!(ppu.get_mosaic_size(), 2, "Mosaic size should be 2x2");
+
+        // Test enabling mosaic for all BGs, size 4x4
+        ppu.write_register(0x2106, 0xF3); // Size=3 (4x4), all BGs enabled
+        assert!(ppu.is_mosaic_enabled(0));
+        assert!(ppu.is_mosaic_enabled(1));
+        assert!(ppu.is_mosaic_enabled(2));
+        assert!(ppu.is_mosaic_enabled(3));
+        assert_eq!(ppu.get_mosaic_size(), 4, "Mosaic size should be 4x4");
+
+        // Test maximum mosaic size 16x16
+        ppu.write_register(0x2106, 0x0F); // Size=15 (16x16), no BGs enabled
+        assert_eq!(ppu.get_mosaic_size(), 16, "Mosaic size should be 16x16");
+        assert!(!ppu.is_mosaic_enabled(0));
+        assert!(!ppu.is_mosaic_enabled(1));
+        assert!(!ppu.is_mosaic_enabled(2));
+        assert!(!ppu.is_mosaic_enabled(3));
+
+        // Test enabling selective BGs
+        ppu.write_register(0x2106, 0x62); // Size=2 (3x3), BG2 and BG3 enabled
+        assert!(!ppu.is_mosaic_enabled(0));
+        assert!(ppu.is_mosaic_enabled(1), "BG2 should have mosaic enabled");
+        assert!(ppu.is_mosaic_enabled(2), "BG3 should have mosaic enabled");
+        assert!(!ppu.is_mosaic_enabled(3));
+        assert_eq!(ppu.get_mosaic_size(), 3, "Mosaic size should be 3x3");
+    }
+
+    #[test]
+    fn test_mosaic_coordinate_transformation() {
+        let mut ppu = Ppu::new();
+
+        // Test 2x2 mosaic
+        ppu.write_register(0x2106, 0x11); // Size=1 (2x2)
+
+        // Top-left block (0,0)-(1,1) should all map to (0,0)
+        assert_eq!(ppu.apply_mosaic(0, 0), (0, 0));
+        assert_eq!(ppu.apply_mosaic(1, 0), (0, 0));
+        assert_eq!(ppu.apply_mosaic(0, 1), (0, 0));
+        assert_eq!(ppu.apply_mosaic(1, 1), (0, 0));
+
+        // Next block (2,0)-(3,1) should all map to (2,0)
+        assert_eq!(ppu.apply_mosaic(2, 0), (2, 0));
+        assert_eq!(ppu.apply_mosaic(3, 0), (2, 0));
+        assert_eq!(ppu.apply_mosaic(2, 1), (2, 0));
+        assert_eq!(ppu.apply_mosaic(3, 1), (2, 0));
+
+        // Test 4x4 mosaic
+        ppu.write_register(0x2106, 0x13); // Size=3 (4x4)
+
+        // Block (0,0)-(3,3) should all map to (0,0)
+        assert_eq!(ppu.apply_mosaic(0, 0), (0, 0));
+        assert_eq!(ppu.apply_mosaic(3, 3), (0, 0));
+        assert_eq!(ppu.apply_mosaic(2, 1), (0, 0));
+
+        // Block (4,0)-(7,3) should all map to (4,0)
+        assert_eq!(ppu.apply_mosaic(4, 0), (4, 0));
+        assert_eq!(ppu.apply_mosaic(7, 3), (4, 0));
+        assert_eq!(ppu.apply_mosaic(5, 2), (4, 0));
+
+        // Block (0,4)-(3,7) should all map to (0,4)
+        assert_eq!(ppu.apply_mosaic(0, 4), (0, 4));
+        assert_eq!(ppu.apply_mosaic(3, 7), (0, 4));
+        assert_eq!(ppu.apply_mosaic(1, 6), (0, 4));
+
+        // Test 16x16 mosaic (maximum size)
+        ppu.write_register(0x2106, 0x0F); // Size=15 (16x16)
+
+        // Block (0,0)-(15,15) should all map to (0,0)
+        assert_eq!(ppu.apply_mosaic(0, 0), (0, 0));
+        assert_eq!(ppu.apply_mosaic(15, 15), (0, 0));
+        assert_eq!(ppu.apply_mosaic(8, 8), (0, 0));
+
+        // Block (16,0)-(31,15) should all map to (16,0)
+        assert_eq!(ppu.apply_mosaic(16, 0), (16, 0));
+        assert_eq!(ppu.apply_mosaic(31, 15), (16, 0));
+        assert_eq!(ppu.apply_mosaic(20, 10), (16, 0));
+    }
+
+    #[test]
+    fn test_vram_address_remapping() {
+        let mut ppu = Ppu::new();
+
+        // Mode 0: No remapping
+        ppu.write_register(0x2115, 0x00);
+        ppu.write_register(0x2116, 0x20); // Address $0020
+        ppu.write_register(0x2117, 0x00);
+        assert_eq!(ppu.get_remapped_vram_addr(), 0x0020);
+
+        // Mode 1: 8-bit remapping (aaaaaaaaBBBccccc => aaaaaaaacccccBBB)
+        // Example: $0020 = 0b00000000_00100000 = 0b00000000_BBBccccc
+        //   BBB = 001 (bits 5-7), ccccc = 00000 (bits 0-4)
+        //   Result: 0b00000000_00000001 = $0001
+        ppu.write_register(0x2115, 0x04); // Bits 2-3 = 01
+        ppu.write_register(0x2116, 0x20);
+        ppu.write_register(0x2117, 0x00);
+        assert_eq!(ppu.get_remapped_vram_addr(), 0x0001);
+
+        // Another example: $00FF = 0b00000000_11111111
+        //   BBB = 111 (bits 5-7), ccccc = 11111 (bits 0-4)
+        //   Result: 0b00000000_11111111 = $00FF (same because all bits set)
+        ppu.write_register(0x2116, 0xFF);
+        ppu.write_register(0x2117, 0x00);
+        assert_eq!(ppu.get_remapped_vram_addr(), 0x00FF);
+
+        // Example: $0007 = 0b00000000_00000111
+        //   BBB = 000, ccccc = 00111
+        //   Result: 0b00000000_00111000 = $0038
+        ppu.write_register(0x2116, 0x07);
+        ppu.write_register(0x2117, 0x00);
+        assert_eq!(ppu.get_remapped_vram_addr(), 0x0038);
+
+        // Mode 2: 9-bit remapping (aaaaaaaBBBBcccc => aaaaaaaccccBBBB)
+        // Example: $0080 = 0b00000000_10000000
+        //   BBBB = 1000 (bits 4-7), cccc = 0000 (bits 0-3)
+        //   Result: 0b00000000_00001000 = $0008
+        ppu.write_register(0x2115, 0x08); // Bits 2-3 = 10
+        ppu.write_register(0x2116, 0x80);
+        ppu.write_register(0x2117, 0x00);
+        assert_eq!(ppu.get_remapped_vram_addr(), 0x0008);
+
+        // Mode 3: 10-bit remapping (aaaaaaBBBBBccccc => aaaaaacccccBBBBB)
+        // Example: $0100 = 0b00000001_00000000
+        //   BBBBB = 01000 (bits 5-9), ccccc = 00000 (bits 0-4)
+        //   Result: 0b00000000_00001000 = $0008
+        ppu.write_register(0x2115, 0x0C); // Bits 2-3 = 11
+        ppu.write_register(0x2116, 0x00);
+        ppu.write_register(0x2117, 0x01);
+        assert_eq!(ppu.get_remapped_vram_addr(), 0x0008);
     }
 }

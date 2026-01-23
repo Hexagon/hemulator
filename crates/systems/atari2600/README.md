@@ -27,6 +27,10 @@ The Atari 2600 emulator is **fully working** with support for most common cartri
 - **12K (FA)** - 3 banks (CBS games)
 - **16K (F6)** - 4 banks (Donkey Kong)
 - **32K (F4)** - 8 banks (larger games)
+- **FE** - Write-based bank switching (Decathlon)
+- **3F** - RAM-based banking (Espial)
+- **E0** - Multiple simultaneous banks (Parker Bros)
+- **DPC** - Display Processor Chip (Pitfall II)
 
 ## Architecture
 
@@ -411,27 +415,18 @@ VDELP0/VDELP1 delay player graphics update by one scanline for smoother animatio
 
 These features are not yet implemented but would improve game compatibility:
 
-#### Paddle Controllers
+#### Paddle Controllers (GUI Integration)
 
-❌ **Not Implemented**
+✅ **Hardware Implementation Complete** 
+❌ **GUI Integration Needed**
 
-INPT0-INPT3 are used for paddle/driving controller analog input but always return 0. Paddle timing circuits not emulated.
+INPT0-INPT3 analog input is fully implemented in the TIA with proper capacitor charging simulation:
+- Hardware emulation complete with timing circuits ✅
+- Public API `set_paddle_position()` available ✅
+- GUI input integration needed for paddle games ❌
 
-- **Impact**: High for paddle games (Breakout, Kaboom!, Warlords)
-- **Games affected**: All paddle-based games are unplayable
-
-#### Exotic Banking Schemes
-
-❌ **Not Implemented**
-
-Only standard schemes supported: 2K, 4K, F8, FA, F6, F4. Missing formats:
-- **DPC** (Pitfall II) - Display Processor Chip with additional graphics capabilities
-- **FE** (Decathlon) - Write-based bank switching
-- **3F** (Espial) - RAM-based banking with 2K banks
-- **E0** (Parker Bros) - Multiple simultaneous banks
-
-- **Impact**: Medium - affects specific commercial games
-- **Games affected**: Pitfall II, Decathlon, Espial, Parker Bros titles
+- **Impact**: Medium - Hardware ready, but GUI needed to play paddle games (Breakout, Kaboom!, Warlords)
+- **Status**: Hardware complete, awaiting frontend integration
 
 ### Hardware-Accurate Behaviors (Not Bugs)
 
@@ -525,8 +520,9 @@ The emulator caches the first detected visible window start position to prevent 
 
 Priority improvements for better game compatibility:
 
-1. **Paddle Controller Support** - Essential for paddle games (Breakout, Kaboom!, Warlords)
-2. **Additional Banking Schemes** (DPC, FE, 3F, E0) - Needed for specific commercial games
+1. **Paddle Controller GUI Integration** - Frontend support for mouse/analog input to control paddles
+   - Hardware emulation complete, GUI integration needed
+   - Essential for paddle games (Breakout, Kaboom!, Warlords)
 
 ## Contributing
 

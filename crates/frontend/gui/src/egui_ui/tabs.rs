@@ -299,6 +299,8 @@ pub enum DebugAction {
     Step,   // Step one instruction
     Pause,  // Pause emulation
     Resume, // Resume emulation
+    StartTrace(String), // Start instruction tracing with specified filename
+    StopTrace,  // Stop instruction tracing and dump to file
 }
 
 pub struct TabManager {
@@ -324,6 +326,9 @@ pub struct TabManager {
     /// SNES tile viewer state
     pub snes_bpp_mode: u8,
     pub snes_selected_palette: usize,
+    /// Instruction trace state
+    pub trace_active: bool,
+    pub trace_filename: Option<String>,
 }
 
 impl TabManager {
@@ -348,6 +353,8 @@ impl TabManager {
             cached_memory_start: 0,
             snes_bpp_mode: 4, // Default to 4bpp
             snes_selected_palette: 0,
+            trace_active: false,
+            trace_filename: None,
         }
     }
 
@@ -582,39 +589,13 @@ impl TabManager {
                 ui.vertical_centered(|ui| {
                     ui.add_space(60.0);
 
-                    // Try to show embedded app icon from assets/icon_256.png.
-                    // Fall back to the original text heading if decoding fails.
-                    // Decode embedded PNG (assets/icon_256.png) to an egui::ColorImage
-                    match image::load_from_memory(include_bytes!(
-                        "../../../../../assets/icon_256.png",
-                    )) {
-                        Ok(img) => {
-                            let rgba = img.to_rgba8();
-                            let (w, h) = rgba.dimensions();
-                            let pixels = rgba.into_raw();
-                            let color_image = egui::ColorImage::from_rgba_unmultiplied(
-                                [w as usize, h as usize],
-                                &pixels,
-                            );
-
-                            let texture = ui.ctx().load_texture(
-                                "hemulator_logo",
-                                color_image,
-                                egui::TextureOptions::default(),
-                            );
-                            let image = egui::Image::from_texture(&texture)
-                                .fit_to_exact_size(egui::vec2(128.0, 128.0));
-                            ui.add(image);
-                        }
-                        Err(e) => {
-                            ui.heading(
-                                egui::RichText::new("🎮 Welcome to Hemulator")
-                                    .size(32.0)
-                                    .strong(),
-                            );
-                            eprintln!("Failed to load embedded app icon for welcome screen: {}", e);
-                        }
-                    }
+                    ui.add(
+                        egui::Image::new(egui::include_image!(
+                            "../../../../../assets/icon_256.png"
+                        ))
+                        .max_width(200.0)
+                        .corner_radius(10.0),
+                    );
                     ui.add_space(15.0);
                     ui.label(
                         egui::RichText::new("Multi-System Console Emulator")
@@ -1034,6 +1015,32 @@ impl TabManager {
 
                 if ui.button("⏭ Step").clicked() {
                     self.pending_debug_action = Some(DebugAction::Step);
+                }
+
+                ui.separator();
+
+                // Instruction trace controls
+                if !self.trace_active {
+                    if ui.button("📝 Start Trace").clicked() {
+                        // Generate random filename with timestamp
+                        use std::time::{SystemTime, UNIX_EPOCH};
+                        let timestamp = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs();
+                        let filename = format!("trace_{}.txt", timestamp);
+                        self.trace_filename = Some(filename.clone());
+                        self.trace_active = true;
+                        self.pending_debug_action = Some(DebugAction::StartTrace(filename));
+                    }
+                } else {
+                    if ui.button("⏹ Stop Trace").clicked() {
+                        self.trace_active = false;
+                        self.pending_debug_action = Some(DebugAction::StopTrace);
+                    }
+                    if let Some(ref filename) = self.trace_filename {
+                        ui.label(egui::RichText::new(format!("Recording to: {}", filename)).weak());
+                    }
                 }
             });
 
