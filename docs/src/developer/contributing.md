@@ -213,6 +213,8 @@ If you discover a security vulnerability, please report it privately to the main
 
 ## Areas for Contribution
 
+**Looking for something to work on?** Check the [TODO.md](https://github.com/Hexagon/hemulator/blob/master/TODO.md) file in the repository root for a prioritized list of unimplemented features, stubs, and known issues organized by priority (Critical, High, Medium, Low).
+
 Contributions are welcome in the following areas:
 
 - **NES**: Additional mapper implementations (MMC5, VRC6, etc.)
