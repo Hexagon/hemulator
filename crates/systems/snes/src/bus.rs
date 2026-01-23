@@ -81,6 +81,12 @@ pub struct SnesBus {
     /// Cycle counter within current frame for VBlank timing
     /// NTSC SNES: ~89,342 cycles/frame, VBlank starts around cycle 75,000
     frame_cycle: u32,
+    /// Cached VBlank state (updated when frame_cycle changes)
+    cached_in_vblank: Cell<bool>,
+    /// Cached HBlank state (updated when frame_cycle changes)
+    cached_in_hblank: Cell<bool>,
+    /// Last frame_cycle value when cache was updated
+    last_cached_cycle: Cell<u32>,
 
     /// Last main CPU PC (PBR:PC as u32) observed at an instruction boundary.
     /// Used for targeted debug logging inside the bus.
@@ -179,6 +185,9 @@ impl SnesBus {
             ppu: Ppu::new(),
             frame_counter: 0,
             frame_cycle: 0,
+            cached_in_vblank: Cell::new(false),
+            cached_in_hblank: Cell::new(false),
+            last_cached_cycle: Cell::new(0),
             last_cpu_pc: 0,
             controller_state: [0; 2],
             controller_shift: [Cell::new(0), Cell::new(0)],
@@ -277,6 +286,15 @@ impl SnesBus {
     pub fn tick_cycles(&mut self, cycles: u32) {
         self.frame_cycle += cycles;
 
+        // Tick cartridge enhancement chip (e.g., SuperFX) with master cycles
+        // SuperFX runs at the master clock frequency (21.48 MHz)
+        // Main CPU cycles are abstract units, but we approximate master cycles as CPU cycles * 6
+        // (since most CPU operations take 6 master cycles)
+        if let Some(ref mut cart) = self.cartridge {
+            let master_cycles = cycles * 6;
+            cart.tick_chip(master_cycles);
+        }
+
         // Convert main CPU cycles to SPC700 cycles using proper clock ratio
         // Main CPU: ~3.58 MHz (NTSC)
         // SPC700: ~1.024 MHz
@@ -310,6 +328,7 @@ impl SnesBus {
 
     /// Synchronize SPC700 to current cycle count
     /// Called before APU port reads/writes to ensure proper timing
+    #[inline]
     fn sync_spc700(&self) {
         if let Some(ref spc700_cell) = self.spc700 {
             let pending = self.spc700_pending_cycles.get();
@@ -331,12 +350,13 @@ impl SnesBus {
     /// - We use scanline 225 as VBlank start (standard configuration)
     /// - Scanline 224 is the last fully visible scanline
     /// - This gives us 262 - 225 = 37 VBlank scanlines
+    /// - Cached to avoid expensive division in hot path
     fn is_in_vblank(&self) -> bool {
-        let current_scanline = self.frame_cycle / Self::SCANLINE_CYCLES;
-        // VBlank is active during scanlines 225-261 (NTSC has 262 scanlines total)
-        // Scanline 224 is the transition scanline (partially visible, partially vblank)
-        // We use >= 225 to be conservative
-        current_scanline >= 225
+        // Update cache if frame_cycle changed
+        if self.last_cached_cycle.get() != self.frame_cycle {
+            self.update_blanking_cache();
+        }
+        self.cached_in_vblank.get()
     }
 
     /// Check if currently in HBlank period (approximate).
@@ -350,10 +370,33 @@ impl SnesBus {
     /// Implementation:
     /// - We model H-Blank as the last ~40 CPU cycles of each scanline
     /// - This is an approximation since CPU cycle timing varies by operation
+    /// - Cached to avoid expensive modulo in hot path
     ///
     /// We model HBlank as the last ~40 cycles of each scanline.
     fn is_in_hblank(&self) -> bool {
-        (self.frame_cycle % Self::SCANLINE_CYCLES) >= (Self::SCANLINE_CYCLES - Self::HBLANK_CYCLES)
+        // Update cache if frame_cycle changed
+        if self.last_cached_cycle.get() != self.frame_cycle {
+            self.update_blanking_cache();
+        }
+        self.cached_in_hblank.get()
+    }
+
+    /// Update the cached VBlank/HBlank state based on current frame_cycle.
+    /// Called only when frame_cycle changes, avoiding expensive division/modulo in hot path.
+    #[inline]
+    fn update_blanking_cache(&self) {
+        let current_scanline = self.frame_cycle / Self::SCANLINE_CYCLES;
+        let cycle_in_scanline = self.frame_cycle % Self::SCANLINE_CYCLES;
+
+        // VBlank is active during scanlines 225-261 (NTSC has 262 scanlines total)
+        self.cached_in_vblank.set(current_scanline >= 225);
+
+        // HBlank is the last ~40 cycles of each scanline
+        self.cached_in_hblank
+            .set(cycle_in_scanline >= (Self::SCANLINE_CYCLES - Self::HBLANK_CYCLES));
+
+        // Update the cached cycle value
+        self.last_cached_cycle.set(self.frame_cycle);
     }
 
     /// Set controller state (16 buttons) for controller `idx` (0 or 1).
@@ -488,19 +531,23 @@ impl SnesBus {
             // 8 cycles overhead per channel
             cycles += 8;
 
-            // Transfer loop
-            while size > 0 {
-                let bytes_this_transfer = match transfer_mode {
-                    0 => 1,     // Mode 0: 1 byte to 1 register
-                    1 | 5 => 2, // Mode 1/5: 2 bytes to 2 registers
-                    2 | 6 => 2, // Mode 2/6: 2 bytes to 1 register (write twice)
-                    3 | 7 => 4, // Mode 3/7: 4 bytes to 2 registers (write twice each)
-                    4 => 4,     // Mode 4: 4 bytes to 4 registers
-                    _ => 1,
-                };
+            // Pre-compute transfer parameters outside the loop for performance
+            let bytes_per_transfer = match transfer_mode {
+                0 => 1,     // Mode 0: 1 byte to 1 register
+                1 | 5 => 2, // Mode 1/5: 2 bytes to 2 registers
+                2 | 6 => 2, // Mode 2/6: 2 bytes to 1 register (write twice)
+                3 | 7 => 4, // Mode 3/7: 4 bytes to 2 registers (write twice each)
+                4 => 4,     // Mode 4: 4 bytes to 4 registers
+                _ => 1,
+            };
 
-                for i in 0..bytes_this_transfer.min(size) {
-                    // Calculate B-bus register address
+            // Transfer loop - optimized by hoisting bytes_per_transfer out of the inner loop
+            while size > 0 {
+                let count = bytes_per_transfer.min(size);
+
+                for i in 0..count {
+                    // Calculate B-bus register address based on transfer mode for each byte.
+                    // Note: bytes_per_transfer is precomputed, but b_reg is still computed per byte.
                     let b_reg = match transfer_mode {
                         0 => 0x2100 | (dma.b_addr as u16),
                         1 | 5 => {
@@ -782,12 +829,8 @@ impl Memory65c816 for SnesBus {
                             self.apu_out_ports[port_idx]
                         };
 
-                        log(LogCategory::Bus, LogLevel::Debug, || {
-                            format!(
-                                "SNES Bus: [PC=${:06X}] reads APU port ${:04X} = ${:02X}",
-                                self.last_cpu_pc, offset, val
-                            )
-                        });
+                        // Hot path optimization: Remove debug logging from APU port reads
+                        // APU ports are accessed frequently and logging here is a major performance bottleneck
                         val
                     }
                     // Hardware registers (PPU: $2100-$213F, excluding APU ports above)
@@ -869,18 +912,8 @@ impl Memory65c816 for SnesBus {
                         // Reading this register clears the NMI flag
                         let nmi_flag = if self.ppu.nmi_flag.get() { 0x80 } else { 0x00 };
                         self.ppu.clear_nmi_flag();
-                        log(LogCategory::Interrupts, LogLevel::Trace, || {
-                            format!(
-                                "SNES Bus: [PC=${:06X}] read $4210 (RDNMI): 0x{:02X} (NMI flag {})",
-                                self.last_cpu_pc,
-                                nmi_flag | 0x02,
-                                if nmi_flag != 0 {
-                                    "set, now cleared"
-                                } else {
-                                    "not set"
-                                }
-                            )
-                        });
+                        // Hot path optimization: Remove trace logging from RDNMI reads
+                        // This register is read frequently during NMI handling
                         nmi_flag | 0x02 // CPU version 2
                     }
                     // $4211 - TIMEUP - IRQ Flag (read and clear)
@@ -902,12 +935,8 @@ impl Memory65c816 for SnesBus {
                             val |= 0x40;
                         }
 
-                        log(LogCategory::Interrupts, LogLevel::Trace, || {
-                            format!(
-                                "SNES Bus: [PC=${:06X}] read $4212 (HVBJOY): 0x{:02X} (frame_cycle={})",
-                                self.last_cpu_pc, val, self.frame_cycle
-                            )
-                        });
+                        // Hot path optimization: Remove trace logging from HVBJOY reads
+                        // This register is polled frequently (every frame) to detect VBlank
 
                         val
                     }
@@ -1113,12 +1142,7 @@ impl Memory65c816 for SnesBus {
 
                         // Use real SPC700 if available
                         if let Some(ref spc700_cell) = self.spc700 {
-                            log(LogCategory::Bus, LogLevel::Trace, || {
-                                format!(
-                                    "SNES Bus: Write APU port ${:04X} (APUIO{}) to SPC700: 0x{:02X}",
-                                    offset, port, val
-                                )
-                            });
+                            // Hot path optimization: Remove trace logging from APU port writes
                             spc700_cell.borrow_mut().write_port(port, val);
                         } else {
                             // Use stub protocol
@@ -1128,12 +1152,7 @@ impl Memory65c816 for SnesBus {
                             // but we verify explicitly before array indexing for clarity and safety
                             debug_assert!(port < 4, "APU port index must be 0-3, got {}", port);
 
-                            log(LogCategory::Bus, LogLevel::Trace, || {
-                                format!(
-                                    "SNES Bus: Write APU port ${:04X} (APUIO{}) to stub: 0x{:02X} (state: {:?})",
-                                    offset, port, val, self.apu_state
-                                )
-                            });
+                            // Hot path optimization: Remove trace logging from APU port writes
 
                             // Enhanced APU communication protocol stub with state machine
                             // The SPC700 boot ROM implements a multi-round handshake protocol
@@ -1238,15 +1257,8 @@ impl Memory65c816 for SnesBus {
                                         self.apu_transfer_counter =
                                             self.apu_transfer_counter.wrapping_add(1);
 
-                                        log(LogCategory::Bus, LogLevel::Trace, || {
-                                            format!(
-                                                "SNES Bus: APU uploading byte {} of session {}: idx=0x{:02X} data=0x{:02X}",
-                                                self.apu_transfer_counter,
-                                                self.apu_session_id,
-                                                self.apu_in_ports[0],
-                                                val
-                                            )
-                                        });
+                                        // Hot path optimization: Remove trace logging from APU upload loop
+                                        // This is called for every byte uploaded to APU (potentially thousands)
 
                                         // Acknowledge index/counter
                                         self.apu_out_ports[0] = self.apu_in_ports[0];
