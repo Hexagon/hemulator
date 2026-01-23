@@ -18,7 +18,7 @@ pub struct TracerConfig {
 impl Default for TracerConfig {
     fn default() -> Self {
         Self {
-            max_history: 10000, // Last 10,000 instructions
+            max_history: 10_000_000, // Last 10 million instructions
             enabled: false,
         }
     }

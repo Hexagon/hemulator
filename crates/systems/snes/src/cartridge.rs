@@ -291,6 +291,15 @@ impl Cartridge {
                     if matches!(bank, 0x70..=0x73) {
                         return chip.borrow_mut().read(addr);
                     }
+                    // SuperFX ROM passthrough: banks $00-$3F and $80-$BF at $8000-$FFFF
+                    // SuperFX games need CPU to access ROM through SuperFX for decryption/decompression
+                    if matches!(bank, 0x00..=0x3F | 0x80..=0xBF) && offset >= 0x8000 {
+                        return chip.borrow_mut().read(addr);
+                    }
+                    // Also banks $40-$5F for higher ROM access
+                    if matches!(bank, 0x40..=0x5F) {
+                        return chip.borrow_mut().read(addr);
+                    }
                 }
                 (ChipType::Sa1, _) => {
                     // SA-1 Register space: $2200-$23FF in all banks
@@ -629,6 +638,21 @@ impl Cartridge {
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn is_exhirom(&self) -> bool {
         self.mapping_mode == MappingMode::ExHiROM
+    }
+
+    /// Tick the enhancement chip (if present) for the given number of master cycles
+    /// This allows coprocessors like SuperFX to run asynchronously
+    pub fn tick_chip(&mut self, master_cycles: u32) {
+        if let Some(ref chip) = self.chip {
+            // Only SuperFX needs continuous ticking
+            if matches!(self.chip_type, ChipType::SuperFx | ChipType::SuperFx2) {
+                // SuperFX runs at 21.48 MHz (same as master clock)
+                // but internally counts in GSU cycles which are different
+                // For now, we'll just run a proportional number of cycles
+                let gsu_cycles = master_cycles as u64;
+                chip.borrow_mut().tick(gsu_cycles);
+            }
+        }
     }
 }
 

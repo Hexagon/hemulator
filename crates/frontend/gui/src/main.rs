@@ -780,6 +780,24 @@ impl EmulatorSystem {
             EmulatorSystem::SG1000(sys) => Some(&sys.instruction_tracer),
         }
     }
+
+    /// Get mutable access to the instruction tracer
+    fn instruction_tracer_mut(
+        &mut self,
+    ) -> Option<&mut emu_core::instruction_tracer::InstructionTracer> {
+        match self {
+            EmulatorSystem::NES(sys) => Some(sys.get_instruction_tracer_mut()),
+            EmulatorSystem::GameBoy(sys) => Some(sys.get_instruction_tracer_mut()),
+            EmulatorSystem::Atari2600(sys) => Some(sys.get_instruction_tracer_mut()),
+            EmulatorSystem::PC(sys) => Some(sys.get_instruction_tracer_mut()),
+            EmulatorSystem::SNES(sys) => Some(sys.get_instruction_tracer_mut()),
+            EmulatorSystem::N64(sys) => Some(sys.get_instruction_tracer_mut()),
+            EmulatorSystem::SMS(sys) => Some(sys.get_instruction_tracer_mut()),
+            EmulatorSystem::Chip8(sys) => Some(sys.get_instruction_tracer_mut()),
+            EmulatorSystem::ColecoVision(_) => None,
+            EmulatorSystem::SG1000(_) => None,
+        }
+    }
 }
 
 fn key_mapping_to_button(key: Key, mapping: &settings::KeyMapping) -> Option<u8> {
@@ -3178,8 +3196,8 @@ fn main() {
             }
 
             // Safety limit to prevent infinite loops (can be removed or increased)
-            if total_cycles > 100_000_000 {
-                eprintln!("\nReached cycle limit (100M) without triggering dump.");
+            if total_cycles > 200_000_000 {
+                eprintln!("\nReached cycle limit (200M) without triggering dump.");
                 eprintln!(
                     "Current PC: ${:04X}",
                     sys.debugger().map(|d| d.get_cpu_state().pc).unwrap_or(0)
@@ -3535,6 +3553,10 @@ fn main() {
                     let debugger: &dyn Debugger = s.as_ref();
                     Some(create_enhanced_debug_state("SMS", debugger))
                 }
+                EmulatorSystem::SNES(s) => {
+                    let debugger: &dyn Debugger = s.as_ref();
+                    Some(create_enhanced_debug_state("SNES", debugger))
+                }
                 _ => None, // Other systems don't have debugger implemented yet
             };
 
@@ -3547,6 +3569,7 @@ fn main() {
                 let debugger: Option<&dyn Debugger> = match &sys {
                     EmulatorSystem::NES(s) => Some(s.as_ref()),
                     EmulatorSystem::SMS(s) => Some(s.as_ref()),
+                    EmulatorSystem::SNES(s) => Some(s.as_ref()),
                     _ => None,
                 };
 
@@ -6123,6 +6146,36 @@ fn main() {
                         }
                     }
                 }
+                DebugAction::StartTrace(filename) => {
+                    if rom_loaded {
+                        if let Some(tracer) = sys.instruction_tracer_mut() {
+                            tracer.clear();
+                            tracer.set_enabled(true);
+                            egui_app.status_bar.set_message(format!("Started trace: {}", filename));
+                        } else {
+                            egui_app.status_bar.set_message("Trace not supported for this system".to_string());
+                        }
+                    } else {
+                        egui_app.status_bar.set_message("No ROM loaded".to_string());
+                    }
+                }
+                DebugAction::StopTrace => {
+                    if rom_loaded {
+                        if let Some(tracer) = sys.instruction_tracer_mut() {
+                            tracer.set_enabled(false);
+                            if let Some(filename) = &egui_app.tab_manager.trace_filename {
+                                match tracer.dump_to_file(filename) {
+                                    Ok(_) => {
+                                        egui_app.status_bar.set_message(format!("Trace saved to {}", filename));
+                                    }
+                                    Err(e) => {
+                                        egui_app.status_bar.set_message(format!("Failed to save trace: {}", e));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -6312,44 +6365,45 @@ fn main() {
                 );
             }
 
-            // Handle keyboard input for emulator (only if egui doesn't want it)
+            // Handle keyboard input for emulator
+            // We check if egui wants input (e.g., text field focused) and only skip controller updates then.
+            // This allows controller input to work even when docked panels are visible.
             let egui_wants_input = egui_backend.egui_ctx().wants_keyboard_input();
-            if !egui_wants_input {
-                if !matches!(&sys, EmulatorSystem::PC(_)) {
-                    // For non-PC systems, use standard controller mapping
-                    let controller_state =
-                        get_controller_state(&egui_backend, &settings.input.player1);
-                    let snes_state =
-                        get_snes_controller_state(&egui_backend, &settings.input.player1);
-                    let chip8_state = get_chip8_controller_state(&egui_backend);
+            
+            if !matches!(&sys, EmulatorSystem::PC(_)) {
+                // For non-PC systems, use standard controller mapping (always update, even if egui has focus)
+                let controller_state =
+                    get_controller_state(&egui_backend, &settings.input.player1);
+                let snes_state =
+                    get_snes_controller_state(&egui_backend, &settings.input.player1);
+                let chip8_state = get_chip8_controller_state(&egui_backend);
 
-                    // ColecoVision needs special handling for 2-player input
-                    let coleco_p1_state =
-                        get_colecovision_controller_state(&egui_backend, &settings.input.player1);
-                    let coleco_p2_state =
-                        get_colecovision_controller_state(&egui_backend, &settings.input.player2);
+                // ColecoVision needs special handling for 2-player input
+                let coleco_p1_state =
+                    get_colecovision_controller_state(&egui_backend, &settings.input.player1);
+                let coleco_p2_state =
+                    get_colecovision_controller_state(&egui_backend, &settings.input.player2);
 
-                    match &mut sys {
-                        EmulatorSystem::SNES(s) => s.set_controller(0, snes_state),
-                        EmulatorSystem::Chip8(s) => s.set_controller(chip8_state),
-                        EmulatorSystem::ColecoVision(s) => {
-                            // Set both players for ColecoVision
-                            s.set_controller(1, coleco_p1_state);
-                            s.set_controller(2, coleco_p2_state);
-                        }
-                        _ => sys.set_controller(0, controller_state),
+                match &mut sys {
+                    EmulatorSystem::SNES(s) => s.set_controller(0, snes_state),
+                    EmulatorSystem::Chip8(s) => s.set_controller(chip8_state),
+                    EmulatorSystem::ColecoVision(s) => {
+                        // Set both players for ColecoVision
+                        s.set_controller(1, coleco_p1_state);
+                        s.set_controller(2, coleco_p2_state);
                     }
-                } else {
-                    // PC systems handle keyboard directly via scancodes
-                    let pressed = egui_backend.get_sdl2_scancodes_pressed();
-                    let released = egui_backend.get_sdl2_scancodes_released();
-                    if let EmulatorSystem::PC(pc_sys) = &mut sys {
-                        for scancode in pressed {
-                            pc_sys.key_press_sdl2(*scancode as u32);
-                        }
-                        for scancode in released {
-                            pc_sys.key_release_sdl2(*scancode as u32);
-                        }
+                    _ => sys.set_controller(0, controller_state),
+                }
+            } else if !egui_wants_input {
+                // PC systems handle keyboard directly via scancodes (only when egui doesn't need input)
+                let pressed = egui_backend.get_sdl2_scancodes_pressed();
+                let released = egui_backend.get_sdl2_scancodes_released();
+                if let EmulatorSystem::PC(pc_sys) = &mut sys {
+                    for scancode in pressed {
+                        pc_sys.key_press_sdl2(*scancode as u32);
+                    }
+                    for scancode in released {
+                        pc_sys.key_release_sdl2(*scancode as u32);
                     }
                 }
             }
