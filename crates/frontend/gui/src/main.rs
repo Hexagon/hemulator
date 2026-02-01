@@ -2311,6 +2311,10 @@ fn main() {
     let mut rom_loaded = false;
     let mut status_message = String::new();
 
+    // N64 requires OpenGL context which isn't available until egui_backend is created.
+    // Store ROM data temporarily so we can re-create the N64 system with proper GL context later.
+    let mut pending_n64_rom_data: Option<Vec<u8>> = None;
+
     // Initialize system based on --system parameter if specified
     if let Some(ref system_name) = cli_args.system {
         match system_name.to_lowercase().as_str() {
@@ -2488,35 +2492,22 @@ fn main() {
                 }
             }
             "n64" => {
-                // Create N64 system with null GL context for early initialization
-                // Real GL context will be provided when egui_backend is created
-                let n64_sys = emu_n64::N64System::new_for_test();
-                sys = EmulatorSystem::N64(Box::new(n64_sys));
-                rom_loaded = true; // Mark system as loaded even without ROM
-                status_message = "Clean N64 system started".to_string();
-                println!("Started clean N64 system");
+                // N64 requires OpenGL context which isn't available yet.
+                // Create a placeholder NES system; will be replaced with proper N64 after GL init.
+                sys = EmulatorSystem::NES(Box::default());
+                rom_loaded = false;
+                status_message = "Initializing N64 system...".to_string();
+                println!("N64 system will be initialized after OpenGL context is created");
 
-                // If a file is provided with --system n64, load it directly
+                // If a file is provided with --system n64, store it for later
                 if let Some(ref p) = rom_path {
                     if !p.to_lowercase().ends_with(".hemu") {
                         match std::fs::read(p) {
                             Ok(data) => {
                                 rom_hash = Some(GameSaves::rom_hash(&data));
-                                if let EmulatorSystem::N64(n64_sys) = &mut sys {
-                                    if let Err(e) = n64_sys.mount("Cartridge", &data) {
-                                        eprintln!("Failed to load N64 ROM: {}", e);
-                                        status_message = format!("Error: {}", e);
-                                        rom_hash = None;
-                                    } else {
-                                        rom_loaded = true;
-                                        runtime_state.set_mount("Cartridge".to_string(), p.clone());
-                                        if let Err(e) = settings.save() {
-                                            eprintln!("Warning: Failed to save settings: {}", e);
-                                        }
-                                        status_message = "N64 ROM loaded".to_string();
-                                        println!("Loaded N64 ROM: {}", p);
-                                    }
-                                }
+                                pending_n64_rom_data = Some(data);
+                                runtime_state.set_mount("Cartridge".to_string(), p.clone());
+                                println!("N64 ROM data stored, will load after GL context is available");
                             }
                             Err(e) => {
                                 eprintln!("Failed to read file: {}", e);
@@ -2783,22 +2774,13 @@ fn main() {
                             }
                         }
                         Ok(SystemType::N64) => {
+                            // N64 requires OpenGL context which isn't available yet.
+                            // Store ROM data for later initialization.
                             rom_hash = Some(GameSaves::rom_hash(&data));
-                            let mut n64_sys = emu_n64::N64System::new_for_test();
-                            if let Err(e) = n64_sys.mount("Cartridge", &data) {
-                                eprintln!("Failed to load N64 ROM: {}", e);
-                                status_message = format!("Error: {}", e);
-                                rom_hash = None;
-                            } else {
-                                rom_loaded = true;
-                                sys = EmulatorSystem::N64(Box::new(n64_sys));
-                                runtime_state.set_mount("Cartridge".to_string(), p.clone());
-                                if let Err(e) = settings.save() {
-                                    eprintln!("Warning: Failed to save settings: {}", e);
-                                }
-                                status_message = "N64 ROM loaded".to_string();
-                                println!("Loaded N64 ROM: {}", p);
-                            }
+                            pending_n64_rom_data = Some(data);
+                            runtime_state.set_mount("Cartridge".to_string(), p.clone());
+                            status_message = "N64 ROM stored, initializing after OpenGL...".to_string();
+                            println!("N64 ROM data stored, will load after GL context is available");
                         }
                         Ok(SystemType::SMS) => {
                             rom_hash = Some(GameSaves::rom_hash(&data));
@@ -3225,6 +3207,33 @@ fn main() {
     // Some platforms/paths may create contexts elsewhere; installing here
     // is a defensive measure so `egui::include_image!` works at runtime.
     egui_extras::install_image_loaders(egui_backend.egui_ctx());
+
+    // Now that GL context is available, initialize N64 system if ROM data was pending
+    if let Some(n64_data) = pending_n64_rom_data.take() {
+        let gl_ctx = egui_backend.gl_context();
+        match create_n64_system(gl_ctx, &settings) {
+            Ok(mut n64_sys) => {
+                if let Err(e) = n64_sys.mount("Cartridge", &n64_data) {
+                    eprintln!("Failed to load N64 ROM: {}", e);
+                    status_message = format!("Error loading N64 ROM: {}", e);
+                    rom_hash = None;
+                } else {
+                    rom_loaded = true;
+                    sys = EmulatorSystem::N64(Box::new(n64_sys));
+                    if let Err(e) = settings.save() {
+                        eprintln!("Warning: Failed to save settings: {}", e);
+                    }
+                    status_message = "N64 ROM loaded".to_string();
+                    println!("N64 system initialized with OpenGL context");
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to create N64 system: {}", e);
+                status_message = format!("Error: {}", e);
+                rom_hash = None;
+            }
+        }
+    }
 
     // Initialize egui app
     let mut egui_app = EguiApp::new();

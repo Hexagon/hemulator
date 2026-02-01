@@ -1335,11 +1335,11 @@ impl Ppu {
         // ============================================================================
         // Apply color math effects based on CGWSEL ($2130) and CGADSUB ($2131) registers
         // Now that we have per-pixel layer tracking, we can implement this correctly!
+        // CGWSEL bits 4-5 control whether color math is enabled at all (00/01/02 enable, 03 disables)
+        let color_math_enable_mode = (self.cgwsel >> 4) & 0x03;
+        let color_math_enabled = color_math_enable_mode != 0x03;
 
-        // Check if color math is globally disabled
-        let color_math_prevented = (self.cgwsel & 0x40) != 0;
-
-        if !color_math_prevented && self.cgadsub != 0 {
+        if color_math_enabled && self.cgadsub != 0 {
             self.apply_color_math(&mut frame, &layer_buffer, &sub_frame);
         }
         // ============================================================================
@@ -1370,6 +1370,41 @@ impl Ppu {
                 }
             }
         }
+
+        // Debug: Log CGRAM color entries (disabled)
+        /*
+        log(LogCategory::PPU, LogLevel::Info, || {
+            let mut cgram_debug = String::from("CGRAM[0-15]: ");
+            for i in 0..16 {
+                let argb = self.get_color(i as u8);
+                let r = (argb >> 16) & 0xFF;
+                let g = (argb >> 8) & 0xFF;
+                let b = argb & 0xFF;
+                cgram_debug.push_str(&format!("[{}:R{}G{}B{}] ", i, r, g, b));
+            }
+            cgram_debug
+        });
+        */
+        
+        // Also check what the dominant color in the frame is
+        log(LogCategory::PPU, LogLevel::Info, || {
+            // Count color occurrences
+            use std::collections::HashMap;
+            let mut color_counts: HashMap<u32, usize> = HashMap::new();
+            for &pixel in &frame.pixels {
+                *color_counts.entry(pixel).or_insert(0) += 1;
+            }
+            // Find top 3 colors
+            let mut sorted: Vec<_> = color_counts.iter().collect();
+            sorted.sort_by(|a, b| b.1.cmp(a.1));
+            let top3: Vec<_> = sorted.iter().take(3).map(|(c, n)| {
+                let r = (*c >> 16) & 0xFF;
+                let g = (*c >> 8) & 0xFF;
+                let b = *c & 0xFF;
+                format!("0x{:08X}(R{}G{}B{}):{}", c, r, g, b, n)
+            }).collect();
+            format!("Top colors: {}", top3.join(", "))
+        });
 
         log(LogCategory::PPU, LogLevel::Debug, || {
             let vram_any = self.vram.iter().any(|&b| b != 0);

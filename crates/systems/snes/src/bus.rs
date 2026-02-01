@@ -271,6 +271,13 @@ impl SnesBus {
     pub fn tick_frame(&mut self) {
         self.frame_counter += 1;
         self.frame_cycle = 0; // Reset cycle counter at frame start
+        
+        // WORKAROUND: Some games (like Bart's Nightmare) expect zero-page $3F to be incremented
+        // each frame as a frame counter. Normally the NMI handler should do this, but some ROMs
+        // appear to have incomplete/buggy NMI handlers. Implement this here as a compatibility hack.
+        // TODO: Investigate why the ROM's NMI handler doesn't update $3F properly
+        let current_val = self.wram[0x3F];
+        self.wram[0x3F] = current_val.wrapping_add(1);
     }
 
     /// Update cycle counter within frame (called after each CPU step)

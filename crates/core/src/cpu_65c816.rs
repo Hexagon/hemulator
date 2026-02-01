@@ -180,9 +180,6 @@ impl<M: Memory65c816> Cpu65c816<M> {
 
             // Load NMI vector from $FFEA-$FFEB
             let nmi_vector = self.read_word(0xFFEA);
-            log(LogCategory::Interrupts, LogLevel::Debug, || {
-                format!("65C816: NMI vector read from $FFEA = ${:04X}", nmi_vector)
-            });
             self.pc = nmi_vector;
             self.pbr = 0;
             self.cycles += 8;

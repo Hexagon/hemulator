@@ -14,6 +14,13 @@ _None currently_
 ### High
 
 #### SNES
+- [ ] **Zero-Page Frame Counter Workaround**: Investigate NMI handler behavior - `crates/systems/snes/src/bus.rs:271-280`
+  - Current: Manually incrementing $003F each frame as compatibility hack
+  - Issue: Some ROMs (Bart's Nightmare) have NMI handlers that don't properly update frame counters
+  - NMI handler at $00:870F starts with `PHP; REP #$30` but doesn't increment $3F
+  - Workaround: Bus increments $3F during tick_frame() 
+  - Needed: Determine why ROM's NMI handler doesn't work, compare with bsnes/higan
+  - Impact: May affect other games expecting proper NMI handler behavior
 - [ ] **DSP-1 Coprocessor**: Complete missing commands (Attitude/Target/Rotate) - `crates/systems/snes/src/coprocessors/dsp1.rs`
   - Attitude (0x08): Only partial rotation matrix implementation
   - Target (0x20): Not implemented - returns zeros
