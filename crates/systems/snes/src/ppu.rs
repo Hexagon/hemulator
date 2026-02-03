@@ -762,7 +762,11 @@ impl Ppu {
                     format!(
                         "SNES PPU: VMAIN=${:02X} (inc:{}, mapping:{}, inc_byte:{})",
                         val,
-                        match val & 0x03 { 0 => 1, 1 => 32, _ => 128 },
+                        match val & 0x03 {
+                            0 => 1,
+                            1 => 32,
+                            _ => 128,
+                        },
                         (val >> 2) & 0x03,
                         if val & 0x80 != 0 { "high" } else { "low" }
                     )
@@ -806,7 +810,12 @@ impl Ppu {
                 self.vram[addr * 2] = val;
                 log(LogCategory::PPU, LogLevel::Trace, || {
                     if orig_addr as usize != addr {
-                        format!("SNES PPU: VRAM Write L ${:04X}->${:04X} = ${:02X} (remapped)", orig_addr, addr * 2, val)
+                        format!(
+                            "SNES PPU: VRAM Write L ${:04X}->${:04X} = ${:02X} (remapped)",
+                            orig_addr,
+                            addr * 2,
+                            val
+                        )
                     } else {
                         format!("SNES PPU: VRAM Write L ${:04X} = ${:02X}", addr * 2, val)
                     }
@@ -839,9 +848,18 @@ impl Ppu {
                 self.vram[addr * 2 + 1] = val;
                 log(LogCategory::PPU, LogLevel::Trace, || {
                     if orig_addr as usize != addr {
-                        format!("SNES PPU: VRAM Write H ${:04X}->${:04X} = ${:02X} (remapped)", orig_addr, addr * 2 + 1, val)
+                        format!(
+                            "SNES PPU: VRAM Write H ${:04X}->${:04X} = ${:02X} (remapped)",
+                            orig_addr,
+                            addr * 2 + 1,
+                            val
+                        )
                     } else {
-                        format!("SNES PPU: VRAM Write H ${:04X} = ${:02X}", addr * 2 + 1, val)
+                        format!(
+                            "SNES PPU: VRAM Write H ${:04X} = ${:02X}",
+                            addr * 2 + 1,
+                            val
+                        )
                     }
                 });
                 // Auto-increment VRAM address if VMAIN bit 7 is SET (increment on high byte write)
@@ -1880,7 +1898,7 @@ impl Ppu {
 
     /// Get remapped VRAM address based on VMAIN bits 2-3
     /// This handles the address translation used for efficient tilemap writing
-    /// 
+    ///
     /// Address Remapping (bits 2-3):
     /// - 00: No remapping
     /// - 01: Remap addressing aaaaaaaaBBBccccc => aaaaaaaacccccBBB
@@ -1916,6 +1934,7 @@ impl Ppu {
     }
 
     /// Get VRAM address increment amount based on VMAIN register
+    #[inline]
     fn get_vram_increment(&self) -> u16 {
         match self.vmain & 0x03 {
             0 => 1,   // Increment by 1 word
@@ -4079,6 +4098,7 @@ impl Ppu {
     /// Get color from CGRAM or compute direct color
     /// For direct color mode (Modes 3, 4, 7), the palette and color values are combined
     /// to create a direct RGB color instead of indexing CGRAM
+    #[inline]
     fn get_color(&self, index: u8) -> u32 {
         self.get_color_with_palette(index, 0, false)
     }
@@ -4087,6 +4107,7 @@ impl Ppu {
     /// - index: color index from tile data
     /// - palette: palette number (ppp bits from tilemap, used in direct color mode)
     /// - direct_color: if true, use direct color mode instead of CGRAM lookup
+    #[inline]
     fn get_color_with_palette(&self, index: u8, palette: u8, direct_color: bool) -> u32 {
         if direct_color {
             // Direct color mode (CGWSEL bit 0 for Modes 3, 4, 7)
@@ -4350,6 +4371,7 @@ impl Ppu {
     }
 
     /// Add two colors with clamping (for color math)
+    #[inline]
     fn add_colors(&self, color1: u32, color2: u32) -> u32 {
         let r1 = (color1 >> 16) & 0xFF;
         let g1 = (color1 >> 8) & 0xFF;
@@ -4368,6 +4390,7 @@ impl Ppu {
     }
 
     /// Subtract two colors with clamping (for color math)
+    #[inline]
     fn subtract_colors(&self, color1: u32, color2: u32) -> u32 {
         let r1 = ((color1 >> 16) & 0xFF) as i32;
         let g1 = ((color1 >> 8) & 0xFF) as i32;
@@ -4386,6 +4409,7 @@ impl Ppu {
     }
 
     /// Halve a color (divide each component by 2)
+    #[inline]
     fn halve_color(&self, color: u32) -> u32 {
         let r = ((color >> 16) & 0xFF) / 2;
         let g = ((color >> 8) & 0xFF) / 2;
