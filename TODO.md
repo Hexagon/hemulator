@@ -39,15 +39,11 @@ _None currently_
   - PIT tracks frequency/state but audio generation not connected to frontend
   - Impact: No sound output from DOS programs
 
-#### ColecoVision
-- [ ] **TMS9918A Sprite Collision Detection**: Fix sprite collision test - `crates/systems/colecovision/src/lib.rs:53`
-  - Current: Test ignored after TMS9918A refactor
-  - Needed: Update sprite collision detection to work with refactored VDP
-  - Impact: Sprite collision flag not properly tested
-- [ ] **TMS9918A Sprite Overflow**: Fix sprite overflow test - `crates/systems/colecovision/src/lib.rs:107`
-  - Current: Test ignored after TMS9918A refactor
-  - Needed: Update sprite overflow detection to work with refactored VDP
-  - Impact: Sprite overflow flag not properly tested
+#### ColecoVision  
+- [ ] **Z80 ROM Execution**: Debug why test ROM doesn't execute properly through BIOS - `crates/systems/colecovision/src/lib.rs`
+  - Current: Smoke tests use manual VDP initialization instead of ROM execution
+  - Test ROM exists (`test_roms/colecovision/test.col`) but doesn't render when executed
+  - Impact: Full system integration not validated via ROM execution
 
 ### Medium
 
