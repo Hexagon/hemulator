@@ -75,11 +75,12 @@ def assemble_z80(rom):
     rom[pc] = 0xBF  # VDP control port
     pc += 1
     
-    # Register 1: Mode Control 2 - $E0 (16K, display on, frame interrupt, Graphics II mode)
-    # Bit 7 = 16K VRAM, Bit 6 = Display enable, Bit 5 = Frame interrupt, Bit 1 = Graphics II mode
+    # Register 1: Mode Control 2 - $EA (16K, display on, frame interrupt, Graphics II mode)
+    # Bit 7 = 16K VRAM, Bit 6 = Display enable, Bit 5 = Frame interrupt
+    # Bit 4 = M3 (0 for Graphics II), Bit 3 = M2 (1 for Graphics II), Bit 1 = sprite size
     rom[pc] = 0x3E  # LD A, n
     pc += 1
-    rom[pc] = 0xE2  # $E2 = 11100010 (16K, display on, interrupt on, Graphics II, 8x8 sprites)
+    rom[pc] = 0xEA  # $EA = 11101010 (16K, display on, interrupt on, M2=1 for Graphics II, 8x8 sprites)
     pc += 1
     rom[pc] = 0xD3  # OUT (n), A
     pc += 1
@@ -114,12 +115,11 @@ def assemble_z80(rom):
     rom[pc] = 0xBF  # VDP control port
     pc += 1
     
-    # Register 3: Color Table Base - $FF (color table at $2000)
-    # In Graphics II mode: $FF = all 1s, bits 7-0 = 255, pattern is different
-    # For Graphics II: use $7F for color table at $2000
+    # Register 3: Color Table Base - $80 (color table at $2000)
+    # In Graphics II mode: value << 6 = address, so $80 << 6 = $2000
     rom[pc] = 0x3E  # LD A, n
     pc += 1
-    rom[pc] = 0x7F  # Color table at $2000 (Graphics II mode)
+    rom[pc] = 0x80  # Color table at $2000 (Graphics II mode)
     pc += 1
     rom[pc] = 0xD3  # OUT (n), A
     pc += 1
@@ -134,11 +134,11 @@ def assemble_z80(rom):
     rom[pc] = 0xBF  # VDP control port
     pc += 1
     
-    # Register 4: Pattern Table Base - $03 (pattern table at $0000)
-    # In Graphics II: $03 means pattern table at $0000 (bits 2-0, bit 2 = 1 for Graphics II)
+    # Register 4: Pattern Table Base - $00 (pattern table at $0000)
+    # In Graphics II: value & 0x07, then << 11 = address, so $00 << 11 = $0000
     rom[pc] = 0x3E  # LD A, n
     pc += 1
-    rom[pc] = 0x03  # Pattern table at $0000 (Graphics II mode)
+    rom[pc] = 0x00  # Pattern table at $0000 (Graphics II mode)
     pc += 1
     rom[pc] = 0xD3  # OUT (n), A
     pc += 1
