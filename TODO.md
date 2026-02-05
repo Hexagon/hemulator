@@ -112,11 +112,5 @@ _None currently_
   - Branch likely instructions have ND (nullify delay) bit not implemented
   - Impact: Minor timing differences in certain branch patterns
 
-#### Atari 2600
-- [ ] **Player/Missile Sizing**: Implement NUSIZ register - `crates/systems/atari2600/src/lib.rs`
-  - Current: Only default 1x size supported
-  - Needed: Multiple player copies, sizing, and missile width control
-  - Impact: Games using sprite sizing/duplication may render incorrectly
-
 #### Chores
 - [ ] Update dependencies (cargo)
