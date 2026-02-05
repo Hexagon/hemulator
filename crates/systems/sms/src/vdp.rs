@@ -74,6 +74,77 @@ impl Vdp {
         }
     }
 
+    /// Get the current video mode
+    /// Returns (mode_4_enabled, tms_mode)
+    /// TMS modes: 0 = Graphics I, 1 = Text, 2 = Graphics II, 3 = Multicolor
+    #[allow(dead_code)]  // Will be used for TMS mode rendering
+    fn get_video_mode(&self) -> (bool, u8) {
+        let m4 = (self.registers[0] & 0x04) != 0; // Register 0, bit 2
+        
+        if m4 {
+            return (true, 0); // Mode 4 (SMS native mode)
+        }
+
+        // TMS9918A mode detection (when M4=0)
+        // M1 = Register 1, bit 4
+        // M2 = Register 1, bit 3  
+        // M3 = Register 0, bit 1
+        let m1 = (self.registers[1] >> 4) & 1;
+        let m2 = (self.registers[1] >> 3) & 1;
+        let m3 = (self.registers[0] >> 1) & 1;
+
+        let tms_mode = match (m3, m2, m1) {
+            (0, 0, 0) => 0, // Graphics I
+            (0, 1, 0) => 1, // Text
+            (1, 0, 0) => 2, // Graphics II
+            (0, 0, 1) => 3, // Multicolor
+            _ => 0,         // Default to Graphics I for invalid combinations
+        };
+
+        (false, tms_mode)
+    }
+
+    /// Get the active display height based on current mode
+    fn get_display_height(&self) -> u32 {
+        let m4 = (self.registers[0] & 0x04) != 0; // M4 (Mode 4 enable)
+        
+        if m4 {
+            // Mode 4 (SMS): Check M2, M1, M3 for resolution
+            let m2 = (self.registers[0] & 0x02) != 0; // Register 0, bit 1
+            let m1 = (self.registers[1] & 0x10) != 0; // Register 1, bit 4
+            let m3 = (self.registers[1] & 0x08) != 0; // Register 1, bit 3
+            
+            if m2 {
+                // M2=1 allows M1 and M3 to select height
+                if m3 && m1 {
+                    192 // Both M1 and M3 set: default 192
+                } else if m3 {
+                    240 // M3 set: 240-line mode
+                } else if m1 {
+                    224 // M1 set: 224-line mode
+                } else {
+                    192 // Neither set: 192 lines
+                }
+            } else {
+                192 // M2=0: standard 192 lines
+            }
+        } else {
+            // TMS modes always use 192 lines
+            192
+        }
+    }
+
+    /// Update frame buffer size based on current display mode
+    fn update_frame_size(&mut self) {
+        let new_height = self.get_display_height();
+        if self.frame.height != new_height {
+            log(LogCategory::PPU, LogLevel::Info, || {
+                format!("SMS VDP: Resizing frame buffer to 256x{}", new_height)
+            });
+            self.frame = Frame::new(256, new_height);
+        }
+    }
+
     /// Write to VDP control port (0xBF)
     pub fn write_control(&mut self, data: u8) {
         if !self.write_latch {
@@ -103,6 +174,12 @@ impl Vdp {
                         log(LogCategory::PPU, LogLevel::Info, || {
                             format!("SMS VDP: Register R{} = ${:02X}", reg, value)
                         });
+                        
+                        // Check if this register write affects display height
+                        // Registers 0 and 1 contain mode bits
+                        if reg == 0 || reg == 1 {
+                            self.update_frame_size();
+                        }
                     }
                 }
                 _ => {
@@ -193,10 +270,12 @@ impl Vdp {
     /// Step VDP by one scanline
     #[allow(dead_code)]
     pub fn step_scanline(&mut self) {
-        if self.scanline < 192 {
+        let display_height = self.get_display_height() as u16;
+        
+        if self.scanline < display_height {
             // Render visible scanline
             self.render_scanline(self.scanline as u8);
-        } else if self.scanline == 192 {
+        } else if self.scanline == display_height {
             // Frame interrupt occurs at start of VBlank
             if (self.registers[1] & 0x20) != 0 {
                 // Frame interrupt enable
@@ -221,30 +300,33 @@ impl Vdp {
         }
 
         self.scanline = scanline;
+        
+        // Get the active display height
+        let display_height = self.get_display_height() as u16;
 
         // Render any scanlines that were crossed
         if scanline < old_scanline {
             // Wrapped around to new frame
-            // Render remaining scanlines from old_scanline to end of visible area (192)
-            for line in old_scanline..192 {
+            // Render remaining scanlines from old_scanline to end of visible area
+            for line in old_scanline..display_height {
                 self.render_scanline(line as u8);
             }
             // Render scanlines from start of new frame up to and including current scanline
-            for line in 0..=scanline.min(191) {
+            for line in 0..=scanline.min(display_height - 1) {
                 self.render_scanline(line as u8);
             }
-            // Check for frame interrupt at scanline 192
+            // Check for frame interrupt at end of visible area
             if (self.registers[1] & 0x20) != 0 {
                 self.frame_interrupt_pending = true;
             }
         } else {
             // Normal forward progress within same frame
             // Render all scanlines from old_scanline+1 up to and including scanline
-            for line in (old_scanline + 1)..=scanline.min(191) {
+            for line in (old_scanline + 1)..=scanline.min(display_height - 1) {
                 self.render_scanline(line as u8);
             }
-            // Check for frame interrupt when crossing scanline 192
-            if old_scanline < 192 && scanline >= 192 && (self.registers[1] & 0x20) != 0 {
+            // Check for frame interrupt when crossing into VBlank
+            if old_scanline < display_height && scanline >= display_height && (self.registers[1] & 0x20) != 0 {
                 self.frame_interrupt_pending = true;
             }
         }
@@ -392,8 +474,10 @@ impl Vdp {
 
     /// Render a single scanline
     fn render_scanline(&mut self, line: u8) {
+        let display_height = self.get_display_height() as u8;
+        
         // Handle line counter and line interrupts
-        if line < 192 {
+        if line < display_height {
             if self.line_counter == 0 {
                 // Reload line counter from register 10
                 self.line_counter = self.registers[10];
@@ -405,7 +489,7 @@ impl Vdp {
             } else {
                 self.line_counter = self.line_counter.wrapping_sub(1);
             }
-        } else if line == 192 {
+        } else if line == display_height {
             // Reset line counter at start of VBlank
             self.line_counter = self.registers[10];
         }
@@ -423,14 +507,13 @@ impl Vdp {
         // Display enable logic differs between Mode 4 and TMS modes
         let display_enabled = if mode_4_enabled {
             // In Mode 4 (SMS mode):
-            // - Bit 6 of register 1 controls whether we use 192-line (0) or 224-line (1) mode
-            // - Display is always on in Mode 4 (no blanking bit)
-            // - However, we only render if Mode 4 is actually enabled
-            true
+            // - Bit 6 of register 1 is BLK (blank bit): 1=blank, 0=display
+            (self.registers[1] & 0x40) == 0  // Display when BLK=0
         } else {
             // In TMS modes (0-3) for backward compatibility:
-            // - Bit 6 of register 1 controls display blanking (0=blank, 1=display)
-            (self.registers[1] & 0x40) != 0
+            // - Bit 6 of register 1 controls display: 1=display, 0=blank  
+            // - TMS9918A uses opposite polarity from Mode 4
+            (self.registers[1] & 0x40) != 0  // Display when bit 6=1
         };
 
         // Render background if display enabled
