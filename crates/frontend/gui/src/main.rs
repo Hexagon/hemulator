@@ -6151,9 +6151,13 @@ fn main() {
                         if let Some(tracer) = sys.instruction_tracer_mut() {
                             tracer.clear();
                             tracer.set_enabled(true);
-                            egui_app.status_bar.set_message(format!("Started trace: {}", filename));
+                            egui_app
+                                .status_bar
+                                .set_message(format!("Started trace: {}", filename));
                         } else {
-                            egui_app.status_bar.set_message("Trace not supported for this system".to_string());
+                            egui_app
+                                .status_bar
+                                .set_message("Trace not supported for this system".to_string());
                         }
                     } else {
                         egui_app.status_bar.set_message("No ROM loaded".to_string());
@@ -6166,10 +6170,14 @@ fn main() {
                             if let Some(filename) = &egui_app.tab_manager.trace_filename {
                                 match tracer.dump_to_file(filename) {
                                     Ok(_) => {
-                                        egui_app.status_bar.set_message(format!("Trace saved to {}", filename));
+                                        egui_app
+                                            .status_bar
+                                            .set_message(format!("Trace saved to {}", filename));
                                     }
                                     Err(e) => {
-                                        egui_app.status_bar.set_message(format!("Failed to save trace: {}", e));
+                                        egui_app
+                                            .status_bar
+                                            .set_message(format!("Failed to save trace: {}", e));
                                     }
                                 }
                             }
@@ -6369,13 +6377,11 @@ fn main() {
             // We check if egui wants input (e.g., text field focused) and only skip controller updates then.
             // This allows controller input to work even when docked panels are visible.
             let egui_wants_input = egui_backend.egui_ctx().wants_keyboard_input();
-            
+
             if !matches!(&sys, EmulatorSystem::PC(_)) {
                 // For non-PC systems, use standard controller mapping (always update, even if egui has focus)
-                let controller_state =
-                    get_controller_state(&egui_backend, &settings.input.player1);
-                let snes_state =
-                    get_snes_controller_state(&egui_backend, &settings.input.player1);
+                let controller_state = get_controller_state(&egui_backend, &settings.input.player1);
+                let snes_state = get_snes_controller_state(&egui_backend, &settings.input.player1);
                 let chip8_state = get_chip8_controller_state(&egui_backend);
 
                 // ColecoVision needs special handling for 2-player input
