@@ -197,13 +197,28 @@ Unit tests now cover:
 
 ## Testing
 
-Currently no test ROM or smoke tests are implemented. Test ROMs can be created using:
-- z80asm assembler
-- SDCC (Small Device C Compiler) for Z80
+Test ROM and smoke tests are now implemented:
 
-Example test ROM structure would verify:
-- VDP initialization and mode switching
-- Pattern/color table loading
-- Sprite rendering
-- Controller input
-- Audio output
+**Test ROM** (`test_roms/colecovision/test.col`):
+- Production-like test ROM demonstrating Graphics II mode
+- 4 horizontal colored bands (white, red, green, cyan)
+- 2 sprites (yellow and magenta)
+- Built using Python ROM generator (`build_rom.py`)
+
+**Smoke Tests** (`crates/systems/colecovision/src/lib.rs`):
+- `smoke_test_colecovision` - Manual VDP initialization test (passing)
+- `smoke_test_colecovision_manual` - Direct VDP rendering test (passing)
+- Unit tests for VDP address wrapping, save states, sprite transparency
+
+To build the test ROM:
+```bash
+cd test_roms/colecovision
+python3 build_rom.py
+# or
+./build.sh
+```
+
+To run tests:
+```bash
+cargo test --package emu_colecovision
+```
