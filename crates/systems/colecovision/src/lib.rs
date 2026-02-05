@@ -384,86 +384,88 @@ mod tests {
     #[test]
     fn smoke_test_colecovision_manual() {
         use emu_core::cpu_z80::MemoryZ80;
-        
+
         // Create a simple test by manually writing to VDP through the system
         // This tests the full integration without relying on Z80 code execution
-        
+
         let mut system = ColecoVisionSystem::new();
-        
+
         // Create dummy BIOS and cartridge (we won't execute code)
         let bios = vec![0; 0x2000];
         let cart = vec![0; 0x8000];
         system.load_bios(bios);
         system.load_cartridge(cart);
-        
+
         system.reset();
-        
+
         // Manually initialize VDP to Graphics II mode via memory-mapped I/O
         // Write to VDP control port (0xBF) to set up registers
-        
+
         // Register 0: Mode Control 1 - $00
         system.cpu.memory.io_write(0xBF, 0x00);
         system.cpu.memory.io_write(0xBF, 0x80);
-        
+
         // Register 1: Mode Control 2 - $EA (Graphics II, display on, interrupts)
         system.cpu.memory.io_write(0xBF, 0xEA);
         system.cpu.memory.io_write(0xBF, 0x81);
-        
+
         // Register 2: Nametable at $3800
         system.cpu.memory.io_write(0xBF, 0x0E);
         system.cpu.memory.io_write(0xBF, 0x82);
-        
+
         // Register 3: Color table at $2000
         system.cpu.memory.io_write(0xBF, 0x80);
         system.cpu.memory.io_write(0xBF, 0x83);
-        
+
         // Register 4: Pattern table at $0000
         system.cpu.memory.io_write(0xBF, 0x00);
         system.cpu.memory.io_write(0xBF, 0x84);
-        
+
         // Register 7: Backdrop color (black = 1)
         system.cpu.memory.io_write(0xBF, 0x01);
         system.cpu.memory.io_write(0xBF, 0x87);
-        
+
         // Write simple pattern data to VRAM
         // Set VRAM write address to $0000
         system.cpu.memory.io_write(0xBF, 0x00);
         system.cpu.memory.io_write(0xBF, 0x40);
-        
+
         // Write a few solid tiles (pattern 0xFF for all 8 rows)
-        for _ in 0..32 {  // 4 tiles * 8 bytes
+        for _ in 0..32 {
+            // 4 tiles * 8 bytes
             system.cpu.memory.io_write(0xBE, 0xFF);
         }
-        
+
         // Write color data to VRAM $2000
         system.cpu.memory.io_write(0xBF, 0x00);
-        system.cpu.memory.io_write(0xBF, 0x60);  // $2000 with write bit
-        
+        system.cpu.memory.io_write(0xBF, 0x60); // $2000 with write bit
+
         // Write white on black color (0xF1) for first few tiles
-        for _ in 0..32 {  // 4 tiles * 8 bytes
+        for _ in 0..32 {
+            // 4 tiles * 8 bytes
             system.cpu.memory.io_write(0xBE, 0xF1);
         }
-        
+
         // Write nametable at $3800
         system.cpu.memory.io_write(0xBF, 0x00);
-        system.cpu.memory.io_write(0xBF, 0x78);  // $3800 with write bit
-        
+        system.cpu.memory.io_write(0xBF, 0x78); // $3800 with write bit
+
         // Fill first row with tile 0 (which should be white)
         for _ in 0..32 {
-            system.cpu.memory.io_write(0xBE, 0x00);  // Tile 0
+            system.cpu.memory.io_write(0xBE, 0x00); // Tile 0
         }
-        
+
         // Run one frame to trigger rendering
         let frame = system.step_frame().unwrap();
-        
+
         // Verify frame dimensions
         assert_eq!(frame.width, 256);
         assert_eq!(frame.height, 192);
-        
+
         // Check that we have some non-black pixels in the first row
         let first_row = &frame.pixels[0..256];
         let non_black = first_row.iter().filter(|&&p| p != 0xFF000000).count();
-        
+
         assert!(
             non_black > 0,
             "Expected some white pixels in first row, but got all black. First 10 pixels: {:?}",
@@ -474,88 +476,88 @@ mod tests {
     #[test]
     fn smoke_test_colecovision() {
         use emu_core::cpu_z80::MemoryZ80;
-        
+
         // Note: This is a simplified smoke test that manually initializes the VDP
         // rather than executing the test ROM's Z80 code. The full ROM-based test
         // is available but currently having issues with Z80 execution integration.
         // TODO: Debug and enable full ROM execution test
-        
+
         let mut system = ColecoVisionSystem::new();
-        
+
         // Load dummy BIOS and cartridge
         let bios = vec![0; 0x2000];
         let cart = vec![0; 0x8000];
         system.load_bios(bios);
         system.load_cartridge(cart);
-        
+
         system.reset();
-        
+
         // Manually initialize VDP to Graphics II mode
         // Register 0: Mode Control 1
         system.cpu.memory.io_write(0xBF, 0x00);
         system.cpu.memory.io_write(0xBF, 0x80);
-        
+
         // Register 1: Graphics II, display on
         system.cpu.memory.io_write(0xBF, 0xEA);
         system.cpu.memory.io_write(0xBF, 0x81);
-        
+
         // Register 2: Nametable at $3800
         system.cpu.memory.io_write(0xBF, 0x0E);
         system.cpu.memory.io_write(0xBF, 0x82);
-        
+
         // Register 3: Color table at $2000
         system.cpu.memory.io_write(0xBF, 0x80);
         system.cpu.memory.io_write(0xBF, 0x83);
-        
+
         // Register 4: Pattern table at $0000
         system.cpu.memory.io_write(0xBF, 0x00);
         system.cpu.memory.io_write(0xBF, 0x84);
-        
+
         // Register 7: Backdrop color
         system.cpu.memory.io_write(0xBF, 0x01);
         system.cpu.memory.io_write(0xBF, 0x87);
-        
+
         // Write pattern data
         system.cpu.memory.io_write(0xBF, 0x00);
         system.cpu.memory.io_write(0xBF, 0x40);
         for _ in 0..64 {
             system.cpu.memory.io_write(0xBE, 0xFF);
         }
-        
+
         // Write color data (white on black and red on black)
         system.cpu.memory.io_write(0xBF, 0x00);
         system.cpu.memory.io_write(0xBF, 0x60);
         for _ in 0..32 {
-            system.cpu.memory.io_write(0xBE, 0xF1);  // White
+            system.cpu.memory.io_write(0xBE, 0xF1); // White
         }
         for _ in 0..32 {
-            system.cpu.memory.io_write(0xBE, 0x61);  // Red
+            system.cpu.memory.io_write(0xBE, 0x61); // Red
         }
-        
+
         // Write nametable (alternating tiles)
         system.cpu.memory.io_write(0xBF, 0x00);
         system.cpu.memory.io_write(0xBF, 0x78);
         for i in 0..768u16 {
             system.cpu.memory.io_write(0xBE, ((i / 32) % 2) as u8);
         }
-        
+
         // Run a frame
         let frame = system.step_frame().unwrap();
-        
+
         // Verify dimensions
         assert_eq!(frame.width, 256);
         assert_eq!(frame.height, 192);
-        
+
         // Verify we have multiple colors
         use std::collections::HashSet;
         let colors: HashSet<u32> = frame.pixels.iter().copied().collect();
-        
+
         assert!(
             colors.len() >= 2,
             "Expected at least 2 colors (backdrop + pattern), found {}",
             colors.len()
         );
-        
+
         // Verify not all black
         let non_black = frame.pixels.iter().filter(|&&p| p != 0xFF000000).count();
         assert!(
