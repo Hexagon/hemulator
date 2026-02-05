@@ -41,7 +41,7 @@
 //!
 //! // Get memory map
 //! for region in system.get_memory_regions() {
-//!     println!("{}: ${:04X}-${:04X} ({})", 
+//!     println!("{}: ${:04X}-${:04X} ({})",
 //!         region.name, region.start, region.end, region.description);
 //! }
 //! ```
@@ -155,7 +155,7 @@
 //!             None => break,
 //!         };
 //!
-//!         let (instruction, new_m, new_x) = 
+//!         let (instruction, new_m, new_x) =
 //!             disasm_65c816::disassemble_tracking_flags(&memory, current_address, m_flag, x_flag)?;
 //!
 //!         current_address += instruction.len() as u32;
