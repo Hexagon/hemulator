@@ -14,6 +14,12 @@ use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::renderer::Renderer;
 use emu_core::types::Frame;
 
+// Rendering metadata constants
+// During rendering, we use the upper 8 bits of the pixel value to store metadata
+// that is cleaned up before the frame is presented to the user
+const PRIORITY_BIT: u32 = 0x01000000; // Bit 24: Background tile has priority over sprites
+const RGB_MASK: u32 = 0x00FFFFFF; // Lower 24 bits: RGB color value (0xRRGGBB)
+
 /// VDP state and rendering
 pub struct Vdp {
     // Video RAM (16KB)
@@ -414,9 +420,18 @@ impl Vdp {
         // Check if Mode 4 is enabled (register 0, bit 2)
         let mode_4_enabled = (self.registers[0] & 0x04) != 0;
 
-        // In Mode 4, display is always on (bit 6 of register 1 controls 224-line mode)
-        // In TMS modes (0-3), bit 6 of register 1 controls display blanking (0=blank, 1=display)
-        let display_enabled = mode_4_enabled || (self.registers[1] & 0x40) != 0;
+        // Display enable logic differs between Mode 4 and TMS modes
+        let display_enabled = if mode_4_enabled {
+            // In Mode 4 (SMS mode):
+            // - Bit 6 of register 1 controls whether we use 192-line (0) or 224-line (1) mode
+            // - Display is always on in Mode 4 (no blanking bit)
+            // - However, we only render if Mode 4 is actually enabled
+            true
+        } else {
+            // In TMS modes (0-3) for backward compatibility:
+            // - Bit 6 of register 1 controls display blanking (0=blank, 1=display)
+            (self.registers[1] & 0x40) != 0
+        };
 
         // Render background if display enabled
         if display_enabled {
@@ -461,10 +476,17 @@ impl Vdp {
             let tile_data_high = self.vram[(name_addr + 1) as usize];
             let tile_data = tile_data_low as u16 | ((tile_data_high as u16) << 8);
 
+            // SMS Mode 4 name table format (16-bit):
+            // Bits 0-8: Tile index (9 bits, 512 tiles max)
+            // Bit 9: Horizontal flip
+            // Bit 10: Vertical flip
+            // Bit 11: Palette select (0 or 1)
+            // Bit 12: Priority (1 = sprite behind bg, 0 = sprite in front)
             let tile_index = tile_data & 0x1FF;
-            let palette = ((tile_data >> 11) & 1) as usize;
             let h_flip = (tile_data >> 9) & 1;
             let v_flip = (tile_data >> 10) & 1;
+            let palette = ((tile_data >> 11) & 1) as usize;
+            let priority = (tile_data >> 12) & 1;
 
             // Calculate pixel position within tile
             let px = if h_flip != 0 { 7 - pixel_x } else { pixel_x };
@@ -492,7 +514,14 @@ impl Vdp {
             if pixel != 0 {
                 let color_index = palette * 16 + pixel as usize;
                 let color = self.decode_color(self.cram[color_index] & 0x3F);
-                self.frame.pixels[line_offset + x as usize] = color;
+                // Store both the color and priority bit for sprite rendering
+                // Priority: if bit 12 is set, sprites should render behind this pixel
+                let pixel_data = if priority != 0 {
+                    color | PRIORITY_BIT // Set priority bit (sprite behind bg)
+                } else {
+                    color
+                };
+                self.frame.pixels[line_offset + x as usize] = pixel_data;
             }
         }
     }
@@ -501,26 +530,26 @@ impl Vdp {
     fn render_sprites(&mut self, line: u8, line_offset: usize) {
         let sprite_attr_table = ((self.registers[5] as u16) & 0x7E) << 7;
         let sprite_size = if (self.registers[1] & 0x02) != 0 {
-            16
+            16 // 16x16 sprites (zoomed/double-size mode)
         } else {
-            8
+            8 // 8x8 sprites
         };
 
         let mut sprites_on_line = 0;
 
         // Track which pixels have sprites for collision detection
-        // Using a simple array for the scanline
         let mut sprite_pixels = [false; 256];
 
-        // Sprites are rendered in reverse order (higher priority first)
+        // Sprites are rendered in reverse order (sprite 0 has highest priority)
         for i in (0..64).rev() {
             let y = self.vram[(sprite_attr_table + i) as usize];
 
-            // Check for end marker
+            // Check for end marker (Y = 0xD0 terminates sprite list)
             if y == 0xD0 {
                 break;
             }
 
+            // Y position is offset by 1
             let y_pos = y.wrapping_add(1);
             if line < y_pos || line >= y_pos + sprite_size {
                 continue;
@@ -537,11 +566,28 @@ impl Vdp {
             let x_pos = self.vram[(sprite_attr_table + 128 + i * 2) as usize];
             let tile_num = self.vram[(sprite_attr_table + 128 + i * 2 + 1) as usize];
 
-            // Calculate sprite row
+            // Calculate sprite row within the sprite (0-7 for 8x8, 0-15 for 16x16)
             let sprite_y = line - y_pos;
 
-            // Read tile pattern (once per sprite row, not per pixel)
-            let tile_addr = (tile_num as u16) * 32 + (sprite_y as u16) * 4;
+            // For 16x16 sprites in Mode 4:
+            // - Uses 2 tiles vertically (tile N and tile N+1)
+            // - Each tile is still 8 pixels wide
+            // - Pattern reads from consecutive tiles
+            let (actual_tile, actual_y) = if sprite_size == 16 {
+                // 16x16 mode: sprite_y can be 0-15
+                // Rows 0-7: use tile N, rows 8-15: use tile N+1
+                if sprite_y < 8 {
+                    (tile_num, sprite_y)
+                } else {
+                    (tile_num.wrapping_add(1), sprite_y - 8)
+                }
+            } else {
+                // 8x8 mode: sprite_y is already 0-7
+                (tile_num, sprite_y)
+            };
+
+            // Read tile pattern for this row
+            let tile_addr = (actual_tile as u16) * 32 + (actual_y as u16) * 4;
             if tile_addr >= 0x3FFC {
                 continue;
             }
@@ -551,7 +597,9 @@ impl Vdp {
             let byte2 = self.vram[(tile_addr + 2) as usize];
             let byte3 = self.vram[(tile_addr + 3) as usize];
 
-            // Render sprite pixels
+            // Render sprite pixels (always 8 pixels wide per tile, even in 16x16 mode)
+            // For 16x16 sprites, this renders one 8x16 column
+            // SMS hardware vertically doubles sprites but keeps them 8 pixels wide
             for px in 0..8u8 {
                 let x = x_pos.wrapping_add(px);
                 if x as u16 >= 256 {
@@ -568,7 +616,7 @@ impl Vdp {
                 if pixel != 0 {
                     let x_index = x as usize;
 
-                    // Check for sprite collision
+                    // Check for sprite collision (two non-transparent sprite pixels overlap)
                     if sprite_pixels[x_index] {
                         self.sprite_collision = true;
                     }
@@ -576,11 +624,29 @@ impl Vdp {
                     // Mark this pixel as having a sprite
                     sprite_pixels[x_index] = true;
 
-                    let color_index = 16 + pixel as usize; // Sprites use second palette
-                    let color = self.decode_color(self.cram[color_index] & 0x3F);
-                    self.frame.pixels[line_offset + x_index] = color;
+                    // Check if background pixel has priority bit set
+                    let bg_pixel = self.frame.pixels[line_offset + x_index];
+                    let bg_has_priority = (bg_pixel & PRIORITY_BIT) != 0;
+
+                    // Only render sprite if:
+                    // 1. Background pixel is transparent (backdrop color), OR
+                    // 2. Background pixel doesn't have priority bit set
+                    let backdrop_color = self.decode_color(self.cram[16] & 0x3F);
+                    let bg_is_backdrop = (bg_pixel & RGB_MASK) == (backdrop_color & RGB_MASK);
+
+                    if bg_is_backdrop || !bg_has_priority {
+                        // Sprites always use palette 1 (colors 16-31 in CRAM)
+                        let color_index = 16 + pixel as usize;
+                        let color = self.decode_color(self.cram[color_index] & 0x3F);
+                        self.frame.pixels[line_offset + x_index] = color;
+                    }
                 }
             }
+        }
+
+        // Clean up priority bits from final frame (keep only RGB, clear metadata)
+        for x in 0..256 {
+            self.frame.pixels[line_offset + x] &= RGB_MASK;
         }
     }
 

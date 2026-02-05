@@ -296,11 +296,11 @@ pub enum TabAction {
 /// Debug actions that can be triggered from the debug tab
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DebugAction {
-    Step,   // Step one instruction
-    Pause,  // Pause emulation
-    Resume, // Resume emulation
+    Step,               // Step one instruction
+    Pause,              // Pause emulation
+    Resume,             // Resume emulation
     StartTrace(String), // Start instruction tracing with specified filename
-    StopTrace,  // Stop instruction tracing and dump to file
+    StopTrace,          // Stop instruction tracing and dump to file
 }
 
 pub struct TabManager {

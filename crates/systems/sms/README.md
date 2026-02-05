@@ -14,11 +14,16 @@ This document describes the SMS (Sega Master System) implementation in Hemulator
   - Proper downsampling from SMS CPU speed (3.579545 MHz NTSC / 3.546894 MHz PAL) to 44.1 kHz
   - NTSC and PAL timing support
 - VDP (Video Display Processor) with:
-  - Tilemap and sprite rendering
+  - Mode 4 (SMS native graphics mode) with proper display enable logic
+  - Tilemap and sprite rendering (8×8 and 16×16 sprite support)
   - Frame interrupts
   - Line interrupts
-  - Sprite overflow detection
+  - Sprite overflow detection (8 sprites per scanline limit)
   - Sprite collision detection
+  - Background/sprite priority system (bit 12 of name table entry)
+  - 4-bit-per-pixel tile patterns with palette selection
+  - Horizontal and vertical tile flipping
+  - 32-color palette (CRAM) with 6-bit RGB color depth
 - Memory bus with ROM banking support
 - BIOS support with optional BIOS mount point:
   - Games run without BIOS by default
@@ -37,11 +42,13 @@ This document describes the SMS (Sega Master System) implementation in Hemulator
 - System trait implementation
 - Frontend integration (ROM detection, controller input, audio)
 - Test ROM and smoke tests
-- All unit tests passing (50/50)
+- All unit tests passing (51/51)
 
 **❌ Not Yet Implemented:**
 - Game Gear support (planned)
 - FM sound unit support (Master System only, optional accessory)
+- 224-line PAL display mode (currently fixed at 192 lines)
+- TMS9918A compatibility modes (0-3) - only Mode 4 is implemented
 
 ## Architecture
 
