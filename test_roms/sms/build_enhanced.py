@@ -52,12 +52,15 @@ def assemble_z80(rom):
         pc += 1
     
     # === LOAD PALETTE (CRAM) ===
+    # SMS color format: 6-bit RGB encoded as --BBGGRR (2 bits per channel)
+    # Color values: 0b00 (dark), 0b01 (medium), 0b10 (bright), 0b11 (max)
+    # Example: 0x30 = 0b110000 = blue at max brightness
     colors = [
-        0x00,  # 0: Black
-        0x3F,  # 1: White
-        0x03,  # 2: Red
-        0x0C,  # 3: Green
-        0x30,  # 4: Blue
+        0x00,  # 0: Black (0b000000)
+        0x3F,  # 1: White (0b111111)
+        0x03,  # 2: Red (0b000011)
+        0x0C,  # 3: Green (0b001100)
+        0x30,  # 4: Blue (0b110000)
         0x15,  # 5: Orange
         0x33,  # 6: Magenta
         0x3C,  # 7: Cyan
@@ -69,7 +72,7 @@ def assemble_z80(rom):
         0x2A,  # 13: Mid gray
         0x3F,  # 14: Bright white
         0x15,  # 15: Brown
-        0x30,  # 16: Backdrop (blue)
+        0x30,  # 16: Backdrop (blue 0b110000)
     ]
     
     for i, color in enumerate(colors):

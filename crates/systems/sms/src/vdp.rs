@@ -14,6 +14,12 @@ use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::renderer::Renderer;
 use emu_core::types::Frame;
 
+// Rendering metadata constants
+// During rendering, we use the upper 8 bits of the pixel value to store metadata
+// that is cleaned up before the frame is presented to the user
+const PRIORITY_BIT: u32 = 0x01000000; // Bit 24: Background tile has priority over sprites
+const RGB_MASK: u32 = 0x00FFFFFF; // Lower 24 bits: RGB color value (0xRRGGBB)
+
 /// VDP state and rendering
 pub struct Vdp {
     // Video RAM (16KB)
@@ -509,10 +515,9 @@ impl Vdp {
                 let color_index = palette * 16 + pixel as usize;
                 let color = self.decode_color(self.cram[color_index] & 0x3F);
                 // Store both the color and priority bit for sprite rendering
-                // We'll use the upper 8 bits to store metadata (priority flag)
                 // Priority: if bit 12 is set, sprites should render behind this pixel
                 let pixel_data = if priority != 0 {
-                    color | 0x01000000 // Set bit 24 to indicate high priority (sprite behind)
+                    color | PRIORITY_BIT // Set priority bit (sprite behind bg)
                 } else {
                     color
                 };
@@ -621,13 +626,13 @@ impl Vdp {
 
                     // Check if background pixel has priority bit set
                     let bg_pixel = self.frame.pixels[line_offset + x_index];
-                    let bg_has_priority = (bg_pixel & 0x01000000) != 0;
+                    let bg_has_priority = (bg_pixel & PRIORITY_BIT) != 0;
 
                     // Only render sprite if:
                     // 1. Background pixel is transparent (backdrop color), OR
                     // 2. Background pixel doesn't have priority bit set
                     let backdrop_color = self.decode_color(self.cram[16] & 0x3F);
-                    let bg_is_backdrop = (bg_pixel & 0x00FFFFFF) == (backdrop_color & 0x00FFFFFF);
+                    let bg_is_backdrop = (bg_pixel & RGB_MASK) == (backdrop_color & RGB_MASK);
 
                     if bg_is_backdrop || !bg_has_priority {
                         // Sprites always use palette 1 (colors 16-31 in CRAM)
@@ -641,7 +646,7 @@ impl Vdp {
 
         // Clean up priority bits from final frame (keep only RGB, clear metadata)
         for x in 0..256 {
-            self.frame.pixels[line_offset + x] &= 0x00FFFFFF;
+            self.frame.pixels[line_offset + x] &= RGB_MASK;
         }
     }
 
