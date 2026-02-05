@@ -155,10 +155,26 @@ assert_eq!((width, height), (640, 350)); // EGA resolution
 
 ### Mount Points
 
-1. **BIOS** (Slot 1): Custom or replacement BIOS ROM
+The PC system supports four mount points for loading system files and disk images:
+
+1. **BIOS** (Slot 1): Custom or replacement BIOS ROM (optional, has default BIOS)
 2. **Floppy A** (Slot 2): Floppy drive A:
 3. **Floppy B** (Slot 3): Floppy drive B:
 4. **Hard Drive C** (Slot 4): Hard disk drive C:
+
+**Loading via command-line:**
+```bash
+# Using --bios for BIOS (equivalent to --slot1)
+hemu --bios custom.bin --slot2 boot.img
+
+# Using legacy slot syntax
+hemu --slot1 custom.bin --slot2 boot.img --slot4 hdd.img
+
+# Mixed syntax works too
+hemu --bios custom.bin --slot2 boot.img --slot4 hdd.img
+```
+
+**Note**: `--bios` and `--slot1` are interchangeable for PC systems. Use `--bios` for consistency with other systems.
 
 ## Building
 

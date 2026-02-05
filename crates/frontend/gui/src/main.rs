@@ -1374,16 +1374,17 @@ fn create_file_dialog(mount_point: &emu_core::MountPointInfo) -> rfd::FileDialog
 #[derive(Debug, Default)]
 struct CliArgs {
     rom_path: Option<String>,
-    system: Option<String>, // System to start (pc, nes, gb, atari2600, snes, n64)
-    slot1: Option<String>,  // BIOS or primary file
-    slot2: Option<String>,  // FloppyA
-    slot3: Option<String>,  // FloppyB
-    slot4: Option<String>,  // HardDrive
-    slot5: Option<String>,  // Reserved for future use
+    bios_path: Option<String>, // BIOS file path (for systems that support BIOS)
+    system: Option<String>,    // System to start (pc, nes, gb, atari2600, snes, n64)
+    slot1: Option<String>,     // BIOS or primary file
+    slot2: Option<String>,     // FloppyA
+    slot3: Option<String>,     // FloppyB
+    slot4: Option<String>,     // HardDrive
+    slot5: Option<String>,     // Reserved for future use
     create_blank_disk: Option<(String, String)>, // (path, format)
-    show_help: bool,        // Show help message
-    show_version: bool,     // Show version
-    benchmark: bool,        // Benchmark mode: disable frame limiter to measure raw performance
+    show_help: bool,           // Show help message
+    show_version: bool,        // Show version
+    benchmark: bool,           // Benchmark mode: disable frame limiter to measure raw performance
     // Logging configuration
     log_level: Option<String>,      // Global log level
     log_cpu: Option<String>,        // CPU log level
@@ -1429,6 +1430,14 @@ impl CliArgs {
                         eprintln!(
                             "Error: --system requires a value (pc, nes, gb, atari2600, snes, n64)."
                         );
+                        std::process::exit(1);
+                    }
+                }
+                "--bios" => {
+                    if let Some(path) = arg_iter.next() {
+                        args.bios_path = Some(path);
+                    } else {
+                        eprintln!("Error: --bios requires a file path.");
                         std::process::exit(1);
                     }
                 }
@@ -1639,6 +1648,7 @@ impl CliArgs {
         eprintln!(
             "  -S, --system <SYSTEM>    Start clean system (pc, nes, gb, atari2600, snes, n64)"
         );
+        eprintln!("  --bios <file>            Load BIOS file (for ColecoVision, SMS, PC)");
         eprintln!("  --slot1 <file>           Load file into slot 1 (BIOS for PC)");
         eprintln!("  --slot2 <file>           Load file into slot 2 (Floppy A for PC)");
         eprintln!("  --slot3 <file>           Load file into slot 3 (Floppy B for PC)");
@@ -1723,6 +1733,9 @@ impl CliArgs {
         eprintln!(
             "  hemu --slot2 boot.img --slot4 hdd.img         # Load PC with floppy and hard drive"
         );
+        eprintln!("  hemu --bios coleco.rom game.col                # Load ColecoVision with BIOS");
+        eprintln!("  hemu --bios bios.sms game.sms                  # Load SMS with BIOS");
+        eprintln!("  hemu --bios custom.bin --slot2 boot.img       # Load PC with custom BIOS");
         eprintln!("  hemu --create-blank-disk floppy.img 1.44m      # Create 1.44MB floppy image");
         eprintln!(
             "  hemu --create-blank-disk hdd.img 20m           # Create 20MB hard drive image"
@@ -1801,6 +1814,66 @@ Please ensure your system supports hardware-accelerated OpenGL and that the grap
 /// Create an Atari 2600 system
 fn create_atari2600_system(_settings: &Settings) -> emu_atari2600::Atari2600System {
     emu_atari2600::Atari2600System::new()
+}
+
+/// Helper function to load BIOS from CLI argument or auto-search in ROM directory
+/// Returns (bios_data, bios_path) if found, None otherwise
+fn load_bios(
+    cli_bios_path: Option<&String>,
+    rom_path_for_search: Option<&str>,
+    bios_filenames: &[&str],
+    expected_size: Option<usize>,
+) -> Option<(Vec<u8>, String)> {
+    // First, try CLI-provided BIOS path
+    if let Some(bios_path) = cli_bios_path {
+        match std::fs::read(bios_path) {
+            Ok(bios_data) => {
+                // Verify size if specified
+                if let Some(size) = expected_size {
+                    if bios_data.len() != size {
+                        eprintln!(
+                            "Warning: BIOS file {} has unexpected size {} (expected {})",
+                            bios_path,
+                            bios_data.len(),
+                            size
+                        );
+                        return None;
+                    }
+                }
+                println!("Loaded BIOS from: {}", bios_path);
+                return Some((bios_data, bios_path.clone()));
+            }
+            Err(e) => {
+                eprintln!("Error loading BIOS from {}: {}", bios_path, e);
+                return None;
+            }
+        }
+    }
+
+    // If no CLI path provided, try auto-search in ROM directory
+    if let Some(rom_path) = rom_path_for_search {
+        if let Ok(rom_path_abs) = std::path::Path::new(rom_path).canonicalize() {
+            if let Some(parent_dir) = rom_path_abs.parent() {
+                for candidate in bios_filenames {
+                    let bios_path = parent_dir.join(candidate);
+                    if bios_path.exists() {
+                        if let Ok(bios_data) = std::fs::read(&bios_path) {
+                            // Verify size if specified
+                            if let Some(size) = expected_size {
+                                if bios_data.len() != size {
+                                    continue; // Try next candidate
+                                }
+                            }
+                            println!("Auto-detected BIOS from: {}", bios_path.display());
+                            return Some((bios_data, bios_path.to_string_lossy().to_string()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
 }
 
 /// Helper to update mount_info in tab_manager after mount/unmount operations
@@ -2803,6 +2876,27 @@ fn main() {
                         Ok(SystemType::SMS) => {
                             rom_hash = Some(GameSaves::rom_hash(&data));
                             let mut sms_sys = emu_sms::SmsSystem::new();
+
+                            // SMS BIOS is optional - try CLI arg first, then auto-search
+                            let bios_candidates =
+                                ["bios.sms", "sms.rom", "sms.bin", "bios.rom", "bios.bin"];
+
+                            let bios_result = load_bios(
+                                cli_args.bios_path.as_ref(),
+                                Some(&p),
+                                &bios_candidates,
+                                None, // SMS BIOS size can vary
+                            );
+
+                            if let Some((bios_data, bios_path)) = bios_result {
+                                if sms_sys.mount("bios", &bios_data).is_ok() {
+                                    runtime_state.set_mount("bios".to_string(), bios_path);
+                                } else {
+                                    eprintln!("Failed to mount SMS BIOS");
+                                }
+                            }
+
+                            // Load the cartridge
                             if let Err(e) = sms_sys.mount("cartridge", &data) {
                                 eprintln!("Failed to load SMS ROM: {}", e);
                                 status_message = format!("Error: {}", e);
@@ -2840,46 +2934,28 @@ fn main() {
                             rom_hash = Some(GameSaves::rom_hash(&data));
                             let mut coleco_sys = emu_colecovision::ColecoVisionSystem::new();
 
-                            // ColecoVision requires BIOS - try to find it automatically
-                            let bios_loaded = if let Ok(rom_path) =
-                                std::path::Path::new(&p).canonicalize()
-                            {
-                                if let Some(parent_dir) = rom_path.parent() {
-                                    // Try common BIOS filenames
-                                    let bios_candidates = [
-                                        "ColecoVision BIOS (1982).col",
-                                        "coleco.rom",
-                                        "coleco.bin",
-                                        "bios.rom",
-                                        "bios.bin",
-                                    ];
+                            // ColecoVision requires BIOS - try CLI arg first, then auto-search
+                            let bios_candidates = [
+                                "ColecoVision BIOS (1982).col",
+                                "coleco.rom",
+                                "coleco.bin",
+                                "bios.rom",
+                                "bios.bin",
+                            ];
 
-                                    let mut loaded = false;
-                                    for candidate in &bios_candidates {
-                                        let bios_path = parent_dir.join(candidate);
-                                        if bios_path.exists() {
-                                            if let Ok(bios_data) = std::fs::read(&bios_path) {
-                                                if bios_data.len() == 8192 {
-                                                    // Verify BIOS is 8KB
-                                                    if coleco_sys.mount("BIOS", &bios_data).is_ok()
-                                                    {
-                                                        println!(
-                                                            "Loaded ColecoVision BIOS from: {}",
-                                                            bios_path.display()
-                                                        );
-                                                        runtime_state.set_mount(
-                                                            "BIOS".to_string(),
-                                                            bios_path.to_string_lossy().to_string(),
-                                                        );
-                                                        loaded = true;
-                                                        break;
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    loaded
+                            let bios_result = load_bios(
+                                cli_args.bios_path.as_ref(),
+                                Some(&p),
+                                &bios_candidates,
+                                Some(8192), // ColecoVision BIOS must be 8KB
+                            );
+
+                            let bios_loaded = if let Some((bios_data, bios_path)) = bios_result {
+                                if coleco_sys.mount("BIOS", &bios_data).is_ok() {
+                                    runtime_state.set_mount("BIOS".to_string(), bios_path);
+                                    true
                                 } else {
+                                    eprintln!("Failed to mount ColecoVision BIOS");
                                     false
                                 }
                             } else {
@@ -2948,12 +3024,13 @@ fn main() {
     }
 
     // Handle slot-based loading (primarily for PC system)
-    // If any slot arguments are provided, auto-select PC mode if no ROM was loaded
+    // If any slot arguments or bios argument are provided, auto-select PC mode if no ROM was loaded
     let has_slot_args = cli_args.slot1.is_some()
         || cli_args.slot2.is_some()
         || cli_args.slot3.is_some()
         || cli_args.slot4.is_some()
-        || cli_args.slot5.is_some();
+        || cli_args.slot5.is_some()
+        || cli_args.bios_path.is_some();
 
     if has_slot_args && !rom_loaded {
         // Auto-select PC mode when slot files are provided
@@ -2965,18 +3042,19 @@ fn main() {
 
     // Load slot files for PC system
     if let EmulatorSystem::PC(ref mut pc_sys) = sys {
-        // Slot 1: BIOS
-        if let Some(ref slot1_path) = cli_args.slot1 {
-            match fs::read(slot1_path) {
+        // BIOS: Load from --bios first, then fall back to --slot1
+        let bios_source = cli_args.bios_path.as_ref().or(cli_args.slot1.as_ref());
+        if let Some(bios_path) = bios_source {
+            match fs::read(bios_path) {
                 Ok(data) => {
                     if let Err(e) = pc_sys.mount("BIOS", &data) {
-                        eprintln!("Failed to mount BIOS from slot 1: {}", e);
+                        eprintln!("Failed to mount BIOS: {}", e);
                     } else {
-                        runtime_state.set_mount("BIOS".to_string(), slot1_path.clone());
-                        println!("Loaded BIOS from slot 1: {}", slot1_path);
+                        runtime_state.set_mount("BIOS".to_string(), bios_path.clone());
+                        println!("Loaded BIOS from: {}", bios_path);
                     }
                 }
-                Err(e) => eprintln!("Failed to read slot 1 file: {}", e),
+                Err(e) => eprintln!("Failed to read BIOS file: {}", e),
             }
         }
 
