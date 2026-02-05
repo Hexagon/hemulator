@@ -1375,16 +1375,16 @@ fn create_file_dialog(mount_point: &emu_core::MountPointInfo) -> rfd::FileDialog
 struct CliArgs {
     rom_path: Option<String>,
     bios_path: Option<String>, // BIOS file path (for systems that support BIOS)
-    system: Option<String>, // System to start (pc, nes, gb, atari2600, snes, n64)
-    slot1: Option<String>,  // BIOS or primary file
-    slot2: Option<String>,  // FloppyA
-    slot3: Option<String>,  // FloppyB
-    slot4: Option<String>,  // HardDrive
-    slot5: Option<String>,  // Reserved for future use
+    system: Option<String>,    // System to start (pc, nes, gb, atari2600, snes, n64)
+    slot1: Option<String>,     // BIOS or primary file
+    slot2: Option<String>,     // FloppyA
+    slot3: Option<String>,     // FloppyB
+    slot4: Option<String>,     // HardDrive
+    slot5: Option<String>,     // Reserved for future use
     create_blank_disk: Option<(String, String)>, // (path, format)
-    show_help: bool,        // Show help message
-    show_version: bool,     // Show version
-    benchmark: bool,        // Benchmark mode: disable frame limiter to measure raw performance
+    show_help: bool,           // Show help message
+    show_version: bool,        // Show version
+    benchmark: bool,           // Benchmark mode: disable frame limiter to measure raw performance
     // Logging configuration
     log_level: Option<String>,      // Global log level
     log_cpu: Option<String>,        // CPU log level
@@ -2878,13 +2878,8 @@ fn main() {
                             let mut sms_sys = emu_sms::SmsSystem::new();
 
                             // SMS BIOS is optional - try CLI arg first, then auto-search
-                            let bios_candidates = [
-                                "bios.sms",
-                                "sms.rom",
-                                "sms.bin",
-                                "bios.rom",
-                                "bios.bin",
-                            ];
+                            let bios_candidates =
+                                ["bios.sms", "sms.rom", "sms.bin", "bios.rom", "bios.bin"];
 
                             let bios_result = load_bios(
                                 cli_args.bios_path.as_ref(),
@@ -2957,8 +2952,7 @@ fn main() {
 
                             let bios_loaded = if let Some((bios_data, bios_path)) = bios_result {
                                 if coleco_sys.mount("BIOS", &bios_data).is_ok() {
-                                    runtime_state
-                                        .set_mount("BIOS".to_string(), bios_path);
+                                    runtime_state.set_mount("BIOS".to_string(), bios_path);
                                     true
                                 } else {
                                     eprintln!("Failed to mount ColecoVision BIOS");
@@ -6235,9 +6229,13 @@ fn main() {
                         if let Some(tracer) = sys.instruction_tracer_mut() {
                             tracer.clear();
                             tracer.set_enabled(true);
-                            egui_app.status_bar.set_message(format!("Started trace: {}", filename));
+                            egui_app
+                                .status_bar
+                                .set_message(format!("Started trace: {}", filename));
                         } else {
-                            egui_app.status_bar.set_message("Trace not supported for this system".to_string());
+                            egui_app
+                                .status_bar
+                                .set_message("Trace not supported for this system".to_string());
                         }
                     } else {
                         egui_app.status_bar.set_message("No ROM loaded".to_string());
@@ -6250,10 +6248,14 @@ fn main() {
                             if let Some(filename) = &egui_app.tab_manager.trace_filename {
                                 match tracer.dump_to_file(filename) {
                                     Ok(_) => {
-                                        egui_app.status_bar.set_message(format!("Trace saved to {}", filename));
+                                        egui_app
+                                            .status_bar
+                                            .set_message(format!("Trace saved to {}", filename));
                                     }
                                     Err(e) => {
-                                        egui_app.status_bar.set_message(format!("Failed to save trace: {}", e));
+                                        egui_app
+                                            .status_bar
+                                            .set_message(format!("Failed to save trace: {}", e));
                                     }
                                 }
                             }
@@ -6453,13 +6455,11 @@ fn main() {
             // We check if egui wants input (e.g., text field focused) and only skip controller updates then.
             // This allows controller input to work even when docked panels are visible.
             let egui_wants_input = egui_backend.egui_ctx().wants_keyboard_input();
-            
+
             if !matches!(&sys, EmulatorSystem::PC(_)) {
                 // For non-PC systems, use standard controller mapping (always update, even if egui has focus)
-                let controller_state =
-                    get_controller_state(&egui_backend, &settings.input.player1);
-                let snes_state =
-                    get_snes_controller_state(&egui_backend, &settings.input.player1);
+                let controller_state = get_controller_state(&egui_backend, &settings.input.player1);
+                let snes_state = get_snes_controller_state(&egui_backend, &settings.input.player1);
                 let chip8_state = get_chip8_controller_state(&egui_backend);
 
                 // ColecoVision needs special handling for 2-player input

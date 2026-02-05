@@ -295,7 +295,9 @@ macro_rules! impl_instruction_tracer_methods {
         }
 
         /// Get a mutable reference to the instruction tracer
-        pub fn get_instruction_tracer_mut(&mut self) -> &mut $crate::instruction_tracer::InstructionTracer {
+        pub fn get_instruction_tracer_mut(
+            &mut self,
+        ) -> &mut $crate::instruction_tracer::InstructionTracer {
             &mut self.instruction_tracer
         }
     };

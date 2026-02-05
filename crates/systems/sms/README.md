@@ -156,10 +156,23 @@ The SMS has optional BIOS ROM support:
 - Games start directly from cartridge ROM at 0x0000
 
 **Loading BIOS:**
-- BIOS can be mounted via the "bios" mount point
-- Supports .sms, .bin, .rom file extensions
-- When loaded, BIOS is automatically enabled
-- BIOS typically boots, initializes hardware, then disables itself
+
+1. **Command-line argument**:
+   ```bash
+   hemu --bios bios.sms game.sms
+   ```
+
+2. **Auto-detection**: If `--bios` is not specified, the emulator automatically searches for BIOS files in the same directory as the cartridge ROM using these filenames:
+   - `bios.sms`
+   - `sms.rom`
+   - `sms.bin`
+   - `bios.rom`
+   - `bios.bin`
+
+3. **Mount point**: BIOS can also be mounted via the "bios" mount point programmatically
+   - Supports .sms, .bin, .rom file extensions
+   - When loaded, BIOS is automatically enabled
+   - BIOS typically boots, initializes hardware, then disables itself
 
 **Use Cases:**
 - Some Japanese games require BIOS

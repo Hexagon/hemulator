@@ -81,8 +81,23 @@ Full save state support includes:
 
 ## System Requirements
 
-The ColecoVision requires a BIOS ROM to boot, which must be provided separately via the mount points system:
+The ColecoVision requires a BIOS ROM to boot. The emulator supports loading BIOS via:
 
+1. **Command-line argument** (recommended):
+   ```bash
+   hemu --bios coleco.rom game.col
+   ```
+
+2. **Auto-detection**: If `--bios` is not specified, the emulator automatically searches for BIOS files in the same directory as the cartridge ROM using these filenames:
+   - `coleco.rom`
+   - `coleco.bin`
+   - `bios.rom`
+   - `bios.bin`
+   - `ColecoVision BIOS (1982).col`
+
+The BIOS must be 8KB (8192 bytes) in size.
+
+**Mount points:**
 - **BIOS**: 8 KB system ROM (required)
 - **Cartridge**: Game ROM up to 32 KB (required)
 
