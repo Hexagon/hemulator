@@ -1,70 +1,107 @@
-# SMS Test ROM
+# SMS Test ROMs
 
-This directory contains a minimal test ROM for the Sega Master System.
+This directory contains test ROMs for the Sega Master System emulator.
 
-## Purpose
+## Test ROMs
 
-This test ROM is designed to:
-1. Verify basic Z80 CPU functionality
-2. Test VDP initialization and register writes
-3. Demonstrate tile pattern loading
-4. Display a visible checkerboard pattern
-5. Provide deterministic output for smoke tests
+### test.sms - Basic Checkerboard Test
+A minimal test ROM that displays a simple checkerboard pattern.
 
-## Building
+**Purpose:**
+- Verify basic Z80 CPU functionality
+- Test VDP Mode 4 initialization
+- Test simple tile pattern loading
+- Demonstrate basic rendering with 2 colors
 
+**Expected Output:**
+- 256×192 pixel resolution
+- Checkerboard pattern (50% white, 50% black)
+- Uses tiles 0 (white) and 1 (transparent/black backdrop)
+
+**Building:**
 ```bash
-./build.sh
+python3 build_rom.py
 ```
 
-Requirements:
-- Python 3 (for ROM generation script)
+### test_enhanced.sms - Multi-Color Band Test
+An enhanced test ROM that demonstrates multi-color rendering.
+
+**Purpose:**
+- Test Mode 4 with full register initialization
+- Verify CRAM (Color RAM) palette loading
+- Test multiple tile patterns with different colors
+- Demonstrate production-like VDP usage
+
+**Expected Output:**
+- 256×192 pixel resolution
+- Blue backdrop color
+- Four horizontal colored bands:
+  - Rows 0-5: White (25% of screen)
+  - Rows 6-11: Red (25% of screen)
+  - Rows 12-17: Green (25% of screen)
+  - Rows 18-23: Blue (25% of screen)
+
+**Building:**
+```bash
+python3 build_enhanced.py
+```
+
+## Requirements
+
+- Python 3 (for ROM generation scripts)
 
 ## ROM Structure
 
+Both ROMs use the standard SMS format:
 - **Format**: SMS ROM with TMR SEGA header
 - **Size**: 32 KB
 - **Header**: TMR SEGA signature at 0x7FF0
+- **Mode**: Mode 4 (SMS native graphics mode)
+- **Region**: Export (NTSC)
 
-## Test Program
+## Testing
 
-The test ROM performs the following operations:
+Smoke tests for these ROMs are included in `crates/systems/sms/src/system.rs`:
+- `smoke_test_sms()`: Tests the basic checkerboard ROM
+- `test_enhanced_rom()`: Tests the multi-color band ROM
 
-1. **Initialization**:
-   - Disables interrupts (DI)
-   - Sets stack pointer to 0xDFF0
-   
-2. **VDP Setup**:
-   - Configures VDP registers (mode, name table, sprite table)
-   - Sets display mode 4 with display enabled
-   
-3. **Tile Data**:
-   - Loads tile 0: All white pixels (32 bytes of 0xFF)
-   - Loads tile 1: All black pixels (32 bytes of 0x00)
-   
-4. **Name Table**:
-   - Fills 32x24 tile name table at 0x3800
-   - Creates checkerboard pattern by alternating tiles 0 and 1
-   
-5. **Palette**:
-   - Sets palette entry 0 to white (0x3F - max brightness)
-   - Sets palette entry 1 to black (0x00)
-   
-6. **Main Loop**:
-   - Infinite loop with HALT instruction
+Run tests with:
+```bash
+cargo test --package emu_sms
+```
 
-## Expected Output
+## Implementation Notes
 
-The test ROM should display a checkerboard pattern on screen:
-- 256x192 pixel resolution
-- Alternating white and black 8x8 tiles
-- Approximately 50% white pixels, 50% black pixels
+### VDP Mode 4
+Both test ROMs use Mode 4, the native SMS graphics mode:
+- Tile-based background rendering
+- 4 bits per pixel (16 colors per tile)
+- 256×192 resolution
+- Name table at 0x3800 (register 2 = 0x0E)
+- Sprite table at 0x3F00 (register 5 = 0x7E)
 
-## Smoke Test
+### Color Palette (CRAM)
+The enhanced test ROM sets up a 17-entry palette:
+- Entries 0-15: Tile colors (black, white, red, green, blue, etc.)
+- Entry 16: Backdrop color (blue)
 
-The smoke test in `crates/systems/sms/src/system.rs` verifies:
-- Frame dimensions (256x192)
-- Visible output (non-zero pixel count > 0)
-- Basic rendering (white pixel percentage > 1%)
+### Tile Format
+SMS Mode 4 uses 4-bit-per-pixel tiles:
+- 32 bytes per 8×8 tile
+- 4 bytes per row (one byte per bit plane)
+- Pixel value = bit0 | (bit1<<1) | (bit2<<2) | (bit3<<3)
 
-More strict verification (exact checkerboard pattern) requires complete VDP implementation.
+Example for a solid white tile (pixel value 1):
+```
+Row 0: 0xFF, 0x00, 0x00, 0x00  # All pixels = 0b0001 = 1
+Row 1: 0xFF, 0x00, 0x00, 0x00
+... (8 rows total)
+```
+
+### Display Enable Logic
+The test ROMs demonstrate the correct display enable behavior:
+- In Mode 4: Display is always on when Mode 4 is enabled (bit 2 of register 0)
+- Bit 6 of register 1 controls 192-line vs 224-line mode (not blanking)
+- In TMS modes (0-3): Bit 6 of register 1 controls display blanking
+
+This matches the real SMS hardware behavior where Mode 4 games don't use display blanking.
