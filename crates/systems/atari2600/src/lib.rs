@@ -94,9 +94,8 @@
 //!
 //! ## Known Limitations
 //!
-//! 1. **Audio**: Audio synthesis is simplified (registers stored but not fully synthesized)
-//! 2. **Collision Detection**: Simplified implementation (registers exist but always return 0)
-//! 3. **Player/Missile Sizing**: Only default 1x size supported (NUSIZ register not implemented)
+//! See the [Atari 2600 README](README.md) for a comprehensive list of known limitations
+//! and hardware-accurate behaviors.
 //!
 //! # Usage Example
 //!

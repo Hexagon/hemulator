@@ -432,6 +432,35 @@ INPT0-INPT3 analog input is fully implemented in the TIA with proper capacitor c
 
 These behaviors are authentic to the original hardware and affect all emulators:
 
+#### Regional Variations (NTSC vs PAL)
+
+✅ **Fully Implemented** 
+
+The emulator properly handles both NTSC and PAL Atari 2600 systems:
+
+**NTSC (North America, Japan)**:
+- 262 scanlines per frame
+- 192 visible scanlines
+- 60 Hz refresh rate
+- 128 colors (16 hues × 8 luminance levels)
+- Color clock: 3.579545 MHz
+
+**PAL (Europe, Australia)**:
+- 312 scanlines per frame
+- 228 visible scanlines  
+- 50 Hz refresh rate
+- 104 colors (13 hues × 8 luminance levels)
+- Color clock: 3.546894 MHz
+
+**PAL Color Encoding**:
+- PAL uses a different color encoding than NTSC due to phase alternation
+- Color indices 0-103 map directly to accurate PAL palette values
+- Color indices 104-127 wrap around to indices 0-23 (mimics hardware behavior)
+  - Most games only use indices 0-103, so wrapping is rarely encountered
+  - This matches observed PAL hardware where undefined colors wrap
+
+**Implementation Quality**: Hardware-accurate with proper timing and palette support for both standards.
+
 #### Sprite Flicker (e.g., Pac-Man Ghosts)
 
 ✅ **Hardware-Accurate** ⚠️ **Appears as Bug on Modern Displays**
