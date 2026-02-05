@@ -714,6 +714,50 @@ mod tests {
     }
 
     #[test]
+    fn test_enhanced_rom() {
+        // Load the enhanced test ROM
+        let rom = include_bytes!("../../../../test_roms/sms/test_enhanced.sms");
+        let mut system = SmsSystem::new();
+        system.load_rom(rom.to_vec());
+        system.reset();
+
+        // Run for several frames
+        for _ in 0..20 {
+            let _ = system.step_frame();
+        }
+
+        // Get a frame
+        let frame = system.step_frame().unwrap();
+
+        // Verify we have multiple colors (should have white, red, green, blue backdrop)
+        use std::collections::HashMap;
+        let mut color_counts: HashMap<u32, usize> = HashMap::new();
+        for &pixel in &frame.pixels {
+            *color_counts.entry(pixel).or_insert(0) += 1;
+        }
+
+        println!(
+            "Enhanced ROM produced {} unique colors:",
+            color_counts.len()
+        );
+        for (color, count) in &color_counts {
+            println!(
+                "  Color {:08X}: {} pixels ({:.2}%)",
+                color,
+                count,
+                (*count as f32 / frame.pixels.len() as f32) * 100.0
+            );
+        }
+
+        // Should have at least 3 colors (backdrop + multiple tile colors)
+        assert!(
+            color_counts.len() >= 3,
+            "Expected at least 3 colors, got {}",
+            color_counts.len()
+        );
+    }
+
+    #[test]
     fn test_vdp_interrupt_triggers() {
         let mut system = SmsSystem::new();
 

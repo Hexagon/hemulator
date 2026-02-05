@@ -414,9 +414,18 @@ impl Vdp {
         // Check if Mode 4 is enabled (register 0, bit 2)
         let mode_4_enabled = (self.registers[0] & 0x04) != 0;
 
-        // In Mode 4, display is always on (bit 6 of register 1 controls 224-line mode)
-        // In TMS modes (0-3), bit 6 of register 1 controls display blanking (0=blank, 1=display)
-        let display_enabled = mode_4_enabled || (self.registers[1] & 0x40) != 0;
+        // Display enable logic differs between Mode 4 and TMS modes
+        let display_enabled = if mode_4_enabled {
+            // In Mode 4 (SMS mode):
+            // - Bit 6 of register 1 controls whether we use 192-line (0) or 224-line (1) mode
+            // - Display is always on in Mode 4 (no blanking bit)
+            // - However, we only render if Mode 4 is actually enabled
+            true
+        } else {
+            // In TMS modes (0-3) for backward compatibility:
+            // - Bit 6 of register 1 controls display blanking (0=blank, 1=display)
+            (self.registers[1] & 0x40) != 0
+        };
 
         // Render background if display enabled
         if display_enabled {
