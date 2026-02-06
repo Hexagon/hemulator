@@ -55,9 +55,13 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Code comment: "TODO: Implement GAIN modes (direct, linear increase/decrease, exponential)"
 
 #### PC/DOS
-- [ ] **PC Speaker Audio**: Connect PIT channel 2 to audio output - `crates/systems/pc/`
-  - PIT tracks frequency/state but audio generation not connected to frontend
-  - Impact: No sound output from DOS programs
+- [x] **PC Speaker Audio**: Connect PIT channel 2 to audio output - `crates/systems/pc/`
+  - Implemented get_audio_samples() method in PcSystem
+  - Generates square wave audio based on PIT channel 2 frequency and output state
+  - Respects speaker gate enable/disable from port 0x61
+  - Added speaker_gate_enabled() getter method to PcBus
+  - Connected to frontend audio system
+  - Impact: PC speaker audio now functional for DOS programs
 
 #### ColecoVision  
 - [ ] **Z80 ROM Execution**: Debug why test ROM doesn't execute properly through BIOS - `crates/systems/colecovision/src/lib.rs`

@@ -286,6 +286,63 @@ impl PcSystem {
         (self.video.fb_width(), self.video.fb_height())
     }
 
+    /// Get audio samples from the PC speaker
+    ///
+    /// Generates audio samples based on the PIT channel 2 (PC speaker) output.
+    /// The PC speaker produces a square wave controlled by the PIT.
+    ///
+    /// # Arguments
+    /// * `count` - Number of samples to generate (typically for one frame)
+    ///
+    /// # Returns
+    /// Vector of 16-bit audio samples at 44.1 kHz sample rate
+    pub fn get_audio_samples(&self, count: usize) -> Vec<i16> {
+        const SAMPLE_RATE: f64 = 44_100.0; // Standard audio sample rate
+        const AMPLITUDE: i16 = 8192; // Quarter of max 16-bit range for reasonable volume
+
+        let mut samples = Vec::with_capacity(count);
+        
+        // Get speaker state from PIT channel 2
+        let speaker_enabled = self.cpu.bus().speaker_gate_enabled();
+        let speaker_output = self.cpu.bus().pit.speaker_output();
+        
+        // If speaker is disabled or output is low, generate silence
+        // Otherwise generate square wave at PIT frequency
+        if !speaker_enabled {
+            samples.resize(count, 0);
+        } else {
+            // Get the current frequency from PIT channel 2
+            let frequency = self.cpu.bus().pit.speaker_frequency();
+            
+            // Generate square wave samples
+            // We track phase across samples to maintain continuity
+            // Note: In a real implementation, we'd need to maintain phase state
+            // across calls, but for simplicity we start fresh each time
+            let samples_per_cycle = SAMPLE_RATE / frequency;
+            
+            for i in 0..count {
+                // Calculate phase within the current cycle (0.0 to 1.0)
+                let phase = (i as f64 % samples_per_cycle) / samples_per_cycle;
+                
+                // Square wave: high for first half of cycle, low for second half
+                // Apply the PIT output state - if output is high, emit positive, else negative
+                let sample = if speaker_output {
+                    if phase < 0.5 {
+                        AMPLITUDE
+                    } else {
+                        -AMPLITUDE
+                    }
+                } else {
+                    0
+                };
+                
+                samples.push(sample);
+            }
+        }
+        
+        samples
+    }
+
     /// Trigger boot sector loading (called before first execution or on reset)
     fn ensure_boot_sector_loaded(&mut self) {
         self.cpu.bus_mut().load_boot_sector();
