@@ -647,7 +647,7 @@ For N64 games, the standard controller mappings apply with these button equivale
     - 0x0D: Shaded triangle with Z-buffer (fully implemented)
   - **Stub implementations** (accept but don't fully process):
     - TEXTURE_RECTANGLE - currently renders as solid rectangle (needs advanced sampling)
-    - SET_OTHER_MODES - rendering modes configuration
+    - SET_OTHER_MODES - rendering mode configuration (ignored)
   - **TMEM (Texture Memory)**: ✅ Fully implemented
     - 4KB TMEM buffer with texture loading via LOAD_BLOCK and LOAD_TILE
     - Tile descriptors (8 tiles) fully configured via SET_TILE
@@ -655,17 +655,18 @@ For N64 games, the standard controller mappings apply with these button equivale
     - Texture sampling for RGBA16 and RGBA32 formats
     - **Textured triangle rendering fully integrated**
   - **Not implemented**: 
-    - Advanced texture formats (CI, IA, I)
+    - Advanced texture formats (CI, IA, I) - render as white
     - Anti-aliasing and blending
     - Perspective-correct texture mapping
     - Most advanced rendering commands
+    - Performance counters (DPC_CLOCK, DPC_BUFBUSY, DPC_PIPEBUSY, DPC_TMEM) return zeros
   - Can render 3D textured graphics with depth testing
   - Full game graphics require perspective-correct mapping, additional RDP features, and more complete RSP emulation
 - **VI (Video Interface)**: Registers implemented but not fully integrated
   - All VI registers accessible (STATUS, ORIGIN, WIDTH, timing, scaling)
   - Not yet used for actual display output (uses RDP internal framebuffer)
   - Scanline tracking and interrupt support in place but not active
-- **RSP**: High-Level Emulation with F3DEX display list processing
+- **RSP**: High-Level Emulation with partial F3DEX display list processing
   - ✅ **Implemented**:
     - Microcode detection (F3DEX, F3DEX2, Audio)
     - Vertex buffer management (32 vertices)
@@ -680,19 +681,29 @@ For N64 games, the standard controller mappings apply with these button equivale
     - RDP command passthrough (0xE0-0xFF range)
     - Vertex transformation with perspective projection
     - RDP triangle command generation
-  - ⚠️ **Limitations**:
+  - ⚠️ **Stubbed/Missing**:
+    - Audio microcode tasks (not implemented - no audio output)
+    - G_MOVEWORD, G_MOVEMEM, G_SETOTHERMODE_L/H (logged but ignored)
+    - Semaphore register (always returns 0)
+    - Signal bits (SIG0-SIG7) not implemented
+    - No instruction-level execution (HLE only, no LLE)
     - No lighting calculations
     - No texture coordinate generation
     - Some advanced F3DEX2 commands missing
-- **Audio**: Audio interface not implemented - silent gameplay
+- **Audio**: Audio interface implemented but RSP audio microcode not supported - silent gameplay
+- **Save System**: No EEPROM, Flash, or Controller Pak support - games cannot save progress
 - **Input**: Controller infrastructure complete, needs frontend integration
   - All 14 buttons defined and working (A, B, Z, Start, D-pad, L, R, C-buttons)
   - Analog stick support implemented (-128 to 127 range)
   - PIF command protocol functional
   - Frontend keyboard/gamepad mapping not yet connected
 - **Memory**: Basic memory map only - no TLB, cache, or accurate timing
-- **Timing**: Frame-based implementation - not cycle-accurate
-- **Status**: Core infrastructure in place (CPU, RDP, RSP HLE with F3DEX support, PIF). RSP supports full matrix stack operations and conditional branching. **Textured triangle rendering fully implemented** with TMEM texture loading and sampling. Next steps: perspective-correct mapping, lighting, frontend controller integration. Test ROMs can run and render transformed 3D graphics with textures.
+- **Timing**: Frame-based implementation (50,000 cycles/frame vs hardware's 1,562,500) - not cycle-accurate
+- **CPU Edge Cases**: 
+  - Overflow traps not implemented (uses wrapping arithmetic)
+  - Memory alignment not validated (assumes proper alignment)
+  - Cache is direct-mapped only (no full coherency)
+- **Status**: Core infrastructure in place (CPU, RDP, RSP HLE with partial F3DEX support, PIF). RSP supports full matrix stack operations and conditional branching. **Textured triangle rendering fully implemented** with TMEM texture loading and sampling. Next steps: complete RSP commands, audio microcode, save system, perspective-correct mapping, lighting, frontend controller integration. Test ROMs can run and render transformed 3D graphics with textures.
 
 ### PC/DOS (IBM PC/XT)
 

@@ -8,8 +8,8 @@ The N64 emulator is a **basic implementation** with functional RDP graphics proc
 
 ### What Works
 
-- ✅ **MIPS R4300i CPU** - Complete instruction set implementation
-  - All base instructions (load/store, arithmetic, branch, etc.)
+- ✅ **MIPS R4300i CPU** - Instruction set implementation (with some edge cases not fully implemented - see Known Limitations)
+  - All base instructions (load/store, arithmetic, branch, etc.) - see "Common Pitfalls" section for edge cases
   - CP0 coprocessor with TLB support
   - **TLB/MMU** - Full TLB implementation with CP0 integration
     - TLBWI (Write Indexed), TLBWR (Write Random)
@@ -27,7 +27,7 @@ The N64 emulator is a **basic implementation** with functional RDP graphics proc
   - GPU-accelerated using OpenGL 3.3 Core Profile
   - 3D triangle rasterization (flat, Gouraud shading, textured triangles)
   - Hardware Z-buffer for depth testing
-  - Display list processing with comprehensive command support:
+  - Display list processing with command support (many commands stubbed - see "What's Missing"):
     - FILL_RECTANGLE (0x36) - Solid color rectangles
     - SET_FILL_COLOR (0x37) - Set fill color
     - SYNC_FULL (0x29) - Pipeline synchronization
@@ -61,8 +61,26 @@ The N64 emulator is a **basic implementation** with functional RDP graphics proc
 ### What's Missing for Full Compatibility
 
 - ⏳ **Cycle Accuracy** - Uses reduced cycle count (50,000 cycles/frame instead of hardware-accurate 1,562,500) for performance; frame-based timing, not cycle-accurate (configurable via `set_frame_cycles()`)
-- ⏳ **Some RDP Commands** - Missing some advanced blend/combine modes
-- ⏳ **RSP Microcode** - Only common F3DEX/F3DEX2 commands implemented (some games may use less common commands)
+- ⏳ **RDP Commands** - Many commands stubbed or simplified:
+  - `SET_OTHER_MODES` (0x2F) - Ignored (rendering mode configuration not applied)
+  - Some texture formats not implemented (returns white for unknown formats)
+  - Advanced blend/combine modes missing
+  - Performance counters (DPC_CLOCK, DPC_BUFBUSY, DPC_PIPEBUSY, DPC_TMEM) return hardcoded zeros
+- ⏳ **RSP Implementation** - High-Level Emulation only (no Low-Level Emulation):
+  - Only F3DEX/F3DEX2 graphics commands implemented
+  - Audio microcode tasks explicitly not implemented
+  - Many F3DEX commands are stubs: G_MOVEWORD, G_MOVEMEM, G_SETOTHERMODE_L/H
+  - Semaphore register always returns 0 (stub)
+  - Signal bits (SIG0-SIG7) not implemented
+  - No instruction-level execution (scalar/vector units not emulated)
+- ⏳ **Save System** - No EEPROM, Flash, or Memory Card support:
+  - Cartridge saves not implemented
+  - Controller Pak (memory card) not supported
+  - No persistent storage for game progress
+- ⏳ **CPU Accuracy** - Some edge cases not fully implemented:
+  - Overflow traps not implemented (uses wrapping arithmetic instead)
+  - Memory alignment not validated (assumes properly aligned access)
+  - Cache is direct-mapped only (no full coherency)
 
 ### Recent Improvements (January 2026)
 
@@ -279,27 +297,31 @@ See [User Manual](https://hemulator.56k.guru/user/systems.html#n64-nintendo-64) 
 
 **Main limitations preventing full game compatibility**:
 1. **Cycle Accuracy** - Uses 50,000 cycles/frame (vs hardware's 1,562,500) for performance; may cause issues with precise timing-dependent games (configurable via `set_frame_cycles()`)
-2. **Missing RDP Commands** - Some advanced blend/combine modes not implemented
-3. **RSP Coverage** - HLE works for common F3DEX commands but may not cover all microcode variants
-4. **CPU Cache** - Cache is direct-mapped; full cache coherency not implemented
+2. **RDP Incomplete** - Many commands stubbed or simplified (SET_OTHER_MODES ignored, some texture formats missing, performance counters return zeros)
+3. **RSP HLE Only** - No instruction-level execution; only F3DEX graphics commands partially implemented; audio microcode not supported; many commands are stubs
+4. **No Save System** - EEPROM, Flash, and Memory Card (Controller Pak) not implemented; games cannot save progress
+5. **CPU Edge Cases** - Overflow traps not implemented (uses wrapping arithmetic); memory alignment not validated; cache is direct-mapped only
 
 ## Future Development
 
 ### Critical for Commercial Games
-1. **Cycle-Accurate Timing** - Improve timing precision for games that depend on it (optional enhancement - configurable system already in place)
-2. **RSP Microcode Coverage** - Expand HLE to support more microcode variants
+1. **RSP Microcode Expansion** - Implement missing F3DEX commands (G_MOVEWORD, G_MOVEMEM, G_SETOTHERMODE_*) and add audio microcode support
+2. **Save System** - Implement EEPROM/Flash cartridge saves and Controller Pak (memory card) support
+3. **RDP Command Completion** - Implement SET_OTHER_MODES and missing texture formats for proper rendering
+4. **Cycle-Accurate Timing** - Improve timing precision for games that depend on it (optional enhancement - configurable system already in place)
 
 ### Nice to Have
-1. Additional RDP blend/combine modes for advanced graphics effects
-2. Expand RSP HLE coverage for less common microcode variants
-3. Memory card support in PIF
-4. EEPROM save data support
-5. Extended controller features (e.g., rumble, accessory support)
+1. RDP performance counters (DPC_CLOCK, DPC_BUFBUSY, DPC_PIPEBUSY, DPC_TMEM)
+2. RSP semaphore and signal bits implementation
+3. CPU overflow trap exceptions for signed arithmetic
+4. Memory alignment validation
+5. Full cache coherency (currently direct-mapped only)
+6. Extended controller features (rumble, accessory support)
 
 ### Long Term
-1. Full OpenGL renderer with GL context integration
-2. Cycle-accurate timing
-3. TLB and cache emulation
+1. Low-Level RSP Emulation (instruction-level execution)
+2. Complete RDP blend/combine pipeline
+3. Full cache emulation
 4. Game compatibility improvements
 
 ## Contributing
