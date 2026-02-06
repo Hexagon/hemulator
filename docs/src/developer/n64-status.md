@@ -21,7 +21,7 @@ For detailed implementation information, see:
 ### ✅ Working Components
 
 **Core System**:
-- ✅ **MIPS R4300i CPU** - Complete instruction set implementation from `emu_core::cpu_mips_r4300i`
+- ✅ **MIPS R4300i CPU** - Instruction set implementation from `emu_core::cpu_mips_r4300i` (with some edge cases - see Known Limitations)
 - ✅ **Memory Bus** - 4MB RDRAM, PIF boot, SP memory, cartridge ROM
 - ✅ **Cartridge Loading** - Z64/N64/V64 formats with byte-order conversion
 - ✅ **Save States** - Full system state serialization
@@ -36,20 +36,47 @@ For detailed implementation information, see:
 ### ⏳ Partially Working / In Development
 
 **RSP (Reality Signal Processor)**:
-- ⏳ **Basic Infrastructure** - Stub implementation in place
-- ❌ **Microcode Execution** - Not implemented (required for commercial games)
-- ❌ **Geometry Processing** - Not implemented
+- ⏳ **High-Level Emulation (HLE)** - Partial F3DEX/F3DEX2 support implemented
+  - ✅ Microcode detection and vertex transformation pipeline
+  - ⚠️ Many F3DEX commands are stubs (G_MOVEWORD, G_MOVEMEM, G_SETOTHERMODE_L/H)
+  - ❌ Audio microcode tasks not implemented
+  - ❌ Semaphore and signal bits not implemented
+- ❌ **Instruction-Level Execution** - Not implemented (HLE only, no LLE)
+- ❌ **Geometry Processing** - Limited to basic vertex transformation
 
-**Graphics**:
-- ⏳ **Texture Mapping** - TMEM structure in place, sampling not fully implemented
-- ⏳ **Advanced RDP Commands** - Many commands stubbed or missing
+**Graphics (RDP)**:
+- ⏳ **Display List Processing** - Partial command support
+  - ✅ Basic commands (FILL_RECTANGLE, SET_FILL_COLOR, SYNC, SET_SCISSOR)
+  - ✅ Triangle rendering (all modes 0x08-0x0F)
+  - ⚠️ SET_OTHER_MODES stubbed (rendering mode configuration ignored)
+  - ⚠️ Performance counters return hardcoded zeros
+- ⏳ **Texture Mapping** - TMEM structure in place, some formats missing
+  - ✅ RGBA16, RGBA32 formats working
+  - ❌ Advanced formats (CI, IA, I) render as white
+  - ❌ Perspective-correct mapping not implemented
+
+**Audio**:
+- ⏳ **Audio Interface (AI)** - Hardware implemented but no microcode support
+  - ✅ AI registers and DMA transfers working
+  - ✅ Integration with frontend audio output
+  - ❌ RSP audio microcode tasks not implemented - no sound output
+
+**Save System**:
+- ❌ **EEPROM** - Not implemented (4Kbit/16Kbit variants)
+- ❌ **Flash RAM** - Not implemented
+- ❌ **Controller Pak** - Not implemented (memory card support)
+
+**CPU**:
+- ⏳ **Edge Cases** - Some features not implemented
+  - ❌ Overflow traps (uses wrapping arithmetic instead)
+  - ❌ Memory alignment validation
+  - ⚠️ Cache is direct-mapped only (no full coherency)
 
 ### ❌ Not Implemented
 
-- ❌ **Audio** - Audio interface not implemented
-- ❌ **Controller Input** - Input system not implemented
-- ❌ **Memory Management** - No TLB, cache, or accurate timing
-- ❌ **Commercial Game Support** - RSP microcode execution required
+- ❌ **Controller Input** - Input system not connected to frontend (infrastructure complete, mapping needed)
+- ❌ **Memory Management** - No full TLB coherency or cache simulation (basic TLB/MMU implemented)
+- ❌ **Cycle-Accurate Timing** - Frame-based timing (50,000 cycles/frame vs hardware's 1,562,500)
 
 ## Renderer Architecture
 
@@ -103,11 +130,12 @@ cargo test --package emu_n64 -- --ignored
 See [MANUAL.md](MANUAL.md#n64-nintendo-64) for complete user-facing limitations.
 
 **Critical blockers for commercial games**:
-1. **No RSP microcode execution** - Cannot process geometry from games
-2. **No texture mapping** - Only flat/shaded triangles (TMEM structure exists but sampling incomplete)
-3. **No audio** - Audio interface not implemented
-4. **No controller input** - Input system not implemented
-5. **Frame-based timing** - Not cycle-accurate
+1. **Incomplete RSP HLE** - Many F3DEX commands stubbed (G_MOVEWORD, G_MOVEMEM, G_SETOTHERMODE_*); audio microcode not implemented
+2. **No Save System** - EEPROM/Flash/Controller Pak not implemented; games cannot save progress
+3. **RDP Commands Incomplete** - SET_OTHER_MODES ignored; some texture formats missing (render as white); performance counters return zeros
+4. **No Audio Microcode** - RSP audio tasks not implemented; games cannot produce sound
+5. **Frame-based timing** - Uses 50,000 cycles/frame (vs hardware's 1,562,500); not cycle-accurate
+6. **CPU Edge Cases** - Overflow traps not implemented; memory alignment not validated; cache is direct-mapped only
 
 **System Requirements**:
 - **OpenGL 3.3+ required** - No software fallback available

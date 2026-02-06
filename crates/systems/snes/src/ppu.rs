@@ -40,7 +40,7 @@
 //!   - Reference: <https://wiki.superfamicom.org/rendering-the-screen#color-math>
 //!
 //! **NOT Implemented** (future enhancements):
-//! - Direct color mode (CGWSEL bits 0-1)
+//! - ✅ Direct color mode (CGWSEL bits 0-1) - Fully implemented
 
 use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::types::Frame;
@@ -365,9 +365,10 @@ pub struct Ppu {
     /// Controls WHERE and WHEN color math is applied, plus color clipping
     ///
     /// Bit layout:
-    /// - Bits 0-1: Direct color mode for 256-color BGs (Mode 3/4/7) - NOT IMPLEMENTED
+    /// - Bits 0-1: Direct color mode for 256-color BGs (Mode 3/4/7) - IMPLEMENTED ✅
     ///   - 00 = Normal color mode (palette lookup)
     ///   - 01/10/11 = Direct color mode (pixel value is color, not palette index)
+    ///   - Implementation: See get_color_with_palette() method (line 4076+)
     /// - Bits 2-3: Reserved (unused)
     /// - Bits 4-5: Color math enable control based on window regions
     ///   - 00 = Enable color math everywhere (no window masking)

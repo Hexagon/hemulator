@@ -9,16 +9,36 @@ This file tracks unimplemented features, stubs, and simplified implementations a
 
 ### Critical
 
-_None currently_
-
-### High
-
-#### SNES
+#### SNES - Enhancement Chips
 - [ ] **DSP-1 Coprocessor**: Complete missing commands (Attitude/Target/Rotate) - `crates/systems/snes/src/coprocessors/dsp1.rs:231,246,326,338`
   - Attitude (0x08): Only partial rotation matrix implementation (FIXME at line 231, TODO at line 246)
   - Target (0x20): Not implemented - returns zeros (FIXME at line 326)
   - Rotate (0x24): Not implemented - returns zeros (TODO at line 338)
   - Impact: Games using these commands may malfunction (Pilotwings, Super Mario Kart)
+
+#### SNES - PPU Advanced Features
+- [ ] **Interlace Mode**: Implement interlaced display modes - `crates/systems/snes/src/ppu.rs:1118-1122`
+  - Current: $2133 SETINI register is a stub (stored but ignored)
+  - Needed: Interlaced rendering support
+  - Impact: Some games may rely on interlaced display
+- [ ] **H/V Counter Reading**: Implement beam position tracking - `crates/systems/snes/src/ppu.rs:1214-1218`
+  - Current: $213C/$213D (OPHCT/OPVCT) always return 0
+  - Needed: Return actual H/V counter values
+  - Impact: Games scanning beam position won't work properly
+
+#### SNES - Bus/Memory
+- [ ] **CPU Halt During DMA**: Implement proper DMA CPU freeze - `crates/systems/snes/src/bus.rs:1419`
+  - Current: DMA executes immediately (comment: "would halt the CPU")
+  - Needed: Freeze CPU during DMA transfers for hardware-accurate timing
+  - Impact: Game timing may be wrong if code relies on CPU being frozen
+- [ ] **Cycle-Accurate DMA Timing**: Fix DMA cycle counting - `crates/systems/snes/src/bus.rs:440-520`
+  - Current: Fixed cycles per transfer (8-16) instead of actual hardware timing
+  - Needed: Account for address bus speed differences
+  - Impact: Not cycle-accurate for timing-sensitive code
+- [ ] **FastROM Timing**: Implement FastROM memory access timing - `crates/systems/snes/src/bus.rs:1388-1391`
+  - Current: MEMSEL register ($420D) written but ignored
+  - Needed: Faster access times for FastROM regions
+  - Impact: Performance optimization for games using FastROM
 
 #### SNES Audio (DSP)
 - [ ] **Gaussian Interpolation**: Replace linear interpolation with Gaussian filter - `crates/core/src/apu/dsp.rs:368`
@@ -68,6 +88,15 @@ _None currently_
 
 ### Low
 
+#### COMPLETED ✅
+- [x] **SNES H/V Timer IRQ**: Fully implemented (2026-02-05) - `crates/systems/snes/src/bus.rs:155-163`, `crates/systems/snes/src/lib.rs:347-387`
+  - All 4 timer modes (off, H-only, V-only, HV) implemented
+  - IRQ flag register ($4211) with read-and-clear behavior
+  - Mode selection via $4200 bits 5-4
+  - Comprehensive test coverage (4 new tests, all passing)
+  - Impact: Essential for timing-sensitive games using raster effects
+  - Reference: https://sneslab.net/wiki/H/V_Count_Timer
+
 #### UI
 - [ ] Make links in about tab work
 - [ ] Check that áll systems has the enhanced debugger state
@@ -92,12 +121,45 @@ _None currently_
   - Impact: Some hardware features may not work
 
 #### N64
-- [ ] **RDP Counters**: Implement RDP performance counters - `crates/systems/n64/src/rdp.rs`
+- [ ] **RSP Microcode Commands**: Implement stubbed F3DEX commands - `crates/systems/n64/src/rsp_hle.rs`
+  - G_MOVEWORD (0xDB) - stub at line 732
+  - G_MOVEMEM (0xDC) - stub at line 857
+  - G_SETOTHERMODE_L (0xE2) - stub at line 878
+  - G_SETOTHERMODE_H (0xE3) - stub at line 895
+  - Impact: Some games may not render correctly without these commands
+- [ ] **Audio Microcode**: Implement RSP audio task processing - `crates/systems/n64/src/rsp_hle.rs:336`
+  - Current: "Audio tasks not yet implemented"
+  - Impact: No audio output from games
+- [ ] **Save System**: Implement EEPROM/Flash/Controller Pak support - `crates/systems/n64/src/pif.rs`
+  - Current: No save data persistence
+  - Needed: EEPROM (4Kbit/16Kbit), Flash RAM, Controller Pak
+  - Impact: Games cannot save progress
+- [ ] **RDP SET_OTHER_MODES**: Implement rendering mode configuration - `crates/systems/n64/src/rdp.rs:1160`
+  - Current: Logged as stub and ignored
+  - Needed: Proper blend/combine mode application
+  - Impact: Advanced graphics effects not working
+- [ ] **Texture Format Support**: Implement missing texture formats - `crates/systems/n64/src/rdp.rs:805`
+  - Current: "Other formats not yet implemented - return white"
+  - Impact: Some textures render as white instead of proper images
+
+#### N64
+- [ ] **RDP Performance Counters**: Implement RDP performance counters - `crates/systems/n64/src/rdp.rs`
   - DPC_CLOCK (clock counter) - returns 0
   - DPC_BUFBUSY (buffer busy counter) - returns 0
   - DPC_PIPEBUSY (pipe busy counter) - returns 0
   - DPC_TMEM (TMEM counter) - returns 0
   - Impact: Performance monitoring not available
+- [ ] **RSP Semaphore**: Implement RSP semaphore register - `crates/systems/n64/src/rsp.rs:195`
+  - Current: Always returns 0 (stub implementation)
+  - Impact: Synchronization between CPU and RSP not working
+- [ ] **RSP Signal Bits**: Implement signal bits (SIG0-SIG7) - `crates/systems/n64/src/rsp.rs:72-86`
+  - Current: Marked as #[allow(dead_code)]
+  - Impact: RSP-CPU communication signals not working
+- [ ] **Memory Alignment Validation**: Add alignment checks for load/store - `crates/core/src/cpu_mips_r4300i.rs`
+  - LH/SH: 2-byte aligned
+  - LW/SW: 4-byte aligned
+  - LD/SD: 8-byte aligned
+  - Impact: Unaligned access currently not validated (most code is properly aligned)
 
 #### MIPS R4300i
 - [ ] **Arithmetic Overflow Traps**: Implement overflow exception handling - `crates/core/src/cpu_mips_r4300i.rs`

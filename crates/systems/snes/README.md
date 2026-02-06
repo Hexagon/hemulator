@@ -134,11 +134,23 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
 
 #### CPU I/O Registers
 - ✅ **Interrupt Control**
-  - $4200 (NMITIMEN) - NMI/IRQ enable and auto-joypad
+  - $4200 (NMITIMEN) - NMI/IRQ enable, H/V timer IRQ enable, and auto-joypad
   - $4210 (RDNMI) - NMI flag with read-and-clear ⭐
-  - $4211 (TIMEUP) - IRQ flag (stub)
+  - $4211 (TIMEUP) - IRQ flag with read-and-clear ⭐
   - $4212 (HVBJOY) - H/V-Blank and joypad status
   - Reference: [CPU Registers](https://snes.nesdev.org/wiki/CPU_registers)
+
+- ✅ **H/V Timer IRQ** - Scanline interrupt timing ⭐
+  - $4207-$4208 (HTIMEL/HTIMEH) - Horizontal timer position (9-bit, 0-339)
+  - $4209-$420A (VTIMEL/VTIMEH) - Vertical timer scanline (9-bit, 0-261)
+  - Four timer modes via $4200 bits 5-4:
+    - Mode 0 (00): Timer off
+    - Mode 1 (01): H-timer only (triggers every scanline at HTIME)
+    - Mode 2 (10): V-timer only (triggers at VTIME scanline)
+    - Mode 3 (11): HV-timer (triggers at VTIME scanline and HTIME position)
+  - Hardware-accurate IRQ flag behavior ($4211 read-and-clear)
+  - Essential for raster effects, split screens, and scanline-based timing
+  - Reference: [H/V Count Timer](https://sneslab.net/wiki/H/V_Count_Timer)
 
 - ✅ **Controller Input**
   - $4016-$4017 - Serial joypad ports (JOYSER0/1)
@@ -427,9 +439,9 @@ The emulator now includes a framework for enhancement chip (coprocessor) support
 
 
 #### Other Missing Features
-- ❌ **IRQ** - H/V timer interrupts not implemented
 - ❌ **PAL** - NTSC timing only
 - ❌ **Interlace** - No interlace mode support
+- ⚠️ **H/V Counter Reading** - $213C/$213D (OPHCT/OPVCT) not implemented (beam position tracking)
 
 ## Register Implementation Status
 
@@ -452,16 +464,17 @@ Core PPU registers implemented:
 Reference: [PPU Registers](https://snes.nesdev.org/wiki/PPU_registers)
 
 ### CPU I/O Registers ($4000-$43FF)
-- ✅ $4200 (NMITIMEN) - Interrupt enable
+- ✅ $4200 (NMITIMEN) - Interrupt enable (NMI, H/V timer IRQ, auto-joypad)
+- ✅ $4207-$420A (HTIMEL/HTIMEH/VTIMEL/VTIMEH) - H/V timer position ⭐
 - ✅ $4210 (RDNMI) - NMI flag ⭐ Critical for proper NMI handling
-- ✅ $4211 (TIMEUP) - IRQ flag (stub)
+- ✅ $4211 (TIMEUP) - IRQ flag ⭐ Critical for H/V timer interrupts
 - ✅ $4212 (HVBJOY) - H/V-Blank and joypad status
 - ✅ $4016-$4017 - Controller serial ports
 - ✅ $4218-$421F - Auto-joypad read
 - ✅ $420B (MDMAEN) - DMA enable
 - ✅ $420C (HDMAEN) - HDMA enable
 - ✅ $4300-$437F - DMA/HDMA channel registers
-- ⚠️ $4202-$4206 - Multiply/Divide (stubbed)
+- ✅ $4202-$4206 - Multiply/Divide (fully functional)
 
 Reference: [CPU Registers](https://snes.nesdev.org/wiki/CPU_registers)
 
@@ -523,7 +536,7 @@ Located in `test_roms/snes/`:
 ```bash
 cargo test --package emu_snes
 ```
-- 70+ unit tests covering bus, PPU, DMA, HDMA, controllers, Mode 7, offset-per-tile, hi-res
+- 160 tests passing (comprehensive coverage of bus, PPU, DMA, HDMA, controllers, H/V timer IRQ, Mode 7, offset-per-tile, hi-res)
 - All tests passing
 
 ### Commercial Game Testing
@@ -576,16 +589,23 @@ cargo run -- game.sfc --log-bus debug
    - Current status: Audio works but quality may differ from hardware
 
 2. **Timing** - Frame-based, not cycle-accurate
+   - ✅ H/V Timer IRQ implemented for scanline-based timing
+   - ⚠️ DMA/HDMA timing simplified (not cycle-accurate)
+   - ⚠️ Some timing-sensitive effects may not work perfectly
    - Good enough for most games
-   - Some timing-sensitive effects may not work
 
 3. **Enhancement Chips** - Most chips not yet implemented
    - DSP-1 is partially implemented with known limitations:
      - Attitude command (0x08) incomplete - missing full rotation matrix
      - Target command (0x20) not implemented
      - Rotate command (0x24) not implemented
-   - SuperFX, SA-1, S-DD1, CX4, and other chips not yet implemented
-   - Games requiring unimplemented chips will not work properly
+   - SA-1 partially implemented with missing features:
+     - DMA engine not functional
+     - VLBP (Variable-Length Bit Processing) not implemented
+     - Co-processor CPU execution not implemented
+   - SuperFX/SuperFX2 core functionality implemented (Star Fox, Yoshi's Island)
+   - Other chips not yet implemented: S-DD1, CX4, SPC7110, ST-series, OBC-1
+   - Games requiring unimplemented chips or features will not work properly
    - See Enhancement Chip Roadmap section for planned implementations
 
 ## Hardware Accuracy & Edge Cases
