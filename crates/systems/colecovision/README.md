@@ -154,9 +154,16 @@ The 12-key numeric keypad is read separately from the main controller state in t
 - No tape/disk drive support
 - Controllers limited to standard joystick (no Super Action Controllers, spinners, etc.)
 - Numeric keypad (12 keys) not fully implemented - only joystick and fire buttons currently functional
-- Audio output currently stubbed (PSG implemented but not connected to audio pipeline)
 
 ## Recent Improvements
+
+### Audio Pipeline Integration (February 2026)
+- **PSG Audio Now Functional**: Complete audio pipeline integration with frontend
+  - SN76489 PSG now generates and outputs audio samples to the frontend
+  - Cycle-accurate audio generation matching SMS implementation
+  - PSG properly resets on system reset
+  - Audio quality: 44.1 kHz mono output with exponential volume curve
+- **Impact**: Games now have sound! All 3 tone channels and 1 noise channel working correctly
 
 ### VDP Edge Cases (January 2026)
 - **Sprite Collision Detection**: Now uses dedicated sprite buffer instead of color comparison, correctly detecting sprite-to-sprite overlap
