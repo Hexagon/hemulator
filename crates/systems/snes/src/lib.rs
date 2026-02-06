@@ -1111,105 +1111,113 @@ mod tests {
             EXPECTED_SPRITE_PIXELS
         );
     }
-    
+
     #[test]
     fn test_hv_timer_irq_disabled() {
         use emu_core::cpu_65c816::Memory65c816;
-        
+
         let mut sys = SnesSystem::new();
-        
+
         // Load test ROM
         let rom_data = include_bytes!("../../../../test_roms/snes/test.sfc");
         sys.mount("Cartridge", rom_data).unwrap();
-        
+
         // H/V timer IRQ disabled by default (mode = 0)
         assert_eq!(sys.cpu.bus().get_hv_irq_mode(), 0);
-        
+
         // Run a frame
         let _ = sys.step_frame();
-        
+
         // IRQ flag should not be set
         // Read $4211 which returns IRQ flag
         let irq_flag = sys.cpu.bus().read(0x4211);
-        assert_eq!(irq_flag & 0x80, 0, "IRQ flag should not be set when timer is disabled");
+        assert_eq!(
+            irq_flag & 0x80,
+            0,
+            "IRQ flag should not be set when timer is disabled"
+        );
     }
-    
+
     #[test]
     fn test_hv_timer_irq_mode_register() {
         use emu_core::cpu_65c816::Memory65c816;
-        
+
         let mut sys = SnesSystem::new();
-        
+
         // Load test ROM
         let rom_data = include_bytes!("../../../../test_roms/snes/test.sfc");
         sys.mount("Cartridge", rom_data).unwrap();
-        
+
         // Test writing to $4200 to set H/V IRQ mode
         // Bit 7 = NMI enable, bits 5-4 = H/V mode, bit 0 = auto-joypad
-        
+
         // Mode 0: Timer off (bits 5-4 = 00)
         sys.cpu.bus_mut().write(0x4200, 0x00);
         assert_eq!(sys.cpu.bus().get_hv_irq_mode(), 0);
-        
+
         // Mode 1: H-timer only (bits 5-4 = 01)
         sys.cpu.bus_mut().write(0x4200, 0x10);
         assert_eq!(sys.cpu.bus().get_hv_irq_mode(), 1);
-        
+
         // Mode 2: V-timer only (bits 5-4 = 10)
         sys.cpu.bus_mut().write(0x4200, 0x20);
         assert_eq!(sys.cpu.bus().get_hv_irq_mode(), 2);
-        
+
         // Mode 3: HV-timer (bits 5-4 = 11)
         sys.cpu.bus_mut().write(0x4200, 0x30);
         assert_eq!(sys.cpu.bus().get_hv_irq_mode(), 3);
     }
-    
+
     #[test]
     fn test_hv_timer_registers() {
         use emu_core::cpu_65c816::Memory65c816;
-        
+
         let mut sys = SnesSystem::new();
-        
+
         // Load test ROM
         let rom_data = include_bytes!("../../../../test_roms/snes/test.sfc");
         sys.mount("Cartridge", rom_data).unwrap();
-        
+
         // Test writing HTIME (H-position) $4207-$4208
         // HTIME is a 9-bit value (0-339)
         sys.cpu.bus_mut().write(0x4207, 0x50); // Low byte
         sys.cpu.bus_mut().write(0x4208, 0x01); // High byte (bit 0 only)
-        // HTIME should now be 0x0150 (336)
-        
+                                               // HTIME should now be 0x0150 (336)
+
         // Test writing VTIME (scanline) $4209-$420A
         // VTIME is a 9-bit value (0-261)
         sys.cpu.bus_mut().write(0x4209, 0x64); // Low byte (100)
         sys.cpu.bus_mut().write(0x420A, 0x00); // High byte
-        // VTIME should now be 100
-        
+                                               // VTIME should now be 100
+
         // Values are stored internally and used for IRQ triggering
         // We can't directly read them back, but they're used in check_hv_timer_irq()
     }
-    
+
     #[test]
     fn test_irq_flag_read_and_clear() {
         use emu_core::cpu_65c816::Memory65c816;
-        
+
         let mut sys = SnesSystem::new();
-        
+
         // Load test ROM
         let rom_data = include_bytes!("../../../../test_roms/snes/test.sfc");
         sys.mount("Cartridge", rom_data).unwrap();
-        
+
         // Trigger IRQ flag manually
         sys.cpu.bus().trigger_hv_irq();
-        
+
         // Read $4211 (TIMEUP) - should return 0x80 (IRQ flag set)
         let irq_flag = sys.cpu.bus().read(0x4211);
         assert_eq!(irq_flag & 0x80, 0x80, "IRQ flag should be set");
-        
+
         // Reading $4211 clears the flag
         let irq_flag_after = sys.cpu.bus().read(0x4211);
-        assert_eq!(irq_flag_after & 0x80, 0x00, "IRQ flag should be cleared after read");
+        assert_eq!(
+            irq_flag_after & 0x80,
+            0x00,
+            "IRQ flag should be cleared after read"
+        );
     }
 }
 

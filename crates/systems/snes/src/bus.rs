@@ -155,10 +155,10 @@ pub struct SnesBus {
     /// $4207-$420A - H/V timer registers
     htime: u16,
     vtime: u16,
-    
+
     /// IRQ flag (set when H/V timer matches)
     irq_flag: Cell<bool>,
-    
+
     /// H/V timer IRQ enable mode from $4200 bits 4-5
     /// 00 = disabled, 01 = H only, 10 = V only, 11 = HV
     hv_irq_mode: u8,
@@ -280,12 +280,12 @@ impl SnesBus {
     pub fn ppu_mut(&mut self) -> &mut Ppu {
         &mut self.ppu
     }
-    
+
     /// Trigger H/V timer IRQ (sets IRQ flag)
     pub fn trigger_hv_irq(&self) {
         self.irq_flag.set(true);
     }
-    
+
     /// Get H/V IRQ mode for debugging/logging
     pub fn get_hv_irq_mode(&self) -> u8 {
         self.hv_irq_mode
@@ -417,9 +417,9 @@ impl SnesBus {
         // Update the cached cycle value
         self.last_cached_cycle.set(self.frame_cycle);
     }
-    
+
     /// Check if H/V timer IRQ should trigger
-    /// 
+    ///
     /// Hardware behavior (https://sneslab.net/wiki/H/V_Count_Timer):
     /// - Mode 00 (hv_irq_mode=0): Timer off, never triggers
     /// - Mode 01 (hv_irq_mode=1): H-IRQ only - triggers every scanline at H = HTIME + ~3.5 cycles
@@ -1353,7 +1353,7 @@ impl Memory65c816 for SnesBus {
                         // Bit 0: Joypad auto-read enable
                         let old_nmi_enable = self.ppu.nmi_enable;
                         self.ppu.nmi_enable = (val & 0x80) != 0;
-                        
+
                         // H/V timer IRQ mode (bits 5-4)
                         let old_hv_irq_mode = self.hv_irq_mode;
                         self.hv_irq_mode = (val >> 4) & 0x03;
@@ -1369,7 +1369,7 @@ impl Memory65c816 for SnesBus {
                                 format!("SNES Bus: H/V timer IRQ mode = {}", mode_str)
                             });
                         }
-                        
+
                         if old_nmi_enable != self.ppu.nmi_enable {
                             log(LogCategory::Interrupts, LogLevel::Debug, || {
                                 format!(
