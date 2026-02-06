@@ -147,6 +147,172 @@ Reusable audio building blocks:
   - `Renderer` trait: Unified rendering interface
   - Pattern: System (state) → Renderer trait → {Software, Hardware} implementations
 
+### Debugger Architecture (`crates/core/src/debug.rs`)
+
+The debugger subsystem provides a unified interface for system introspection, debugging, and analysis across all emulated systems.
+
+#### Core Components
+
+**Debug Trait (`Debugger`)**:
+- `disassemble_instruction(address)`: Disassemble a single instruction at a given address
+- `disassemble_range(address, count)`: Disassemble multiple instructions (with automatic mode tracking for 65C816)
+- `read_memory(address, length)`: Read memory with bounds checking
+- `get_memory_regions()`: Return list of memory regions with metadata
+- `get_cpu_state()`: Snapshot of all CPU registers and flags
+- `get_execution_history()`: Access instruction trace buffer (if enabled)
+- `has_execution_history()`: Check if tracing is active
+
+**Data Structures**:
+- `MemoryRegion`: Memory region metadata (name, address range, description, permissions)
+- `DisassembledInstruction`: Disassembled instruction with address, bytes, mnemonic, optional comment
+- `CpuRegister`: Register value with name, value, width (8/16/32 bits)
+- `CpuFlags`: Collection of CPU status flags
+- `CpuState`: Complete CPU state snapshot (registers + flags + PC)
+- `ExecutionTrace`: Instruction + post-execution CPU state
+
+**Instruction Tracer (`crates/core/src/instruction_tracer.rs`)**:
+- Circular buffer for execution history (default: 10 million instructions)
+- Configurable at runtime (enable/disable, buffer size)
+- Dump to file with formatted output
+- Zero overhead when disabled
+- Integrated with breakpoint system
+
+#### Implementation Pattern
+
+Each system implements the `Debugger` trait to expose its internals:
+
+```rust
+impl Debugger for MySystem {
+    fn disassemble_instruction(&self, address: u32) -> Option<DisassembledInstruction> {
+        let memory = self.read_memory(address, MAX_INSTR_SIZE)?;
+        disasm_mycpu::disassemble(&memory, address)
+    }
+
+    fn read_memory(&self, address: u32, length: usize) -> Option<Vec<u8>> {
+        // Bounds check address space
+        // Read from system bus
+    }
+
+    fn get_memory_regions(&self) -> Vec<MemoryRegion> {
+        vec![
+            MemoryRegion::new("RAM", 0x0000, 0x1FFF, "System RAM", true, true),
+            MemoryRegion::new("ROM", 0x8000, 0xFFFF, "Program ROM", true, false),
+        ]
+    }
+
+    fn get_cpu_state(&self) -> CpuState {
+        let mut state = CpuState::new(self.cpu.pc as u32);
+        state.add_register(CpuRegister::new_16bit("PC", self.cpu.pc));
+        state.add_register(CpuRegister::new_8bit("A", self.cpu.a));
+        state.add_flag("Z", (self.cpu.status & 0x02) != 0);
+        state
+    }
+
+    // Automatically implement execution history methods
+    emu_core::impl_debugger_execution_history!();
+}
+```
+
+**Helper Macros**:
+- `impl_debugger_execution_history!()`: Auto-implement execution history methods by delegating to `instruction_tracer` field
+- `impl_instruction_tracer_methods!()`: Add convenience methods for tracer control (`set_instruction_tracing`, `get_instruction_tracer`)
+
+#### System-Specific Implementations
+
+| System | Status | Special Features |
+|--------|--------|------------------|
+| **NES** | ✅ Complete | Full memory map, comprehensive tests |
+| **Game Boy** | ✅ Complete | VRAM banks, OAM, IME/HALT flags |
+| **SNES** | ✅ Complete | M/X flag tracking for accurate disassembly, 24-bit addressing |
+| **Atari 2600** | ✅ Complete | TIA registers, 13-bit address space |
+| **CHIP-8** | ✅ Complete | Variable memory size, all variants |
+| **SMS** | ✅ Complete | Z80 shadow registers, interrupt modes |
+| **ColecoVision** | ✅ Complete | BIOS region, Z80 full state |
+| **SG-1000** | ✅ Complete | Z80 full state |
+| **N64** | ✅ Complete | 32 GPRs, CP0 registers, MIPS disassembly |
+| **PC** | ✅ Complete | BDA/EBDA regions, segment addressing, mode-specific regions |
+
+#### GUI Integration
+
+The debugger is exposed through the Inspector dock in the GUI:
+
+- **Debug Tab** (`src/egui_ui/inspector_tabs.rs`):
+  - **CPU State Panel**: Live register and flag values
+  - **Memory Viewer**: Hex dump with ASCII view, multiple memory regions
+  - **Disassembly Panel**: 
+    - ±100 instructions around current PC
+    - Current instruction highlighted
+    - Address, bytes, mnemonic display
+    - Auto-scrolls with PC
+
+- **System-Specific Tabs**: Each system can add custom debug views
+  - NES: Tiles, Palettes, Nametables, OAM
+  - Game Boy: Tiles, Palettes, VRAM banks
+  - PC: BDA/EBDA inspector, video memory
+
+#### Command-Line Debug Tools
+
+**Debug Dump** (`--debug-dump-pc`, `--debug-dump-cycles`):
+- Headless mode (no GUI, faster execution)
+- Generate comprehensive debug dumps:
+  - Timestamp and cycle count
+  - CPU state (all registers and flags)
+  - Disassembly (±100 instructions around PC)
+  - Full memory hex dumps for all regions
+  - Screenshot of last frame
+- Useful for CI/automated testing
+- Example: `hemu --debug-dump-pc 0x8000 --debug-dump-file dump.txt game.nes`
+
+**Instruction Tracing** (`--trace-instructions`, `--breakpoint`):
+- Record all executed instructions to circular buffer
+- Includes full CPU state after each instruction
+- Breakpoints trigger automatic trace dump
+- Example: `hemu --trace-instructions --breakpoint 0x8100 --trace-dump-file trace.txt game.nes`
+- Essential for debugging execution flow issues
+
+#### Testing Strategy
+
+All debugger implementations include comprehensive tests:
+
+1. **Memory Regions Test**: Verify all regions are exposed with correct addresses and permissions
+2. **CPU State Test**: Check all registers and flags are present in correct order
+3. **Memory Read Test**: Validate address bounds checking and read functionality
+4. **Disassembly Test**: Verify instruction disassembly (when ROM can be mounted)
+
+Example test pattern:
+```rust
+#[test]
+fn test_memory_regions() {
+    let system = MySystem::new();
+    let regions = system.get_memory_regions();
+    
+    assert!(regions.len() >= 2);
+    assert!(regions.iter().any(|r| r.name == "RAM"));
+    // Verify each region's properties
+}
+```
+
+#### Design Principles
+
+1. **Consistency**: Same interface across all systems
+2. **Performance**: Zero overhead when debugging is disabled
+3. **Completeness**: Expose all system state for inspection
+4. **Testability**: All implementations have comprehensive tests
+5. **Documentation**: Clear docs for each system's memory map and registers
+
+#### Future Enhancements
+
+- **Watchpoints**: Break on memory read/write
+- **Conditional Breakpoints**: Break on register values
+- **Trace Analysis**: Statistical analysis of execution traces
+- **Symbol Support**: Load symbol files for human-readable debugging
+- **Remote Debugging**: GDB protocol support
+
+For implementation examples, see:
+- **NES**: `crates/systems/nes/src/debugger.rs` (reference implementation)
+- **SNES**: `crates/systems/snes/src/debugger.rs` (advanced M/X flag tracking)
+- **N64**: `crates/systems/n64/src/debugger.rs` (32 registers, MIPS example)
+
 ### Common Traits
 
 - **`System` trait**: High-level emulator interface
