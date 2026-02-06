@@ -46,12 +46,8 @@ pub struct Sg1000System {
     // Timing
     cycles: u64,
     cpu_cycles_per_frame: u32,
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Calculated but reserved for future use (e.g., line interrupts)
     scanline_cycles: u32,
-
-    // Audio buffer
-    #[allow(dead_code)]
-    audio_buffer: Vec<i16>,
 
     // Loaded media
     cartridge_loaded: bool,
@@ -93,7 +89,6 @@ impl Sg1000System {
             cycles: 0,
             cpu_cycles_per_frame,
             scanline_cycles,
-            audio_buffer: Vec::new(),
             cartridge_loaded: false,
             instruction_tracer: emu_core::instruction_tracer::InstructionTracer::new(),
             breakpoint_manager: emu_core::breakpoints::BreakpointManager::new(),
@@ -153,6 +148,7 @@ impl System for Sg1000System {
     fn reset(&mut self) {
         self.cpu.reset();
         self.vdp.borrow_mut().reset();
+        self.psg.borrow_mut().reset();
         self.cycles = 0;
         log(LogCategory::Bus, LogLevel::Info, || {
             "SG-1000: System reset".to_string()
@@ -350,6 +346,14 @@ impl System for Sg1000System {
 }
 
 impl Sg1000System {
+    /// Get audio samples from the PSG
+    ///
+    /// This method generates the requested number of audio samples by clocking
+    /// the SN76489 PSG audio chip.
+    pub fn get_audio_samples(&mut self, count: usize) -> Vec<i16> {
+        self.psg.borrow_mut().generate_samples(count)
+    }
+
     /// Get resolution for the renderer
     pub fn resolution(&self) -> (usize, usize) {
         (256, 192) // TMS9918A resolution

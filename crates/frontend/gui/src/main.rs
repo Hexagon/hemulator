@@ -601,8 +601,8 @@ impl EmulatorSystem {
             EmulatorSystem::N64(sys) => sys.get_audio_samples(count),
             EmulatorSystem::Chip8(_) => vec![0; count], // CHIP-8 audio: Single beep tone not yet implemented
             EmulatorSystem::SMS(sys) => sys.get_audio_samples(count),
-            EmulatorSystem::ColecoVision(_) => vec![0; count], // ColecoVision: TI SN76489 PSG integration needed
-            EmulatorSystem::SG1000(_) => vec![0; count], // SG-1000: TI SN76489 PSG integration needed
+            EmulatorSystem::ColecoVision(sys) => sys.get_audio_samples(count),
+            EmulatorSystem::SG1000(sys) => sys.get_audio_samples(count),
         }
     }
 

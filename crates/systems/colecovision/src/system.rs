@@ -50,9 +50,6 @@ pub struct ColecoVisionSystem {
     cpu_cycles_per_frame: u32,
     scanline_cycles: u32,
 
-    // Audio buffer
-    audio_buffer: Vec<i16>,
-
     // Loaded media
     bios_loaded: bool,
     cartridge_loaded: bool,
@@ -95,7 +92,6 @@ impl ColecoVisionSystem {
             cycles: 0,
             cpu_cycles_per_frame,
             scanline_cycles,
-            audio_buffer: Vec::new(),
             bios_loaded: false,
             cartridge_loaded: false,
             instruction_tracer: emu_core::instruction_tracer::InstructionTracer::new(),
@@ -147,6 +143,14 @@ impl ColecoVisionSystem {
         self.reset();
     }
 
+    /// Get audio samples from the PSG
+    ///
+    /// This method generates the requested number of audio samples by clocking
+    /// the SN76489 PSG audio chip.
+    pub fn get_audio_samples(&mut self, count: usize) -> Vec<i16> {
+        self.psg.borrow_mut().generate_samples(count)
+    }
+
     /// Get tile viewer data for debugging
     pub fn get_tile_viewer_data(&self) -> TileViewerData {
         let (vram, palette, registers) = self.vdp.borrow().get_tile_viewer_data();
@@ -181,7 +185,9 @@ impl System for ColecoVisionSystem {
         self.vdp.borrow_mut().reset();
         self.psg.borrow_mut().reset(); // Reset PSG without replacing the shared reference
         self.cycles = 0;
-        self.audio_buffer.clear();
+        log(LogCategory::Bus, LogLevel::Info, || {
+            "ColecoVision: System reset".to_string()
+        });
     }
 
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
@@ -201,10 +207,6 @@ impl System for ColecoVisionSystem {
             if self.vdp.borrow().frame_interrupt_pending() {
                 self.cpu.interrupt(0xFF);
             }
-
-            // Step PSG and collect audio samples
-            let samples = self.psg.borrow_mut().step(cpu_cycles);
-            self.audio_buffer.extend_from_slice(&samples);
         }
 
         // Render the full frame once at the end
