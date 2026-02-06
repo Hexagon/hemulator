@@ -2,6 +2,206 @@
 //!
 //! This module provides traits and types for debugging emulated systems,
 //! including disassembly, memory inspection, and CPU state tracking.
+//!
+//! # Overview
+//!
+//! The debugger subsystem enables comprehensive introspection of emulated systems
+//! through a unified interface. Every system implements the [`Debugger`] trait to
+//! expose its internal state for debugging, testing, and analysis.
+//!
+//! # Core Components
+//!
+//! - [`Debugger`] trait: Main interface for system debugging
+//! - [`MemoryRegion`]: Describes a memory region with metadata
+//! - [`DisassembledInstruction`]: Represents a disassembled instruction
+//! - [`CpuRegister`]: CPU register with name, value, and width
+//! - [`CpuFlags`]: Collection of CPU status flags
+//! - [`CpuState`]: Complete CPU state snapshot
+//! - [`ExecutionTrace`]: Instruction execution record with post-execution state
+//!
+//! # Usage Example
+//!
+//! ```rust,ignore
+//! use emu_core::debug::Debugger;
+//!
+//! // Get CPU state
+//! let state = system.get_cpu_state();
+//! println!("PC: ${:04X}", state.pc);
+//!
+//! // Disassemble around current PC
+//! let instructions = system.disassemble_range(state.pc, 10);
+//! for instr in instructions {
+//!     println!("{:04X}: {}", instr.address, instr.mnemonic);
+//! }
+//!
+//! // Read memory
+//! if let Some(data) = system.read_memory(0x0000, 256) {
+//!     // Inspect memory contents
+//! }
+//!
+//! // Get memory map
+//! for region in system.get_memory_regions() {
+//!     println!("{}: ${:04X}-${:04X} ({})",
+//!         region.name, region.start, region.end, region.description);
+//! }
+//! ```
+//!
+//! # Implementation Guide
+//!
+//! When implementing the [`Debugger`] trait for a new system:
+//!
+//! 1. **Implement `disassemble_instruction`**:
+//!    - Read instruction bytes via `read_memory`
+//!    - Call appropriate disassembler function
+//!    - Return `None` for invalid addresses
+//!
+//! 2. **Implement `read_memory`**:
+//!    - Validate address bounds
+//!    - Read from system bus/memory
+//!    - Handle wrapping and mirroring
+//!
+//! 3. **Implement `get_memory_regions`**:
+//!    - List all memory regions in address order
+//!    - Include RAM, ROM, I/O registers, etc.
+//!    - Set correct read/write permissions
+//!
+//! 4. **Implement `get_cpu_state`**:
+//!    - Create `CpuState` with current PC
+//!    - Add all registers (including PC for display)
+//!    - Add all CPU flags in logical order
+//!
+//! 5. **Use helper macro for execution history**:
+//!    - Add `instruction_tracer: InstructionTracer` field to system
+//!    - Use `impl_debugger_execution_history!()` macro
+//!    - Optionally use `impl_instruction_tracer_methods!()` for convenience
+//!
+//! # Example Implementation
+//!
+//! ```rust,ignore
+//! impl Debugger for MySystem {
+//!     fn disassemble_instruction(&self, address: u32) -> Option<DisassembledInstruction> {
+//!         let memory = self.read_memory(address, 3)?;
+//!         disasm_mycpu::disassemble(&memory, address)
+//!     }
+//!
+//!     fn read_memory(&self, address: u32, length: usize) -> Option<Vec<u8>> {
+//!         if address > 0xFFFF {
+//!             return None;
+//!         }
+//!         let mut result = Vec::with_capacity(length);
+//!         for i in 0..length {
+//!             let addr = address.wrapping_add(i as u32);
+//!             if addr > 0xFFFF { break; }
+//!             result.push(self.memory.read(addr as u16));
+//!         }
+//!         Some(result)
+//!     }
+//!
+//!     fn get_memory_regions(&self) -> Vec<MemoryRegion> {
+//!         vec![
+//!             MemoryRegion::new("RAM", 0x0000, 0x1FFF, "System RAM", true, true),
+//!             MemoryRegion::new("ROM", 0x8000, 0xFFFF, "Program ROM", true, false),
+//!         ]
+//!     }
+//!
+//!     fn get_cpu_state(&self) -> CpuState {
+//!         let mut state = CpuState::new(self.cpu.pc as u32);
+//!         state.add_register(CpuRegister::new_16bit("PC", self.cpu.pc));
+//!         state.add_register(CpuRegister::new_8bit("A", self.cpu.a));
+//!         state.add_flag("Z", (self.cpu.status & 0x02) != 0);
+//!         state
+//!     }
+//!
+//!     // Automatically implement execution history methods
+//!     emu_core::impl_debugger_execution_history!();
+//! }
+//! ```
+//!
+//! # Advanced Features
+//!
+//! ## Instruction Tracing
+//!
+//! Systems can enable instruction tracing to record execution history:
+//!
+//! ```rust,ignore
+//! // Enable tracing (typically via command-line flag)
+//! system.set_instruction_tracing(true);
+//!
+//! // Run emulation
+//! system.step_frame();
+//!
+//! // Access trace history
+//! let history = system.get_execution_history();
+//! for trace in history.iter().take(10) {
+//!     println!("{:04X}: {}", trace.instruction.address, trace.instruction.mnemonic);
+//! }
+//! ```
+//!
+//! ## Mode-Specific Disassembly
+//!
+//! Some CPUs require mode tracking for accurate disassembly (e.g., 65C816 M/X flags).
+//! Override `disassemble_range` to track mode changes:
+//!
+//! ```rust,ignore
+//! fn disassemble_range(&self, address: u32, count: usize) -> Vec<DisassembledInstruction> {
+//!     let mut result = Vec::new();
+//!     let mut current_address = address;
+//!     let mut m_flag = (self.cpu.status & 0x20) != 0;
+//!     let mut x_flag = (self.cpu.status & 0x10) != 0;
+//!
+//!     for _ in 0..count {
+//!         let memory = match self.read_memory(current_address, 4) {
+//!             Some(m) => m,
+//!             None => break,
+//!         };
+//!
+//!         let (instruction, new_m, new_x) =
+//!             disasm_65c816::disassemble_tracking_flags(&memory, current_address, m_flag, x_flag)?;
+//!
+//!         current_address += instruction.len() as u32;
+//!         result.push(instruction);
+//!
+//!         m_flag = new_m;
+//!         x_flag = new_x;
+//!     }
+//!     result
+//! }
+//! ```
+//!
+//! # Testing
+//!
+//! All `Debugger` implementations should include comprehensive tests:
+//!
+//! ```rust,ignore
+//! #[cfg(test)]
+//! mod tests {
+//!     use super::*;
+//!
+//!     #[test]
+//!     fn test_memory_regions() {
+//!         let system = MySystem::new();
+//!         let regions = system.get_memory_regions();
+//!         
+//!         assert!(regions.len() >= 2);
+//!         assert!(regions.iter().any(|r| r.name == "RAM"));
+//!         
+//!         let ram = regions.iter().find(|r| r.name == "RAM").unwrap();
+//!         assert_eq!(ram.start, 0x0000);
+//!         assert_eq!(ram.end, 0x1FFF);
+//!         assert!(ram.readable && ram.writable);
+//!     }
+//!
+//!     #[test]
+//!     fn test_cpu_state() {
+//!         let system = MySystem::new();
+//!         let state = system.get_cpu_state();
+//!         
+//!         assert!(state.registers.iter().any(|r| r.name == "PC"));
+//!         assert!(state.registers.iter().any(|r| r.name == "A"));
+//!         assert_eq!(state.flags.flags.len(), 7); // Adjust for your CPU
+//!     }
+//! }
+//! ```
 
 /// A memory region with a name and address range
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -59,15 +59,11 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - PIT tracks frequency/state but audio generation not connected to frontend
   - Impact: No sound output from DOS programs
 
-#### ColecoVision
-- [ ] **TMS9918A Sprite Collision Detection**: Fix sprite collision test - `crates/systems/colecovision/src/lib.rs:53`
-  - Current: Test ignored after TMS9918A refactor
-  - Needed: Update sprite collision detection to work with refactored VDP
-  - Impact: Sprite collision flag not properly tested
-- [ ] **TMS9918A Sprite Overflow**: Fix sprite overflow test - `crates/systems/colecovision/src/lib.rs:107`
-  - Current: Test ignored after TMS9918A refactor
-  - Needed: Update sprite overflow detection to work with refactored VDP
-  - Impact: Sprite overflow flag not properly tested
+#### ColecoVision  
+- [ ] **Z80 ROM Execution**: Debug why test ROM doesn't execute properly through BIOS - `crates/systems/colecovision/src/lib.rs`
+  - Current: Smoke tests use manual VDP initialization instead of ROM execution
+  - Test ROM exists (`test_roms/colecovision/test.col`) but doesn't render when executed
+  - Impact: Full system integration not validated via ROM execution
 
 ### Medium
 
@@ -140,12 +136,6 @@ This file tracks unimplemented features, stubs, and simplified implementations a
 - [ ] **Branch Delay Slot Nullification**: Implement nullify delay slot - `crates/core/src/cpu_mips_r4300i.rs`
   - Branch likely instructions have ND (nullify delay) bit not implemented
   - Impact: Minor timing differences in certain branch patterns
-
-#### Atari 2600
-- [ ] **Player/Missile Sizing**: Implement NUSIZ register - `crates/systems/atari2600/src/lib.rs`
-  - Current: Only default 1x size supported
-  - Needed: Multiple player copies, sizing, and missile width control
-  - Impact: Games using sprite sizing/duplication may render incorrectly
 
 #### Chores
 - [ ] Update dependencies (cargo)
