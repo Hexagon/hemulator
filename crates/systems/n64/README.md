@@ -8,8 +8,8 @@ The N64 emulator is a **basic implementation** with functional RDP graphics proc
 
 ### What Works
 
-- ✅ **MIPS R4300i CPU** - Complete instruction set implementation
-  - All base instructions (load/store, arithmetic, branch, etc.)
+- ✅ **MIPS R4300i CPU** - Instruction set implementation (with some edge cases not fully implemented - see Known Limitations)
+  - All base instructions (load/store, arithmetic, branch, etc.) - see "Common Pitfalls" section for edge cases
   - CP0 coprocessor with TLB support
   - **TLB/MMU** - Full TLB implementation with CP0 integration
     - TLBWI (Write Indexed), TLBWR (Write Random)
@@ -27,7 +27,7 @@ The N64 emulator is a **basic implementation** with functional RDP graphics proc
   - GPU-accelerated using OpenGL 3.3 Core Profile
   - 3D triangle rasterization (flat, Gouraud shading, textured triangles)
   - Hardware Z-buffer for depth testing
-  - Display list processing with comprehensive command support:
+  - Display list processing with command support (many commands stubbed - see "What's Missing"):
     - FILL_RECTANGLE (0x36) - Solid color rectangles
     - SET_FILL_COLOR (0x37) - Set fill color
     - SYNC_FULL (0x29) - Pipeline synchronization

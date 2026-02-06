@@ -21,7 +21,7 @@ For detailed implementation information, see:
 ### ✅ Working Components
 
 **Core System**:
-- ✅ **MIPS R4300i CPU** - Complete instruction set implementation from `emu_core::cpu_mips_r4300i`
+- ✅ **MIPS R4300i CPU** - Instruction set implementation from `emu_core::cpu_mips_r4300i` (with some edge cases - see Known Limitations)
 - ✅ **Memory Bus** - 4MB RDRAM, PIF boot, SP memory, cartridge ROM
 - ✅ **Cartridge Loading** - Z64/N64/V64 formats with byte-order conversion
 - ✅ **Save States** - Full system state serialization
