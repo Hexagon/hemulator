@@ -752,7 +752,7 @@ impl SuperFx {
             // LOB - Get low byte
             0x0E if !self.flags_alt1 => {
                 let src = self.sreg();
-                self.regs[src] = self.regs[src] & 0xFF;
+                self.regs[src] &= 0xFF;
                 self.update_zs_flags(self.regs[src]);
                 1
             }

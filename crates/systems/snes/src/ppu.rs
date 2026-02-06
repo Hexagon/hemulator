@@ -441,6 +441,33 @@ pub struct Ppu {
     fixed_color_r: u8,
     fixed_color_g: u8,
     fixed_color_b: u8,
+
+    // ============================================================================
+    // H/V Counter Registers ($213C-$213D)
+    // ============================================================================
+    /// Current horizontal beam position (H counter) - 9-bit value (0-339)
+    /// Tracks the current horizontal dot position within a scanline
+    /// Used for raster effects and timing-sensitive code
+    h_counter: u16,
+
+    /// Current vertical beam position (V counter) - 9-bit value (0-261)
+    /// Tracks the current scanline number within a frame
+    /// Used for raster effects and timing-sensitive code
+    v_counter: u16,
+
+    /// H/V counter latch toggle for reading $213C/$213D
+    /// The hardware latches the counter values when $2137 is read
+    /// Then alternates between returning low and high byte on subsequent reads
+    /// false = next read returns low byte, true = next read returns high byte
+    hv_latch_toggle: Cell<bool>,
+
+    /// Latched H counter value (from $2137 read)
+    /// Uses Cell for interior mutability as reading $213C updates the toggle
+    h_counter_latched: Cell<u16>,
+
+    /// Latched V counter value (from $2137 read)
+    /// Uses Cell for interior mutability as reading $213D updates the toggle
+    v_counter_latched: Cell<u16>,
 }
 
 impl Ppu {
@@ -516,6 +543,12 @@ impl Ppu {
             fixed_color_r: 0,
             fixed_color_g: 0,
             fixed_color_b: 0,
+            // H/V counter defaults
+            h_counter: 0,
+            v_counter: 0,
+            hv_latch_toggle: Cell::new(false),
+            h_counter_latched: Cell::new(0),
+            v_counter_latched: Cell::new(0),
         }
     }
 
@@ -1160,8 +1193,12 @@ impl Ppu {
             // $2137 - SLHV - Software Latch for H/V Counter
             0x2137 => {
                 // Reading this register latches H/V counter values
-                // We don't implement this
-                0
+                // Store current counter values into latched values
+                self.h_counter_latched.set(self.h_counter);
+                self.v_counter_latched.set(self.v_counter);
+                // Reset toggle to prepare for reading low byte first
+                self.hv_latch_toggle.set(false);
+                0 // Reading $2137 always returns 0 (write-only functionality)
             }
 
             // $2138 - OAMDATAREAD - OAM Data Read
@@ -1212,11 +1249,47 @@ impl Ppu {
                 self.cgram[addr]
             }
 
-            // $213C - OPHCT - Horizontal Counter (stub)
-            0x213C => 0,
+            // $213C - OPHCT - Horizontal Counter
+            // Returns latched H counter value, alternating between low and high byte
+            // 9-bit value (0-339), requires two reads to get full value
+            0x213C => {
+                let value = self.h_counter_latched.get();
+                let toggle = self.hv_latch_toggle.get();
 
-            // $213D - OPVCT - Vertical Counter (stub)
-            0x213D => 0,
+                // Return low byte first, then high byte (bit 8 only)
+                let result = if !toggle {
+                    // Low byte (bits 0-7)
+                    (value & 0xFF) as u8
+                } else {
+                    // High byte (bit 8 only, in bit 0 position)
+                    ((value >> 8) & 0x01) as u8
+                };
+
+                // Toggle for next read
+                self.hv_latch_toggle.set(!toggle);
+                result
+            }
+
+            // $213D - OPVCT - Vertical Counter
+            // Returns latched V counter value, alternating between low and high byte
+            // 9-bit value (0-261), requires two reads to get full value
+            0x213D => {
+                let value = self.v_counter_latched.get();
+                let toggle = self.hv_latch_toggle.get();
+
+                // Return low byte first, then high byte (bit 8 only)
+                let result = if !toggle {
+                    // Low byte (bits 0-7)
+                    (value & 0xFF) as u8
+                } else {
+                    // High byte (bit 8 only, in bit 0 position)
+                    ((value >> 8) & 0x01) as u8
+                };
+
+                // Toggle for next read
+                self.hv_latch_toggle.set(!toggle);
+                result
+            }
 
             // $213E - STAT77 - PPU Status
             0x213E => {
@@ -1409,6 +1482,19 @@ impl Ppu {
         });
 
         frame
+    }
+
+    /// Update H/V counters based on elapsed cycles
+    ///
+    /// This should be called periodically by the system to update the beam position.
+    /// The SNES has 262 scanlines (V=0-261) and 340 dots per scanline (H=0-339).
+    ///
+    /// # Arguments
+    /// * `scanline` - Current scanline number (0-261)
+    /// * `dot` - Current horizontal dot position (0-339)
+    pub fn update_counters(&mut self, scanline: u16, dot: u16) {
+        self.v_counter = scanline;
+        self.h_counter = dot;
     }
 
     /// Helper method to render layers for main or sub-screen

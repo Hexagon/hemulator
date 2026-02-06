@@ -17,14 +17,18 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Impact: Games using these commands may malfunction (Pilotwings, Super Mario Kart)
 
 #### SNES - PPU Advanced Features
+- [x] **H/V Counter Reading**: Implement beam position tracking - `crates/systems/snes/src/ppu.rs:1214-1218`
+  - Added h_counter and v_counter fields to track beam position (0-339 H, 0-261 V)
+  - Implemented $2137 (SLHV) register to latch current counter values
+  - Implemented $213C (OPHCT) register read with low/high byte toggle
+  - Implemented $213D (OPVCT) register read with low/high byte toggle
+  - Added update_counters() method to PPU
+  - Integrated counter updates in SNES step_frame loop during active display and HBlank
+  - Impact: Games using beam position for raster effects now work properly
 - [ ] **Interlace Mode**: Implement interlaced display modes - `crates/systems/snes/src/ppu.rs:1118-1122`
   - Current: $2133 SETINI register is a stub (stored but ignored)
   - Needed: Interlaced rendering support
   - Impact: Some games may rely on interlaced display
-- [ ] **H/V Counter Reading**: Implement beam position tracking - `crates/systems/snes/src/ppu.rs:1214-1218`
-  - Current: $213C/$213D (OPHCT/OPVCT) always return 0
-  - Needed: Return actual H/V counter values
-  - Impact: Games scanning beam position won't work properly
 
 #### SNES - Bus/Memory
 - [ ] **CPU Halt During DMA**: Implement proper DMA CPU freeze - `crates/systems/snes/src/bus.rs:1419`
@@ -55,9 +59,13 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Code comment: "TODO: Implement GAIN modes (direct, linear increase/decrease, exponential)"
 
 #### PC/DOS
-- [ ] **PC Speaker Audio**: Connect PIT channel 2 to audio output - `crates/systems/pc/`
-  - PIT tracks frequency/state but audio generation not connected to frontend
-  - Impact: No sound output from DOS programs
+- [x] **PC Speaker Audio**: Connect PIT channel 2 to audio output - `crates/systems/pc/`
+  - Implemented get_audio_samples() method in PcSystem
+  - Generates square wave audio based on PIT channel 2 frequency and output state
+  - Respects speaker gate enable/disable from port 0x61
+  - Added speaker_gate_enabled() getter method to PcBus
+  - Connected to frontend audio system
+  - Impact: PC speaker audio now functional for DOS programs
 
 #### ColecoVision  
 - [ ] **Z80 ROM Execution**: Debug why test ROM doesn't execute properly through BIOS - `crates/systems/colecovision/src/lib.rs`

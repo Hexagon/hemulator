@@ -596,7 +596,7 @@ impl EmulatorSystem {
             EmulatorSystem::NES(sys) => sys.get_audio_samples(count),
             EmulatorSystem::GameBoy(sys) => sys.get_audio_samples(count),
             EmulatorSystem::Atari2600(sys) => sys.get_audio_samples(count),
-            EmulatorSystem::PC(_) => vec![0; count], // PC audio: Speaker/AdLib/Sound Blaster not yet implemented
+            EmulatorSystem::PC(sys) => sys.get_audio_samples(count),
             EmulatorSystem::SNES(_) => vec![0; count], // SNES SPC700 DSP audio generation not yet implemented
             EmulatorSystem::N64(sys) => sys.get_audio_samples(count),
             EmulatorSystem::Chip8(_) => vec![0; count], // CHIP-8 audio: Single beep tone not yet implemented

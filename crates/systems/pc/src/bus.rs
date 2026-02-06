@@ -554,6 +554,15 @@ impl PcBus {
         &mut self.disk_controller
     }
 
+    /// Check if the PC speaker gate is enabled
+    ///
+    /// The speaker gate is controlled by bit 0 of port 0x61.
+    /// When the gate is enabled and PIT channel 2 is running,
+    /// the speaker produces audio.
+    pub fn speaker_gate_enabled(&self) -> bool {
+        self.speaker_gate
+    }
+
     /// Check if a floppy drive has a disk mounted
     pub fn has_floppy(&self, drive: u8) -> bool {
         match drive {
