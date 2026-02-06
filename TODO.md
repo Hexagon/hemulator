@@ -121,12 +121,45 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Impact: Some hardware features may not work
 
 #### N64
-- [ ] **RDP Counters**: Implement RDP performance counters - `crates/systems/n64/src/rdp.rs`
+- [ ] **RSP Microcode Commands**: Implement stubbed F3DEX commands - `crates/systems/n64/src/rsp_hle.rs`
+  - G_MOVEWORD (0xDB) - stub at line 732
+  - G_MOVEMEM (0xDC) - stub at line 857
+  - G_SETOTHERMODE_L (0xE2) - stub at line 878
+  - G_SETOTHERMODE_H (0xE3) - stub at line 895
+  - Impact: Some games may not render correctly without these commands
+- [ ] **Audio Microcode**: Implement RSP audio task processing - `crates/systems/n64/src/rsp_hle.rs:336`
+  - Current: "Audio tasks not yet implemented"
+  - Impact: No audio output from games
+- [ ] **Save System**: Implement EEPROM/Flash/Controller Pak support - `crates/systems/n64/src/pif.rs`
+  - Current: No save data persistence
+  - Needed: EEPROM (4Kbit/16Kbit), Flash RAM, Controller Pak
+  - Impact: Games cannot save progress
+- [ ] **RDP SET_OTHER_MODES**: Implement rendering mode configuration - `crates/systems/n64/src/rdp.rs:1160`
+  - Current: Logged as stub and ignored
+  - Needed: Proper blend/combine mode application
+  - Impact: Advanced graphics effects not working
+- [ ] **Texture Format Support**: Implement missing texture formats - `crates/systems/n64/src/rdp.rs:805`
+  - Current: "Other formats not yet implemented - return white"
+  - Impact: Some textures render as white instead of proper images
+
+#### N64
+- [ ] **RDP Performance Counters**: Implement RDP performance counters - `crates/systems/n64/src/rdp.rs`
   - DPC_CLOCK (clock counter) - returns 0
   - DPC_BUFBUSY (buffer busy counter) - returns 0
   - DPC_PIPEBUSY (pipe busy counter) - returns 0
   - DPC_TMEM (TMEM counter) - returns 0
   - Impact: Performance monitoring not available
+- [ ] **RSP Semaphore**: Implement RSP semaphore register - `crates/systems/n64/src/rsp.rs:195`
+  - Current: Always returns 0 (stub implementation)
+  - Impact: Synchronization between CPU and RSP not working
+- [ ] **RSP Signal Bits**: Implement signal bits (SIG0-SIG7) - `crates/systems/n64/src/rsp.rs:72-86`
+  - Current: Marked as #[allow(dead_code)]
+  - Impact: RSP-CPU communication signals not working
+- [ ] **Memory Alignment Validation**: Add alignment checks for load/store - `crates/core/src/cpu_mips_r4300i.rs`
+  - LH/SH: 2-byte aligned
+  - LW/SW: 4-byte aligned
+  - LD/SD: 8-byte aligned
+  - Impact: Unaligned access currently not validated (most code is properly aligned)
 
 #### MIPS R4300i
 - [ ] **Arithmetic Overflow Traps**: Implement overflow exception handling - `crates/core/src/cpu_mips_r4300i.rs`
