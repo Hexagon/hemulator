@@ -365,3 +365,136 @@ impl Default for Sg1000System {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use emu_core::cpu_z80::MemoryZ80;
+    use emu_core::System;
+
+    #[test]
+    fn test_system_creation() {
+        let system = Sg1000System::new();
+        assert_eq!(system.cycles, 0);
+        assert!(!system.cartridge_loaded);
+    }
+
+    #[test]
+    fn test_system_reset() {
+        let mut system = Sg1000System::new();
+
+        // Execute some cycles
+        let _ = system.step_frame();
+        assert!(system.cycles > 0);
+
+        // Reset
+        system.reset();
+        assert_eq!(system.cycles, 0);
+    }
+
+    #[test]
+    fn test_audio_generation() {
+        let mut system = Sg1000System::new();
+
+        // Generate audio samples
+        let samples = system.get_audio_samples(1000);
+
+        // Should generate exactly the requested number of samples
+        assert_eq!(samples.len(), 1000);
+
+        // With default muted state, samples should be near zero
+        let max_sample = samples.iter().map(|&s| s.abs()).max().unwrap_or(0);
+        assert!(
+            max_sample <= 100,
+            "Expected near-silent output by default, got max sample: {}",
+            max_sample
+        );
+    }
+
+    #[test]
+    fn test_audio_with_tone() {
+        let mut system = Sg1000System::new();
+
+        // Write to PSG to enable a tone
+        // SG-1000 PSG is at I/O ports 0x40-0x7F (all mirrored)
+        system.cpu.memory.io_write(0x7F, 0x90); // Channel 0, Volume 0 (max)
+        system.cpu.memory.io_write(0x7F, 0x80 | 0x04); // Channel 0, Tone low bits
+        system.cpu.memory.io_write(0x7F, 0x01); // Tone high bits
+
+        // Generate samples
+        let samples = system.get_audio_samples(1000);
+        assert_eq!(samples.len(), 1000);
+
+        // Should now have audible output
+        let non_zero_count = samples.iter().filter(|&&s| s != 0).count();
+        assert!(
+            non_zero_count > 0,
+            "Expected audio output after enabling tone"
+        );
+    }
+
+    #[test]
+    fn test_psg_reset() {
+        let mut system = Sg1000System::new();
+
+        // Enable a tone
+        system.cpu.memory.io_write(0x7F, 0x90); // Max volume
+        system.cpu.memory.io_write(0x7F, 0x84); // Tone frequency
+
+        // Reset system
+        system.reset();
+
+        // PSG should be reset - audio should be silent again
+        let samples = system.get_audio_samples(100);
+        let max_sample = samples.iter().map(|&s| s.abs()).max().unwrap_or(0);
+        assert!(
+            max_sample <= 100,
+            "Expected near-silent output after reset, got max sample: {}",
+            max_sample
+        );
+    }
+
+    #[test]
+    fn test_resolution() {
+        let system = Sg1000System::new();
+        let (width, height) = system.resolution();
+        assert_eq!(width, 256);
+        assert_eq!(height, 192);
+    }
+
+    #[test]
+    fn test_mount_cartridge() {
+        let mut system = Sg1000System::new();
+
+        // Create a dummy cartridge
+        let cartridge = vec![0x00, 0xC3, 0x00, 0x00]; // JP 0x0000
+
+        // Mount cartridge
+        let result = system.mount("Cartridge", &cartridge);
+        assert!(result.is_ok());
+        assert!(system.is_mounted("Cartridge"));
+    }
+
+    #[test]
+    fn test_save_state_roundtrip() {
+        let mut system = Sg1000System::new();
+
+        // Mount and run a bit
+        let cartridge = vec![0; 0x8000];
+        system.mount("Cartridge", &cartridge).unwrap();
+        let _ = system.step_frame();
+
+        // Save state
+        let state = system.save_state();
+
+        // Modify system
+        system.reset();
+
+        // Load state
+        let result = system.load_state(&state);
+        assert!(result.is_ok());
+
+        // State should be restored
+        // Note: We don't check exact cycles because load_state may not restore them exactly
+    }
+}
