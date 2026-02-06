@@ -9,15 +9,6 @@ This file tracks unimplemented features, stubs, and simplified implementations a
 
 ### Critical
 
-#### SNES - H/V Timer IRQ (CRITICAL)
-- [ ] **H/V Timer IRQ Implementation**: Implement H/V timer interrupt triggering - `crates/systems/snes/src/bus.rs:1371-1386`, `crates/systems/snes/src/lib.rs`
-  - Current: Registers ($4207-$420A) store values but never trigger CPU IRQ
-  - IRQ flag ($4211 TIMEUP) always returns 0 instead of being set when timer matches
-  - Needed: Check HTIME/VTIME match in step_frame(), call cpu.trigger_irq(), set flag in $4211
-  - Impact: CRITICAL - Breaks timing-sensitive games, raster effects, horizontal split screens
-  - Pattern: Similar to NMI implementation (see lib.rs:412 for reference)
-  - Reference: https://snes.nesdev.org/wiki/CPU_registers#Interrupt_Registers
-
 #### SNES - Enhancement Chips
 - [ ] **DSP-1 Coprocessor**: Complete missing commands (Attitude/Target/Rotate) - `crates/systems/snes/src/coprocessors/dsp1.rs:231,246,326,338`
   - Attitude (0x08): Only partial rotation matrix implementation (FIXME at line 231, TODO at line 246)
@@ -100,6 +91,15 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Impact: Protected mode DOS extenders and DPMI applications
 
 ### Low
+
+#### COMPLETED ✅
+- [x] **SNES H/V Timer IRQ**: Fully implemented (2026-02-05) - `crates/systems/snes/src/bus.rs:155-163`, `crates/systems/snes/src/lib.rs:347-387`
+  - All 4 timer modes (off, H-only, V-only, HV) implemented
+  - IRQ flag register ($4211) with read-and-clear behavior
+  - Mode selection via $4200 bits 5-4
+  - Comprehensive test coverage (4 new tests, all passing)
+  - Impact: Essential for timing-sensitive games using raster effects
+  - Reference: https://sneslab.net/wiki/H/V_Count_Timer
 
 #### UI
 - [ ] Make links in about tab work
