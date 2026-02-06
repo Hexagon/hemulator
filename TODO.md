@@ -9,16 +9,36 @@ This file tracks unimplemented features, stubs, and simplified implementations a
 
 ### Critical
 
-_None currently_
-
-### High
-
-#### SNES
+#### SNES - Enhancement Chips
 - [ ] **DSP-1 Coprocessor**: Complete missing commands (Attitude/Target/Rotate) - `crates/systems/snes/src/coprocessors/dsp1.rs:231,246,326,338`
   - Attitude (0x08): Only partial rotation matrix implementation (FIXME at line 231, TODO at line 246)
   - Target (0x20): Not implemented - returns zeros (FIXME at line 326)
   - Rotate (0x24): Not implemented - returns zeros (TODO at line 338)
   - Impact: Games using these commands may malfunction (Pilotwings, Super Mario Kart)
+
+#### SNES - PPU Advanced Features
+- [ ] **Interlace Mode**: Implement interlaced display modes - `crates/systems/snes/src/ppu.rs:1118-1122`
+  - Current: $2133 SETINI register is a stub (stored but ignored)
+  - Needed: Interlaced rendering support
+  - Impact: Some games may rely on interlaced display
+- [ ] **H/V Counter Reading**: Implement beam position tracking - `crates/systems/snes/src/ppu.rs:1214-1218`
+  - Current: $213C/$213D (OPHCT/OPVCT) always return 0
+  - Needed: Return actual H/V counter values
+  - Impact: Games scanning beam position won't work properly
+
+#### SNES - Bus/Memory
+- [ ] **CPU Halt During DMA**: Implement proper DMA CPU freeze - `crates/systems/snes/src/bus.rs:1419`
+  - Current: DMA executes immediately (comment: "would halt the CPU")
+  - Needed: Freeze CPU during DMA transfers for hardware-accurate timing
+  - Impact: Game timing may be wrong if code relies on CPU being frozen
+- [ ] **Cycle-Accurate DMA Timing**: Fix DMA cycle counting - `crates/systems/snes/src/bus.rs:440-520`
+  - Current: Fixed cycles per transfer (8-16) instead of actual hardware timing
+  - Needed: Account for address bus speed differences
+  - Impact: Not cycle-accurate for timing-sensitive code
+- [ ] **FastROM Timing**: Implement FastROM memory access timing - `crates/systems/snes/src/bus.rs:1388-1391`
+  - Current: MEMSEL register ($420D) written but ignored
+  - Needed: Faster access times for FastROM regions
+  - Impact: Performance optimization for games using FastROM
 
 #### SNES Audio (DSP)
 - [ ] **Gaussian Interpolation**: Replace linear interpolation with Gaussian filter - `crates/core/src/apu/dsp.rs:368`
@@ -67,6 +87,15 @@ _None currently_
   - Impact: Protected mode DOS extenders and DPMI applications
 
 ### Low
+
+#### COMPLETED ✅
+- [x] **SNES H/V Timer IRQ**: Fully implemented (2026-02-05) - `crates/systems/snes/src/bus.rs:155-163`, `crates/systems/snes/src/lib.rs:347-387`
+  - All 4 timer modes (off, H-only, V-only, HV) implemented
+  - IRQ flag register ($4211) with read-and-clear behavior
+  - Mode selection via $4200 bits 5-4
+  - Comprehensive test coverage (4 new tests, all passing)
+  - Impact: Essential for timing-sensitive games using raster effects
+  - Reference: https://sneslab.net/wiki/H/V_Count_Timer
 
 #### UI
 - [ ] Make links in about tab work
