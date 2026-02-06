@@ -79,9 +79,16 @@ The SG-1000 only requires a cartridge ROM to run - no BIOS is needed.
 - No SC-3000 support (keyboard computer variant)
 - No cassette tape support
 - Controllers limited to standard joystick
-- Audio output currently stubbed (PSG implemented but not connected to audio pipeline)
 
 ## Recent Fixes
+
+### Audio Pipeline Integration (February 2026)
+- **PSG Audio Now Functional**: Complete audio pipeline integration with frontend
+  - SN76489 PSG now generates and outputs audio samples to the frontend
+  - Cycle-accurate audio generation matching SMS implementation
+  - PSG properly resets on system reset
+  - Audio quality: 44.1 kHz stereo output with exponential volume curve
+- **Impact**: Games now have sound! All 3 tone channels and 1 noise channel working correctly
 
 ### TMS9918A Display Blank Bit (January 2026)
 - **Fixed display blanking**: When bit 6 of register 1 is set (display blanked), the entire display now shows only the backdrop color (register 7, lower 4 bits)
