@@ -75,6 +75,26 @@ This file tracks unimplemented features, stubs, and simplified implementations a
 
 ### Medium
 
+#### SG-1000
+- [ ] **Test ROM**: Create basic test ROM for smoke testing - `test_roms/sg1000/`
+  - Current: No test ROM exists (README mentions z80asm/SDCC for creating test ROMs)
+  - Needed: Assembly-based test ROM demonstrating VDP and PSG functionality
+  - Follow pattern from other systems (test_roms/README.md)
+  - Impact: No automated verification of ROM loading and execution
+- [ ] **I/O Port Mirroring Tests**: Add unit tests for port mirroring behavior - `crates/systems/sg1000/src/bus.rs`
+  - Current: I/O port mirroring implemented but not tested
+  - PSG: All ports 0x40-0x7F mirror to same PSG
+  - VDP Data: All even ports 0x80-0xFF
+  - VDP Control: All odd ports 0x80-0xFF
+  - Controllers: Ports 0xC0-0xFF (even=controller1, odd=controller2)
+  - Impact: Verify hardware-accurate port decoding
+
+#### ColecoVision
+- [ ] **Test ROM**: Create basic test ROM for smoke testing - `test_roms/colecovision/`
+  - Current: Test ROM exists but doesn't execute properly through BIOS
+  - Smoke tests use manual VDP initialization instead of ROM execution
+  - Impact: Full system integration not validated via ROM execution
+
 #### PC/DOS
 - [ ] **INT 21h DOS API**: Expand file I/O and DOS functions - `crates/systems/pc/src/cpu.rs`
   - Current: Character I/O works, file operations are stubs
@@ -177,6 +197,17 @@ This file tracks unimplemented features, stubs, and simplified implementations a
 - [ ] **Branch Delay Slot Nullification**: Implement nullify delay slot - `crates/core/src/cpu_mips_r4300i.rs`
   - Branch likely instructions have ND (nullify delay) bit not implemented
   - Impact: Minor timing differences in certain branch patterns
+
+#### SG-1000
+- [ ] **ROM Banking Support**: Implement memory banking for larger cartridges - `crates/systems/sg1000/src/bus.rs`
+  - Current: Fixed 48KB ROM space (0x0000-0xBFFF)
+  - Most SG-1000 games are under 48KB, so not critical
+  - Impact: Cannot run games larger than 48KB (rare)
+- [ ] **Controller API Refinement**: Add type-safe controller methods - `crates/systems/sg1000/src/system.rs`
+  - Current: Generic `set_controller(port: u8, state: u8)` method
+  - Consider: Explicit `set_controller1(state: u8)` and `set_controller2(state: u8)` methods
+  - Follow ColecoVision pattern for consistency
+  - Impact: Better API design and type safety
 
 #### Chores
 - [ ] Update dependencies (cargo)

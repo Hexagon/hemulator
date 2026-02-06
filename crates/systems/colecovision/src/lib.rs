@@ -215,6 +215,84 @@ mod tests {
     }
 
     #[test]
+    fn test_audio_generation() {
+        let mut system = ColecoVisionSystem::new();
+
+        // Load dummy BIOS and cartridge
+        system.load_bios(vec![0; 0x2000]);
+        system.load_cartridge(vec![0; 0x8000]);
+
+        // Generate audio samples
+        let samples = system.get_audio_samples(1000);
+
+        // Should generate exactly the requested number of samples
+        assert_eq!(samples.len(), 1000);
+
+        // With default muted state, samples should be near zero
+        let max_sample = samples.iter().map(|&s| s.abs()).max().unwrap_or(0);
+        assert!(
+            max_sample <= 100,
+            "Expected near-silent output by default, got max sample: {}",
+            max_sample
+        );
+    }
+
+    #[test]
+    fn test_audio_with_tone() {
+        use emu_core::cpu_z80::MemoryZ80;
+
+        let mut system = ColecoVisionSystem::new();
+
+        // Load dummy BIOS and cartridge
+        system.load_bios(vec![0; 0x2000]);
+        system.load_cartridge(vec![0; 0x8000]);
+
+        // Write to PSG to enable a tone
+        // ColecoVision PSG is at I/O ports 0xA0-0xA1 (but all ports 0xA0+ work)
+        system.cpu.memory.io_write(0xA0, 0x90); // Channel 0, Volume 0 (max)
+        system.cpu.memory.io_write(0xA0, 0x80 | 0x04); // Channel 0, Tone low bits
+        system.cpu.memory.io_write(0xA0, 0x01); // Tone high bits
+
+        // Generate samples
+        let samples = system.get_audio_samples(1000);
+        assert_eq!(samples.len(), 1000);
+
+        // Should now have audible output
+        let non_zero_count = samples.iter().filter(|&&s| s != 0).count();
+        assert!(
+            non_zero_count > 0,
+            "Expected audio output after enabling tone"
+        );
+    }
+
+    #[test]
+    fn test_psg_reset() {
+        use emu_core::cpu_z80::MemoryZ80;
+
+        let mut system = ColecoVisionSystem::new();
+
+        // Load dummy BIOS and cartridge
+        system.load_bios(vec![0; 0x2000]);
+        system.load_cartridge(vec![0; 0x8000]);
+
+        // Enable a tone
+        system.cpu.memory.io_write(0xA0, 0x90); // Max volume
+        system.cpu.memory.io_write(0xA0, 0x84); // Tone frequency
+
+        // Reset system
+        system.reset();
+
+        // PSG should be reset - audio should be silent again
+        let samples = system.get_audio_samples(100);
+        let max_sample = samples.iter().map(|&s| s.abs()).max().unwrap_or(0);
+        assert!(
+            max_sample <= 100,
+            "Expected near-silent output after reset, got max sample: {}",
+            max_sample
+        );
+    }
+
+    #[test]
     fn test_vdp_sprite_transparency() {
         use emu_core::renderer::Renderer;
         use emu_core::tms9918a::Tms9918a;
