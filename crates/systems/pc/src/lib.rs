@@ -289,7 +289,8 @@ impl PcSystem {
     /// Get audio samples from the PC speaker
     ///
     /// Generates audio samples based on the PIT channel 2 (PC speaker) output.
-    /// The PC speaker produces a square wave controlled by the PIT.
+    /// The PC speaker's cone position directly follows the PIT output state:
+    /// high = cone in one position, low = cone in opposite position.
     ///
     /// # Arguments
     /// * `count` - Number of samples to generate (typically for one frame)
@@ -304,40 +305,58 @@ impl PcSystem {
 
         // Get speaker state from PIT channel 2
         let speaker_enabled = self.cpu.bus().speaker_gate_enabled();
-        let speaker_output = self.cpu.bus().pit.speaker_output();
 
-        // If speaker is disabled or output is low, generate silence
-        // Otherwise generate square wave at PIT frequency
+        // If speaker is disabled, generate silence
         if !speaker_enabled {
             samples.resize(count, 0);
-        } else {
-            // Get the current frequency from PIT channel 2
-            let frequency = self.cpu.bus().pit.speaker_frequency();
+            return samples;
+        }
 
-            // Generate square wave samples
-            // We track phase across samples to maintain continuity
-            // Note: In a real implementation, we'd need to maintain phase state
-            // across calls, but for simplicity we start fresh each time
-            let samples_per_cycle = SAMPLE_RATE / frequency;
+        // Get the current frequency from PIT channel 2
+        let frequency = self.cpu.bus().pit.speaker_frequency();
 
-            for i in 0..count {
-                // Calculate phase within the current cycle (0.0 to 1.0)
-                let phase = (i as f64 % samples_per_cycle) / samples_per_cycle;
+        // If the frequency is zero, negative or non-finite, treat as silence
+        if !frequency.is_finite() || frequency <= 0.0 {
+            samples.resize(count, 0);
+            return samples;
+        }
 
-                // Square wave: high for first half of cycle, low for second half
-                // Apply the PIT output state - if output is high, emit positive, else negative
-                let sample = if speaker_output {
-                    if phase < 0.5 {
-                        AMPLITUDE
-                    } else {
-                        -AMPLITUDE
-                    }
+        // The PIT output toggles at the specified frequency in square wave mode.
+        // We sample this output state at the audio sample rate.
+        // Since the PIT state changes over time and we can't retroactively sample it,
+        // we approximate by generating a square wave at the PIT frequency.
+        //
+        // Note: This is a simplified implementation. A more accurate version would
+        // maintain PIT state and sample it at precise intervals, but this approximation
+        // works well for most PC speaker applications.
+
+        let speaker_output = self.cpu.bus().pit.speaker_output();
+        let samples_per_cycle = SAMPLE_RATE / frequency;
+
+        for i in 0..count {
+            // Calculate phase within the current cycle (0.0 to 1.0)
+            let phase = (i as f64 % samples_per_cycle) / samples_per_cycle;
+
+            // The speaker cone follows the PIT output state
+            // In square wave mode, output toggles: high for half period, low for half period
+            // We use the current output state as the initial state
+            let sample = if speaker_output {
+                // Start high
+                if phase < 0.5 {
+                    AMPLITUDE
                 } else {
-                    0
-                };
+                    -AMPLITUDE
+                }
+            } else {
+                // Start low
+                if phase < 0.5 {
+                    -AMPLITUDE
+                } else {
+                    AMPLITUDE
+                }
+            };
 
-                samples.push(sample);
-            }
+            samples.push(sample);
         }
 
         samples

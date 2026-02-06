@@ -356,7 +356,8 @@ impl System for SnesSystem {
                 // Calculate approximate dot position within the scanline
                 let scanline_cycles = self.current_cycles % SNES_SCANLINE_CYCLES;
                 // Convert CPU cycles to approximate dot position (340 dots per scanline)
-                let dot = (scanline_cycles * 340) / SNES_SCANLINE_CYCLES;
+                // Clamp to valid range 0-339
+                let dot = ((scanline_cycles * 340) / SNES_SCANLINE_CYCLES).min(339);
                 self.cpu
                     .bus_mut()
                     .ppu_mut()
@@ -404,7 +405,9 @@ impl System for SnesSystem {
 
                 // Update PPU H/V counters in HBlank too
                 let scanline_cycles = self.current_cycles % SNES_SCANLINE_CYCLES;
-                let dot = (scanline_cycles * 340) / SNES_SCANLINE_CYCLES;
+                // Convert CPU cycles to approximate dot position (340 dots per scanline)
+                // Clamp to valid range 0-339
+                let dot = ((scanline_cycles * 340) / SNES_SCANLINE_CYCLES).min(339);
                 self.cpu
                     .bus_mut()
                     .ppu_mut()
