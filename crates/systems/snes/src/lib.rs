@@ -357,7 +357,10 @@ impl System for SnesSystem {
                 let scanline_cycles = self.current_cycles % SNES_SCANLINE_CYCLES;
                 // Convert CPU cycles to approximate dot position (340 dots per scanline)
                 let dot = (scanline_cycles * 340) / SNES_SCANLINE_CYCLES;
-                self.cpu.bus_mut().ppu_mut().update_counters(scanline as u16, dot as u16);
+                self.cpu
+                    .bus_mut()
+                    .ppu_mut()
+                    .update_counters(scanline as u16, dot as u16);
 
                 // Check for H/V timer IRQ
                 if self.cpu.bus().check_hv_timer_irq(scanline, scanline_cycles) {
@@ -402,7 +405,10 @@ impl System for SnesSystem {
                 // Update PPU H/V counters in HBlank too
                 let scanline_cycles = self.current_cycles % SNES_SCANLINE_CYCLES;
                 let dot = (scanline_cycles * 340) / SNES_SCANLINE_CYCLES;
-                self.cpu.bus_mut().ppu_mut().update_counters(scanline as u16, dot as u16);
+                self.cpu
+                    .bus_mut()
+                    .ppu_mut()
+                    .update_counters(scanline as u16, dot as u16);
 
                 // Check for H/V timer IRQ during HBlank too
                 if self.cpu.bus().check_hv_timer_irq(scanline, scanline_cycles) {

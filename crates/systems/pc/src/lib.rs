@@ -301,11 +301,11 @@ impl PcSystem {
         const AMPLITUDE: i16 = 8192; // Quarter of max 16-bit range for reasonable volume
 
         let mut samples = Vec::with_capacity(count);
-        
+
         // Get speaker state from PIT channel 2
         let speaker_enabled = self.cpu.bus().speaker_gate_enabled();
         let speaker_output = self.cpu.bus().pit.speaker_output();
-        
+
         // If speaker is disabled or output is low, generate silence
         // Otherwise generate square wave at PIT frequency
         if !speaker_enabled {
@@ -313,17 +313,17 @@ impl PcSystem {
         } else {
             // Get the current frequency from PIT channel 2
             let frequency = self.cpu.bus().pit.speaker_frequency();
-            
+
             // Generate square wave samples
             // We track phase across samples to maintain continuity
             // Note: In a real implementation, we'd need to maintain phase state
             // across calls, but for simplicity we start fresh each time
             let samples_per_cycle = SAMPLE_RATE / frequency;
-            
+
             for i in 0..count {
                 // Calculate phase within the current cycle (0.0 to 1.0)
                 let phase = (i as f64 % samples_per_cycle) / samples_per_cycle;
-                
+
                 // Square wave: high for first half of cycle, low for second half
                 // Apply the PIT output state - if output is high, emit positive, else negative
                 let sample = if speaker_output {
@@ -335,11 +335,11 @@ impl PcSystem {
                 } else {
                     0
                 };
-                
+
                 samples.push(sample);
             }
         }
-        
+
         samples
     }
 

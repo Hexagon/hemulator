@@ -1255,7 +1255,7 @@ impl Ppu {
             0x213C => {
                 let value = self.h_counter_latched.get();
                 let toggle = self.hv_latch_toggle.get();
-                
+
                 // Return low byte first, then high byte (bit 8 only)
                 let result = if !toggle {
                     // Low byte (bits 0-7)
@@ -1264,7 +1264,7 @@ impl Ppu {
                     // High byte (bit 8 only, in bit 0 position)
                     ((value >> 8) & 0x01) as u8
                 };
-                
+
                 // Toggle for next read
                 self.hv_latch_toggle.set(!toggle);
                 result
@@ -1276,7 +1276,7 @@ impl Ppu {
             0x213D => {
                 let value = self.v_counter_latched.get();
                 let toggle = self.hv_latch_toggle.get();
-                
+
                 // Return low byte first, then high byte (bit 8 only)
                 let result = if !toggle {
                     // Low byte (bits 0-7)
@@ -1285,7 +1285,7 @@ impl Ppu {
                     // High byte (bit 8 only, in bit 0 position)
                     ((value >> 8) & 0x01) as u8
                 };
-                
+
                 // Toggle for next read
                 self.hv_latch_toggle.set(!toggle);
                 result
