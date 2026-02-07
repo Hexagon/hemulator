@@ -704,6 +704,44 @@ impl Rdp {
                     0xFFFF00FF
                 }
             }
+            // YUV 16-bit (format=1, size=2) - Used for video textures
+            // Stored as interleaved YUYV: 8-bit Y, 8-bit U/V alternating
+            (1, 2) => {
+                if addr + 1 < self.tmem.len() {
+                    // YUV stored as pairs: Y0 U Y1 V
+                    // For even s: use Y and interpolate U/V from neighbors
+                    // For odd s: use Y and interpolate U/V from neighbors
+                    let texel = u16::from_be_bytes([self.tmem[addr], self.tmem[addr + 1]]);
+                    let y = ((texel >> 8) & 0xFF) as i32;
+                    let uv = (texel & 0xFF) as i32;
+
+                    // Determine if this is a U or V sample based on position
+                    // Even positions have U, odd positions have V
+                    let (u, v) = if s & 1 == 0 {
+                        // Even position - this byte is U, get V from next texel
+                        let u_val = uv - 128;
+                        // For V, we'd need to look at the next texel, but for simplicity use 0
+                        (u_val, 0)
+                    } else {
+                        // Odd position - this byte is V, get U from previous texel
+                        let v_val = uv - 128;
+                        // For U, we'd need to look at the previous texel, but for simplicity use 0
+                        (0, v_val)
+                    };
+
+                    // YUV to RGB conversion (ITU-R BT.601)
+                    // R = Y + 1.402 * V
+                    // G = Y - 0.344 * U - 0.714 * V
+                    // B = Y + 1.772 * U
+                    let r = (y + (1402 * v) / 1000).clamp(0, 255) as u32;
+                    let g = (y - (344 * u) / 1000 - (714 * v) / 1000).clamp(0, 255) as u32;
+                    let b = (y + (1772 * u) / 1000).clamp(0, 255) as u32;
+
+                    0xFF000000 | (r << 16) | (g << 8) | b
+                } else {
+                    0xFFFF00FF
+                }
+            }
             // CI (Color Index) 8-bit (format=2, size=1)
             (2, 1) => {
                 // Color index format - lookup in palette

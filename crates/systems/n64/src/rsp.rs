@@ -68,25 +68,18 @@ const SP_STATUS_IO_FULL: u32 = 0x010; // I/O full
 const SP_STATUS_SSTEP: u32 = 0x020; // Single step mode
 #[allow(dead_code)]
 const SP_STATUS_INTR_BREAK: u32 = 0x040; // Interrupt on break
-#[allow(dead_code)]
 const SP_STATUS_SIG0: u32 = 0x080; // Signal 0
-#[allow(dead_code)]
 const SP_STATUS_SIG1: u32 = 0x100; // Signal 1
-#[allow(dead_code)]
 const SP_STATUS_SIG2: u32 = 0x200; // Signal 2
-#[allow(dead_code)]
 const SP_STATUS_SIG3: u32 = 0x400; // Signal 3
-#[allow(dead_code)]
 const SP_STATUS_SIG4: u32 = 0x800; // Signal 4
-#[allow(dead_code)]
 const SP_STATUS_SIG5: u32 = 0x1000; // Signal 5
-#[allow(dead_code)]
 const SP_STATUS_SIG6: u32 = 0x2000; // Signal 6
-#[allow(dead_code)]
 const SP_STATUS_SIG7: u32 = 0x4000; // Signal 7
 
 use super::rdp::Rdp;
 use super::rsp_hle::RspHle;
+use std::cell::Cell;
 
 /// RSP (Reality Signal Processor) state
 pub struct Rsp {
@@ -108,7 +101,8 @@ pub struct Rsp {
     sp_status: u32,
     sp_dma_full: u32,
     sp_dma_busy: u32,
-    sp_semaphore: u32,
+    /// Semaphore uses Cell for interior mutability (read clears it)
+    sp_semaphore: Cell<u32>,
 
     /// High-level emulation state
     hle: RspHle,
@@ -128,7 +122,7 @@ impl Rsp {
             sp_status: SP_STATUS_HALT, // Start halted
             sp_dma_full: 0,
             sp_dma_busy: 0,
-            sp_semaphore: 0,
+            sp_semaphore: Cell::new(0),
             hle: RspHle::new(),
         }
     }
@@ -146,7 +140,7 @@ impl Rsp {
         self.sp_status = SP_STATUS_HALT;
         self.sp_dma_full = 0;
         self.sp_dma_busy = 0;
-        self.sp_semaphore = 0;
+        self.sp_semaphore.set(0);
         self.hle = RspHle::new();
     }
 
@@ -191,9 +185,10 @@ impl Rsp {
             SP_DMA_FULL => self.sp_dma_full,
             SP_DMA_BUSY => self.sp_dma_busy,
             SP_SEMAPHORE => {
-                // Reading semaphore clears it (returns 1 if was set, 0 if was clear)
-                // For now, stub implementation always returns 0
-                0
+                // Reading semaphore atomically returns current value and clears it
+                // Returns 1 if was set (locked), 0 if was clear (unlocked)
+                // Use replace() to atomically read and clear
+                self.sp_semaphore.replace(0)
             }
             _ => 0,
         }
@@ -252,11 +247,90 @@ impl Rsp {
                 if value & 0x0004 != 0 {
                     self.sp_status &= !SP_STATUS_BROKE;
                 }
-                // Other bits control interrupts, signals, etc. (not implemented)
+                // Bit 3: Clear interrupt
+                if value & 0x0008 != 0 {
+                    // Interrupt clearing would be handled by MI
+                }
+                // Bit 4: Set interrupt
+                if value & 0x0010 != 0 {
+                    // Interrupt setting would be handled by MI
+                }
+                // Bit 5: Clear single step
+                if value & 0x0020 != 0 {
+                    self.sp_status &= !SP_STATUS_SSTEP;
+                }
+                // Bit 6: Set single step
+                if value & 0x0040 != 0 {
+                    self.sp_status |= SP_STATUS_SSTEP;
+                }
+                // Bit 7: Clear interrupt on break
+                if value & 0x0080 != 0 {
+                    self.sp_status &= !SP_STATUS_INTR_BREAK;
+                }
+                // Bit 8: Set interrupt on break
+                if value & 0x0100 != 0 {
+                    self.sp_status |= SP_STATUS_INTR_BREAK;
+                }
+                // Bits 9-10: Clear/Set signal 0
+                if value & 0x0200 != 0 {
+                    self.sp_status &= !SP_STATUS_SIG0;
+                }
+                if value & 0x0400 != 0 {
+                    self.sp_status |= SP_STATUS_SIG0;
+                }
+                // Bits 11-12: Clear/Set signal 1
+                if value & 0x0800 != 0 {
+                    self.sp_status &= !SP_STATUS_SIG1;
+                }
+                if value & 0x1000 != 0 {
+                    self.sp_status |= SP_STATUS_SIG1;
+                }
+                // Bits 13-14: Clear/Set signal 2
+                if value & 0x2000 != 0 {
+                    self.sp_status &= !SP_STATUS_SIG2;
+                }
+                if value & 0x4000 != 0 {
+                    self.sp_status |= SP_STATUS_SIG2;
+                }
+                // Bits 15-16: Clear/Set signal 3
+                if value & 0x8000 != 0 {
+                    self.sp_status &= !SP_STATUS_SIG3;
+                }
+                if value & 0x10000 != 0 {
+                    self.sp_status |= SP_STATUS_SIG3;
+                }
+                // Bits 17-18: Clear/Set signal 4
+                if value & 0x20000 != 0 {
+                    self.sp_status &= !SP_STATUS_SIG4;
+                }
+                if value & 0x40000 != 0 {
+                    self.sp_status |= SP_STATUS_SIG4;
+                }
+                // Bits 19-20: Clear/Set signal 5
+                if value & 0x80000 != 0 {
+                    self.sp_status &= !SP_STATUS_SIG5;
+                }
+                if value & 0x100000 != 0 {
+                    self.sp_status |= SP_STATUS_SIG5;
+                }
+                // Bits 21-22: Clear/Set signal 6
+                if value & 0x200000 != 0 {
+                    self.sp_status &= !SP_STATUS_SIG6;
+                }
+                if value & 0x400000 != 0 {
+                    self.sp_status |= SP_STATUS_SIG6;
+                }
+                // Bits 23-24: Clear/Set signal 7
+                if value & 0x800000 != 0 {
+                    self.sp_status &= !SP_STATUS_SIG7;
+                }
+                if value & 0x1000000 != 0 {
+                    self.sp_status |= SP_STATUS_SIG7;
+                }
             }
             SP_SEMAPHORE => {
                 // Writing any value to semaphore sets it
-                self.sp_semaphore = 1;
+                self.sp_semaphore.set(1);
             }
             _ => {}
         }
