@@ -140,6 +140,18 @@ pub struct RspHle {
     /// Ambient light color (RGB as floats 0.0-1.0)
     #[allow(dead_code)] // Reserved for future lighting implementation
     ambient_light: [f32; 3],
+
+    /// Segment base addresses (16 segments, 0x00-0x0F)
+    /// Used for segmented addressing in display lists and textures
+    segment_bases: [u32; 16],
+
+    /// Other mode high word (pipeline settings)
+    /// Controls cycle type, texture filtering, dithering, etc.
+    othermode_h: u32,
+
+    /// Other mode low word (rendering settings)
+    /// Controls alpha compare, depth source, render mode, etc.
+    othermode_l: u32,
 }
 
 impl RspHle {
@@ -162,6 +174,9 @@ impl RspHle {
             lights: [[0.0; 7]; 8],
             num_lights: 0,
             ambient_light: [0.3, 0.3, 0.3], // Default ambient light
+            segment_bases: [0; 16],         // Initialize all segments to 0
+            othermode_h: 0,
+            othermode_l: 0,
         }
     }
 
@@ -714,8 +729,8 @@ impl RspHle {
                 // word0: cmd_id | index (which word to modify) | offset (within that word)
                 // word1: value to write
                 let index = (word0 >> 16) & 0xFF;
-                let _offset = word0 & 0xFFFF;
-                let _value = word1;
+                let offset = word0 & 0xFFFF;
+                let value = word1;
 
                 // Common indices:
                 // 0x00: G_MW_MATRIX - Modify current matrix
@@ -727,14 +742,43 @@ impl RspHle {
                 // 0x0C: G_MW_POINTS - Point rendering params
                 // 0x0E: G_MW_PERSPNORM - Perspective normalization
 
-                // For HLE, we log but don't implement most of these
-                // Full LLE would modify RSP internal state
-                log(LogCategory::Stubs, LogLevel::Debug, || {
-                    format!(
-                        "N64 RSP HLE: G_MOVEWORD stub - index=0x{:02X}, offset=0x{:04X}, value=0x{:08X}",
-                        index, _offset, _value
-                    )
-                });
+                match index {
+                    0x02 => {
+                        // G_MW_NUMLIGHT - Set number of lights
+                        // value is the number of lights to use (usually multiplied by 24 in the macro)
+                        // The actual number of lights is value / 24
+                        let num_lights = (value / 24).min(8) as usize;
+                        self.num_lights = num_lights;
+                        log(LogCategory::PPU, LogLevel::Debug, || {
+                            format!("RSP HLE: G_MOVEWORD numlight - set to {}", num_lights)
+                        });
+                    }
+                    0x06 => {
+                        // G_MW_SEGMENT - Set segment base address
+                        // offset contains the segment number (0-15)
+                        // value is the base address for that segment
+                        let segment = (offset / 4) as usize;
+                        if segment < 16 {
+                            self.segment_bases[segment] = value;
+                            log(LogCategory::PPU, LogLevel::Debug, || {
+                                format!(
+                                    "RSP HLE: G_MOVEWORD segment - segment 0x{:X} = 0x{:08X}",
+                                    segment, value
+                                )
+                            });
+                        }
+                    }
+                    _ => {
+                        // Other indices not yet implemented
+                        // Log at debug level since these may not be critical for basic rendering
+                        log(LogCategory::Stubs, LogLevel::Debug, || {
+                            format!(
+                                "N64 RSP HLE: G_MOVEWORD - index=0x{:02X}, offset=0x{:04X}, value=0x{:08X}",
+                                index, offset, value
+                            )
+                        });
+                    }
+                }
                 true
             }
             // G_MOVEMEM (0xDC) - Load memory segment
@@ -887,15 +931,25 @@ impl RspHle {
             0xB2 => {
                 // word0: cmd_id | shift | length
                 // word1: data to set
-                let _shift = (word0 >> 8) & 0xFF;
-                let _length = word0 & 0xFF;
-                let _data = word1;
+                let shift = (word0 >> 8) & 0xFF;
+                let length = word0 & 0xFF;
+                let data = word1;
 
-                // Other modes control rendering pipeline settings (alpha blend, Z-mode, etc.)
-                log(LogCategory::Stubs, LogLevel::Debug, || {
+                // Create a mask for the bits we're setting
+                // length bits starting at position shift
+                let mask = if length == 32 {
+                    0xFFFFFFFF
+                } else {
+                    ((1u32 << length) - 1) << shift
+                };
+
+                // Clear the bits in the range, then set new bits
+                self.othermode_l = (self.othermode_l & !mask) | (data & mask);
+
+                log(LogCategory::PPU, LogLevel::Debug, || {
                     format!(
-                        "N64 RSP HLE: G_SETOTHERMODE_L stub - shift={}, len={}, data=0x{:08X}",
-                        _shift, _length, _data
+                        "RSP HLE: G_SETOTHERMODE_L - shift={}, len={}, data=0x{:08X}, result=0x{:08X}",
+                        shift, length, data, self.othermode_l
                     )
                 });
                 true
@@ -904,15 +958,25 @@ impl RspHle {
             0xB3 => {
                 // word0: cmd_id | shift | length
                 // word1: data to set
-                let _shift = (word0 >> 8) & 0xFF;
-                let _length = word0 & 0xFF;
-                let _data = word1;
+                let shift = (word0 >> 8) & 0xFF;
+                let length = word0 & 0xFF;
+                let data = word1;
 
-                // Other modes control rendering pipeline settings
-                log(LogCategory::Stubs, LogLevel::Debug, || {
+                // Create a mask for the bits we're setting
+                // length bits starting at position shift
+                let mask = if length == 32 {
+                    0xFFFFFFFF
+                } else {
+                    ((1u32 << length) - 1) << shift
+                };
+
+                // Clear the bits in the range, then set new bits
+                self.othermode_h = (self.othermode_h & !mask) | (data & mask);
+
+                log(LogCategory::PPU, LogLevel::Debug, || {
                     format!(
-                        "N64 RSP HLE: G_SETOTHERMODE_H stub - shift={}, len={}, data=0x{:08X}",
-                        _shift, _length, _data
+                        "RSP HLE: G_SETOTHERMODE_H - shift={}, len={}, data=0x{:08X}, result=0x{:08X}",
+                        shift, length, data, self.othermode_h
                     )
                 });
                 true

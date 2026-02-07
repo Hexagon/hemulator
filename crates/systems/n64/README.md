@@ -62,14 +62,13 @@ The N64 emulator is a **basic implementation** with functional RDP graphics proc
 
 - ⏳ **Cycle Accuracy** - Uses reduced cycle count (50,000 cycles/frame instead of hardware-accurate 1,562,500) for performance; frame-based timing, not cycle-accurate (configurable via `set_frame_cycles()`)
 - ⏳ **RDP Commands** - Many commands stubbed or simplified:
-  - `SET_OTHER_MODES` (0x2F) - Ignored (rendering mode configuration not applied)
   - Some texture formats not implemented (returns white for unknown formats)
-  - Advanced blend/combine modes missing
+  - Advanced blend/combine modes not fully applied to rendering pipeline
   - Performance counters (DPC_CLOCK, DPC_BUFBUSY, DPC_PIPEBUSY, DPC_TMEM) return hardcoded zeros
 - ⏳ **RSP Implementation** - High-Level Emulation only (no Low-Level Emulation):
   - Only F3DEX/F3DEX2 graphics commands implemented
   - Audio microcode tasks explicitly not implemented
-  - Many F3DEX commands are stubs: G_MOVEWORD, G_MOVEMEM, G_SETOTHERMODE_L/H
+  - Some less common F3DEX commands still stubbed (matrix modification, fog, clipping)
   - Semaphore register always returns 0 (stub)
   - Signal bits (SIG0-SIG7) not implemented
   - No instruction-level execution (scalar/vector units not emulated)
@@ -82,8 +81,21 @@ The N64 emulator is a **basic implementation** with functional RDP graphics proc
   - Memory alignment not validated (assumes properly aligned access)
   - Cache is direct-mapped only (no full coherency)
 
-### Recent Improvements (January 2026)
+### Recent Improvements (January-February 2026)
 
+- ✅ **RSP F3DEX Command Implementation** (February 2026) - Implemented key F3DEX microcode commands
+  - **G_MOVEWORD (0xDB)**: Now handles G_MW_NUMLIGHT and G_MW_SEGMENT
+    - Sets number of active lights for lighting calculations
+    - Configures segment base addresses for segmented addressing
+  - **G_SETOTHERMODE_L (0xB2)**: Stores lower other modes with proper bit masking
+    - Controls alpha compare, depth source, render mode settings
+  - **G_SETOTHERMODE_H (0xB3)**: Stores upper other modes with proper bit masking
+    - Controls cycle type, texture filtering, dithering settings
+  - Impact: Better compatibility with games using these rendering configuration commands
+- ✅ **RDP SET_OTHER_MODES Implementation** (February 2026) - RDP command for rendering pipeline configuration
+  - Stores full 64-bit othermode value (cycle type, texture filtering, alpha compare, z-mode)
+  - Extracts and logs common rendering mode fields for debugging
+  - Foundation for future rendering pipeline enhancements
 - ✅ **Viewport Y-Axis Transformation Fix** (January 15, 2026) - Corrected viewport transformation in RSP HLE
   - Fixed incorrect Y-axis calculation in `clip_to_screen` function
   - Changed from `vp_y + (1.0 - ndc_y) * scale_y` to `vp_y + (ndc_y + 1.0) * scale_y`
@@ -307,17 +319,17 @@ See [User Manual](https://hemulator.56k.guru/user/systems.html#n64-nintendo-64) 
 
 **Main limitations preventing full game compatibility**:
 1. **Cycle Accuracy** - Uses 50,000 cycles/frame (vs hardware's 1,562,500) for performance; may cause issues with precise timing-dependent games (configurable via `set_frame_cycles()`)
-2. **RDP Incomplete** - Many commands stubbed or simplified (SET_OTHER_MODES ignored, some texture formats missing, performance counters return zeros)
-3. **RSP HLE Only** - No instruction-level execution; only F3DEX graphics commands partially implemented; audio microcode not supported; many commands are stubs
+2. **RDP Incomplete** - Some texture formats missing; blend/combine modes not fully applied to rendering pipeline; performance counters return zeros
+3. **RSP HLE Only** - No instruction-level execution; only F3DEX graphics commands implemented; audio microcode not supported; some less common commands stubbed
 4. **No Save System** - EEPROM, Flash, and Memory Card (Controller Pak) not implemented; games cannot save progress
 5. **CPU Edge Cases** - Overflow traps not implemented (uses wrapping arithmetic); memory alignment not validated; cache is direct-mapped only
 
 ## Future Development
 
 ### Critical for Commercial Games
-1. **RSP Microcode Expansion** - Implement missing F3DEX commands (G_MOVEWORD, G_MOVEMEM, G_SETOTHERMODE_*) and add audio microcode support
+1. **RSP Microcode Expansion** - Implement audio microcode support and remaining F3DEX commands (matrix modification, fog, clipping)
 2. **Save System** - Implement EEPROM/Flash cartridge saves and Controller Pak (memory card) support
-3. **RDP Command Completion** - Implement SET_OTHER_MODES and missing texture formats for proper rendering
+3. **RDP Blend/Combine Pipeline** - Apply stored othermode settings to rendering pipeline for advanced graphics effects
 4. **Cycle-Accurate Timing** - Improve timing precision for games that depend on it (optional enhancement - configurable system already in place)
 
 ### Nice to Have
