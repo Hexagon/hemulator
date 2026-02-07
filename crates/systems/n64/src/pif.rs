@@ -175,6 +175,7 @@ pub struct ControllerState {
 
 /// EEPROM type and size
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)] // Public API for N64 system save persistence
 pub enum EepromType {
     /// No EEPROM present
     None,
@@ -208,6 +209,7 @@ pub struct Pif {
     eeprom_data: Vec<u8>,
 
     /// Current EEPROM block being accessed (for multi-byte transfers)
+    #[allow(dead_code)] // Reserved for future multi-byte EEPROM transfers
     eeprom_block: u8,
 }
 
@@ -227,6 +229,7 @@ impl Pif {
     }
 
     /// Set EEPROM type and initialize storage
+    #[allow(dead_code)] // Will be used by N64 system for save persistence
     pub fn set_eeprom_type(&mut self, eeprom_type: EepromType) {
         self.eeprom_type = eeprom_type;
         
@@ -241,6 +244,7 @@ impl Pif {
     }
 
     /// Load EEPROM data from file
+    #[allow(dead_code)] // Will be used by N64 system for save persistence
     pub fn load_eeprom(&mut self, data: Vec<u8>) -> Result<(), String> {
         if self.eeprom_type == EepromType::None {
             return Err("No EEPROM configured".to_string());
@@ -265,6 +269,7 @@ impl Pif {
     }
 
     /// Save EEPROM data to buffer (for persistence)
+    #[allow(dead_code)] // Will be used by N64 system for save persistence
     pub fn save_eeprom(&self) -> Option<Vec<u8>> {
         if self.eeprom_type != EepromType::None {
             Some(self.eeprom_data.clone())
@@ -415,9 +420,7 @@ impl Pif {
         if self.ram[0x7C0] == 0x0A && self.ram[0x7C1] == 0x01 && self.ram[0x7C2] == 0x05 {
             let block = self.ram[0x7C3];
             let mut data = [0u8; 8];
-            for i in 0..8 {
-                data[i] = self.ram[0x7C4 + i];
-            }
+            data.copy_from_slice(&self.ram[0x7C4..0x7CC]);
             self.write_eeprom_block(0x7CC, block, &data);
         }
     }
@@ -504,9 +507,7 @@ impl Pif {
         });
 
         // Copy 8 bytes from data to EEPROM
-        for i in 0..8 {
-            self.eeprom_data[addr + i] = data[i];
-        }
+        self.eeprom_data[addr..addr + 8].copy_from_slice(data);
 
         self.ram[offset] = 0x00; // Success status
     }
