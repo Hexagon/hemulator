@@ -152,23 +152,33 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - **IMPLEMENTED**: Now stores full 64-bit othermode value
   - Extracts and logs cycle type, texture filtering, alpha compare, and z-mode
   - Impact: RDP properly tracks rendering mode settings for future use
-- [ ] **Texture Format Support**: Implement missing texture formats - `crates/systems/n64/src/rdp.rs:805`
-  - Current: "Other formats not yet implemented - return white"
-  - Impact: Some textures render as white instead of proper images
+- [x] **Texture Format Support**: Implement missing texture formats - `crates/systems/n64/src/rdp.rs:705`
+  - **IMPLEMENTED**: YUV16 texture format (format=1, size=2)
+    - Used for video textures with interleaved YUYV data
+    - Implements ITU-R BT.601 YUV to RGB conversion
+    - Properly handles even/odd texel positions for U/V sampling
+  - Impact: Video textures now render correctly instead of returning white
 
 #### N64
-- [ ] **RDP Performance Counters**: Implement RDP performance counters - `crates/systems/n64/src/rdp.rs`
-  - DPC_CLOCK (clock counter) - returns 0
-  - DPC_BUFBUSY (buffer busy counter) - returns 0
-  - DPC_PIPEBUSY (pipe busy counter) - returns 0
-  - DPC_TMEM (TMEM counter) - returns 0
-  - Impact: Performance monitoring not available
-- [ ] **RSP Semaphore**: Implement RSP semaphore register - `crates/systems/n64/src/rsp.rs:195`
-  - Current: Always returns 0 (stub implementation)
-  - Impact: Synchronization between CPU and RSP not working
-- [ ] **RSP Signal Bits**: Implement signal bits (SIG0-SIG7) - `crates/systems/n64/src/rsp.rs:72-86`
-  - Current: Marked as #[allow(dead_code)]
-  - Impact: RSP-CPU communication signals not working
+- [x] **RDP Performance Counters**: Implement RDP performance counters - `crates/systems/n64/src/rdp.rs:165-172`
+  - **IMPLEMENTED**: All four performance counters now functional
+    - DPC_CLOCK: Increments ~10 cycles per RDP command processed
+    - DPC_BUFBUSY: Increments by number of commands during DMA processing
+    - DPC_PIPEBUSY: Increments for triangle/fill commands (pipeline-active operations)
+    - DPC_TMEM: Increments on each texture load to TMEM
+  - Impact: Performance monitoring now available for debugging and profiling
+- [x] **RSP Semaphore**: Implement RSP semaphore register - `crates/systems/n64/src/rsp.rs:103`
+  - **IMPLEMENTED**: Full atomic semaphore implementation using Cell<u32>
+    - Reading returns current value and atomically clears it (test-and-clear operation)
+    - Writing sets semaphore to 1 (locked state)
+    - Uses interior mutability to support atomic read-clear within immutable read context
+  - Impact: CPU-RSP synchronization now functional
+- [x] **RSP Signal Bits**: Implement signal bits (SIG0-SIG7) - `crates/systems/n64/src/rsp.rs:72-86`
+  - **IMPLEMENTED**: All 8 signal bits (SIG0-SIG7) in SP_STATUS register
+    - Each signal has clear/set bit pairs in SP_STATUS write (bits 9-24)
+    - Signals properly reflected in SP_STATUS read
+    - Enables RSP-CPU communication for task coordination
+  - Impact: RSP-CPU communication signals fully operational
 - [ ] **Memory Alignment Validation**: Add alignment checks for load/store - `crates/core/src/cpu_mips_r4300i.rs`
   - LH/SH: 2-byte aligned
   - LW/SW: 4-byte aligned
