@@ -181,10 +181,10 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Solution: Batch callback invocations or cache upgraded reference during scanline
   - Note: Low priority - current `chr_fetch_fast()` optimization already minimizes impact
 - [ ] **Weak Pointer Upgrade Overhead**: Review mapper A12 callback performance - `crates/systems/nes/src/bus.rs:88,112-114`
-  - Current: Two `.upgrade()` calls per scanline (~240 times/frame)
-  - Impact: Minimal overhead on modern CPUs
-  - Solution: Profile and optimize only if measurable impact found
-  - Note: Very low priority - likely negligible performance impact
+  - Current: `.upgrade()` is called from PPU CHR/A12 callback closures and runs once per callback invocation (potentially many times per scanline/frame depending on CHR reads/A12 transitions)
+  - Impact: Additional weak-to-strong pointer upgrades on each relevant callback; expected to be minimal on modern CPUs
+  - Solution: Profile actual callback frequency and optimize (e.g., cache strong references or restructure callbacks) only if a measurable impact is observed
+  - Note: Very low priority - likely negligible performance impact in practice
 - [ ] **Unreachable Panic Branch**: Use `unreachable!()` for impossible flag names - `crates/systems/nes/src/debugger.rs:113`
   - Current: `panic!("Unexpected flag: {}", name)` but all flag names are pre-defined
   - Impact: Code clarity and optimization
