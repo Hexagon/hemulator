@@ -168,7 +168,7 @@ pub struct Rdp {
     dpc_status: u32,
 
     /// Performance counters
-    dpc_clock: u32, // Clock counter (increments per RDP cycle)
+    dpc_clock: u32, // Clock counter (increments by a fixed amount per RDP command processed)
     dpc_bufbusy: u32,  // Buffer busy counter (cycles waiting for buffer)
     dpc_pipebusy: u32, // Pipe busy counter (cycles with active pipeline)
     dpc_tmem: u32,     // TMEM load counter (texture loads performed)
@@ -298,6 +298,11 @@ impl Rdp {
         self.dpc_end = 0;
         self.dpc_current = 0;
         self.dpc_status = DPC_STATUS_CBUF_READY;
+        // Reset performance counters
+        self.dpc_clock = 0;
+        self.dpc_bufbusy = 0;
+        self.dpc_pipebusy = 0;
+        self.dpc_tmem = 0;
     }
 
     /// Set the fill color for clear operations
@@ -536,6 +541,7 @@ impl Rdp {
         // Process commands from dpc_start to dpc_end
         let mut addr = self.dpc_start as usize;
         let end = self.dpc_end as usize;
+        let mut executed_commands = 0u32;
 
         while addr < end && addr + 7 < rdram.len() {
             // Read 64-bit command (8 bytes)
@@ -575,13 +581,15 @@ impl Rdp {
                 self.dpc_pipebusy = self.dpc_pipebusy.wrapping_add(1);
             }
 
+            // Track executed commands
+            executed_commands = executed_commands.wrapping_add(1);
+
             // Move to next command (all RDP commands are 8 bytes)
             addr += 8;
         }
 
-        // Buffer busy counter: increments during DMA processing
-        let command_count = self.dpc_end.saturating_sub(self.dpc_start) / 8;
-        self.dpc_bufbusy = self.dpc_bufbusy.wrapping_add(command_count);
+        // Buffer busy counter: increments by number of commands actually executed
+        self.dpc_bufbusy = self.dpc_bufbusy.wrapping_add(executed_commands);
 
         // Update current pointer and clear busy flags
         self.dpc_current = self.dpc_end;
@@ -735,25 +743,39 @@ impl Rdp {
             // Stored as interleaved YUYV: 8-bit Y, 8-bit U/V alternating
             (1, 2) => {
                 if addr + 1 < self.tmem.len() {
-                    // YUV stored as pairs: Y0 U Y1 V
-                    // For even s: use Y and interpolate U/V from neighbors
-                    // For odd s: use Y and interpolate U/V from neighbors
+                    // YUV stored as pairs in memory: (Y0 U0)(Y1 V0)
+                    // Both pixels (Y0 and Y1) share the same U0/V0 chroma.
                     let texel = u16::from_be_bytes([self.tmem[addr], self.tmem[addr + 1]]);
                     let y = ((texel >> 8) & 0xFF) as i32;
                     let uv = (texel & 0xFF) as i32;
 
                     // Determine if this is a U or V sample based on position
-                    // Even positions have U, odd positions have V
+                    // Even s: current texel is (Y0 U0), U is local, V comes from next texel (Y1 V0)
+                    // Odd  s: current texel is (Y1 V0), V is local, U comes from previous texel (Y0 U0)
                     let (u, v) = if s & 1 == 0 {
-                        // Even position - this byte is U, get V from next texel
+                        // Even position - this byte is U, get V from next texel if available
                         let u_val = uv - 128;
-                        // For V, we'd need to look at the next texel, but for simplicity use 0
-                        (u_val, 0)
+                        let v_val = if addr + 3 < self.tmem.len() {
+                            let next_texel =
+                                u16::from_be_bytes([self.tmem[addr + 2], self.tmem[addr + 3]]);
+                            ((next_texel & 0xFF) as i32) - 128
+                        } else {
+                            // Fallback: reuse U as V when next texel is out of bounds
+                            u_val
+                        };
+                        (u_val, v_val)
                     } else {
-                        // Odd position - this byte is V, get U from previous texel
+                        // Odd position - this byte is V, get U from previous texel if available
                         let v_val = uv - 128;
-                        // For U, we'd need to look at the previous texel, but for simplicity use 0
-                        (0, v_val)
+                        let u_val = if addr >= 2 {
+                            let prev_texel =
+                                u16::from_be_bytes([self.tmem[addr - 2], self.tmem[addr - 1]]);
+                            ((prev_texel & 0xFF) as i32) - 128
+                        } else {
+                            // Fallback: reuse V as U when previous texel is not available
+                            v_val
+                        };
+                        (u_val, v_val)
                     };
 
                     // YUV to RGB conversion (ITU-R BT.601)

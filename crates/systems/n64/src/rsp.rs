@@ -185,9 +185,9 @@ impl Rsp {
             SP_DMA_FULL => self.sp_dma_full,
             SP_DMA_BUSY => self.sp_dma_busy,
             SP_SEMAPHORE => {
-                // Reading semaphore atomically returns current value and clears it
-                // Returns 1 if was set (locked), 0 if was clear (unlocked)
-                // Use replace() to atomically read and clear
+                // Reading semaphore returns the current value and then clears it (read-and-clear)
+                // Returns 1 if it was set (locked), 0 if it was clear (unlocked)
+                // Use replace() to implement this read-and-clear behavior
                 self.sp_semaphore.replace(0)
             }
             _ => 0,
@@ -573,5 +573,75 @@ mod tests {
         // Verify data was copied to IMEM
         assert_eq!(rsp.read_imem(0x000), 0x12);
         assert_eq!(rsp.read_imem(0x001), 0x34);
+    }
+
+    #[test]
+    fn test_rsp_semaphore_behavior() {
+        let mut rsp = Rsp::new();
+        let mut rdram = vec![0u8; 1024];
+
+        // Initially semaphore should be 0 (unlocked)
+        assert_eq!(rsp.read_register(SP_SEMAPHORE), 0);
+
+        // Write to semaphore sets it to 1 (locked)
+        rsp.write_register(SP_SEMAPHORE, 1, &mut rdram);
+
+        // First read should return 1 and clear it
+        assert_eq!(rsp.read_register(SP_SEMAPHORE), 1);
+
+        // Second read should return 0 (already cleared)
+        assert_eq!(rsp.read_register(SP_SEMAPHORE), 0);
+
+        // Write again to set it
+        rsp.write_register(SP_SEMAPHORE, 0xFFFF, &mut rdram); // Any value sets to 1
+
+        // Read should return 1 and clear
+        assert_eq!(rsp.read_register(SP_SEMAPHORE), 1);
+
+        // Verify it's cleared
+        assert_eq!(rsp.read_register(SP_SEMAPHORE), 0);
+    }
+
+    #[test]
+    fn test_rsp_signal_bits() {
+        let mut rsp = Rsp::new();
+        let mut rdram = vec![0u8; 1024];
+
+        // Initially all signal bits should be 0
+        let status = rsp.read_register(SP_STATUS);
+        assert_eq!(status & SP_STATUS_SIG0, 0);
+        assert_eq!(status & SP_STATUS_SIG1, 0);
+
+        // Set SIG0 (bit 10 = 0x0400)
+        rsp.write_register(SP_STATUS, 0x0400, &mut rdram);
+        let status = rsp.read_register(SP_STATUS);
+        assert_eq!(status & SP_STATUS_SIG0, SP_STATUS_SIG0);
+
+        // Clear SIG0 (bit 9 = 0x0200)
+        rsp.write_register(SP_STATUS, 0x0200, &mut rdram);
+        let status = rsp.read_register(SP_STATUS);
+        assert_eq!(status & SP_STATUS_SIG0, 0);
+
+        // Set SIG1 (bit 12 = 0x1000)
+        rsp.write_register(SP_STATUS, 0x1000, &mut rdram);
+        let status = rsp.read_register(SP_STATUS);
+        assert_eq!(status & SP_STATUS_SIG1, SP_STATUS_SIG1);
+
+        // Clear SIG1 (bit 11 = 0x0800)
+        rsp.write_register(SP_STATUS, 0x0800, &mut rdram);
+        let status = rsp.read_register(SP_STATUS);
+        assert_eq!(status & SP_STATUS_SIG1, 0);
+
+        // Test setting multiple signals at once
+        rsp.write_register(SP_STATUS, 0x0400 | 0x1000, &mut rdram); // Set SIG0 and SIG1
+        let status = rsp.read_register(SP_STATUS);
+        assert_eq!(status & SP_STATUS_SIG0, SP_STATUS_SIG0);
+        assert_eq!(status & SP_STATUS_SIG1, SP_STATUS_SIG1);
+
+        // Test clearing multiple signals at once
+        rsp.write_register(SP_STATUS, 0x0200 | 0x0800, &mut rdram); // Clear SIG0 and SIG1
+        let status = rsp.read_register(SP_STATUS);
+        assert_eq!(status & SP_STATUS_SIG0, 0);
+        assert_eq!(status & SP_STATUS_SIG1, 0);
     }
 }
