@@ -224,6 +224,19 @@ pub const SCANCODE_F7: u8 = 0x41;
 pub const SCANCODE_F8: u8 = 0x42;
 pub const SCANCODE_F9: u8 = 0x43;
 pub const SCANCODE_F10: u8 = 0x44;
+// Arrow keys (using standard PC AT scancodes)
+// Note: On real hardware these are E0-prefixed extended scancodes,
+// but BIOS treats them as having these specific scancodes for INT 16h
+pub const SCANCODE_UP: u8 = 0x48;    // Up arrow (also numpad 8 without numlock)
+pub const SCANCODE_LEFT: u8 = 0x4B;  // Left arrow (also numpad 4 without numlock)
+pub const SCANCODE_RIGHT: u8 = 0x4D; // Right arrow (also numpad 6 without numlock)
+pub const SCANCODE_DOWN: u8 = 0x50;  // Down arrow (also numpad 2 without numlock)
+pub const SCANCODE_HOME: u8 = 0x47;  // Home (also numpad 7 without numlock)
+pub const SCANCODE_END: u8 = 0x4F;   // End (also numpad 1 without numlock)
+pub const SCANCODE_PGUP: u8 = 0x49;  // Page Up (also numpad 9 without numlock)
+pub const SCANCODE_PGDN: u8 = 0x51;  // Page Down (also numpad 3 without numlock)
+pub const SCANCODE_INSERT: u8 = 0x52; // Insert (also numpad 0 without numlock)
+pub const SCANCODE_DELETE: u8 = 0x53; // Delete (also numpad . without numlock)
 // Extended scancodes (normally E0-prefixed, but we use simplified values)
 pub const SCANCODE_RIGHT_CTRL: u8 = 0x5D; // Right Ctrl (extended scancode E0 1D)
 pub const SCANCODE_RIGHT_ALT: u8 = 0x5E; // Right Alt/AltGr (extended scancode E0 38)
@@ -310,6 +323,18 @@ pub fn sdl2_scancode_to_pc(sdl_scancode: u32) -> Option<u8> {
         45 => Some(SCANCODE_MINUS),         // SDL_SCANCODE_MINUS
         46 => Some(SCANCODE_EQUALS),        // SDL_SCANCODE_EQUALS
         53 => Some(SCANCODE_BACKTICK),      // SDL_SCANCODE_GRAVE
+        // Arrow keys
+        82 => Some(SCANCODE_UP),            // SDL_SCANCODE_UP
+        81 => Some(SCANCODE_DOWN),          // SDL_SCANCODE_DOWN
+        80 => Some(SCANCODE_LEFT),          // SDL_SCANCODE_LEFT
+        79 => Some(SCANCODE_RIGHT),         // SDL_SCANCODE_RIGHT
+        // Navigation keys
+        74 => Some(SCANCODE_HOME),          // SDL_SCANCODE_HOME
+        77 => Some(SCANCODE_END),           // SDL_SCANCODE_END
+        75 => Some(SCANCODE_PGUP),          // SDL_SCANCODE_PAGEUP
+        78 => Some(SCANCODE_PGDN),          // SDL_SCANCODE_PAGEDOWN
+        73 => Some(SCANCODE_INSERT),        // SDL_SCANCODE_INSERT
+        76 => Some(SCANCODE_DELETE),        // SDL_SCANCODE_DELETE
         _ => None,
     }
 }

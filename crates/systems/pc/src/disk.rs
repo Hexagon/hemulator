@@ -401,6 +401,268 @@ pub fn create_blank_hard_drive(format: HardDriveFormat) -> Vec<u8> {
     vec![0; size as usize]
 }
 
+/// Create a formatted hard drive image with MBR partition table and FAT16 filesystem
+///
+/// This creates a bootable hard drive ready for DOS use.
+pub fn create_formatted_hard_drive(format: HardDriveFormat) -> Vec<u8> {
+    let size = format.size_bytes();
+    if size > usize::MAX as u64 {
+        panic!(
+            "Cannot create {}GB hard drive on this platform: size ({} bytes) exceeds address space limit ({} bytes)",
+            size / (1024 * 1024 * 1024),
+            size,
+            usize::MAX
+        );
+    }
+    
+    let mut disk = vec![0u8; size as usize];
+    let (cylinders, sectors_per_track, heads) = format.geometry();
+    let total_sectors = (size / 512) as u32;
+    
+    // ==========================================
+    // MBR (Master Boot Record) at sector 0
+    // ==========================================
+    
+    // MBR boot code (minimal - just jumps to partition boot sector)
+    // This is a simple boot loader that loads partition 1's boot sector
+    let mbr_boot_code: [u8; 128] = [
+        0xFA,             // CLI - disable interrupts
+        0x33, 0xC0,       // XOR AX, AX
+        0x8E, 0xD0,       // MOV SS, AX
+        0xBC, 0x00, 0x7C, // MOV SP, 0x7C00
+        0xFB,             // STI - enable interrupts
+        0x8E, 0xD8,       // MOV DS, AX
+        0x8E, 0xC0,       // MOV ES, AX
+        0xBE, 0xBE, 0x07, // MOV SI, 0x07BE (partition table)
+        0xB9, 0x04, 0x00, // MOV CX, 4 (4 partitions)
+        // Find bootable partition loop
+        0x80, 0x3C, 0x80, // CMP BYTE [SI], 0x80
+        0x74, 0x0E,       // JE found
+        0x83, 0xC6, 0x10, // ADD SI, 16
+        0xE2, 0xF5,       // LOOP
+        // No bootable partition - halt
+        0xEB, 0xFE,       // JMP $ (infinite loop)
+        // Found bootable partition - load boot sector
+        0x8A, 0x74, 0x01, // MOV DH, [SI+1] (starting head)
+        0x8B, 0x4C, 0x02, // MOV CX, [SI+2] (starting cyl/sector)
+        0xB8, 0x01, 0x02, // MOV AX, 0x0201 (read 1 sector)
+        0xBB, 0x00, 0x7C, // MOV BX, 0x7C00
+        0xB2, 0x80,       // MOV DL, 0x80 (drive C:)
+        0xCD, 0x13,       // INT 13h
+        0x72, 0xE8,       // JC error
+        0xEA, 0x00, 0x7C, 0x00, 0x00, // JMP FAR 0000:7C00
+        // Pad rest with zeros (54 bytes of code + 74 zeros = 128)
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ];
+    disk[0..128].copy_from_slice(&mbr_boot_code);
+    
+    // Partition table at offset 0x1BE (446)
+    // Partition 1: FAT16, bootable, starting at sector 63 (standard offset)
+    let partition_start_lba: u32 = 63; // Standard offset - leaves room for MBR
+    let partition_sectors = total_sectors - partition_start_lba;
+    
+    // Convert LBA to CHS for partition entry
+    let spt = sectors_per_track as u32;
+    let hpc = heads as u32;
+    
+    // Start CHS
+    let start_sector = ((partition_start_lba % spt) + 1) as u8;
+    let start_head = ((partition_start_lba / spt) % hpc) as u8;
+    let start_cylinder = (partition_start_lba / (spt * hpc)) as u16;
+    
+    // End CHS (clamped to max values for large disks)
+    let end_lba = partition_start_lba + partition_sectors - 1;
+    let end_sector = (((end_lba % spt) + 1) as u8).min(63);
+    let end_head = (((end_lba / spt) % hpc) as u8).min(254);
+    let end_cylinder = ((end_lba / (spt * hpc)) as u16).min(1023);
+    
+    // Partition entry format:
+    // 0: Boot indicator (0x80 = bootable)
+    // 1: Starting head
+    // 2: Starting sector (bits 0-5) + cylinder high (bits 6-7)
+    // 3: Starting cylinder low
+    // 4: System ID (0x06 = FAT16B)
+    // 5: Ending head
+    // 6: Ending sector + cylinder high
+    // 7: Ending cylinder low
+    // 8-11: Starting LBA (little endian)
+    // 12-15: Partition size in sectors (little endian)
+    let partition1: [u8; 16] = [
+        0x80,  // Bootable
+        start_head,
+        start_sector | (((start_cylinder >> 8) & 0x03) as u8) << 6,
+        (start_cylinder & 0xFF) as u8,
+        0x06,  // FAT16B (>32MB)
+        end_head,
+        end_sector | (((end_cylinder >> 8) & 0x03) as u8) << 6,
+        (end_cylinder & 0xFF) as u8,
+        (partition_start_lba & 0xFF) as u8,
+        ((partition_start_lba >> 8) & 0xFF) as u8,
+        ((partition_start_lba >> 16) & 0xFF) as u8,
+        ((partition_start_lba >> 24) & 0xFF) as u8,
+        (partition_sectors & 0xFF) as u8,
+        ((partition_sectors >> 8) & 0xFF) as u8,
+        ((partition_sectors >> 16) & 0xFF) as u8,
+        ((partition_sectors >> 24) & 0xFF) as u8,
+    ];
+    disk[0x1BE..0x1CE].copy_from_slice(&partition1);
+    
+    // MBR signature
+    disk[0x1FE] = 0x55;
+    disk[0x1FF] = 0xAA;
+    
+    // ==========================================
+    // FAT16 Boot Sector (VBR) at sector 63
+    // ==========================================
+    let vbr_offset = (partition_start_lba * 512) as usize;
+    
+    // Calculate FAT16 parameters
+    let bytes_per_sector: u16 = 512;
+    let sectors_per_cluster: u8 = if partition_sectors > 65536 { 32 } else if partition_sectors > 32768 { 16 } else { 8 };
+    let reserved_sectors: u16 = 1;
+    let num_fats: u8 = 2;
+    let root_entries: u16 = 512; // 512 entries * 32 bytes = 16KB = 32 sectors
+    let root_dir_sectors = ((root_entries as u32 * 32) + 511) / 512;
+    
+    // FAT size calculation
+    let data_sectors = partition_sectors - reserved_sectors as u32 - root_dir_sectors;
+    let clusters = data_sectors / sectors_per_cluster as u32;
+    let fat_sectors = ((clusters * 2) + 511) / 512; // 2 bytes per FAT16 entry
+    
+    // BPB (BIOS Parameter Block)
+    // Jump instruction
+    disk[vbr_offset] = 0xEB;     // JMP SHORT
+    disk[vbr_offset + 1] = 0x3C; // +60 bytes
+    disk[vbr_offset + 2] = 0x90; // NOP
+    
+    // OEM name
+    disk[vbr_offset + 3..vbr_offset + 11].copy_from_slice(b"HEMULDOS");
+    
+    // Bytes per sector
+    disk[vbr_offset + 11] = (bytes_per_sector & 0xFF) as u8;
+    disk[vbr_offset + 12] = ((bytes_per_sector >> 8) & 0xFF) as u8;
+    
+    // Sectors per cluster
+    disk[vbr_offset + 13] = sectors_per_cluster;
+    
+    // Reserved sectors
+    disk[vbr_offset + 14] = (reserved_sectors & 0xFF) as u8;
+    disk[vbr_offset + 15] = ((reserved_sectors >> 8) & 0xFF) as u8;
+    
+    // Number of FATs
+    disk[vbr_offset + 16] = num_fats;
+    
+    // Root directory entries
+    disk[vbr_offset + 17] = (root_entries & 0xFF) as u8;
+    disk[vbr_offset + 18] = ((root_entries >> 8) & 0xFF) as u8;
+    
+    // Total sectors (16-bit, 0 if > 65535)
+    if partition_sectors <= 65535 {
+        disk[vbr_offset + 19] = (partition_sectors & 0xFF) as u8;
+        disk[vbr_offset + 20] = ((partition_sectors >> 8) & 0xFF) as u8;
+    }
+    
+    // Media descriptor (F8 = hard disk)
+    disk[vbr_offset + 21] = 0xF8;
+    
+    // Sectors per FAT
+    disk[vbr_offset + 22] = (fat_sectors & 0xFF) as u8;
+    disk[vbr_offset + 23] = ((fat_sectors >> 8) & 0xFF) as u8;
+    
+    // Sectors per track
+    disk[vbr_offset + 24] = sectors_per_track;
+    disk[vbr_offset + 25] = 0;
+    
+    // Number of heads
+    disk[vbr_offset + 26] = heads;
+    disk[vbr_offset + 27] = 0;
+    
+    // Hidden sectors (sectors before this partition)
+    disk[vbr_offset + 28] = (partition_start_lba & 0xFF) as u8;
+    disk[vbr_offset + 29] = ((partition_start_lba >> 8) & 0xFF) as u8;
+    disk[vbr_offset + 30] = ((partition_start_lba >> 16) & 0xFF) as u8;
+    disk[vbr_offset + 31] = ((partition_start_lba >> 24) & 0xFF) as u8;
+    
+    // Total sectors (32-bit, if > 65535)
+    if partition_sectors > 65535 {
+        disk[vbr_offset + 32] = (partition_sectors & 0xFF) as u8;
+        disk[vbr_offset + 33] = ((partition_sectors >> 8) & 0xFF) as u8;
+        disk[vbr_offset + 34] = ((partition_sectors >> 16) & 0xFF) as u8;
+        disk[vbr_offset + 35] = ((partition_sectors >> 24) & 0xFF) as u8;
+    }
+    
+    // Extended BPB
+    disk[vbr_offset + 36] = 0x80; // Drive number (hard disk)
+    disk[vbr_offset + 37] = 0;    // Reserved
+    disk[vbr_offset + 38] = 0x29; // Extended boot signature
+    
+    // Volume serial number (use size as pseudo-random)
+    disk[vbr_offset + 39] = ((size >> 0) & 0xFF) as u8;
+    disk[vbr_offset + 40] = ((size >> 8) & 0xFF) as u8;
+    disk[vbr_offset + 41] = ((size >> 16) & 0xFF) as u8;
+    disk[vbr_offset + 42] = ((size >> 24) & 0xFF) as u8;
+    
+    // Volume label
+    disk[vbr_offset + 43..vbr_offset + 54].copy_from_slice(b"HEMULATOR  ");
+    
+    // File system type
+    disk[vbr_offset + 54..vbr_offset + 62].copy_from_slice(b"FAT16   ");
+    
+    // Boot code area (offset 62-509) - minimal boot code that prints error
+    let boot_msg = b"No operating system";
+    let boot_code_offset = vbr_offset + 62;
+    // Simple code to print message and halt
+    disk[boot_code_offset] = 0xBE;  // MOV SI, offset
+    disk[boot_code_offset + 1] = (boot_code_offset + 20 - vbr_offset) as u8;
+    disk[boot_code_offset + 2] = 0x7C;
+    disk[boot_code_offset + 3] = 0xAC;  // LODSB
+    disk[boot_code_offset + 4] = 0x08;  // OR AL, AL
+    disk[boot_code_offset + 5] = 0xC0;
+    disk[boot_code_offset + 6] = 0x74;  // JZ halt
+    disk[boot_code_offset + 7] = 0x06;
+    disk[boot_code_offset + 8] = 0xB4;  // MOV AH, 0x0E
+    disk[boot_code_offset + 9] = 0x0E;
+    disk[boot_code_offset + 10] = 0xCD; // INT 10h
+    disk[boot_code_offset + 11] = 0x10;
+    disk[boot_code_offset + 12] = 0xEB; // JMP loop
+    disk[boot_code_offset + 13] = 0xF5;
+    disk[boot_code_offset + 14] = 0xEB; // JMP $ (halt)
+    disk[boot_code_offset + 15] = 0xFE;
+    disk[boot_code_offset + 20..boot_code_offset + 20 + boot_msg.len()].copy_from_slice(boot_msg);
+    
+    // Boot sector signature
+    disk[vbr_offset + 510] = 0x55;
+    disk[vbr_offset + 511] = 0xAA;
+    
+    // ==========================================
+    // Initialize FAT tables
+    // ==========================================
+    let fat1_offset = vbr_offset + (reserved_sectors as usize * 512);
+    let fat2_offset = fat1_offset + (fat_sectors as usize * 512);
+    
+    // FAT media descriptor and reserved entries
+    // Entry 0: Media descriptor (F8 for hard disk) 
+    // Entry 1: End-of-chain marker
+    disk[fat1_offset] = 0xF8;
+    disk[fat1_offset + 1] = 0xFF;
+    disk[fat1_offset + 2] = 0xFF;
+    disk[fat1_offset + 3] = 0xFF;
+    
+    // Copy to second FAT
+    disk[fat2_offset] = 0xF8;
+    disk[fat2_offset + 1] = 0xFF;
+    disk[fat2_offset + 2] = 0xFF;
+    disk[fat2_offset + 3] = 0xFF;
+    
+    // Root directory is already zeroed (empty)
+    
+    disk
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

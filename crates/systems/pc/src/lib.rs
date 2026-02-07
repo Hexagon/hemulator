@@ -41,7 +41,7 @@ pub use video_adapter_software::SoftwareCgaAdapter;
 
 pub use bios::BootPriority; // Export boot priority
 pub use bus::VideoAdapterType; // Export video adapter type
-pub use disk::{create_blank_floppy, create_blank_hard_drive, FloppyFormat, HardDriveFormat}; // Export disk utilities for GUI
+pub use disk::{create_blank_floppy, create_blank_hard_drive, create_formatted_hard_drive, FloppyFormat, HardDriveFormat}; // Export disk utilities for GUI
 pub use emu_core::cpu_8086::CpuModel as PcCpuModel; // Re-export for external use
 pub use keyboard::*; // Export keyboard scancodes for GUI integration
 pub use video_adapter_cga_graphics::{CgaGraphicsAdapter, CgaMode}; // Export CGA graphics adapter and modes
@@ -179,6 +179,26 @@ impl PcSystem {
         self.cpu.bus().memory_kb()
     }
 
+    /// Get all currently mounted files as (mount_id, data) pairs
+    /// Useful for preserving mounts when recreating the system with different config
+    pub fn mounted_files(&self) -> Vec<(String, Vec<u8>)> {
+        let mut files = Vec::new();
+        let bus = self.cpu.bus();
+        if let Some(data) = bus.floppy_a() {
+            files.push(("FloppyA".to_string(), data.to_vec()));
+        }
+        if let Some(data) = bus.floppy_b() {
+            files.push(("FloppyB".to_string(), data.to_vec()));
+        }
+        if let Some(data) = bus.hard_drive() {
+            files.push(("HardDrive".to_string(), data.to_vec()));
+        }
+        if let Some(data) = bus.cdrom() {
+            files.push(("CDROM".to_string(), data.to_vec()));
+        }
+        files
+    }
+
     /// Set the CPU model (requires reset to take full effect)
     pub fn set_cpu_model(&mut self, model: CpuModel) {
         self.cpu.set_model(model);
@@ -214,7 +234,11 @@ impl PcSystem {
 
     /// Handle keyboard input (called by GUI)
     pub fn key_press(&mut self, scancode: u8) {
+        println!("PC key_press: scancode=0x{:02X}", scancode);
         self.cpu.bus_mut().keyboard.key_press(scancode);
+        // Trigger keyboard interrupt (INT 09h / IRQ 1)
+        // This synchronizes the internal keyboard buffer to the BDA and unhalts the CPU
+        self.cpu.trigger_hardware_interrupt(0x09);
         // Unhalt the CPU if it was waiting for keyboard input (INT 16h AH=00h)
         self.cpu.unhalt();
     }
@@ -228,7 +252,10 @@ impl PcSystem {
     /// This bypasses the Key enum and directly maps SDL2 scancodes to PC scancodes
     pub fn key_press_sdl2(&mut self, sdl_scancode: u32) {
         if let Some(pc_scancode) = keyboard::sdl2_scancode_to_pc(sdl_scancode) {
+            println!("PC key_press_sdl2: SDL scancode={} -> PC scancode=0x{:02X}", sdl_scancode, pc_scancode);
             self.key_press(pc_scancode);
+        } else {
+            println!("PC key_press_sdl2: SDL scancode={} -> NO MAPPING", sdl_scancode);
         }
     }
 

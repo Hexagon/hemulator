@@ -1403,7 +1403,7 @@ impl Ppu {
             cgram_debug
         });
         */
-        
+
         // Also check what the dominant color in the frame is
         log(LogCategory::PPU, LogLevel::Info, || {
             // Count color occurrences
@@ -1415,12 +1415,16 @@ impl Ppu {
             // Find top 3 colors
             let mut sorted: Vec<_> = color_counts.iter().collect();
             sorted.sort_by(|a, b| b.1.cmp(a.1));
-            let top3: Vec<_> = sorted.iter().take(3).map(|(c, n)| {
-                let r = (*c >> 16) & 0xFF;
-                let g = (*c >> 8) & 0xFF;
-                let b = *c & 0xFF;
-                format!("0x{:08X}(R{}G{}B{}):{}", c, r, g, b, n)
-            }).collect();
+            let top3: Vec<_> = sorted
+                .iter()
+                .take(3)
+                .map(|(c, n)| {
+                    let r = (*c >> 16) & 0xFF;
+                    let g = (*c >> 8) & 0xFF;
+                    let b = *c & 0xFF;
+                    format!("0x{:08X}(R{}G{}B{}):{}", c, r, g, b, n)
+                })
+                .collect();
             format!("Top colors: {}", top3.join(", "))
         });
 

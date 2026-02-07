@@ -36,6 +36,7 @@ pub struct Vdp {
 
     // Interrupts
     frame_interrupt_pending: bool,
+    vblank_flag: bool,
     line_interrupt_pending: bool,
     line_counter: u8,
 
@@ -45,6 +46,10 @@ pub struct Vdp {
 
     // Current scanline
     scanline: u16,
+    hcounter: u8,
+
+    // Timing mode (PAL/NTSC)
+    timing_mode: emu_core::apu::TimingMode,
 }
 
 impl Vdp {
@@ -60,12 +65,20 @@ impl Vdp {
             write_latch: false,
             frame: Frame::new(256, 192),
             frame_interrupt_pending: false,
+            vblank_flag: false,
             line_interrupt_pending: false,
             line_counter: 0,
             sprite_overflow: false,
             sprite_collision: false,
             scanline: 262, // Start at end of frame so first set_scanline(0) wraps around
+            hcounter: 0,
+            timing_mode: emu_core::apu::TimingMode::Ntsc,
         }
+    }
+
+    /// Set timing mode (PAL/NTSC) for correct V-counter behavior
+    pub fn set_timing_mode(&mut self, mode: emu_core::apu::TimingMode) {
+        self.timing_mode = mode;
     }
 
     /// Write to VDP control port (0xBF)
@@ -74,11 +87,26 @@ impl Vdp {
             // First byte - lower 8 bits of address
             self.address_register = (self.address_register & 0x3F00) | data as u16;
             self.write_latch = true;
+            log(LogCategory::PPU, LogLevel::Trace, || {
+                format!("SMS VDP: Control 1st byte ${:02X}, addr now ${:04X}", data, self.address_register)
+            });
         } else {
             // Second byte - upper 6 bits of address + code
             self.address_register = (self.address_register & 0x00FF) | ((data as u16 & 0x3F) << 8);
             self.code_register = (data >> 6) & 0x03;
             self.write_latch = false;
+            
+            log(LogCategory::PPU, LogLevel::Debug, || {
+                let mode_str = match self.code_register {
+                    0 => "VRAM_READ",
+                    1 => "VRAM_WRITE",
+                    2 => "REG_WRITE",
+                    3 => "CRAM_WRITE",
+                    _ => "UNKNOWN",
+                };
+                format!("SMS VDP: Control 2nd byte ${:02X}, mode={}, addr=${:04X}", 
+                    data, mode_str, self.address_register)
+            });
 
             // Handle different code modes
             match self.code_register {
@@ -117,6 +145,9 @@ impl Vdp {
                 // CRAM write
                 let addr = self.address_register & 0x1F;
                 self.cram[addr as usize] = data;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("SMS VDP: CRAM[{:02}] = ${:02X}", addr, data)
+                });
                 if addr == 16 {
                     log(LogCategory::PPU, LogLevel::Info, || {
                         format!("SMS VDP: Backdrop color = ${:02X}", data)
@@ -125,7 +156,11 @@ impl Vdp {
             }
             _ => {
                 // VRAM write
-                self.vram[(self.address_register & 0x3FFF) as usize] = data;
+                let vram_addr = self.address_register & 0x3FFF;
+                self.vram[vram_addr as usize] = data;
+                log(LogCategory::PPU, LogLevel::Trace, || {
+                    format!("SMS VDP: VRAM[${:04X}] = ${:02X}", vram_addr, data)
+                });
             }
         }
 
@@ -147,7 +182,7 @@ impl Vdp {
         let mut status = 0;
 
         // Bit 7: Frame interrupt pending
-        if self.frame_interrupt_pending {
+        if self.vblank_flag {
             status |= 0x80;
         }
 
@@ -161,8 +196,8 @@ impl Vdp {
             status |= 0x20;
         }
 
-        // Clear frame interrupt flag on read
-        self.frame_interrupt_pending = false;
+        // Clear VBlank flag on read
+        self.vblank_flag = false;
 
         // Clear sprite flags on read
         self.sprite_overflow = false;
@@ -173,8 +208,16 @@ impl Vdp {
 
     /// Read vertical counter
     pub fn read_vcounter(&self) -> u8 {
-        // Return current scanline (simplified)
-        let vcounter = (self.scanline & 0xFF) as u8;
+        // Map scanline to SMS V-counter values.
+        // NOTE: This is an approximation that handles visible range and VBlank wraparound.
+        // TODO: Implement accurate V-counter table for NTSC/PAL timing.
+        let scanline = self.scanline;
+        let vcounter = if scanline < 192 {
+            scanline as u8
+        } else {
+            // VBlank region starts at 0xD0 and wraps after 0xFF
+            0xD0u8.wrapping_add((scanline - 192) as u8)
+        };
         log(LogCategory::PPU, LogLevel::Debug, || {
             format!(
                 "SMS VDP: V-counter read = ${:02X} (scanline={})",
@@ -182,6 +225,11 @@ impl Vdp {
             )
         });
         vcounter
+    }
+
+    /// Read horizontal counter
+    pub fn read_hcounter(&self) -> u8 {
+        self.hcounter
     }
 
     /// Step VDP by one scanline
@@ -192,6 +240,7 @@ impl Vdp {
             self.render_scanline(self.scanline as u8);
         } else if self.scanline == 192 {
             // Frame interrupt occurs at start of VBlank
+            self.vblank_flag = true;
             if (self.registers[1] & 0x20) != 0 {
                 // Frame interrupt enable
                 self.frame_interrupt_pending = true;
@@ -228,6 +277,7 @@ impl Vdp {
                 self.render_scanline(line as u8);
             }
             // Check for frame interrupt at scanline 192
+            self.vblank_flag = true;
             if (self.registers[1] & 0x20) != 0 {
                 self.frame_interrupt_pending = true;
             }
@@ -238,10 +288,18 @@ impl Vdp {
                 self.render_scanline(line as u8);
             }
             // Check for frame interrupt when crossing scanline 192
-            if old_scanline < 192 && scanline >= 192 && (self.registers[1] & 0x20) != 0 {
-                self.frame_interrupt_pending = true;
+            if old_scanline < 192 && scanline >= 192 {
+                self.vblank_flag = true;
+                if (self.registers[1] & 0x20) != 0 {
+                    self.frame_interrupt_pending = true;
+                }
             }
         }
+    }
+
+    /// Set horizontal counter value (0-255)
+    pub fn set_hcounter(&mut self, value: u8) {
+        self.hcounter = value;
     }
 
     /// Check if frame interrupt is pending
@@ -296,11 +354,13 @@ impl Vdp {
             "read_buffer": self.read_buffer,
             "write_latch": self.write_latch,
             "frame_interrupt_pending": self.frame_interrupt_pending,
+            "vblank_flag": self.vblank_flag,
             "line_interrupt_pending": self.line_interrupt_pending,
             "line_counter": self.line_counter,
             "sprite_overflow": self.sprite_overflow,
             "sprite_collision": self.sprite_collision,
             "scanline": self.scanline,
+            "hcounter": self.hcounter,
         })
     }
 
@@ -375,11 +435,13 @@ impl Vdp {
             "frame_interrupt_pending",
             self.frame_interrupt_pending
         );
+        load_bool!(state, "vblank_flag", self.vblank_flag);
         load_bool!(state, "line_interrupt_pending", self.line_interrupt_pending);
         load_u8!(state, "line_counter", self.line_counter);
         load_bool!(state, "sprite_overflow", self.sprite_overflow);
         load_bool!(state, "sprite_collision", self.sprite_collision);
         load_u16!(state, "scanline", self.scanline);
+        load_u8!(state, "hcounter", self.hcounter);
 
         Ok(())
     }
@@ -641,12 +703,15 @@ impl Renderer for Vdp {
         self.read_buffer = 0;
         self.write_latch = false;
         self.frame_interrupt_pending = false;
+        self.vblank_flag = false;
         self.line_interrupt_pending = false;
         self.line_counter = 0;
         self.sprite_overflow = false;
         self.sprite_collision = false;
         // Set to end of frame so first set_scanline(0) will properly render frame
         self.scanline = 262;
+        self.hcounter = 0;
+        self.timing_mode = emu_core::apu::TimingMode::Ntsc;
         self.clear(0xFF000000);
     }
 
@@ -837,7 +902,7 @@ mod tests {
         let mut vdp = Vdp::new();
 
         // Set all flags
-        vdp.frame_interrupt_pending = true;
+        vdp.vblank_flag = true;
         vdp.sprite_overflow = true;
         vdp.sprite_collision = true;
 

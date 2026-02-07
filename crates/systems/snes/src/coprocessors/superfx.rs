@@ -756,7 +756,7 @@ impl SuperFx {
                 self.update_zs_flags(self.regs[src]);
                 1
             }
-            // HIB - Get high byte  
+            // HIB - Get high byte
             0x0E if self.flags_alt1 => {
                 let src = self.sreg();
                 self.regs[src] = (self.regs[src] >> 8) & 0xFF;
@@ -838,7 +838,7 @@ impl SuperFx {
                 }
             }
             // Unimplemented opcodes - treat as NOP
-            _ => 1
+            _ => 1,
         };
 
         // Increment cycle counter
@@ -938,11 +938,17 @@ impl SuperFx {
                 use emu_core::logging::{log, LogCategory, LogLevel};
                 if self.flags_g {
                     log(LogCategory::Bus, LogLevel::Info, || {
-                        format!("SuperFX: GO flag set, PC=${:04X}, starting execution", self.pc())
+                        format!(
+                            "SuperFX: GO flag set, PC=${:04X}, starting execution",
+                            self.pc()
+                        )
                     });
                 } else {
                     log(LogCategory::Bus, LogLevel::Info, || {
-                        format!("SuperFX: GO flag cleared, PC=${:04X}, stopping execution", self.pc())
+                        format!(
+                            "SuperFX: GO flag cleared, PC=${:04X}, stopping execution",
+                            self.pc()
+                        )
                     });
                 }
             }
@@ -1000,7 +1006,8 @@ impl EnhancementChip for SuperFx {
         // Banks $00-$3F, $80-$BF at $8000-$FFFF access ROM
         if matches!(bank, 0x00..=0x3F | 0x80..=0xBF) && offset >= 0x8000 {
             let effective_bank = bank & 0x3F; // Remove mirror bit
-            let rom_offset = ((effective_bank as usize) << 15) | ((offset as usize - 0x8000) & 0x7FFF);
+            let rom_offset =
+                ((effective_bank as usize) << 15) | ((offset as usize - 0x8000) & 0x7FFF);
             if rom_offset < self.rom.len() {
                 return self.rom[rom_offset];
             }
@@ -1081,7 +1088,12 @@ impl EnhancementChip for SuperFx {
         if self.flags_g {
             use emu_core::logging::{log, LogCategory, LogLevel};
             log(LogCategory::Bus, LogLevel::Trace, || {
-                format!("SuperFX: Running {} cycles, PC=${:04X}, GO={}", cycles, self.pc(), self.flags_g)
+                format!(
+                    "SuperFX: Running {} cycles, PC=${:04X}, GO={}",
+                    cycles,
+                    self.pc(),
+                    self.flags_g
+                )
             });
             self.run(cycles);
         }

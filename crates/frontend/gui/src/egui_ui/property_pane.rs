@@ -17,6 +17,8 @@ pub enum PropertyAction {
     ConfigureInput,                    // Open input configuration dialog
     SetInputSource(InputConfigSource), // Switch between global/project input config
     SetRenderer(String),               // Switch to specified renderer
+    SetPcCpuModel(String),             // Change PC CPU model (requires restart)
+    SetPcMemory(u32),                  // Change PC memory size in KB (requires restart)
 }
 
 pub struct PropertyPane {
@@ -344,8 +346,10 @@ impl PropertyPane {
             ui.add_space(5.0);
             ui.separator();
             ui.label(egui::RichText::new("PC Configuration").strong());
+            ui.label(egui::RichText::new("(Changes require restart)").small().weak());
 
             if let Some(ref mut cpu_model) = self.pc_cpu_model {
+                let old_model = cpu_model.clone();
                 ui.horizontal(|ui| {
                     ui.label("CPU Model:");
                 });
@@ -370,9 +374,14 @@ impl PropertyPane {
                             ui.selectable_value(cpu_model, model.to_string(), model);
                         }
                     });
+                // Emit action if model changed
+                if *cpu_model != old_model {
+                    self.pending_action = Some(PropertyAction::SetPcCpuModel(cpu_model.clone()));
+                }
             }
 
             if let Some(ref mut memory_kb) = self.pc_memory_kb {
+                let old_memory = *memory_kb;
                 ui.horizontal(|ui| {
                     ui.label("Memory:");
                 });
@@ -394,6 +403,10 @@ impl PropertyPane {
                             ui.selectable_value(memory_kb, kb, label);
                         }
                     });
+                // Emit action if memory changed
+                if *memory_kb != old_memory {
+                    self.pending_action = Some(PropertyAction::SetPcMemory(*memory_kb));
+                }
             }
         }
     }

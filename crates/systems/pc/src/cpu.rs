@@ -202,9 +202,8 @@ impl PcCpu {
                 true
             }
             0x09 => {
-                // Keyboard interrupt - call our emulated handler
-                // Already using handle_int09h which is the hardware keyboard interrupt handler
-                self.handle_int09h();
+                // Keyboard interrupt - call hardware keyboard handler (doesn't skip instruction bytes)
+                self.handle_hardware_keyboard_interrupt();
                 true
             }
             _ => {
@@ -2142,15 +2141,24 @@ impl PcCpu {
         // Hardware interrupts don't return cycle counts
     }
 
+    /// Handle hardware keyboard interrupt from keyboard controller
+    /// Called when a key is pressed/released, does NOT skip instruction bytes
+    fn handle_hardware_keyboard_interrupt(&mut self) {
+        // For hardware interrupts, we DON'T skip instruction bytes
+        // (there's no INT instruction to skip)
+
+        // Sync keyboard buffer to BDA so DOS can read it
+        self.sync_bda_keyboard_buffer();
+
+        // Hardware interrupts don't return cycle counts
+    }
+
     /// Handle INT 09h - Keyboard Hardware Interrupt
     /// Called by keyboard hardware when a key is pressed or released
     #[allow(dead_code)] // Called dynamically based on interrupt number
     fn handle_int09h(&mut self) -> u32 {
         // Skip the INT 09h instruction (2 bytes: 0xCD 0x09)
         self.cpu.ip = self.cpu.ip.wrapping_add(2);
-
-        // Log stub call (partial implementation)
-        self.log_stub_interrupt(0x09, None, "Keyboard Hardware Interrupt (partial stub)");
 
         // Hardware keyboard interrupt
         // This is typically triggered by keyboard controller when a key is pressed
@@ -2161,8 +2169,9 @@ impl PcCpu {
         // 4. Update buffer pointers
         // 5. Send EOI to interrupt controller
 
-        // For emulator, keyboard input is handled by INT 16h services
-        // We just acknowledge the interrupt
+        // Sync keyboard buffer to BDA so DOS can read it
+        self.sync_bda_keyboard_buffer();
+
         51
     }
 

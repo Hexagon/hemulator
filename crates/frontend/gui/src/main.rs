@@ -1637,13 +1637,17 @@ impl CliArgs {
             "  --benchmark              Disable frame limiter to measure raw emulation performance"
         );
         eprintln!(
-            "  -S, --system <SYSTEM>    Start clean system (pc, nes, gb, atari2600, snes, n64)"
+            "  -S, --system <SYSTEM>    Start clean system (pc, nes, gb, atari2600, sms, colecovision, snes, n64, chip8, sg1000)"
         );
-        eprintln!("  --slot1 <file>           Load file into slot 1 (BIOS for PC)");
-        eprintln!("  --slot2 <file>           Load file into slot 2 (Floppy A for PC)");
-        eprintln!("  --slot3 <file>           Load file into slot 3 (Floppy B for PC)");
-        eprintln!("  --slot4 <file>           Load file into slot 4 (Hard Drive for PC)");
-        eprintln!("  --slot5 <file>           Load file into slot 5 (reserved)");
+        eprintln!();
+        eprintln!("Slot-based loading (use --system to specify which system):");
+        eprintln!(
+            "  --slot1 <file>           [PC] BIOS ROM | [SMS] BIOS ROM | [ColecoVision] BIOS ROM"
+        );
+        eprintln!("  --slot2 <file>           [PC] Floppy Drive A: | [SMS] Cartridge | [ColecoVision] Cartridge");
+        eprintln!("  --slot3 <file>           [PC only] Floppy Drive B:");
+        eprintln!("  --slot4 <file>           [PC only] Hard Drive C:");
+        eprintln!("  --slot5 <file>           [PC only] CD-ROM Drive (reserved)");
         eprintln!("  --create-blank-disk <path> <format>");
         eprintln!("                           Create a blank disk image");
         eprintln!();
@@ -1682,7 +1686,8 @@ impl CliArgs {
         eprintln!();
         eprintln!("Disk formats:");
         eprintln!("  360k, 720k, 1.2m, 1.44m  Floppy disk formats");
-        eprintln!("  20m, 250m, 1g, 20g       Hard drive formats");
+        eprintln!("  20m, 250m, 1g, 20g       Hard drive formats (blank)");
+        eprintln!("  20m-fat16, 250m-fat16    Hard drive formats (formatted with partition + FAT16)");
         eprintln!();
         eprintln!("Examples:");
         eprintln!("  hemu game.nes                                  # Load NES ROM (auto-detect)");
@@ -1717,11 +1722,15 @@ impl CliArgs {
         eprintln!(
             "                                                 # Keep last 5000 instructions in trace"
         );
+        eprintln!("  hemu --system pc --slot1 bios.bin --slot2 boot.img");
+        eprintln!("                                                 # [PC] Load BIOS and floppy");
+        eprintln!("  hemu --system sms --slot1 bios.sms --slot2 game.sms");
         eprintln!(
-            "  hemu --slot2 disk.img                          # Load PC with floppy in drive A"
+            "                                                 # [SMS] Load BIOS and cartridge"
         );
+        eprintln!("  hemu --system colecovision --slot1 bios.rom --slot2 game.col");
         eprintln!(
-            "  hemu --slot2 boot.img --slot4 hdd.img         # Load PC with floppy and hard drive"
+            "                                                 # [ColecoVision] Load BIOS and cartridge"
         );
         eprintln!("  hemu --create-blank-disk floppy.img 1.44m      # Create 1.44MB floppy image");
         eprintln!(
@@ -1878,6 +1887,138 @@ fn create_enhanced_debug_state(
     enhanced_state.current_pc = pc;
 
     enhanced_state
+}
+
+/// Generic slot-based file mounting for all systems
+/// Maps slot files to mount points based on system type
+fn mount_slot_files(
+    sys: &mut EmulatorSystem,
+    cli_args: &CliArgs,
+    runtime_state: &mut RuntimeState,
+) -> bool {
+    let mut any_mounted = false;
+
+    match sys {
+        // PC system uses hardcoded slot mapping
+        EmulatorSystem::PC(pc_sys) => {
+            if let Some(ref slot1) = cli_args.slot1 {
+                match std::fs::read(slot1) {
+                    Ok(data) => {
+                        if pc_sys.mount("BIOS", &data).is_ok() {
+                            runtime_state.set_mount("BIOS".to_string(), slot1.clone());
+                            println!("Loaded BIOS from slot 1: {}", slot1);
+                            any_mounted = true;
+                        } else {
+                            eprintln!("Failed to mount BIOS from slot 1");
+                        }
+                    }
+                    Err(e) => eprintln!("Failed to read slot 1 file: {}", e),
+                }
+            }
+            if let Some(ref slot2) = cli_args.slot2 {
+                match std::fs::read(slot2) {
+                    Ok(data) => {
+                        if pc_sys.mount("FloppyA", &data).is_ok() {
+                            runtime_state.set_mount("FloppyA".to_string(), slot2.clone());
+                            println!("Loaded Floppy A from slot 2: {}", slot2);
+                            any_mounted = true;
+                        }
+                    }
+                    Err(e) => eprintln!("Failed to read slot 2 file: {}", e),
+                }
+            }
+            if let Some(ref slot3) = cli_args.slot3 {
+                match std::fs::read(slot3) {
+                    Ok(data) => {
+                        if pc_sys.mount("FloppyB", &data).is_ok() {
+                            runtime_state.set_mount("FloppyB".to_string(), slot3.clone());
+                            println!("Loaded Floppy B from slot 3: {}", slot3);
+                            any_mounted = true;
+                        }
+                    }
+                    Err(e) => eprintln!("Failed to read slot 3 file: {}", e),
+                }
+            }
+            if let Some(ref slot4) = cli_args.slot4 {
+                match std::fs::read(slot4) {
+                    Ok(data) => {
+                        if pc_sys.mount("HardDrive", &data).is_ok() {
+                            runtime_state.set_mount("HardDrive".to_string(), slot4.clone());
+                            println!("Loaded Hard Drive from slot 4: {}", slot4);
+                            any_mounted = true;
+                        }
+                    }
+                    Err(e) => eprintln!("Failed to read slot 4 file: {}", e),
+                }
+            }
+            if cli_args.slot5.is_some() {
+                eprintln!("Warning: Slot 5 is reserved for future use");
+            }
+        }
+
+        // SMS: slot1=BIOS (optional), slot2=Cartridge
+        EmulatorSystem::SMS(sms_sys) => {
+            if let Some(ref slot1) = cli_args.slot1 {
+                match std::fs::read(slot1) {
+                    Ok(data) => {
+                        if sms_sys.mount("bios", &data).is_ok() {
+                            runtime_state.set_mount("bios".to_string(), slot1.clone());
+                            println!("Loaded SMS BIOS from slot 1: {}", slot1);
+                            any_mounted = true;
+                        }
+                    }
+                    Err(e) => eprintln!("Failed to read slot 1 file: {}", e),
+                }
+            }
+            if let Some(ref slot2) = cli_args.slot2 {
+                match std::fs::read(slot2) {
+                    Ok(data) => {
+                        if sms_sys.mount("cartridge", &data).is_ok() {
+                            runtime_state.set_mount("cartridge".to_string(), slot2.clone());
+                            println!("Loaded SMS Cartridge from slot 2: {}", slot2);
+                            any_mounted = true;
+                        }
+                    }
+                    Err(e) => eprintln!("Failed to read slot 2 file: {}", e),
+                }
+            }
+        }
+
+        // ColecoVision: slot1=BIOS (required), slot2=Cartridge
+        EmulatorSystem::ColecoVision(cv_sys) => {
+            if let Some(ref slot1) = cli_args.slot1 {
+                match std::fs::read(slot1) {
+                    Ok(data) => {
+                        if cv_sys.mount("BIOS", &data).is_ok() {
+                            runtime_state.set_mount("BIOS".to_string(), slot1.clone());
+                            println!("Loaded ColecoVision BIOS from slot 1: {}", slot1);
+                            any_mounted = true;
+                        }
+                    }
+                    Err(e) => eprintln!("Failed to read slot 1 file: {}", e),
+                }
+            } else {
+                eprintln!("Warning: ColecoVision requires a BIOS. Use --slot1 to load it.");
+            }
+            if let Some(ref slot2) = cli_args.slot2 {
+                match std::fs::read(slot2) {
+                    Ok(data) => {
+                        if cv_sys.mount("Cartridge", &data).is_ok() {
+                            runtime_state.set_mount("Cartridge".to_string(), slot2.clone());
+                            println!("Loaded ColecoVision Cartridge from slot 2: {}", slot2);
+                            any_mounted = true;
+                        }
+                    }
+                    Err(e) => eprintln!("Failed to read slot 2 file: {}", e),
+                }
+            }
+        }
+
+        // Other systems don't support slot loading yet
+        _ => {}
+    }
+
+    any_mounted
 }
 
 /// Apply CLI debugging options to a system
@@ -2196,6 +2337,25 @@ fn main() {
                 println!("Created 20GB hard drive image: {}", path);
                 std::process::exit(0);
             }
+            // Formatted (partitioned + FAT16) versions
+            "20m-fat16" | "fat16-20m" => {
+                let disk = emu_pc::create_formatted_hard_drive(emu_pc::HardDriveFormat::HardDrive20M);
+                if let Err(e) = fs::write(path, disk) {
+                    eprintln!("Error creating disk image: {}", e);
+                    std::process::exit(1);
+                }
+                println!("Created 20MB formatted (FAT16) hard drive image: {}", path);
+                std::process::exit(0);
+            }
+            "250m-fat16" | "fat16-250m" => {
+                let disk = emu_pc::create_formatted_hard_drive(emu_pc::HardDriveFormat::HardDrive250M);
+                if let Err(e) = fs::write(path, disk) {
+                    eprintln!("Error creating disk image: {}", e);
+                    std::process::exit(1);
+                }
+                println!("Created 250MB formatted (FAT16) hard drive image: {}", path);
+                std::process::exit(0);
+            }
             _ => {
                 eprintln!("Error: Unknown disk format '{}'", format_str);
                 eprintln!();
@@ -2507,7 +2667,9 @@ fn main() {
                                 rom_hash = Some(GameSaves::rom_hash(&data));
                                 pending_n64_rom_data = Some(data);
                                 runtime_state.set_mount("Cartridge".to_string(), p.clone());
-                                println!("N64 ROM data stored, will load after GL context is available");
+                                println!(
+                                    "N64 ROM data stored, will load after GL context is available"
+                                );
                             }
                             Err(e) => {
                                 eprintln!("Failed to read file: {}", e);
@@ -2516,9 +2678,41 @@ fn main() {
                     }
                 }
             }
+            "sms" => {
+                sys = EmulatorSystem::SMS(Box::new(emu_sms::SmsSystem::new()));
+                rom_loaded = true;
+                status_message = "Clean SMS system started".to_string();
+                println!("Started clean SMS system");
+            }
+            "colecovision" | "coleco" => {
+                sys = EmulatorSystem::ColecoVision(Box::new(
+                    emu_colecovision::ColecoVisionSystem::new(),
+                ));
+                rom_loaded = true;
+                status_message = "Clean ColecoVision system started".to_string();
+                println!("Started clean ColecoVision system");
+            }
+            "snes" => {
+                sys = EmulatorSystem::SNES(Box::new(emu_snes::SnesSystem::new()));
+                rom_loaded = true;
+                status_message = "Clean SNES system started".to_string();
+                println!("Started clean SNES system");
+            }
+            "chip8" => {
+                sys = EmulatorSystem::Chip8(Box::new(emu_chip8::Chip8System::new()));
+                rom_loaded = true;
+                status_message = "Clean CHIP-8 system started".to_string();
+                println!("Started clean CHIP-8 system");
+            }
+            "sg1000" => {
+                sys = EmulatorSystem::SG1000(Box::new(emu_sg1000::Sg1000System::new()));
+                rom_loaded = true;
+                status_message = "Clean SG-1000 system started".to_string();
+                println!("Started clean SG-1000 system");
+            }
             _ => {
                 eprintln!("Error: Unknown system '{}'", system_name);
-                eprintln!("Valid systems: pc, nes, gb, atari2600, snes, n64");
+                eprintln!("Valid systems: pc, nes, gb, atari2600, sms, colecovision, snes, n64, chip8, sg1000");
                 std::process::exit(1);
             }
         }
@@ -2779,8 +2973,11 @@ fn main() {
                             rom_hash = Some(GameSaves::rom_hash(&data));
                             pending_n64_rom_data = Some(data);
                             runtime_state.set_mount("Cartridge".to_string(), p.clone());
-                            status_message = "N64 ROM stored, initializing after OpenGL...".to_string();
-                            println!("N64 ROM data stored, will load after GL context is available");
+                            status_message =
+                                "N64 ROM stored, initializing after OpenGL...".to_string();
+                            println!(
+                                "N64 ROM data stored, will load after GL context is available"
+                            );
                         }
                         Ok(SystemType::SMS) => {
                             rom_hash = Some(GameSaves::rom_hash(&data));
@@ -2945,75 +3142,23 @@ fn main() {
         println!("Auto-selected PC mode for slot-based loading");
     }
 
-    // Load slot files for PC system
+    // Load slot files for all supported systems
     if let EmulatorSystem::PC(ref mut pc_sys) = sys {
-        // Slot 1: BIOS
-        if let Some(ref slot1_path) = cli_args.slot1 {
-            match fs::read(slot1_path) {
-                Ok(data) => {
-                    if let Err(e) = pc_sys.mount("BIOS", &data) {
-                        eprintln!("Failed to mount BIOS from slot 1: {}", e);
-                    } else {
-                        runtime_state.set_mount("BIOS".to_string(), slot1_path.clone());
-                        println!("Loaded BIOS from slot 1: {}", slot1_path);
-                    }
-                }
-                Err(e) => eprintln!("Failed to read slot 1 file: {}", e),
-            }
-        }
-
-        // Slot 2: Floppy A
-        if let Some(ref slot2_path) = cli_args.slot2 {
-            match fs::read(slot2_path) {
-                Ok(data) => {
-                    if let Err(e) = pc_sys.mount("FloppyA", &data) {
-                        eprintln!("Failed to mount Floppy A from slot 2: {}", e);
-                    } else {
-                        runtime_state.set_mount("FloppyA".to_string(), slot2_path.clone());
-                        println!("Loaded Floppy A from slot 2: {}", slot2_path);
-                    }
-                }
-                Err(e) => eprintln!("Failed to read slot 2 file: {}", e),
-            }
-        }
-
-        // Slot 3: Floppy B
-        if let Some(ref slot3_path) = cli_args.slot3 {
-            match fs::read(slot3_path) {
-                Ok(data) => {
-                    if let Err(e) = pc_sys.mount("FloppyB", &data) {
-                        eprintln!("Failed to mount Floppy B from slot 3: {}", e);
-                    } else {
-                        runtime_state.set_mount("FloppyB".to_string(), slot3_path.clone());
-                        println!("Loaded Floppy B from slot 3: {}", slot3_path);
-                    }
-                }
-                Err(e) => eprintln!("Failed to read slot 3 file: {}", e),
-            }
-        }
-
-        // Slot 4: Hard Drive
-        if let Some(ref slot4_path) = cli_args.slot4 {
-            match fs::read(slot4_path) {
-                Ok(data) => {
-                    if let Err(e) = pc_sys.mount("HardDrive", &data) {
-                        eprintln!("Failed to mount Hard Drive from slot 4: {}", e);
-                    } else {
-                        runtime_state.set_mount("HardDrive".to_string(), slot4_path.clone());
-                        println!("Loaded Hard Drive from slot 4: {}", slot4_path);
-                    }
-                }
-                Err(e) => eprintln!("Failed to read slot 4 file: {}", e),
-            }
-        }
-
-        // Slot 5: Reserved for future use
-        if cli_args.slot5.is_some() {
-            eprintln!("Warning: Slot 5 is reserved for future use and will be ignored");
+        if has_slot_args {
+            mount_slot_files(&mut sys, &cli_args, &mut runtime_state);
         }
 
         // Save settings if any slot was loaded
         if has_slot_args {
+            if let Err(e) = settings.save() {
+                eprintln!("Warning: Failed to save settings: {}", e);
+            }
+        }
+    } else if has_slot_args {
+        // For non-PC systems with slots, mount them
+        let slots_mounted = mount_slot_files(&mut sys, &cli_args, &mut runtime_state);
+        if slots_mounted {
+            rom_loaded = true; // Mark as loaded if slots were successfully mounted
             if let Err(e) = settings.save() {
                 eprintln!("Warning: Failed to save settings: {}", e);
             }
@@ -5830,6 +5975,107 @@ fn main() {
                         }
                     }
                 }
+                PropertyAction::SetPcCpuModel(cpu_model_name) => {
+                    // Parse display name to CpuModel enum
+                    let cpu_model = match cpu_model_name.as_str() {
+                        "Intel 8086" => emu_core::cpu_8086::CpuModel::Intel8086,
+                        "Intel 8088" => emu_core::cpu_8086::CpuModel::Intel8088,
+                        "Intel 80186" => emu_core::cpu_8086::CpuModel::Intel80186,
+                        "Intel 80188" => emu_core::cpu_8086::CpuModel::Intel80188,
+                        "Intel 80286" => emu_core::cpu_8086::CpuModel::Intel80286,
+                        "Intel 80386" => emu_core::cpu_8086::CpuModel::Intel80386,
+                        "Intel 80486" => emu_core::cpu_8086::CpuModel::Intel80486,
+                        "Intel 80486SX" => emu_core::cpu_8086::CpuModel::Intel80486SX,
+                        "Intel 80486DX2" => emu_core::cpu_8086::CpuModel::Intel80486DX2,
+                        "Intel 80486SX2" => emu_core::cpu_8086::CpuModel::Intel80486SX2,
+                        "Intel 80486DX4" => emu_core::cpu_8086::CpuModel::Intel80486DX4,
+                        "Intel Pentium" => emu_core::cpu_8086::CpuModel::IntelPentium,
+                        "Intel Pentium MMX" => emu_core::cpu_8086::CpuModel::IntelPentiumMMX,
+                        _ => {
+                            egui_app
+                                .status_bar
+                                .set_error(format!("Unknown CPU model: {}", cpu_model_name));
+                            return;
+                        }
+                    };
+
+                    if let EmulatorSystem::PC(ref mut pc_sys) = sys {
+                        // Get current config to preserve other settings
+                        let memory_kb = pc_sys.memory_kb();
+                        let mounted_files = pc_sys.mounted_files();
+
+                        // Create new video adapter (preserving current type)
+                        let video_adapter: Box<dyn emu_pc::VideoAdapter> =
+                            Box::new(emu_pc::SoftwareCgaAdapter::new());
+
+                        // Create new PC system with updated CPU
+                        let mut new_pc = emu_pc::PcSystem::with_config(cpu_model, memory_kb, video_adapter);
+
+                        // Remount all files
+                        for (mount_id, data) in mounted_files {
+                            let _ = new_pc.mount(&mount_id, &data);
+                        }
+
+                        // Replace the system
+                        *pc_sys = Box::new(new_pc);
+
+                        egui_app.status_bar.set_success(format!(
+                            "CPU model changed to {}. System restarted.",
+                            cpu_model_name
+                        ));
+                        egui_app.tab_manager.add_log(format!(
+                            "PC: CPU model changed to {}, system restarted",
+                            cpu_model_name
+                        ));
+                    } else {
+                        egui_app
+                            .status_bar
+                            .set_error("CPU model can only be changed for PC systems".to_string());
+                    }
+                }
+                PropertyAction::SetPcMemory(memory_kb) => {
+                    if let EmulatorSystem::PC(ref mut pc_sys) = sys {
+                        // Get current config to preserve other settings
+                        let current_cpu = pc_sys.cpu_model();
+                        let mounted_files = pc_sys.mounted_files();
+
+                        // Create new video adapter
+                        let video_adapter: Box<dyn emu_pc::VideoAdapter> =
+                            Box::new(emu_pc::SoftwareCgaAdapter::new());
+
+                        // Create new PC system with updated memory
+                        let mut new_pc = emu_pc::PcSystem::with_config(current_cpu, memory_kb, video_adapter);
+
+                        // Remount all files
+                        for (mount_id, data) in mounted_files {
+                            let _ = new_pc.mount(&mount_id, &data);
+                        }
+
+                        // Replace the system
+                        *pc_sys = Box::new(new_pc);
+
+                        let memory_str = if memory_kb >= 1024 {
+                            format!("{} MB", memory_kb / 1024)
+                        } else {
+                            format!("{} KB", memory_kb)
+                        };
+                        egui_app.status_bar.set_success(format!(
+                            "Memory changed to {}. System restarted.",
+                            memory_str
+                        ));
+                        egui_app.tab_manager.add_log(format!(
+                            "PC: Memory changed to {}, system restarted",
+                            memory_str
+                        ));
+
+                        // Update property pane with new value
+                        egui_app.property_pane.pc_memory_kb = Some(memory_kb);
+                    } else {
+                        egui_app
+                            .status_bar
+                            .set_error("Memory can only be changed for PC systems".to_string());
+                    }
+                }
             }
         }
 
@@ -6160,9 +6406,13 @@ fn main() {
                         if let Some(tracer) = sys.instruction_tracer_mut() {
                             tracer.clear();
                             tracer.set_enabled(true);
-                            egui_app.status_bar.set_message(format!("Started trace: {}", filename));
+                            egui_app
+                                .status_bar
+                                .set_message(format!("Started trace: {}", filename));
                         } else {
-                            egui_app.status_bar.set_message("Trace not supported for this system".to_string());
+                            egui_app
+                                .status_bar
+                                .set_message("Trace not supported for this system".to_string());
                         }
                     } else {
                         egui_app.status_bar.set_message("No ROM loaded".to_string());
@@ -6175,10 +6425,14 @@ fn main() {
                             if let Some(filename) = &egui_app.tab_manager.trace_filename {
                                 match tracer.dump_to_file(filename) {
                                     Ok(_) => {
-                                        egui_app.status_bar.set_message(format!("Trace saved to {}", filename));
+                                        egui_app
+                                            .status_bar
+                                            .set_message(format!("Trace saved to {}", filename));
                                     }
                                     Err(e) => {
-                                        egui_app.status_bar.set_message(format!("Failed to save trace: {}", e));
+                                        egui_app
+                                            .status_bar
+                                            .set_message(format!("Failed to save trace: {}", e));
                                     }
                                 }
                             }
@@ -6378,13 +6632,11 @@ fn main() {
             // We check if egui wants input (e.g., text field focused) and only skip controller updates then.
             // This allows controller input to work even when docked panels are visible.
             let egui_wants_input = egui_backend.egui_ctx().wants_keyboard_input();
-            
+
             if !matches!(&sys, EmulatorSystem::PC(_)) {
                 // For non-PC systems, use standard controller mapping (always update, even if egui has focus)
-                let controller_state =
-                    get_controller_state(&egui_backend, &settings.input.player1);
-                let snes_state =
-                    get_snes_controller_state(&egui_backend, &settings.input.player1);
+                let controller_state = get_controller_state(&egui_backend, &settings.input.player1);
+                let snes_state = get_snes_controller_state(&egui_backend, &settings.input.player1);
                 let chip8_state = get_chip8_controller_state(&egui_backend);
 
                 // ColecoVision needs special handling for 2-player input

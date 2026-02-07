@@ -110,6 +110,8 @@ impl SmsSystem {
 
         // Update PSG timing
         self.psg.borrow_mut().set_timing(self.timing_mode);
+        // Update VDP timing
+        self.vdp.borrow_mut().set_timing_mode(self.timing_mode);
 
         // Load ROM into existing memory (preserves BIOS)
         self.cpu.memory.load_rom(rom_data);
@@ -203,7 +205,12 @@ impl System for SmsSystem {
             "SMS: System reset".to_string()
         });
         self.cpu.reset();
+        // SMS expects stack pointer near top of RAM (set by BIOS on real hardware)
+        // Without BIOS, initialize it here to avoid writes to banking registers at 0xFFFC-0xFFFF.
+        self.cpu.sp = 0xDFF0;
         self.vdp.borrow_mut().reset();
+        // Ensure VDP timing matches current system mode after reset
+        self.vdp.borrow_mut().set_timing_mode(self.timing_mode);
         self.psg.borrow_mut().reset();
         self.cycles = 0;
         self.total_cycles = 0;
@@ -230,6 +237,8 @@ impl System for SmsSystem {
                 (70938_u64, 313_u64)
             }
         };
+
+        let cycles_per_scanline = (target_cycles / total_scanlines).max(1);
 
         while self.cycles < target_cycles {
             // Log CPU state on first few cycles (using cycles count directly)
@@ -260,11 +269,14 @@ impl System for SmsSystem {
                 }
             }
 
-            // Update VDP scanline based on cycles
-            // Calculate dynamically to avoid cumulative timing drift
-            let current_scanline =
-                (self.cycles * total_scanlines / target_cycles) % total_scanlines;
+            // Update VDP scanline and H-counter based on cycles
+            let current_scanline = (self.cycles / cycles_per_scanline) % total_scanlines;
+            let dot = self.cycles % cycles_per_scanline;
+            let hcounter = ((dot * 256) / cycles_per_scanline) as u8;
+
+            // TODO: Replace approximate H-counter with cycle-accurate dot timing.
             self.vdp.borrow_mut().set_scanline(current_scanline as u16);
+            self.vdp.borrow_mut().set_hcounter(hcounter);
 
             // Check for VDP interrupts (frame interrupt has priority over line interrupt)
             if self.vdp.borrow().frame_interrupt_pending() {

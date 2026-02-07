@@ -180,6 +180,41 @@ Unit tests now cover:
 - [TMS9918A Programming](http://map.grauw.nl/resources/video/texasinstruments_tms9918.pdf)
 - [ColecoVision Memory Map](http://www.atarihq.com/danb/files/CV-MemMap.txt)
 
+## Command-Line Usage
+
+### Loading ColecoVision Games
+
+**Basic ROM loading:**
+```bash
+hemu game.col
+```
+The emulator auto-detects ColecoVision format from file headers or size.
+
+**Loading with BIOS ROM:**
+```bash
+hemu --system colecovision --slot1 bios.rom --slot2 game.col
+```
+- `--system colecovision` - Specify ColecoVision system (alias: `coleco`)
+- `--slot1 <file>` - Mount BIOS ROM (required for proper boot)
+- `--slot2 <file>` - Mount cartridge ROM
+
+**BIOS Examples:**
+```bash
+# Standard ColecoVision BIOS
+hemu --system colecovision --slot1 "ColecoVision BIOS (1982).col" --slot2 donkey_kong.col
+
+# Any .col, .bin, or .rom file can be used as BIOS
+hemu --system colecovision --slot1 coleco_bios.bin --slot2 game.rom
+```
+
+### System Alias
+
+ColecoVision can be specified as either:
+```bash
+hemu --system colecovision ...
+hemu --system coleco ...  # Shorter alias
+```
+
 ## Testing
 
 Currently no test ROM or smoke tests are implemented. Test ROMs can be created using:

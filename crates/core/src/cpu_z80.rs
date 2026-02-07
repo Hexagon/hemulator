@@ -2450,6 +2450,65 @@ mod tests {
     }
 
     #[test]
+    fn test_ldir_instruction() {
+        // Test LDIR: Copy 5 bytes from $1000 to $2000
+        let mut memory = TestMemory::new();
+        memory.ram[0x1000] = 0x11;
+        memory.ram[0x1001] = 0x22;
+        memory.ram[0x1002] = 0x33;
+        memory.ram[0x1003] = 0x44;
+        memory.ram[0x1004] = 0x55;
+
+        // Program: LD HL, $1000; LD DE, $2000; LD BC, 5; LDIR
+        let program = [
+            0x21, 0x00, 0x10, // LD HL, $1000
+            0x11, 0x00, 0x20, // LD DE, $2000
+            0x01, 0x05, 0x00, // LD BC, $0005
+            0xED, 0xB0, // LDIR
+        ];
+        for (i, &byte) in program.iter().enumerate() {
+            memory.ram[i] = byte;
+        }
+
+        let mut cpu = CpuZ80::new(memory);
+        cpu.reset();
+
+        // Execute LD HL, $1000
+        cpu.step();
+        assert_eq!(cpu.hl(), 0x1000);
+
+        // Execute LD DE, $2000
+        cpu.step();
+        assert_eq!(cpu.de(), 0x2000);
+
+        // Execute LD BC, 5
+        cpu.step();
+        assert_eq!(cpu.bc(), 0x0005);
+
+        // Execute LDIR - should repeat until BC=0
+        // LDIR decrements PC to repeat, so we need to keep stepping until BC=0
+        let mut iterations = 0;
+        while cpu.bc() != 0 && iterations < 10 {
+            cpu.step();
+            iterations += 1;
+        }
+
+        // After LDIR completes:
+        assert_eq!(iterations, 5, "LDIR should take exactly 5 iterations");
+        assert_eq!(cpu.bc(), 0); // BC should be 0
+        assert_eq!(cpu.hl(), 0x1005); // HL should be incremented 5 times
+        assert_eq!(cpu.de(), 0x2005); // DE should be incremented 5 times
+        assert_eq!(cpu.pc, 0x000B); // PC should be after LDIR (at $000B)
+
+        // Check that data was copied
+        assert_eq!(cpu.memory.read(0x2000), 0x11);
+        assert_eq!(cpu.memory.read(0x2001), 0x22);
+        assert_eq!(cpu.memory.read(0x2002), 0x33);
+        assert_eq!(cpu.memory.read(0x2003), 0x44);
+        assert_eq!(cpu.memory.read(0x2004), 0x55);
+    }
+
+    #[test]
     fn test_di_instruction() {
         let program = [0xF3]; // DI instruction
         let memory = TestMemory::with_program(&program);

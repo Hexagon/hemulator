@@ -139,7 +139,8 @@ For 440 Hz (A4): register = 3579545 / (32 × 440) ≈ 254
 | 0xC000-0xDFFF | RAM (8KB) |
 | 0xE000-0xFFFF | RAM Mirror |
 
-Banking registers at 0xFFFC, 0xFFFD, 0xFFFE (in RAM) control which 16KB banks are mapped.
+Banking registers at 0xFFFD, 0xFFFE, 0xFFFF (in RAM) control which 16KB banks are mapped.
+0xFFFC is the mapper control register.
 
 ### BIOS Support
 
@@ -176,6 +177,65 @@ The SMS has optional BIOS ROM support:
 | 0xDC | Controller port 1 |
 | 0xDD | Controller port 2 |
 | 0x3E | Memory control |
+
+## Command-Line Usage
+
+### Loading SMS Games
+
+**Basic ROM loading:**
+```bash
+hemu game.sms
+```
+The emulator auto-detects SMS format from file headers.
+
+**Loading with BIOS ROM:**
+```bash
+hemu --system sms --slot1 bios.sms --slot2 game.sms
+```
+- `--system sms` - Specify SMS system
+- `--slot1 <file>` - Mount BIOS ROM (optional, for games that require it)
+- `--slot2 <file>` - Mount cartridge ROM
+
+**BIOS Examples:**
+```bash
+# Bin's Master System BIOS
+hemu --system sms --slot1 "Master System BIOS (Bin).sms" --slot2 sonic.sms
+
+# Any .sms, .bin, or .rom file can be used as BIOS
+hemu --system sms --slot1 sms_bios.bin --slot2 game.sms
+```
+
+### BIOS Behavior
+
+- BIOS is **optional** - most games work without it
+- When loaded via `--slot1`, BIOS is automatically enabled
+- BIOS typically runs initialization code, shows SEGA logo, then disables itself
+- Some Japanese releases may require BIOS for proper initialization
+
+### Controller Input
+
+Default key mapping:
+- **D-Pad**: Arrow keys
+- **Button 1 (Fire)**: Z
+- **Button 2**: X
+- **Pause**: P
+
+Customize in `config.json`:
+```json
+{
+  "input": {
+    "player1": {
+      "up": "ArrowUp",
+      "down": "ArrowDown",
+      "left": "ArrowLeft",
+      "right": "ArrowRight",
+      "button1": "Z",
+      "button2": "X",
+      "pause": "P"
+    }
+  }
+}
+```
 
 ## Testing
 

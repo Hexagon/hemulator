@@ -60,7 +60,7 @@ impl SmsMemory {
         // Calculate number of 16KB banks
         let num_banks = rom.len().div_ceil(0x4000);
 
-        Self {
+        let mut memory = Self {
             rom,
             bios: Vec::new(), // No BIOS by default
             ram: [0; 0x2000],
@@ -73,7 +73,14 @@ impl SmsMemory {
             controller_1: 0xFF,
             controller_2: 0xFF,
             memory_control: 0x08, // Bit 3 set by default (BIOS disabled)
-        }
+        };
+
+        // Initialize mapper registers to defaults
+        memory.ram[0x1FFD] = 0;
+        memory.ram[0x1FFE] = 1;
+        memory.ram[0x1FFF] = 2;
+
+        memory
     }
 
     /// Load BIOS ROM
@@ -96,6 +103,9 @@ impl SmsMemory {
         self.rom_bank_0 = 0;
         self.rom_bank_1 = 1;
         self.rom_bank_2 = 2;
+        self.ram[0x1FFD] = 0;
+        self.ram[0x1FFE] = 1;
+        self.ram[0x1FFF] = 2;
     }
 
     /// Check if BIOS is currently enabled
@@ -106,10 +116,10 @@ impl SmsMemory {
 
     /// Update banking configuration
     fn update_banking(&mut self) {
-        // Banking registers are at 0xFFFC, 0xFFFD, 0xFFFE in RAM
-        let frame_0 = self.ram[0x1FFC] as usize;
-        let frame_1 = self.ram[0x1FFD] as usize;
-        let frame_2 = self.ram[0x1FFE] as usize;
+        // Banking registers are at 0xFFFD, 0xFFFE, 0xFFFF in RAM.
+        let frame_0 = self.ram[0x1FFD] as usize;
+        let frame_1 = self.ram[0x1FFE] as usize;
+        let frame_2 = self.ram[0x1FFF] as usize;
 
         // Map banks with wraparound
         self.rom_bank_0 = frame_0 % self.num_banks.max(1);
@@ -187,6 +197,7 @@ impl SmsMemory {
     /// Set memory control register for save state
     pub fn set_memory_control(&mut self, value: u8) {
         self.memory_control = value;
+        self.ram[0x1FFC] = value;
     }
 }
 
@@ -227,7 +238,9 @@ impl MemoryZ80 for SmsMemory {
                 self.ram[ram_addr] = val;
 
                 // Check if banking registers were updated
-                if matches!(ram_addr, 0x1FFC..=0x1FFE) {
+                if ram_addr == 0x1FFC {
+                    self.memory_control = val;
+                } else if matches!(ram_addr, 0x1FFD..=0x1FFF) {
                     self.update_banking();
                 }
             }
@@ -247,8 +260,11 @@ impl MemoryZ80 for SmsMemory {
             // 0x40-0x7F: V-counter (even ports) / H-counter (odd ports)
             p if (0x40..=0x7F).contains(&p) => {
                 // V-counter on even ports, H-counter on odd ports
-                // Both currently read vcounter for simplicity
-                self.vdp.borrow().read_vcounter()
+                if p & 0x01 == 0 {
+                    self.vdp.borrow().read_vcounter()
+                } else {
+                    self.vdp.borrow().read_hcounter()
+                }
             }
             // 0x80-0xBF: VDP ports (bit 0 determines data vs control)
             p if (0x80..=0xBF).contains(&p) => {
@@ -282,6 +298,11 @@ impl MemoryZ80 for SmsMemory {
     }
 
     fn io_write(&mut self, port: u8, val: u8) {
+        // Log all I/O writes for debugging
+        log(LogCategory::Bus, LogLevel::Trace, || {
+            format!("SMS I/O: Write port ${:02X} = ${:02X}", port, val)
+        });
+
         // SMS I/O port decoding (partial decoding based on bit patterns):
         // - 0x00-0x3F: Memory control, I/O control, etc.
         // - 0x40-0x7F: PSG write (directly connected to SN76489)
@@ -290,8 +311,9 @@ impl MemoryZ80 for SmsMemory {
         match port {
             // 0x00-0x3F: Memory control registers
             0x3E => {
-                // Memory control register
+                // Memory control register (mirror to 0xFFFC)
                 self.memory_control = val;
+                self.ram[0x1FFC] = val;
             }
             0x3F => {
                 // I/O port control (nationalization adapter)
@@ -371,7 +393,7 @@ mod tests {
         assert_eq!(mem.read(0x8000), 2);
 
         // Switch bank 2 to bank 5
-        mem.write(0xFFFE, 5);
+        mem.write(0xFFFF, 5);
         assert_eq!(mem.read(0x8000), 5);
     }
 }
