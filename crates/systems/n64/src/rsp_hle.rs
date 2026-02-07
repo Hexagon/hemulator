@@ -174,7 +174,7 @@ impl RspHle {
             lights: [[0.0; 7]; 8],
             num_lights: 0,
             ambient_light: [0.3, 0.3, 0.3], // Default ambient light
-            segment_bases: [0; 16], // Initialize all segments to 0
+            segment_bases: [0; 16],         // Initialize all segments to 0
             othermode_h: 0,
             othermode_l: 0,
         }

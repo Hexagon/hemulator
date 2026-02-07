@@ -220,7 +220,7 @@ impl Rdp {
             fog_color: 0xFF000000,   // Black
             combine_mode: 0,         // No combine mode
             z_image_addr: 0,
-            othermode: 0,            // Default other modes
+            othermode: 0, // Default other modes
             dpc_start: 0,
             dpc_end: 0,
             dpc_current: 0,
