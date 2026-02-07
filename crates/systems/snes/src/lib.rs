@@ -347,11 +347,49 @@ impl System for SnesSystem {
             while self.current_cycles < scanline_target.saturating_sub(40) {
                 // Check if DMA is halting the CPU
                 if self.cpu.bus().has_pending_dma() {
-                    // Consume DMA cycles instead of executing CPU instructions
-                    let dma_cycles = self.cpu.bus().consume_dma_cycles(1);
+                    // Consume DMA cycles in larger chunks to avoid tight loops.
+                    // Batch consumption up to the remaining cycles in the active display
+                    // portion of this scanline.
+                    let display_limit = scanline_target.saturating_sub(40);
+                    let remaining_display_cycles =
+                        display_limit.saturating_sub(self.current_cycles);
+                    if remaining_display_cycles == 0 {
+                        break;
+                    }
+                    let dma_cycles = self.cpu.bus().consume_dma_cycles(remaining_display_cycles);
+                    if dma_cycles == 0 {
+                        // Defensive: avoid an infinite loop if DMA reports pending
+                        // but does not actually consume any cycles.
+                        break;
+                    }
                     self.current_cycles += dma_cycles;
                     self.total_cycles += dma_cycles as u64;
                     self.cpu.bus_mut().tick_cycles(dma_cycles);
+
+                    // During DMA halt, also advance PPU H/V counters and evaluate H/V timer IRQs
+                    let scanline_cycles = self.current_cycles % SNES_SCANLINE_CYCLES;
+                    // Convert CPU cycles to approximate dot position (340 dots per scanline)
+                    // Clamp to valid range 0-339
+                    let dot = ((scanline_cycles * 340) / SNES_SCANLINE_CYCLES).min(339);
+                    self.cpu
+                        .bus_mut()
+                        .ppu_mut()
+                        .update_counters(scanline as u16, dot as u16);
+
+                    // Check for H/V timer IRQ
+                    if self.cpu.bus().check_hv_timer_irq(scanline, scanline_cycles) {
+                        // Set IRQ flag and trigger CPU IRQ
+                        self.cpu.bus().trigger_hv_irq();
+                        log(LogCategory::Interrupts, LogLevel::Debug, || {
+                            format!(
+                                "SNES: H/V Timer IRQ triggered at scanline {} H-pos {} (mode {})",
+                                scanline,
+                                scanline_cycles,
+                                self.cpu.bus().get_hv_irq_mode()
+                            )
+                        });
+                        self.cpu.cpu.trigger_irq();
+                    }
                     continue;
                 }
 
@@ -408,11 +446,46 @@ impl System for SnesSystem {
             while self.current_cycles < scanline_target {
                 // Check if DMA is halting the CPU
                 if self.cpu.bus().has_pending_dma() {
-                    // Consume DMA cycles instead of executing CPU instructions
-                    let dma_cycles = self.cpu.bus().consume_dma_cycles(1);
+                    // Consume DMA cycles in larger chunks to avoid tight loops.
+                    // Batch consumption up to the remaining cycles in this scanline.
+                    let remaining_scanline_cycles =
+                        scanline_target.saturating_sub(self.current_cycles);
+                    if remaining_scanline_cycles == 0 {
+                        break;
+                    }
+                    let dma_cycles = self.cpu.bus().consume_dma_cycles(remaining_scanline_cycles);
+                    if dma_cycles == 0 {
+                        // Defensive: avoid an infinite loop
+                        break;
+                    }
                     self.current_cycles += dma_cycles;
                     self.total_cycles += dma_cycles as u64;
                     self.cpu.bus_mut().tick_cycles(dma_cycles);
+
+                    // Keep PPU H/V counters and H/V timer IRQ evaluation in sync during DMA halt
+                    let scanline_cycles = self.current_cycles % SNES_SCANLINE_CYCLES;
+                    // Convert CPU cycles to approximate dot position (340 dots per scanline)
+                    // Clamp to valid range 0-339
+                    let dot = ((scanline_cycles * 340) / SNES_SCANLINE_CYCLES).min(339);
+                    self.cpu
+                        .bus_mut()
+                        .ppu_mut()
+                        .update_counters(scanline as u16, dot as u16);
+
+                    // Check for H/V timer IRQ during DMA halt in HBlank too
+                    if self.cpu.bus().check_hv_timer_irq(scanline, scanline_cycles) {
+                        // Set IRQ flag and trigger CPU IRQ
+                        self.cpu.bus().trigger_hv_irq();
+                        log(LogCategory::Interrupts, LogLevel::Debug, || {
+                            format!(
+                                "SNES: H/V Timer IRQ triggered at scanline {} H-pos {} (mode {}) [HBlank/DMA]",
+                                scanline,
+                                scanline_cycles,
+                                self.cpu.bus().get_hv_irq_mode()
+                            )
+                        });
+                        self.cpu.cpu.trigger_irq();
+                    }
                     continue;
                 }
 

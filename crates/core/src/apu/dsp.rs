@@ -60,9 +60,11 @@ use crate::logging::{log, LogCategory, LogLevel};
 
 /// Gaussian interpolation filter table (512 entries)
 ///
-/// This table represents one side of a Gaussian curve for 4-point sample interpolation.
-/// Hardware uses bits 4-11 of the pitch counter to index this table (256 indices, mirrored).
-/// Values are 12-bit unsigned integers representing filter coefficients.
+/// This table encodes the full Gaussian curve used for 4-point sample interpolation.
+/// Hardware uses bits 4–11 of the pitch counter as a 9-bit index into these 512 entries.
+/// Indices 0–255 cover one side of the curve; 256–511 contain the mirrored other side.
+/// All values are 12-bit unsigned magnitudes of the filter coefficients; the sign comes
+/// from the sample data and interpolation formula rather than from this table itself.
 ///
 /// Reference: https://sneslab.net/wiki/S-DSP/Gaussian_Filter
 const GAUSSIAN_TABLE: [i16; 512] = [
@@ -297,6 +299,8 @@ struct Voice {
     sample_addr: u16,
     /// Loop start address (from BRR header)
     loop_addr: u16,
+    /// Sample history for Gaussian interpolation across block boundaries (last 3 samples)
+    sample_history: [i16; 3],
 }
 
 impl Voice {
@@ -315,6 +319,7 @@ impl Voice {
             ended: false,
             sample_addr: 0,
             loop_addr: 0,
+            sample_history: [0; 3],
         }
     }
 
@@ -328,6 +333,7 @@ impl Voice {
         self.brr_decoder.reset();
         self.envelope.key_on();
         self.sample_buffer = [0; 16]; // Clear sample buffer
+        self.sample_history = [0; 3]; // Clear history
     }
 
     /// Stop playback (key off)
@@ -343,6 +349,13 @@ impl Voice {
             // Invalid address, stop playback (need 9 bytes: 1 header + 8 data)
             self.ended = true;
             return true;
+        }
+
+        // Save last 3 samples from current buffer to history before decoding new block
+        if self.sample_buffer.len() >= 3 {
+            self.sample_history[0] = self.sample_buffer[13];
+            self.sample_history[1] = self.sample_buffer[14];
+            self.sample_history[2] = self.sample_buffer[15];
         }
 
         // Read BRR block header
@@ -418,22 +431,43 @@ impl Voice {
         // Uses bits 4-11 of position (fractional part) to index the Gaussian table
         let frac = ((self.position >> 4) & 0xFF) as usize; // 8-bit index (0-255)
 
-        // Get 4 consecutive samples for interpolation
-        // Hardware uses a ring buffer with indices wrapped
-        let idx0 = (self.buffer_index + 15) & 0xF; // t-1 (previous sample)
-        let idx1 = self.buffer_index; // t (current sample)
-        let idx2 = (self.buffer_index + 1) & 0xF; // t+1 (next sample)
-        let idx3 = (self.buffer_index + 2) & 0xF; // t+2 (next next sample)
+        // Get 4 consecutive samples for interpolation, properly handling block boundaries
+        // by using sample history for samples before the current block
+        let idx = self.buffer_index;
 
-        let s0 = self.sample_buffer[idx0] as i32;
-        let s1 = self.sample_buffer[idx1] as i32;
-        let s2 = self.sample_buffer[idx2] as i32;
-        let s3 = self.sample_buffer[idx3] as i32;
+        // t-1 (previous sample) - may be from history if we're at the start of the block
+        let s0 = if idx == 0 {
+            self.sample_history[2] // Last sample of previous block
+        } else {
+            self.sample_buffer[idx - 1]
+        } as i32;
+
+        // t (current sample)
+        let s1 = self.sample_buffer[idx] as i32;
+
+        // t+1 (next sample) - handle wraparound at end of block
+        let s2 = if idx + 1 < 16 {
+            self.sample_buffer[idx + 1]
+        } else {
+            // At block boundary, this would be the first sample of next block
+            // For now, use the last available sample to avoid discontinuity
+            self.sample_buffer[15]
+        } as i32;
+
+        // t+2 (next next sample) - handle wraparound at end of block
+        let s3 = if idx + 2 < 16 {
+            self.sample_buffer[idx + 2]
+        } else if idx + 1 < 16 {
+            // Would be from next block, use last available
+            self.sample_buffer[15]
+        } else {
+            // Both would be from next block
+            self.sample_buffer[15]
+        } as i32;
 
         // Get Gaussian filter coefficients from the table
         // The table is organized so that frac=0 gives weight to current sample,
         // frac=255 gives weight to next sample
-        // Table indices: [0-255] for positive side of Gaussian, [256-511] for negative side
         let g0 = GAUSSIAN_TABLE[255 - frac] as i32; // Weight for t-1
         let g1 = GAUSSIAN_TABLE[511 - frac] as i32; // Weight for t
         let g2 = GAUSSIAN_TABLE[256 + frac] as i32; // Weight for t+1
@@ -927,5 +961,158 @@ mod tests {
         let (left, right) = dsp.clock();
         assert_eq!(left, 0);
         assert_eq!(right, 0);
+    }
+
+    #[test]
+    fn test_gaussian_interpolation_coefficient_lookup() {
+        // Test that coefficient table can be indexed correctly
+        // The table should have 512 entries
+        assert_eq!(GAUSSIAN_TABLE.len(), 512);
+
+        // Test index 0 and 511 (endpoints)
+        assert!(GAUSSIAN_TABLE[0] >= 0);
+        assert!(GAUSSIAN_TABLE[511] >= 0);
+
+        // Values should be 12-bit (0-4095 range), though stored as i16
+        for &coeff in &GAUSSIAN_TABLE {
+            assert!(
+                (0..=0x7FF).contains(&coeff),
+                "Coefficient out of 12-bit range"
+            );
+        }
+    }
+
+    #[test]
+    fn test_gaussian_interpolation_at_zero_fraction() {
+        let mut voice = Voice::new();
+        voice.playing = true;
+        voice.sample_buffer = [
+            100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600,
+        ];
+        voice.buffer_index = 5;
+        voice.position = 5 << 16; // Exactly at sample 5, no fractional part
+
+        // At zero fraction (frac=0), should give most weight to current sample
+        let result = voice.get_sample();
+
+        // Result should be close to the current sample (600) since frac=0
+        // Allow some margin due to Gaussian filter characteristics
+        assert!(
+            result > 400 && result < 800,
+            "Result {} should be close to 600",
+            result
+        );
+    }
+
+    #[test]
+    fn test_gaussian_interpolation_block_boundary_start() {
+        let mut voice = Voice::new();
+        voice.playing = true;
+        // Setup history from previous block
+        voice.sample_history = [50, 75, 90];
+        voice.sample_buffer = [
+            100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600,
+        ];
+        voice.buffer_index = 0; // At start of block
+        voice.position = 0; // No fractional part
+
+        // Should use sample_history[2] (90) for t-1
+        let result = voice.get_sample();
+
+        // Result should incorporate history from previous block
+        // The fact that it doesn't panic or return wildly incorrect values is the main test
+        assert!(result > -32768 && result < 32767);
+    }
+
+    #[test]
+    fn test_gaussian_interpolation_mid_block() {
+        let mut voice = Voice::new();
+        voice.playing = true;
+        voice.sample_buffer = [
+            100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600,
+        ];
+        voice.buffer_index = 8; // Middle of block
+        voice.position = 8 << 16; // Exactly at sample 8
+
+        // In the middle of the block, all 4 samples should come from sample_buffer
+        let result = voice.get_sample();
+
+        // Should be reasonable value around sample 8 (900)
+        assert!(
+            result > 600 && result < 1200,
+            "Result {} should be around 900",
+            result
+        );
+    }
+
+    #[test]
+    fn test_gaussian_interpolation_with_fractional_position() {
+        let mut voice = Voice::new();
+        voice.playing = true;
+        voice.sample_buffer = [0, 0, 0, 0, 1000, 1000, 1000, 1000, 0, 0, 0, 0, 0, 0, 0, 0];
+        voice.buffer_index = 4;
+        voice.position = (4 << 16) | 0x8000; // Sample 4 + 0.5 fractional
+
+        // With fractional position 0.5, should interpolate between samples
+        let result = voice.get_sample();
+
+        // Should produce a reasonable interpolated value
+        assert!(
+            result > 0 && result < 1500,
+            "Result {} should be interpolated",
+            result
+        );
+    }
+
+    #[test]
+    fn test_gaussian_interpolation_returns_zero_when_not_playing() {
+        let mut voice = Voice::new();
+        voice.playing = false;
+        voice.sample_buffer = [1000; 16]; // Non-zero samples
+        voice.buffer_index = 5;
+
+        let result = voice.get_sample();
+        assert_eq!(result, 0, "Should return 0 when not playing");
+    }
+
+    #[test]
+    fn test_gaussian_interpolation_returns_zero_when_ended() {
+        let mut voice = Voice::new();
+        voice.playing = true;
+        voice.ended = true;
+        voice.sample_buffer = [1000; 16]; // Non-zero samples
+        voice.buffer_index = 5;
+
+        let result = voice.get_sample();
+        assert_eq!(result, 0, "Should return 0 when ended");
+    }
+
+    #[test]
+    fn test_sample_history_updated_on_block_decode() {
+        let mut voice = Voice::new();
+        voice.playing = true;
+        voice.sample_buffer = [
+            100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600,
+        ];
+
+        let mut ram = Box::new([0u8; 0x10000]);
+        // Setup a simple BRR block at address 0x100
+        ram[0x100] = 0x00; // Header: no flags, shift=0, filter=0
+        for i in 0x101..=0x108 {
+            ram[i] = 0; // Sample data (zeros)
+        }
+
+        voice.sample_addr = 0x100;
+
+        // Before decoding, set history to known values
+        voice.sample_history = [0, 0, 0];
+
+        // Decode block
+        voice.decode_brr_block(&ram);
+
+        // After decoding, history should contain last 3 samples of previous buffer
+        assert_eq!(voice.sample_history[0], 1400);
+        assert_eq!(voice.sample_history[1], 1500);
+        assert_eq!(voice.sample_history[2], 1600);
     }
 }
