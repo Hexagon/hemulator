@@ -166,6 +166,12 @@ pub struct Rdp {
     dpc_end: u32,
     dpc_current: u32,
     dpc_status: u32,
+
+    /// Performance counters
+    dpc_clock: u32, // Clock counter (increments per RDP cycle)
+    dpc_bufbusy: u32,  // Buffer busy counter (cycles waiting for buffer)
+    dpc_pipebusy: u32, // Pipe busy counter (cycles with active pipeline)
+    dpc_tmem: u32,     // TMEM load counter (texture loads performed)
 }
 
 impl Rdp {
@@ -225,6 +231,10 @@ impl Rdp {
             dpc_end: 0,
             dpc_current: 0,
             dpc_status: DPC_STATUS_CBUF_READY, // Start ready for commands
+            dpc_clock: 0,
+            dpc_bufbusy: 0,
+            dpc_pipebusy: 0,
+            dpc_tmem: 0,
         })
     }
 
@@ -435,10 +445,10 @@ impl Rdp {
             DPC_END => self.dpc_end,
             DPC_CURRENT => self.dpc_current,
             DPC_STATUS => self.dpc_status,
-            DPC_CLOCK => 0,    // Clock counter not implemented
-            DPC_BUFBUSY => 0,  // Buffer busy counter not implemented
-            DPC_PIPEBUSY => 0, // Pipe busy counter not implemented
-            DPC_TMEM => 0,     // TMEM counter not implemented
+            DPC_CLOCK => self.dpc_clock,
+            DPC_BUFBUSY => self.dpc_bufbusy,
+            DPC_PIPEBUSY => self.dpc_pipebusy,
+            DPC_TMEM => self.dpc_tmem,
             _ => 0,
         }
     }
@@ -555,9 +565,23 @@ impl Rdp {
             // Execute command
             self.execute_rdp_command(cmd_id, cmd_word0, cmd_word1, rdram);
 
+            // Increment performance counters
+            // Clock counter: increments for each command processed
+            self.dpc_clock = self.dpc_clock.wrapping_add(10); // ~10 cycles per command
+
+            // Pipe busy counter: increments when pipeline is active (rendering commands)
+            if (0x08..=0x0F).contains(&cmd_id) || cmd_id == 0x36 {
+                // Triangle or fill commands keep pipeline busy
+                self.dpc_pipebusy = self.dpc_pipebusy.wrapping_add(1);
+            }
+
             // Move to next command (all RDP commands are 8 bytes)
             addr += 8;
         }
+
+        // Buffer busy counter: increments during DMA processing
+        let command_count = self.dpc_end.saturating_sub(self.dpc_start) / 8;
+        self.dpc_bufbusy = self.dpc_bufbusy.wrapping_add(command_count);
 
         // Update current pointer and clear busy flags
         self.dpc_current = self.dpc_end;
@@ -620,6 +644,9 @@ impl Rdp {
             let actual_bytes = (src_end - src_addr).min(bytes_to_copy);
             self.tmem[tmem_addr..tmem_addr + actual_bytes]
                 .copy_from_slice(&rdram[src_addr..src_addr + actual_bytes]);
+
+            // Increment TMEM counter for texture load operations
+            self.dpc_tmem = self.dpc_tmem.wrapping_add(1);
         }
     }
 

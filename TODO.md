@@ -160,12 +160,13 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Impact: Video textures now render correctly instead of returning white
 
 #### N64
-- [ ] **RDP Performance Counters**: Implement RDP performance counters - `crates/systems/n64/src/rdp.rs`
-  - DPC_CLOCK (clock counter) - returns 0
-  - DPC_BUFBUSY (buffer busy counter) - returns 0
-  - DPC_PIPEBUSY (pipe busy counter) - returns 0
-  - DPC_TMEM (TMEM counter) - returns 0
-  - Impact: Performance monitoring not available
+- [x] **RDP Performance Counters**: Implement RDP performance counters - `crates/systems/n64/src/rdp.rs:165-172`
+  - **IMPLEMENTED**: All four performance counters now functional
+    - DPC_CLOCK: Increments ~10 cycles per RDP command processed
+    - DPC_BUFBUSY: Increments by number of commands during DMA processing
+    - DPC_PIPEBUSY: Increments for triangle/fill commands (pipeline-active operations)
+    - DPC_TMEM: Increments on each texture load to TMEM
+  - Impact: Performance monitoring now available for debugging and profiling
 - [x] **RSP Semaphore**: Implement RSP semaphore register - `crates/systems/n64/src/rsp.rs:103`
   - **IMPLEMENTED**: Full atomic semaphore implementation using Cell<u32>
     - Reading returns current value and atomically clears it (test-and-clear operation)
