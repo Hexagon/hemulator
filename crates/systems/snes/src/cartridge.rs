@@ -68,10 +68,27 @@ impl Cartridge {
         // Detect enhancement chip from header
         let (chip_type, chip) = Self::detect_chip(rom_data, mapping_mode);
 
+        // Read SRAM size from ROM header (offset +$18 from header base)
+        let header_base = match mapping_mode {
+            MappingMode::LoROM => 0x7FC0,
+            MappingMode::HiROM | MappingMode::ExHiROM => 0xFFC0,
+        };
+        let sram_size = if header_base + 0x18 < rom_data.len() {
+            let sram_byte = rom_data[header_base + 0x18];
+            if sram_byte > 0 && sram_byte <= 8 {
+                0x400usize << sram_byte // 1KB << value (e.g., 5 = 32KB)
+            } else {
+                0
+            }
+        } else {
+            0
+        };
+
         log(LogCategory::Bus, LogLevel::Info, || {
             format!(
-                "SNES Cartridge: Loaded ROM - Size: {} KB, SMC Header: {}, Mapping: {:?}, Chip: {}",
+                "SNES Cartridge: Loaded ROM - Size: {} KB, SRAM: {} KB, SMC Header: {}, Mapping: {:?}, Chip: {}",
                 rom_data.len() / 1024,
+                sram_size / 1024,
                 if header_offset > 0 { "Yes" } else { "No" },
                 mapping_mode,
                 chip_type.name()
@@ -80,7 +97,7 @@ impl Cartridge {
 
         Ok(Self {
             rom: rom_data.to_vec(),
-            ram: vec![0; 0x8000], // 32KB SRAM (standard size)
+            ram: vec![0; sram_size],
             header_offset,
             mapping_mode,
             chip_type,
@@ -727,7 +744,9 @@ mod tests {
 
     #[test]
     fn test_write_read_ram_lorom() {
-        let data = vec![0; 0x8000];
+        let mut data = vec![0; 0x8000];
+        // Set SRAM size byte at LoROM header + $18 = $7FD8
+        data[0x7FD8] = 0x05; // 32KB SRAM
         let mut cart = Cartridge::load(&data).unwrap();
         assert!(!cart.is_hirom()); // Should be LoROM
 
@@ -740,6 +759,21 @@ mod tests {
     }
 
     #[test]
+    fn test_no_sram_when_header_says_none() {
+        let data = vec![0; 0x8000]; // SRAM size byte is 0
+        let cart = Cartridge::load(&data).unwrap();
+        assert!(cart.ram.is_empty());
+
+        // Reading SRAM region should return 0
+        assert_eq!(cart.read(0x700000), 0);
+
+        // Writing should have no effect
+        let mut cart = cart;
+        cart.write(0x700000, 0x55);
+        assert_eq!(cart.read(0x700000), 0);
+    }
+
+    #[test]
     fn test_write_read_ram_hirom() {
         // Create HiROM ROM with valid header
         let mut data = vec![0; 0x10000];
@@ -748,6 +782,7 @@ mod tests {
         let header_offset = 0xFFC0;
         data[header_offset + 0x15] = 0x01; // Mapper type
         data[header_offset + 0x17] = 0x09; // ROM size
+        data[header_offset + 0x18] = 0x05; // SRAM size: 32KB
         data[header_offset + 0x1C] = 0x00; // Checksum complement low
         data[header_offset + 0x1D] = 0x00; // Checksum complement high
         data[header_offset + 0x1E] = 0xFF; // Checksum low
@@ -921,6 +956,7 @@ mod tests {
         let header_offset = 0xFFC0;
         data[header_offset + 0x15] = 0x25; // ExHiROM
         data[header_offset + 0x17] = 0x0A; // ROM size
+        data[header_offset + 0x18] = 0x05; // SRAM size: 32KB
 
         let mut cart = Cartridge::load(&data).unwrap();
         assert!(cart.is_exhirom());
