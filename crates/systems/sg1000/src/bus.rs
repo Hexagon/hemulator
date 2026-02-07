@@ -48,12 +48,22 @@ impl Sg1000Memory {
         }
     }
 
-    /// Set controller state
+    /// Set controller 1 state (type-safe method)
+    pub fn set_controller1(&mut self, state: u8) {
+        self.controller1 = state;
+    }
+
+    /// Set controller 2 state (type-safe method)
+    pub fn set_controller2(&mut self, state: u8) {
+        self.controller2 = state;
+    }
+
+    /// Set controller state (generic method for backward compatibility)
     pub fn set_controller(&mut self, port: u8, state: u8) {
-        if port == 1 {
-            self.controller1 = state;
-        } else if port == 2 {
-            self.controller2 = state;
+        match port {
+            1 => self.set_controller1(state),
+            2 => self.set_controller2(state),
+            _ => {} // Ignore invalid ports
         }
     }
 

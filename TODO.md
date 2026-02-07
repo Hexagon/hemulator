@@ -55,7 +55,27 @@ This file tracks unimplemented features, stubs, and simplified implementations a
 
 ### High
 
-**All high priority items have been resolved!** The following items were previously marked as high and have been completed:
+#### NES (Nintendo Entertainment System)
+- [ ] **Sprite 0 Hit Timing on Odd Frames**: Fix X position calculation during odd-frame skip - `crates/systems/nes/src/lib.rs:620-627,655-656`
+  - Current: Frame rendering triggers at variable dot positions (dot 0 OR first scanline rendering)
+  - Issue: Odd-frame skip (scanline 0, dot 0 skipped when rendering enabled) may cause sprite 0 hit to fire at wrong X position
+  - Impact: Games with tight sprite 0 hit timing windows (e.g., split-screen effects) may fail
+  - Needed: Ensure sprite 0 hit detection accounts for exact dot position when frame is rendered
+  - Reference: https://www.nesdev.org/wiki/PPU_frame_timing#Odd_frames
+- [ ] **APU Non-Linear Mixing**: Implement hardware-accurate mixer impedance curves - `crates/systems/nes/src/apu.rs:38`
+  - Current: Simple average mixing documented at line 38
+  - Needed: Non-linear mixing with impedance curves matching NES hardware
+  - Impact: Audio quality differs from hardware, especially with multiple channels active
+  - Formula: pulse_out = 95.88 / (8128 / (pulse1 + pulse2) + 100)
+  - Formula: tnd_out = 159.79 / (1 / (triangle/8227 + noise/12241 + dmc/22638) + 100)
+  - Reference: https://www.nesdev.org/wiki/APU_Mixer
+- [ ] **Tile Viewer CHR Data Clone Overhead**: Optimize CHR data access in tile viewer - `crates/systems/nes/src/lib.rs:343,358,362`
+  - Current: `.clone()` on CHR data (~8KB) during every tile viewer call
+  - Impact: ~240KB/sec memory allocation overhead at 30fps viewer refresh
+  - Solution: Cache CHR data clone or use `Rc<Vec<u8>>` instead of full copy
+  - Affects: GUI Inspector tile/palette/nametable viewers
+
+**All other high priority items have been resolved!** The following items were previously marked as high and have been completed:
 
 #### SMS (Sega Master System) - Completed
 - [x] **VDP Default Initialization**: Fix VDP reset to enable Mode 4 by default - `crates/systems/sms/src/vdp.rs:1035-1051`
@@ -80,6 +100,50 @@ This file tracks unimplemented features, stubs, and simplified implementations a
     3. Track memory accesses in CPU core and adjust timing post-execution
   - Note: This is an optimization, not a correctness issue - all games work without it, just run slightly slower than hardware
 
+### Medium
+
+**SG-1000 items completed in this PR:**
+
+#### SG-1000 (Completed)
+- [x] **Test ROM**: Create basic test ROM for smoke testing - `test_roms/sg1000/`
+  - **COMPLETED**: Created Python-based test ROM generator following SMS/ColecoVision pattern
+  - Test ROM displays checkerboard pattern using TMS9918A VDP in Graphics I mode
+  - Added smoke test to `crates/systems/sg1000/src/lib.rs`
+  - Built ROM: `test_roms/sg1000/test.sg` (32KB)
+  - Impact: Automated verification of ROM loading and basic system functionality
+- [x] **Controller API Refinement**: Add type-safe controller methods - `crates/systems/sg1000/src/system.rs`, `crates/systems/sg1000/src/bus.rs`
+  - **COMPLETED**: Added explicit `set_controller1(state: u8)` and `set_controller2(state: u8)` methods
+  - Follows ColecoVision pattern for consistency
+  - Kept generic `set_controller(port, state)` method for backward compatibility
+  - Impact: Better API design with type safety
+#### NES (Nintendo Entertainment System)
+- [ ] **MMC3A Mapper Support**: Implement MMC3A variant IRQ behavior - `crates/systems/nes/src/mappers/mmc3.rs:35-36`
+  - Current: Only MMC3B/C implemented (IRQ triggers after counter reaches 0)
+  - Needed: MMC3A behavior (IRQ triggers when counter==0 after reload)
+  - Impact: Rare early MMC3A cartridges will have broken scanline IRQs
+  - Note: MMC3A is extremely rare; most games use MMC3B/C revision
+  - Reference: https://www.nesdev.org/wiki/MMC3#IRQ_Specifics
+- [ ] **PPU A12 Edge Timing**: Refine A12 callback timing during rendering - `crates/systems/nes/src/ppu.rs:980,1103-1106`
+  - Current: `suppress_a12` flag toggles A12 callbacks off during `render_scanline()`, re-enables in CHR fetch
+  - Issue: May cause subtle timing issues for mappers relying on A12 edge detection at specific dot cycles
+  - Impact: MMC3 IRQ timing could be slightly inaccurate during mid-scanline rendering
+  - Note: Current implementation works for 99%+ of games, only affects edge cases
+- [ ] **Synthetic A12 Edge Generation**: Review mapper A12 edge synthesis - `crates/systems/nes/src/bus.rs:109-114`
+  - Current: `clock_mapper_a12_rising_edge()` synthesizes A12 transitions by forcing false→true
+  - Issue: May not match actual PPU cycle-accurate edges
+  - Impact: MMC3 games with complex scanline IRQ patterns may have inaccurate behavior
+  - Note: Works for standard games, may affect advanced homebrew or edge cases
+- [ ] **First Frame Register Protection**: Validate PPUADDR/PPUSCROLL write protection - `crates/systems/nes/src/ppu.rs:539`
+  - Current: PPUDATA ($2007) is read-protected on first frame (line 539)
+  - Needed: Verify PPUADDR/PPUSCROLL write protection matches hardware behavior
+  - Impact: Some edge-case games relying on first-frame PPU state may behave unexpectedly
+  - Note: Extremely rare case, most games don't access PPU during first frame
+- [ ] **Mapper State Inspection**: Expose mapper registers in debugger - `crates/systems/nes/src/debugger.rs`
+  - Current: Mapper number/name exposed but detailed state not available
+  - Needed: Bank select registers, IRQ counter state, CHR latch state
+  - Impact: Debugging mapper-related issues requires manual memory inspection
+  - Use case: Investigating MMC3 IRQ glitches, verifying bank switching behavior
+
 #### SG-1000
 - [ ] **Test ROM**: Create basic test ROM for smoke testing - `test_roms/sg1000/`
   - Current: No test ROM exists (README mentions z80asm/SDCC for creating test ROMs)
@@ -87,15 +151,49 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Follow pattern from other systems (test_roms/README.md)
   - Impact: No automated verification of ROM loading and execution
 
-#### PC/DOS
+#### PC/DOS - Hardware Accuracy
 - [ ] **INT 21h DOS API**: Expand file I/O and DOS functions - `crates/systems/pc/src/cpu.rs`
   - Current: Character I/O works, file operations are stubs
   - Impact: DOS program compatibility
+- [ ] **BIOS Interrupt Stubs**: Complete stub implementations - `crates/systems/pc/src/cpu.rs`
+  - INT 05h (Print Screen) - stub only (cpu.rs:820)
+  - INT 09h (Keyboard IRQ) - partial stub (cpu.rs:900-920)
+  - INT 1Ah AH=01h/03h/05h (RTC set) - read-only stubs (cpu.rs:1040-1080)
+  - INT 14h, 17h, 18h, 19h, 1Bh, 1Ch, 2Ah - stub implementations
+  - INT 2Fh (Multiplex) - mostly unimplemented (cpu.rs:1600+)
+  - Impact: Many BIOS services non-functional, breaks some DOS programs
+- [ ] **INT 08h Chaining**: Review INT 1Ch chain skipping logic - `crates/systems/pc/src/cpu.rs:900-920`
+  - Current: Skips calling INT 1Ch if it points to default BIOS stub (F000:0040) as optimization
+  - Risk: Could break programs expecting chaining behavior
+  - Impact: Potential compatibility issue with DOS programs that rely on INT 1Ch
+- [ ] **PIT Timer IRQ Generation**: Connect PIT to actual IRQ0 generation - `crates/systems/pc/src/pit.rs`
+  - Current: PIT tracks state but doesn't trigger interrupts; INT 08h simulated elsewhere
+  - Needed: PIT counter decrement should trigger IRQ0 when reaching zero
+  - Impact: Timer behavior may not match hardware timing accurately
+- [ ] **Disk CHS Parameter Validation**: Add CHS bounds checking - `crates/systems/pc/src/disk.rs:117`
+  - Current: Only validates final offset, not cylinder/head limits
+  - Needed: Validate cylinder < max_cylinders, head < max_heads against drive geometry
+  - Impact: Invalid disk operations may succeed when they should fail
+- [ ] **Disk Geometry Detection**: Parse BIOS Parameter Block instead of hardcoding - `crates/systems/pc/src/disk.rs:65`
+  - Current: Assumes floppy is always 1.44MB (18 sectors/track)
+  - Needed: Read BPB from boot sector to detect 360KB, 720KB, 1.2MB, 1.44MB formats
+  - Impact: Cannot correctly read non-1.44MB floppy images
+- [ ] **Video Memory Banking**: Implement EGA/VGA extended memory banking - `crates/systems/pc/src/bus.rs`
+  - Current: Only 128KB video memory allocated (0xA0000-0xBFFFF)
+  - Needed: Support for memory plane banking in EGA/VGA modes
+  - Impact: Advanced EGA/VGA modes may not work correctly
+- [ ] **VGA Register Documentation**: Document VGA register bit layouts - `crates/systems/pc/src/bus.rs`
+  - Graphics controller registers (bus.rs:100) - no bit documentation
+  - Sequencer registers (bus.rs:97) - no description
+  - Attribute controller (bus.rs:101-102) - no bit layout
+  - DAC state machine (bus.rs:87-88) - transitions not explained
+  - Impact: Makes code maintenance and debugging difficult
 - [ ] **32-bit Support (80386+)**: Implement full 32-bit operations - `crates/core/src/cpu_8086.rs`
   - Register extension (EAX, EBX, etc.)
   - 32-bit addressing with SIB byte
   - 32-bit operand support
   - Extended instructions (MOVZX, MOVSX, SHLD/SHRD)
+  - Impact: Cannot run 32-bit protected mode DOS extenders
 - [ ] **Protected Mode Instructions**: Complete stubbed 80286+ instructions - `crates/core/src/cpu_8086.rs`
   - INVLPG (Invalidate TLB Entry) - stub at line 3484: "No TLB implementation"
   - LAR (Load Access Rights) - stub at line 3506: "Set ZF=0 (invalid selector)"
@@ -104,9 +202,93 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - VERW (Verify Segment for Writing) - stub at line 3599: "Set ZF=0 (segment not writable)"
   - SHLD (Double Precision Shift Left) - stub at lines 3881, 3893
   - SHRD (Double Precision Shift Right) - stub at lines 3907, 3919
-  - Impact: Protected mode DOS extenders and DPMI applications
+  - Impact: Protected mode DOS extenders and DPMI applications won't work
+
+#### PC/DOS - Timing Accuracy
+- [ ] **Cycle-Accurate Timing**: Implement proper CPU cycle counting - `crates/systems/pc/src/bus.rs:265-266`
+  - Current: Hardcoded 80,000 cycles/frame; I/O timing generic (10-8 cycles)
+  - Needed: Scale cycles with actual CPU model frequency; instruction-accurate timing
+  - Impact: Frame timing approximate; some timing-sensitive code may not work
+- [ ] **VGA Retrace Timing**: Use hardware-accurate retrace windows - `crates/systems/pc/src/bus.rs:252-277`
+  - Current: Generic 5% retrace simulation
+  - Needed: Real CRT timing specifications (horizontal/vertical blank periods)
+  - Impact: Games relying on precise retrace timing may glitch
+
+#### PC/DOS - Performance
+- [ ] **Video Text Rendering Optimization**: Implement dirty region tracking - `crates/systems/pc/src/video_adapter_software.rs:113-200`
+  - Current: Full screen rerender every frame with per-character pixel loops
+  - Needed: Track dirty regions, cache character glyphs, skip unchanged areas
+  - Impact: High CPU usage for text mode rendering; inefficient for large text updates
+- [ ] **Disk Logging Performance**: Move environment variable check outside hot path - `crates/systems/pc/src/disk.rs:82,103,127`
+  - Current: `std::env::var("EMU_LOG_BUS")` called on every disk read/write
+  - Needed: Use static log level initialized once at startup
+  - Impact: Unnecessary overhead on every disk operation
+- [ ] **Font Data Pre-rendering**: Pre-bake font glyphs to pixel patterns - `crates/systems/pc/src/font.rs`
+  - Current: Font arrays stored as `[u8]` requiring pixel extraction on every render
+  - Needed: Pre-computed pixel patterns for common resolutions/zoom levels
+  - Impact: Faster character rendering, reduced CPU overhead
+- [ ] **Keyboard Buffer Implementation**: Use fixed ring buffer instead of VecDeque - `crates/systems/pc/src/keyboard.rs:11`
+  - Current: VecDeque with allocation overhead
+  - Needed: Fixed 16-byte ring buffer matching hardware
+  - Impact: Reduced allocations, better cache locality
+
+#### PC/DOS - Documentation
+- [ ] **Magic Number Documentation**: Add comments for hardcoded values - `crates/systems/pc/src/cpu.rs`, `crates/systems/pc/src/bus.rs`
+  - 0xB8000 (video memory) - used without comment (cpu.rs:526)
+  - 0x400 (BIOS Data Area) - offset hardcoded in multiple places (cpu.rs:103-110)
+  - Port addresses: 0x40-0x43 (PIT), 0x60/0x64 (keyboard), 0x3C0-0x3C9 (VGA) - mostly uncommented
+  - Boot sector signature 0xAA55 - no reference to standard (bus.rs:395)
+  - Impact: Makes code harder to understand and maintain
+- [ ] **INT 10h Documentation**: Add high-level function overview - `crates/systems/pc/src/cpu.rs:412+`
+  - Current: ~1000+ lines with no module-level description
+  - Needed: Summary of supported video BIOS functions and modes
+  - Impact: Hard to understand what's implemented without reading all code
+- [ ] **I/O Port Documentation**: Document port ranges in io_read/io_write - `crates/systems/pc/src/bus.rs:694-1000`
+  - Current: 300+ lines with scattered port documentation
+  - Needed: Port map table at top of each function
+  - Impact: Difficult to find which ports are implemented
+- [ ] **Hardware Reference Citations**: Add IBM PC Technical Reference links
+  - No references to IBM PC documentation
+  - No 8086 CPU instruction set references
+  - No VGA BIOS Programmer's Reference notes
+  - No BIOS INT specification documents
+  - Impact: Hard to verify hardware accuracy without original documentation
 
 ### Low
+
+#### NES (Nintendo Entertainment System)
+- [ ] **Duplicate APU Frame Counter State**: Refactor duplicated frame counter tracking - `crates/systems/nes/src/apu.rs:203-206`
+  - Current: `frame_counter_cycles` and `irq_frame_counter_cycles` track same information separately
+  - Code comment: "duplicated to avoid rewriting audio generation"
+  - Impact: Unnecessary memory duplication; maintenance burden
+  - Solution: Unify frame counter state or document rationale for separation
+- [ ] **Duplicate Variable Extraction in PPU**: Remove redundant scroll variable extraction - `crates/systems/nes/src/ppu.rs:1032-1036,1048-1050`
+  - Current: `coarse_x`, `coarse_y`, `nt_x`, `nt_y` extracted twice identically in `render_scanline()`
+  - Impact: Unnecessary redundant calculations (minimal performance impact)
+  - Solution: Use first extraction, remove second
+- [ ] **PC Histogram Allocation**: Only allocate when instruction tracing enabled - `crates/systems/nes/src/lib.rs:589`
+  - Current: `pc_hist: Option<HashMap<u16, u16>>` allocated with capacity 1024 every frame
+  - Impact: ~60KB/sec allocation overhead even when tracing disabled
+  - Solution: Only allocate when `instruction_tracer.is_enabled()`
+- [ ] **Sprite Evaluation Optimization**: Early exit sprite iteration at 8-sprite limit - `crates/systems/nes/src/ppu.rs:1230-1314`
+  - Current: Sprite evaluation iterates all 64 sprites per scanline even when only 8 rendered
+  - Issue: Early break at `sprites_on_scanline > 8` happens too late in loop
+  - Impact: Wastes CPU cycles checking sprites 9-64 when sprite limit already reached
+  - Solution: Break immediately when 8 sprites collected (preserve overflow detection logic)
+- [ ] **RefCell Borrow & Callback Overhead in Rendering**: Batch CHR callbacks to reduce overhead - `crates/systems/nes/src/ppu.rs:1103-1106`
+  - Current: `chr_read_callback.borrow_mut()` is performed for each callback invocation; when using `chr_fetch_fast()`, callbacks are invoked explicitly per tile/sprite rather than per individual CHR fetch
+  - Impact: Repeated `RefCell` borrows and callback calls in the render hot path add overhead across a scanline/frame
+  - Solution: Reduce callback invocation frequency (e.g., batch work per tile/sprite group) or hold a mutable borrow over a larger scope (such as a scanline) to avoid repeated `borrow_mut()` calls
+  - Note: Low priority - `chr_fetch_fast()` already limits callback frequency, but further batching may yield minor performance gains
+- [ ] **Weak Pointer Upgrade Overhead**: Review mapper A12 callback performance - `crates/systems/nes/src/bus.rs:88,112-114`
+  - Current: `.upgrade()` is called from PPU CHR/A12 callback closures and runs once per callback invocation (potentially many times per scanline/frame depending on CHR reads/A12 transitions)
+  - Impact: Additional weak-to-strong pointer upgrades on each relevant callback; expected to be minimal on modern CPUs
+  - Solution: Profile actual callback frequency and optimize (e.g., cache strong references or restructure callbacks) only if a measurable impact is observed
+  - Note: Very low priority - likely negligible performance impact in practice
+- [ ] **Unreachable Panic Branch**: Use `unreachable!()` for impossible flag names - `crates/systems/nes/src/debugger.rs`
+  - Current: `panic!("Unexpected flag: {}", name)` but all flag names are pre-defined
+  - Impact: Code clarity and optimization
+  - Solution: Replace with `unreachable!()` macro
 
 #### SNES - Enhancement Chips
 - [ ] **DSP-1 Full Hardware Accuracy**: Implement Parameter command and shared projection state - `crates/systems/snes/src/coprocessors/dsp1.rs`
@@ -237,9 +419,4 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Current: Fixed 48KB ROM space (0x0000-0xBFFF)
   - Most SG-1000 games are under 48KB, so not critical
   - Impact: Cannot run games larger than 48KB (rare)
-- [ ] **Controller API Refinement**: Add type-safe controller methods - `crates/systems/sg1000/src/system.rs`
-  - Current: Generic `set_controller(port: u8, state: u8)` method
-  - Consider: Explicit `set_controller1(state: u8)` and `set_controller2(state: u8)` methods
-  - Follow ColecoVision pattern for consistency
-  - Impact: Better API design and type safety
 
