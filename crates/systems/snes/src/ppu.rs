@@ -40,7 +40,7 @@
 //!   - Reference: <https://wiki.superfamicom.org/rendering-the-screen#color-math>
 //!
 //! **NOT Implemented** (future enhancements):
-//! - Direct color mode (CGWSEL bits 0-1)
+//! - ✅ Direct color mode (CGWSEL bits 0-1) - Fully implemented
 
 use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::types::Frame;
@@ -365,9 +365,10 @@ pub struct Ppu {
     /// Controls WHERE and WHEN color math is applied, plus color clipping
     ///
     /// Bit layout:
-    /// - Bits 0-1: Direct color mode for 256-color BGs (Mode 3/4/7) - NOT IMPLEMENTED
+    /// - Bits 0-1: Direct color mode for 256-color BGs (Mode 3/4/7) - IMPLEMENTED ✅
     ///   - 00 = Normal color mode (palette lookup)
     ///   - 01/10/11 = Direct color mode (pixel value is color, not palette index)
+    ///   - Implementation: See get_color_with_palette() method (line 4076+)
     /// - Bits 2-3: Reserved (unused)
     /// - Bits 4-5: Color math enable control based on window regions
     ///   - 00 = Enable color math everywhere (no window masking)
@@ -440,6 +441,58 @@ pub struct Ppu {
     fixed_color_r: u8,
     fixed_color_g: u8,
     fixed_color_b: u8,
+
+    /// Screen mode select ($2133) - SETINI
+    ///
+    /// Controls screen mode and video settings including interlace mode
+    ///
+    /// Bit layout:
+    /// - Bit 0: Interlace enable
+    ///   - 0 = Progressive scan (standard 240p/224 visible lines per frame)
+    ///   - 1 = Interlaced scan (double field, 448 visible lines at 30Hz NTSC)
+    /// - Bit 1: OBJ interlace (when bit 0 is set)
+    ///   - 0 = Normal sprite positioning
+    ///   - 1 = Sprite positions doubled for interlace
+    /// - Bit 2: Overscan mode
+    ///   - 0 = 224 lines visible (standard)
+    ///   - 1 = 239 lines visible (overscan)
+    /// - Bit 3: Pseudo hi-res mode
+    ///   - 0 = Normal resolution
+    ///   - 1 = Pseudo 512 horizontal (alternate pixels main/sub)
+    /// - Bit 6: Mode 7 EXTBG (changes Mode 7 background/priority)
+    ///   - 0 = Normal Mode 7
+    ///   - 1 = Extended background in Mode 7
+    /// - Bit 7: External sync (rarely used)
+    ///
+    /// Reference: https://sneslab.net/wiki/Interlacing
+    setini: u8,
+
+    // ============================================================================
+    // H/V Counter Registers ($213C-$213D)
+    // ============================================================================
+    /// Current horizontal beam position (H counter) - 9-bit value (0-339)
+    /// Tracks the current horizontal dot position within a scanline
+    /// Used for raster effects and timing-sensitive code
+    h_counter: u16,
+
+    /// Current vertical beam position (V counter) - 9-bit value (0-261)
+    /// Tracks the current scanline number within a frame
+    /// Used for raster effects and timing-sensitive code
+    v_counter: u16,
+
+    /// H/V counter latch toggle for reading $213C/$213D
+    /// The hardware latches the counter values when $2137 is read
+    /// Then alternates between returning low and high byte on subsequent reads
+    /// false = next read returns low byte, true = next read returns high byte
+    hv_latch_toggle: Cell<bool>,
+
+    /// Latched H counter value (from $2137 read)
+    /// Uses Cell for interior mutability as reading $213C updates the toggle
+    h_counter_latched: Cell<u16>,
+
+    /// Latched V counter value (from $2137 read)
+    /// Uses Cell for interior mutability as reading $213D updates the toggle
+    v_counter_latched: Cell<u16>,
 }
 
 impl Ppu {
@@ -515,6 +568,13 @@ impl Ppu {
             fixed_color_r: 0,
             fixed_color_g: 0,
             fixed_color_b: 0,
+            setini: 0,
+            // H/V counter defaults
+            h_counter: 0,
+            v_counter: 0,
+            hv_latch_toggle: Cell::new(false),
+            h_counter_latched: Cell::new(0),
+            v_counter_latched: Cell::new(0),
         }
     }
 
@@ -1116,9 +1176,39 @@ impl Ppu {
                 });
             }
             0x2133 => {
-                // $2133 - SETINI - Screen mode/video select (stub for now)
+                // $2133 - SETINI - Screen mode/video select
+                self.setini = val;
                 log(LogCategory::PPU, LogLevel::Debug, || {
-                    format!("SNES PPU: SETINI (Screen mode) = ${:02X}", val)
+                    let interlace = val & 0x01 != 0;
+                    let obj_interlace = val & 0x02 != 0;
+                    let overscan = val & 0x04 != 0;
+                    let pseudo_hires = val & 0x08 != 0;
+                    let extbg = val & 0x40 != 0;
+
+                    let mut flags = Vec::new();
+                    if interlace {
+                        flags.push("interlace");
+                    }
+                    if obj_interlace {
+                        flags.push("obj-interlace");
+                    }
+                    if overscan {
+                        flags.push("overscan");
+                    }
+                    if pseudo_hires {
+                        flags.push("pseudo-hires");
+                    }
+                    if extbg {
+                        flags.push("extbg");
+                    }
+
+                    let flags_str = if flags.is_empty() {
+                        "none".to_string()
+                    } else {
+                        flags.join(" ")
+                    };
+
+                    format!("SNES PPU: SETINI = ${:02X} ({})", val, flags_str)
                 });
             }
 
@@ -1159,8 +1249,12 @@ impl Ppu {
             // $2137 - SLHV - Software Latch for H/V Counter
             0x2137 => {
                 // Reading this register latches H/V counter values
-                // We don't implement this
-                0
+                // Store current counter values into latched values
+                self.h_counter_latched.set(self.h_counter);
+                self.v_counter_latched.set(self.v_counter);
+                // Reset toggle to prepare for reading low byte first
+                self.hv_latch_toggle.set(false);
+                0 // Reading $2137 always returns 0 (write-only functionality)
             }
 
             // $2138 - OAMDATAREAD - OAM Data Read
@@ -1211,11 +1305,47 @@ impl Ppu {
                 self.cgram[addr]
             }
 
-            // $213C - OPHCT - Horizontal Counter (stub)
-            0x213C => 0,
+            // $213C - OPHCT - Horizontal Counter
+            // Returns latched H counter value, alternating between low and high byte
+            // 9-bit value (0-339), requires two reads to get full value
+            0x213C => {
+                let value = self.h_counter_latched.get();
+                let toggle = self.hv_latch_toggle.get();
 
-            // $213D - OPVCT - Vertical Counter (stub)
-            0x213D => 0,
+                // Return low byte first, then high byte (bit 8 only)
+                let result = if !toggle {
+                    // Low byte (bits 0-7)
+                    (value & 0xFF) as u8
+                } else {
+                    // High byte (bit 8 only, in bit 0 position)
+                    ((value >> 8) & 0x01) as u8
+                };
+
+                // Toggle for next read
+                self.hv_latch_toggle.set(!toggle);
+                result
+            }
+
+            // $213D - OPVCT - Vertical Counter
+            // Returns latched V counter value, alternating between low and high byte
+            // 9-bit value (0-261), requires two reads to get full value
+            0x213D => {
+                let value = self.v_counter_latched.get();
+                let toggle = self.hv_latch_toggle.get();
+
+                // Return low byte first, then high byte (bit 8 only)
+                let result = if !toggle {
+                    // Low byte (bits 0-7)
+                    (value & 0xFF) as u8
+                } else {
+                    // High byte (bit 8 only, in bit 0 position)
+                    ((value >> 8) & 0x01) as u8
+                };
+
+                // Toggle for next read
+                self.hv_latch_toggle.set(!toggle);
+                result
+            }
 
             // $213E - STAT77 - PPU Status
             0x213E => {
@@ -1447,6 +1577,19 @@ impl Ppu {
         });
 
         frame
+    }
+
+    /// Update H/V counters based on elapsed cycles
+    ///
+    /// This should be called periodically by the system to update the beam position.
+    /// The SNES has 262 scanlines (V=0-261) and 340 dots per scanline (H=0-339).
+    ///
+    /// # Arguments
+    /// * `scanline` - Current scanline number (0-261)
+    /// * `dot` - Current horizontal dot position (0-339)
+    pub fn update_counters(&mut self, scanline: u16, dot: u16) {
+        self.v_counter = scanline;
+        self.h_counter = dot;
     }
 
     /// Helper method to render layers for main or sub-screen

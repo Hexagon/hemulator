@@ -34,23 +34,39 @@ impl ColecoVisionPsg {
         self.psg.write(data);
     }
 
-    /// Step the PSG by the given number of CPU cycles and collect audio samples
-    pub fn step(&mut self, _cycles: u32) -> Vec<AudioSample> {
-        // For now, generate based on a fixed sample rate
+    /// Reset the PSG to power-on state
+    pub fn reset(&mut self) {
+        self.psg.reset();
+        self.cycle_accum = 0.0;
+    }
+
+    /// Generate audio samples for a given count, stepping PSG in CPU-cycle time
+    /// using the configured timing mode and sample rate of 44.1 kHz.
+    ///
+    /// This method follows the same pattern as the SMS PSG:
+    /// 1. Calculate how many CPU cycles correspond to each audio sample
+    /// 2. Clock the PSG that many times per sample
+    /// 3. Average the output over those cycles
+    pub fn generate_samples(&mut self, sample_count: usize) -> Vec<AudioSample> {
         const SAMPLE_HZ: f64 = 44_100.0;
-        let cpu_hz = 3_579_545.0; // ColecoVision NTSC CPU frequency
+        // ColecoVision CPU clock rate (NTSC only)
+        let cpu_hz = match self.timing {
+            TimingMode::Ntsc => 3_579_545.0, // ColecoVision NTSC
+            TimingMode::Pal => 3_579_545.0,  // ColecoVision was NTSC only, but keep for consistency
+        };
         let cycles_per_sample = cpu_hz / SAMPLE_HZ;
 
-        let mut samples = Vec::new();
+        let mut out = Vec::with_capacity(sample_count);
+        for _ in 0..sample_count {
+            self.cycle_accum += cycles_per_sample;
+            let mut cycles = self.cycle_accum as u32;
+            if cycles == 0 {
+                cycles = 1; // Ensure we advance state even if timing slips
+            }
+            self.cycle_accum -= cycles as f64;
 
-        // Add cycles to accumulator
-        self.cycle_accum += _cycles as f64;
-
-        // Generate samples while we have enough cycles accumulated
-        while self.cycle_accum >= cycles_per_sample {
-            // Clock PSG for one sample period
+            // Clock PSG for all cycles and accumulate output
             let mut acc = 0i32;
-            let cycles = cycles_per_sample as u32;
             for _ in 0..cycles {
                 let sample = self.psg.clock() as i32;
                 acc += sample;
@@ -58,19 +74,10 @@ impl ColecoVisionPsg {
 
             // Average over all cycles
             let avg = acc / cycles as i32;
-            samples.push(avg.clamp(-32768, 32767) as i16);
-
-            // Consume cycles
-            self.cycle_accum -= cycles_per_sample;
+            out.push(avg.clamp(-32768, 32767) as i16);
         }
 
-        samples
-    }
-
-    /// Reset the PSG to power-on state
-    pub fn reset(&mut self) {
-        self.psg.reset();
-        self.cycle_accum = 0.0;
+        out
     }
 
     /// Get PSG state for save state

@@ -386,6 +386,16 @@ impl SuperFx {
                 self.flags_r = true;
                 1
             }
+            // ASR - Arithmetic shift right (ALT1 variant of 0x03)
+            0x03 if self.flags_alt1 => {
+                let src = self.sreg();
+                let val = self.regs[src] as i16;
+                self.flags_cy = (val & 1) != 0;
+                self.regs[src] = (val >> 1) as u16;
+                self.update_zs_flags(self.regs[src]);
+                self.flags_alt1 = false;
+                1
+            }
             // LSR - Logical shift right
             0x03 => {
                 let src = self.sreg();
@@ -393,6 +403,17 @@ impl SuperFx {
                 self.flags_cy = (val & 1) != 0;
                 self.regs[src] = val >> 1;
                 self.update_zs_flags(self.regs[src]);
+                1
+            }
+            // ROR - Rotate right (ALT1 variant of 0x04)
+            0x04 if self.flags_alt1 => {
+                let src = self.sreg();
+                let val = self.regs[src];
+                let cy = if self.flags_cy { 0x8000 } else { 0 };
+                self.flags_cy = (val & 1) != 0;
+                self.regs[src] = (val >> 1) | cy;
+                self.update_zs_flags(self.regs[src]);
+                self.flags_alt1 = false;
                 1
             }
             // ROL - Rotate left
@@ -405,6 +426,34 @@ impl SuperFx {
                 self.update_zs_flags(self.regs[src]);
                 1
             }
+            // BNE - Branch if not zero (ALT1 variant of 0x05)
+            0x05 if self.flags_alt1 => {
+                if !self.flags_z {
+                    let offset_addr = ((self.pbr as u32) << 16) | ((self.pc() + 1) as u32);
+                    let offset = self.read_byte(offset_addr) as i8;
+                    let new_pc = ((self.pc() + 2) as i32 + offset as i32) as u16;
+                    self.set_pc(new_pc);
+                    self.flags_alt1 = false;
+                    0
+                } else {
+                    self.flags_alt1 = false;
+                    2
+                }
+            }
+            // BEQ - Branch if zero (ALT2 variant of 0x05)
+            0x05 if self.flags_alt2 => {
+                if self.flags_z {
+                    let offset_addr = ((self.pbr as u32) << 16) | ((self.pc() + 1) as u32);
+                    let offset = self.read_byte(offset_addr) as i8;
+                    let new_pc = ((self.pc() + 2) as i32 + offset as i32) as u16;
+                    self.set_pc(new_pc);
+                    self.flags_alt2 = false;
+                    0
+                } else {
+                    self.flags_alt2 = false;
+                    2
+                }
+            }
             // BRA - Branch always (relative)
             0x05 => {
                 // Read signed byte offset from (PBR << 16) | (PC+1), branch is relative to PC+2
@@ -413,6 +462,34 @@ impl SuperFx {
                 let new_pc = ((self.pc() + 2) as i32 + offset as i32) as u16;
                 self.set_pc(new_pc);
                 0 // PC already set
+            }
+            // BVC - Branch if overflow clear (ALT1 variant of 0x06)
+            0x06 if self.flags_alt1 => {
+                if !self.flags_ov {
+                    let offset_addr = ((self.pbr as u32) << 16) | ((self.pc() + 1) as u32);
+                    let offset = self.read_byte(offset_addr) as i8;
+                    let new_pc = ((self.pc() + 2) as i32 + offset as i32) as u16;
+                    self.set_pc(new_pc);
+                    self.flags_alt1 = false;
+                    0
+                } else {
+                    self.flags_alt1 = false;
+                    2
+                }
+            }
+            // BMI - Branch if minus (ALT2 variant of 0x06)
+            0x06 if self.flags_alt2 => {
+                if self.flags_s {
+                    let offset_addr = ((self.pbr as u32) << 16) | ((self.pc() + 1) as u32);
+                    let offset = self.read_byte(offset_addr) as i8;
+                    let new_pc = ((self.pc() + 2) as i32 + offset as i32) as u16;
+                    self.set_pc(new_pc);
+                    self.flags_alt2 = false;
+                    0
+                } else {
+                    self.flags_alt2 = false;
+                    2
+                }
             }
             // BGE/BLT - Branch on sign flag
             0x06 => {
@@ -427,12 +504,41 @@ impl SuperFx {
                     2 // Skip branch, advance past opcode and offset
                 }
             }
+            // BIC - Branch if carry (ALT1 variant of 0x07)
+            0x07 if self.flags_alt1 => {
+                if !self.flags_cy {
+                    let offset_addr = ((self.pbr as u32) << 16) | ((self.pc() + 1) as u32);
+                    let offset = self.read_byte(offset_addr) as i8;
+                    let new_pc = ((self.pc() + 2) as i32 + offset as i32) as u16;
+                    self.set_pc(new_pc);
+                    self.flags_alt1 = false;
+                    0
+                } else {
+                    self.flags_alt1 = false;
+                    2
+                }
+            }
             // MERGE - Merge registers
             0x07 => {
                 let r7 = self.regs[7];
                 let r8 = self.regs[8];
                 self.regs[self.dreg()] = (r7 & 0xFF00) | (r8 >> 8);
                 self.update_zs_flags(self.regs[self.dreg()]);
+                1
+            }
+            // HIB - Get high byte (ALT1 variant of 0x0E, part of 0x08-0x0F range)
+            0x0E if self.flags_alt1 => {
+                let src = self.sreg();
+                self.regs[src] = (self.regs[src] >> 8) & 0xFF;
+                self.update_zs_flags(self.regs[src]);
+                self.flags_alt1 = false;
+                1
+            }
+            // LOB - Get low byte (non-ALT1 variant of 0x0E, part of 0x08-0x0F range)
+            0x0E => {
+                let src = self.sreg();
+                self.regs[src] &= 0xFF;
+                self.update_zs_flags(self.regs[src]);
                 1
             }
             // MULT Rn (0x08-0x0F) - Multiply R6 by R(opcode - 0x08), i.e. R0-R7
@@ -726,116 +832,6 @@ impl SuperFx {
                 // GETB: Read byte from ROM buffer into register low byte
                 self.regs[n] = (self.regs[n] & 0xFF00) | (self.rom_buffer as u16);
                 1
-            }
-            // ASR/ASL/LSR - Shift operations with ALT flags
-            0x03 if self.flags_alt1 => {
-                // ASR - Arithmetic shift right
-                let src = self.sreg();
-                let val = self.regs[src] as i16;
-                self.flags_cy = (val & 1) != 0;
-                self.regs[src] = (val >> 1) as u16;
-                self.update_zs_flags(self.regs[src]);
-                self.flags_alt1 = false;
-                1
-            }
-            // ROR - Rotate right
-            0x04 if self.flags_alt1 => {
-                let src = self.sreg();
-                let val = self.regs[src];
-                let cy = if self.flags_cy { 0x8000 } else { 0 };
-                self.flags_cy = (val & 1) != 0;
-                self.regs[src] = (val >> 1) | cy;
-                self.update_zs_flags(self.regs[src]);
-                self.flags_alt1 = false;
-                1
-            }
-            // LOB - Get low byte
-            0x0E if !self.flags_alt1 => {
-                let src = self.sreg();
-                self.regs[src] = self.regs[src] & 0xFF;
-                self.update_zs_flags(self.regs[src]);
-                1
-            }
-            // HIB - Get high byte
-            0x0E if self.flags_alt1 => {
-                let src = self.sreg();
-                self.regs[src] = (self.regs[src] >> 8) & 0xFF;
-                self.update_zs_flags(self.regs[src]);
-                self.flags_alt1 = false;
-                1
-            }
-            // BIC - Branch if carry
-            0x07 if self.flags_alt1 => {
-                if !self.flags_cy {
-                    let offset_addr = ((self.pbr as u32) << 16) | ((self.pc() + 1) as u32);
-                    let offset = self.read_byte(offset_addr) as i8;
-                    let new_pc = ((self.pc() + 2) as i32 + offset as i32) as u16;
-                    self.set_pc(new_pc);
-                    self.flags_alt1 = false;
-                    0
-                } else {
-                    self.flags_alt1 = false;
-                    2
-                }
-            }
-            // BVS/BVC - Branch on overflow
-            0x06 if self.flags_alt1 => {
-                // BVC - Branch if overflow clear
-                if !self.flags_ov {
-                    let offset_addr = ((self.pbr as u32) << 16) | ((self.pc() + 1) as u32);
-                    let offset = self.read_byte(offset_addr) as i8;
-                    let new_pc = ((self.pc() + 2) as i32 + offset as i32) as u16;
-                    self.set_pc(new_pc);
-                    self.flags_alt1 = false;
-                    0
-                } else {
-                    self.flags_alt1 = false;
-                    2
-                }
-            }
-            // BEQ/BNE - Branch on zero
-            0x05 if self.flags_alt1 => {
-                // BNE - Branch if not zero
-                if !self.flags_z {
-                    let offset_addr = ((self.pbr as u32) << 16) | ((self.pc() + 1) as u32);
-                    let offset = self.read_byte(offset_addr) as i8;
-                    let new_pc = ((self.pc() + 2) as i32 + offset as i32) as u16;
-                    self.set_pc(new_pc);
-                    self.flags_alt1 = false;
-                    0
-                } else {
-                    self.flags_alt1 = false;
-                    2
-                }
-            }
-            0x05 if self.flags_alt2 => {
-                // BEQ - Branch if zero
-                if self.flags_z {
-                    let offset_addr = ((self.pbr as u32) << 16) | ((self.pc() + 1) as u32);
-                    let offset = self.read_byte(offset_addr) as i8;
-                    let new_pc = ((self.pc() + 2) as i32 + offset as i32) as u16;
-                    self.set_pc(new_pc);
-                    self.flags_alt2 = false;
-                    0
-                } else {
-                    self.flags_alt2 = false;
-                    2
-                }
-            }
-            // BMI/BPL - Branch on sign
-            0x06 if self.flags_alt2 => {
-                // BMI - Branch if minus (sign set)
-                if self.flags_s {
-                    let offset_addr = ((self.pbr as u32) << 16) | ((self.pc() + 1) as u32);
-                    let offset = self.read_byte(offset_addr) as i8;
-                    let new_pc = ((self.pc() + 2) as i32 + offset as i32) as u16;
-                    self.set_pc(new_pc);
-                    self.flags_alt2 = false;
-                    0
-                } else {
-                    self.flags_alt2 = false;
-                    2
-                }
             }
             // Unimplemented opcodes - treat as NOP
             _ => 1,

@@ -14,11 +14,24 @@ This document describes the SMS (Sega Master System) implementation in Hemulator
   - Proper downsampling from SMS CPU speed (3.579545 MHz NTSC / 3.546894 MHz PAL) to 44.1 kHz
   - NTSC and PAL timing support
 - VDP (Video Display Processor) with:
-  - Tilemap and sprite rendering
+  - **Mode 4 (SMS native graphics mode)**:
+    - Multiple resolutions: 192, 224, or 240 scanlines (controlled by M2, M1, M3 mode bits)
+    - Tilemap and sprite rendering (8×8 and 16×16 sprite support)
+    - Background/sprite priority system (bit 12 of name table entry)
+    - 4-bit-per-pixel tile patterns with palette selection
+    - Horizontal and vertical tile flipping
+    - 32-color palette (CRAM) with 6-bit RGB color depth
+  - **TMS9918A compatibility modes (backward compatibility)**:
+    - Mode 0 (Graphics I): 256×192, 32×24 tiles, 2 colors per 8 patterns
+    - Mode 1 (Text): 40×24 characters, 6×8 pixels, monochrome text display
+    - Mode 2 (Graphics II): 256×192, enhanced color (2 colors per 8×1 row), 768 patterns
+    - Mode 3 (Multicolor): 64×48 blocks (4×4 pixel blocks), 16-color palette
+    - Fixed 16-color TMS9918A palette for all TMS modes
   - Frame interrupts
   - Line interrupts
-  - Sprite overflow detection
+  - Sprite overflow detection (8 sprites per scanline limit)
   - Sprite collision detection
+  - Proper display blanking control (BLK bit)
 - Memory bus with ROM banking support
 - BIOS support with optional BIOS mount point:
   - Games run without BIOS by default
@@ -37,11 +50,12 @@ This document describes the SMS (Sega Master System) implementation in Hemulator
 - System trait implementation
 - Frontend integration (ROM detection, controller input, audio)
 - Test ROM and smoke tests
-- All unit tests passing (50/50)
+- All unit tests passing (51/51)
 
 **❌ Not Yet Implemented:**
 - Game Gear support (planned)
 - FM sound unit support (Master System only, optional accessory)
+- Sprite rendering in TMS modes (Mode 4 sprites work, TMS sprite implementation pending)
 
 ## Architecture
 
@@ -78,17 +92,63 @@ crates/core/src/apu/
 
 ### VDP (Video Display Processor)
 
-The VDP implements the `Renderer` trait and provides:
-- 256×192 resolution framebuffer
-- Tilemap-based background rendering
+The VDP implements the `Renderer` trait and supports multiple display modes:
+
+**Mode 4 (SMS Native Mode):**
+- Dynamic resolution: 192, 224, or 240 scanlines
+- Resolution controlled by mode bits in registers 0 and 1:
+  - M2 (Reg 0, bit 1): Must be 1 for extended heights
+  - M1 (Reg 1, bit 4): Selects 224-line mode when M2=1
+  - M3 (Reg 1, bit 3): Selects 240-line mode when M2=1
+- Tilemap-based background rendering (32×24 tiles, 256×192 default)
 - 64 hardware sprites with 8 per scanline limit
 - 6-bit color palette (64 colors total, 32 on-screen)
-- Scrolling support
-- Frame and line interrupts
+- Scrolling support with lock regions
+- Background/sprite priority control
 
-Register interface:
+**TMS9918A Compatibility Modes:**
+
+The VDP also supports the original TMS9918A video modes for backward compatibility:
+
+- **Mode 0 (Graphics I)**:
+  - 256×192 resolution, 32×24 tiles (8×8 pixels)
+  - Pattern table: 256 unique patterns
+  - Color table: 2 colors per 8 patterns (foreground/background)
+  - Simpler than Mode 4, used by older games
+
+- **Mode 1 (Text)**:
+  - 40×24 characters, 6×8 pixels per character
+  - Monochrome text display
+  - Colors controlled by Register 7 (foreground/background)
+  - 240 pixels wide (remaining 16 pixels blank)
+
+- **Mode 2 (Graphics II)**:
+  - 256×192 resolution with enhanced color
+  - Screen divided into 3 vertical thirds for independent data
+  - 2 colors per 8×1 pixel row (vs 8×8 in Mode 0)
+  - Up to 768 patterns (3 × 256)
+  - Better color flexibility than Mode 0
+
+- **Mode 3 (Multicolor)**:
+  - 64×48 logical blocks (256×192 physical pixels)
+  - Each block is 4×4 pixels of solid color
+  - Pattern data defines 2×2 block colors per byte
+  - Full 16-color palette per block
+  - Simplified graphics for colorful backgrounds
+
+**Display Control:**
+- Frame and line interrupts
+- Display blanking (BLK bit in Register 1, bit 6)
+  - Mode 4: 1=blank, 0=display
+  - TMS modes: 0=blank, 1=display (opposite polarity)
+- Sprite overflow and collision detection
+
+**Register Interface:**
 - Port 0xBE: Data port (read/write VRAM/CRAM)
 - Port 0xBF: Control/status port
+- 11 configuration registers
+- 16 KB VRAM
+- 32 bytes CRAM (64 bytes in Game Gear mode)
 
 ### SN76489 PSG (Programmable Sound Generator)
 
@@ -157,10 +217,23 @@ The SMS has optional BIOS ROM support:
 - Games start directly from cartridge ROM at 0x0000
 
 **Loading BIOS:**
-- BIOS can be mounted via the "bios" mount point
-- Supports .sms, .bin, .rom file extensions
-- When loaded, BIOS is automatically enabled
-- BIOS typically boots, initializes hardware, then disables itself
+
+1. **Command-line argument**:
+   ```bash
+   hemu --bios bios.sms game.sms
+   ```
+
+2. **Auto-detection**: If `--bios` is not specified, the emulator automatically searches for BIOS files in the same directory as the cartridge ROM using these filenames:
+   - `bios.sms`
+   - `sms.rom`
+   - `sms.bin`
+   - `bios.rom`
+   - `bios.bin`
+
+3. **Mount point**: BIOS can also be mounted via the "bios" mount point programmatically
+   - Supports .sms, .bin, .rom file extensions
+   - When loaded, BIOS is automatically enabled
+   - BIOS typically boots, initializes hardware, then disables itself
 
 **Use Cases:**
 - Some Japanese games require BIOS
@@ -256,18 +329,25 @@ cargo test --package emu_sms
 
 ## Next Steps
 
-1. **Game Gear Support**
+1. **TMS Mode Sprite Support**
+   - Implement sprite rendering for TMS9918A modes
+   - Test sprite behavior in each TMS mode
+   - Validate against ColecoVision and MSX software
+
+2. **Game Gear Support**
    - Extended resolution (160×144)
    - LCD palette
    - Link cable support
 
-2. **Enhanced Testing**
+3. **Enhanced Testing**
    - Test with more commercial SMS ROMs
+   - Test TMS modes with ColecoVision/MSX software
    - Performance profiling
    - Accuracy testing against hardware
 
 4. **Documentation**
    - Update MANUAL.md with detailed SMS controls and features
+   - Document TMS mode switching
    - Document mapper support
 
 ## ROM Format
@@ -289,3 +369,6 @@ SMS ROMs are typically headerless binary files:
 
 - No Game Gear support yet (planned)
 - No FM sound unit support (Master System only, optional accessory)
+- TMS9918A mode sprites not yet implemented (Mode 4 sprites work correctly)
+  - TMS modes currently only render backgrounds
+  - Sprite rendering in TMS modes planned for future update
