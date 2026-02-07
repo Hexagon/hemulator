@@ -164,6 +164,15 @@ pub struct CpuMips<M: MemoryMips> {
     /// Program counter
     pub pc: u64,
 
+    /// Next PC (for branch delay slot handling)
+    /// When a branch/jump executes, this is set to the target address.
+    /// After the delay slot executes, PC is updated to next_pc.
+    next_pc: u64,
+
+    /// Whether we're currently in a branch delay slot
+    /// When true, the next instruction is the last before a branch takes effect
+    in_delay_slot: bool,
+
     /// HI register (for multiply/divide results)
     pub hi: u64,
 
@@ -225,7 +234,9 @@ impl<M: MemoryMips> CpuMips<M> {
     pub fn new(memory: M) -> Self {
         let mut cpu = Self {
             gpr: [0; 32],
-            pc: 0xBFC0_0000, // Reset vector in BIOS ROM
+            pc: 0xBFC0_0000,      // Reset vector in BIOS ROM
+            next_pc: 0xBFC0_0004, // Next PC after first instruction
+            in_delay_slot: false,
             hi: 0,
             lo: 0,
             fpr: [0.0; 32],
@@ -247,6 +258,8 @@ impl<M: MemoryMips> CpuMips<M> {
     pub fn reset(&mut self) {
         self.gpr = [0; 32];
         self.pc = 0xBFC0_0000;
+        self.next_pc = 0xBFC0_0004;
+        self.in_delay_slot = false;
         self.hi = 0;
         self.lo = 0;
         self.fpr = [0.0; 32];
@@ -256,6 +269,12 @@ impl<M: MemoryMips> CpuMips<M> {
         self.cp0[CP0_STATUS] = 0x3400_0000;
         self.cp0[CP0_CONFIG] = 0x7006_E463;
         self.cycles = 0;
+    }
+
+    /// Test accessor for delay slot state
+    #[cfg(test)]
+    pub(crate) fn is_in_delay_slot(&self) -> bool {
+        self.in_delay_slot
     }
 
     /// Execute a single instruction and return cycles consumed
@@ -268,62 +287,88 @@ impl<M: MemoryMips> CpuMips<M> {
             return (self.cycles - start_cycles) as u32;
         }
 
-        // Fetch instruction
+        // Fetch instruction at current PC
         let instr = self.memory.read_word(self.pc as u32);
+
+        // Save current PC for branch calculations
+        let current_pc = self.pc;
+
+        // Check if we're in a delay slot (from a previous branch/jump)
+        let was_in_delay_slot = self.in_delay_slot;
+
+        // Save the pending branch target before executing the delay slot
+        let pending_branch_target = self.next_pc;
+
+        // Update PC to next sequential instruction
         self.pc = self.pc.wrapping_add(4);
+
+        // Clear in_delay_slot flag before executing instruction
+        // This allows the delay slot instruction to set its own branch if needed
+        self.in_delay_slot = false;
 
         // Decode opcode (bits 26-31)
         let opcode = (instr >> 26) & 0x3F;
 
+        // Execute the instruction
+        // Branch/jump instructions will set next_pc
         match opcode {
-            0x00 => self.execute_special(instr), // R-type instructions
-            0x01 => self.execute_regimm(instr),  // REGIMM (branch instructions)
-            0x02 => self.execute_j(instr),       // J
-            0x03 => self.execute_jal(instr),     // JAL
-            0x04 => self.execute_beq(instr),     // BEQ
-            0x05 => self.execute_bne(instr),     // BNE
-            0x06 => self.execute_blez(instr),    // BLEZ
-            0x07 => self.execute_bgtz(instr),    // BGTZ
-            0x08 => self.execute_addi(instr),    // ADDI
-            0x09 => self.execute_addiu(instr),   // ADDIU
-            0x0A => self.execute_slti(instr),    // SLTI
-            0x0B => self.execute_sltiu(instr),   // SLTIU
-            0x0C => self.execute_andi(instr),    // ANDI
-            0x0D => self.execute_ori(instr),     // ORI
-            0x0E => self.execute_xori(instr),    // XORI
-            0x0F => self.execute_lui(instr),     // LUI
-            0x10 => self.execute_cop0(instr),    // COP0
-            0x11 => self.execute_cop1(instr),    // COP1
-            0x14 => self.execute_beql(instr),    // BEQL
-            0x15 => self.execute_bnel(instr),    // BNEL
-            0x16 => self.execute_blezl(instr),   // BLEZL
-            0x17 => self.execute_bgtzl(instr),   // BGTZL
-            0x18 => self.execute_daddi(instr),   // DADDI
-            0x19 => self.execute_daddiu(instr),  // DADDIU
-            0x1A => self.execute_ldl(instr),     // LDL
-            0x1B => self.execute_ldr(instr),     // LDR
-            0x20 => self.execute_lb(instr),      // LB
-            0x21 => self.execute_lh(instr),      // LH
-            0x22 => self.execute_lwl(instr),     // LWL
-            0x23 => self.execute_lw(instr),      // LW
-            0x24 => self.execute_lbu(instr),     // LBU
-            0x25 => self.execute_lhu(instr),     // LHU
-            0x26 => self.execute_lwr(instr),     // LWR
-            0x27 => self.execute_lwu(instr),     // LWU
-            0x28 => self.execute_sb(instr),      // SB
-            0x29 => self.execute_sh(instr),      // SH
-            0x2A => self.execute_swl(instr),     // SWL
-            0x2B => self.execute_sw(instr),      // SW
-            0x2C => self.execute_sdl(instr),     // SDL
-            0x2D => self.execute_sdr(instr),     // SDR
-            0x2E => self.execute_swr(instr),     // SWR
-            0x2F => self.execute_cache(instr),   // CACHE
-            0x37 => self.execute_ld(instr),      // LD
-            0x3F => self.execute_sd(instr),      // SD
+            0x00 => self.execute_special(instr, current_pc), // R-type instructions
+            0x01 => self.execute_regimm(instr, current_pc),  // REGIMM (branch instructions)
+            0x02 => self.execute_j(instr, current_pc),       // J
+            0x03 => self.execute_jal(instr, current_pc),     // JAL
+            0x04 => self.execute_beq(instr, current_pc),     // BEQ
+            0x05 => self.execute_bne(instr, current_pc),     // BNE
+            0x06 => self.execute_blez(instr, current_pc),    // BLEZ
+            0x07 => self.execute_bgtz(instr, current_pc),    // BGTZ
+            0x08 => self.execute_addi(instr),                // ADDI
+            0x09 => self.execute_addiu(instr),               // ADDIU
+            0x0A => self.execute_slti(instr),                // SLTI
+            0x0B => self.execute_sltiu(instr),               // SLTIU
+            0x0C => self.execute_andi(instr),                // ANDI
+            0x0D => self.execute_ori(instr),                 // ORI
+            0x0E => self.execute_xori(instr),                // XORI
+            0x0F => self.execute_lui(instr),                 // LUI
+            0x10 => self.execute_cop0(instr, current_pc),    // COP0
+            0x11 => self.execute_cop1(instr, current_pc),    // COP1
+            0x14 => self.execute_beql(instr, current_pc),    // BEQL
+            0x15 => self.execute_bnel(instr, current_pc),    // BNEL
+            0x16 => self.execute_blezl(instr, current_pc),   // BLEZL
+            0x17 => self.execute_bgtzl(instr, current_pc),   // BGTZL
+            0x18 => self.execute_daddi(instr),               // DADDI
+            0x19 => self.execute_daddiu(instr),              // DADDIU
+            0x1A => self.execute_ldl(instr),                 // LDL
+            0x1B => self.execute_ldr(instr),                 // LDR
+            0x20 => self.execute_lb(instr),                  // LB
+            0x21 => self.execute_lh(instr),                  // LH
+            0x22 => self.execute_lwl(instr),                 // LWL
+            0x23 => self.execute_lw(instr),                  // LW
+            0x24 => self.execute_lbu(instr),                 // LBU
+            0x25 => self.execute_lhu(instr),                 // LHU
+            0x26 => self.execute_lwr(instr),                 // LWR
+            0x27 => self.execute_lwu(instr),                 // LWU
+            0x28 => self.execute_sb(instr),                  // SB
+            0x29 => self.execute_sh(instr),                  // SH
+            0x2A => self.execute_swl(instr),                 // SWL
+            0x2B => self.execute_sw(instr),                  // SW
+            0x2C => self.execute_sdl(instr),                 // SDL
+            0x2D => self.execute_sdr(instr),                 // SDR
+            0x2E => self.execute_swr(instr),                 // SWR
+            0x2F => self.execute_cache(instr),               // CACHE
+            0x37 => self.execute_ld(instr),                  // LD
+            0x3F => self.execute_sd(instr),                  // SD
             _ => {
                 // Unimplemented instruction
                 self.cycles += 1;
             }
+        }
+
+        // If we just executed the delay slot of a taken branch/jump, apply its pending branch target.
+        // Note: was_in_delay_slot is only true if the previous instruction was a taken branch/jump.
+        // If the delay slot instruction itself set a new branch, that branch's target is now in next_pc
+        // and will be applied after executing its own delay slot, but we still complete the original
+        // branch by updating pc to pending_branch_target here.
+        if was_in_delay_slot {
+            self.pc = pending_branch_target;
         }
 
         // R0 is always zero
@@ -379,8 +424,20 @@ impl<M: MemoryMips> CpuMips<M> {
         // Set EXL bit in Status register (disable further interrupts)
         self.cp0[CP0_STATUS] |= 0x02; // Set EXL bit
 
-        // Save return address in EPC (current PC, not incremented)
-        self.cp0[CP0_EPC] = self.pc;
+        // If we're in a delay slot, set BD bit in Cause and save EPC to the branch instruction
+        if self.in_delay_slot {
+            // Set BD (Branch Delay) bit in Cause register (bit 31)
+            self.cp0[CP0_CAUSE] |= 1u64 << 31;
+            // EPC should point to the branch instruction (PC - 4)
+            self.cp0[CP0_EPC] = self.pc.wrapping_sub(4);
+            // Clear delay slot state to prevent incorrect PC update after exception handler
+            self.in_delay_slot = false;
+        } else {
+            // Clear BD bit
+            self.cp0[CP0_CAUSE] &= !(1u64 << 31);
+            // Save return address in EPC (current PC)
+            self.cp0[CP0_EPC] = self.pc;
+        }
 
         // Set exception code in Cause register
         self.cp0[CP0_CAUSE] &= !0x7C; // Clear exception code bits (2-6)
@@ -409,7 +466,7 @@ impl<M: MemoryMips> CpuMips<M> {
     }
 
     /// Execute SPECIAL opcode instructions (opcode = 0x00)
-    fn execute_special(&mut self, instr: u32) {
+    fn execute_special(&mut self, instr: u32, current_pc: u64) {
         let funct = instr & 0x3F;
         let rd = ((instr >> 11) & 0x1F) as usize;
         let rs = ((instr >> 21) & 0x1F) as usize;
@@ -452,13 +509,17 @@ impl<M: MemoryMips> CpuMips<M> {
             }
             0x08 => {
                 // JR - Jump Register
-                self.pc = self.gpr[rs];
+                // Set next_pc to register value, mark as in delay slot
+                self.next_pc = self.gpr[rs];
+                self.in_delay_slot = true;
                 self.cycles += 1;
             }
             0x09 => {
                 // JALR - Jump And Link Register
-                self.gpr[rd] = self.pc;
-                self.pc = self.gpr[rs];
+                // Save return address (PC+8, which is current_pc + 8)
+                self.gpr[rd] = current_pc.wrapping_add(8);
+                self.next_pc = self.gpr[rs];
+                self.in_delay_slot = true;
                 self.cycles += 1;
             }
             0x10 => {
@@ -767,7 +828,7 @@ impl<M: MemoryMips> CpuMips<M> {
     // ============================================================================
 
     /// Execute REGIMM (opcode 0x01) - Branch instructions
-    fn execute_regimm(&mut self, instr: u32) {
+    fn execute_regimm(&mut self, instr: u32, current_pc: u64) {
         let rs = ((instr >> 21) & 0x1F) as usize;
         let rt = (instr >> 16) & 0x1F; // This is the regimm field
         let offset = ((instr & 0xFFFF) as i16 as i32) << 2;
@@ -776,60 +837,91 @@ impl<M: MemoryMips> CpuMips<M> {
             0x00 => {
                 // BLTZ - Branch on Less Than Zero
                 if (self.gpr[rs] as i64) < 0 {
-                    self.pc = (self.pc as i64).wrapping_add(offset as i64) as u64;
+                    // Branch target = (branch_addr + 4) + offset
+                    self.next_pc =
+                        (current_pc.wrapping_add(4) as i64).wrapping_add(offset as i64) as u64;
+                    self.in_delay_slot = true;
                 }
                 self.cycles += 1;
             }
             0x01 => {
                 // BGEZ - Branch on Greater Than or Equal to Zero
                 if (self.gpr[rs] as i64) >= 0 {
-                    self.pc = (self.pc as i64).wrapping_add(offset as i64) as u64;
+                    self.next_pc =
+                        (current_pc.wrapping_add(4) as i64).wrapping_add(offset as i64) as u64;
+                    self.in_delay_slot = true;
                 }
                 self.cycles += 1;
             }
             0x02 => {
                 // BLTZL - Branch on Less Than Zero Likely
                 if (self.gpr[rs] as i64) < 0 {
-                    self.pc = (self.pc as i64).wrapping_add(offset as i64) as u64;
+                    // Branch taken: set delay slot
+                    self.next_pc =
+                        (current_pc.wrapping_add(4) as i64).wrapping_add(offset as i64) as u64;
+                    self.in_delay_slot = true;
+                } else {
+                    // Branch not taken: nullify delay slot
+                    self.pc = self.pc.wrapping_add(4);
                 }
                 self.cycles += 1;
             }
             0x03 => {
                 // BGEZL - Branch on Greater Than or Equal to Zero Likely
                 if (self.gpr[rs] as i64) >= 0 {
-                    self.pc = (self.pc as i64).wrapping_add(offset as i64) as u64;
+                    // Branch taken: set delay slot
+                    self.next_pc =
+                        (current_pc.wrapping_add(4) as i64).wrapping_add(offset as i64) as u64;
+                    self.in_delay_slot = true;
+                } else {
+                    // Branch not taken: nullify delay slot
+                    self.pc = self.pc.wrapping_add(4);
                 }
                 self.cycles += 1;
             }
             0x10 => {
                 // BLTZAL - Branch on Less Than Zero And Link
                 if (self.gpr[rs] as i64) < 0 {
-                    self.gpr[31] = self.pc;
-                    self.pc = (self.pc as i64).wrapping_add(offset as i64) as u64;
+                    self.gpr[31] = current_pc.wrapping_add(8); // Return address = PC + 8
+                    self.next_pc =
+                        (current_pc.wrapping_add(4) as i64).wrapping_add(offset as i64) as u64;
+                    self.in_delay_slot = true;
                 }
                 self.cycles += 1;
             }
             0x11 => {
                 // BGEZAL - Branch on Greater Than or Equal to Zero And Link
                 if (self.gpr[rs] as i64) >= 0 {
-                    self.gpr[31] = self.pc;
-                    self.pc = (self.pc as i64).wrapping_add(offset as i64) as u64;
+                    self.gpr[31] = current_pc.wrapping_add(8);
+                    self.next_pc =
+                        (current_pc.wrapping_add(4) as i64).wrapping_add(offset as i64) as u64;
+                    self.in_delay_slot = true;
                 }
                 self.cycles += 1;
             }
             0x12 => {
                 // BLTZALL - Branch on Less Than Zero And Link Likely
                 if (self.gpr[rs] as i64) < 0 {
-                    self.gpr[31] = self.pc;
-                    self.pc = (self.pc as i64).wrapping_add(offset as i64) as u64;
+                    self.gpr[31] = current_pc.wrapping_add(8);
+                    self.next_pc =
+                        (current_pc.wrapping_add(4) as i64).wrapping_add(offset as i64) as u64;
+                    self.in_delay_slot = true;
+                } else {
+                    // Branch not taken: nullify delay slot
+                    self.pc = self.pc.wrapping_add(4);
                 }
                 self.cycles += 1;
             }
             0x13 => {
                 // BGEZALL - Branch on Greater Than or Equal to Zero And Link Likely
                 if (self.gpr[rs] as i64) >= 0 {
-                    self.gpr[31] = self.pc;
-                    self.pc = (self.pc as i64).wrapping_add(offset as i64) as u64;
+                    self.gpr[31] = current_pc.wrapping_add(8);
+                    self.next_pc =
+                        (current_pc.wrapping_add(4) as i64).wrapping_add(offset as i64) as u64;
+                    self.in_delay_slot = true;
+                } else {
+                    // Branch not taken: nullify delay slot
+                    self.pc = self.pc.wrapping_add(4);
                 }
                 self.cycles += 1;
             }
@@ -840,108 +932,141 @@ impl<M: MemoryMips> CpuMips<M> {
     }
 
     /// Execute J - Jump
-    fn execute_j(&mut self, instr: u32) {
+    fn execute_j(&mut self, instr: u32, current_pc: u64) {
         let target = instr & 0x03FFFFFF;
-        self.pc = (self.pc & 0xFFFFFFFF_F0000000) | ((target << 2) as u64);
+        // Jump target = (delay_slot_addr & 0xFFFFFFFF_F0000000) | (target << 2)
+        // delay_slot_addr = current_pc + 4
+        let delay_slot_addr = current_pc.wrapping_add(4);
+        self.next_pc = (delay_slot_addr & 0xFFFFFFFF_F0000000) | ((target << 2) as u64);
+        self.in_delay_slot = true;
         self.cycles += 1;
     }
 
     /// Execute JAL - Jump And Link
-    fn execute_jal(&mut self, instr: u32) {
+    fn execute_jal(&mut self, instr: u32, current_pc: u64) {
         let target = instr & 0x03FFFFFF;
-        self.gpr[31] = self.pc;
-        self.pc = (self.pc & 0xFFFFFFFF_F0000000) | ((target << 2) as u64);
+        // Save return address (PC + 8)
+        self.gpr[31] = current_pc.wrapping_add(8);
+        // Jump target uses upper bits of delay slot address
+        let delay_slot_addr = current_pc.wrapping_add(4);
+        self.next_pc = (delay_slot_addr & 0xFFFFFFFF_F0000000) | ((target << 2) as u64);
+        self.in_delay_slot = true;
         self.cycles += 1;
     }
 
     /// Execute BEQ - Branch on Equal
-    fn execute_beq(&mut self, instr: u32) {
+    fn execute_beq(&mut self, instr: u32, current_pc: u64) {
         let rs = ((instr >> 21) & 0x1F) as usize;
         let rt = ((instr >> 16) & 0x1F) as usize;
         let offset = ((instr & 0xFFFF) as i16 as i32) << 2;
 
         if self.gpr[rs] == self.gpr[rt] {
-            self.pc = (self.pc as i64).wrapping_add(offset as i64) as u64;
+            // Branch target = (branch_addr + 4) + offset
+            self.next_pc = (current_pc.wrapping_add(4) as i64).wrapping_add(offset as i64) as u64;
+            self.in_delay_slot = true;
         }
         self.cycles += 1;
     }
 
     /// Execute BNE - Branch on Not Equal
-    fn execute_bne(&mut self, instr: u32) {
+    fn execute_bne(&mut self, instr: u32, current_pc: u64) {
         let rs = ((instr >> 21) & 0x1F) as usize;
         let rt = ((instr >> 16) & 0x1F) as usize;
         let offset = ((instr & 0xFFFF) as i16 as i32) << 2;
 
         if self.gpr[rs] != self.gpr[rt] {
-            self.pc = (self.pc as i64).wrapping_add(offset as i64) as u64;
+            self.next_pc = (current_pc.wrapping_add(4) as i64).wrapping_add(offset as i64) as u64;
+            self.in_delay_slot = true;
         }
         self.cycles += 1;
     }
 
     /// Execute BLEZ - Branch on Less Than or Equal to Zero
-    fn execute_blez(&mut self, instr: u32) {
+    fn execute_blez(&mut self, instr: u32, current_pc: u64) {
         let rs = ((instr >> 21) & 0x1F) as usize;
         let offset = ((instr & 0xFFFF) as i16 as i32) << 2;
 
         if (self.gpr[rs] as i64) <= 0 {
-            self.pc = (self.pc as i64).wrapping_add(offset as i64) as u64;
+            self.next_pc = (current_pc.wrapping_add(4) as i64).wrapping_add(offset as i64) as u64;
+            self.in_delay_slot = true;
         }
         self.cycles += 1;
     }
 
     /// Execute BGTZ - Branch on Greater Than Zero
-    fn execute_bgtz(&mut self, instr: u32) {
+    fn execute_bgtz(&mut self, instr: u32, current_pc: u64) {
         let rs = ((instr >> 21) & 0x1F) as usize;
         let offset = ((instr & 0xFFFF) as i16 as i32) << 2;
 
         if (self.gpr[rs] as i64) > 0 {
-            self.pc = (self.pc as i64).wrapping_add(offset as i64) as u64;
+            self.next_pc = (current_pc.wrapping_add(4) as i64).wrapping_add(offset as i64) as u64;
+            self.in_delay_slot = true;
         }
         self.cycles += 1;
     }
 
     /// Execute BEQL - Branch on Equal Likely
-    fn execute_beql(&mut self, instr: u32) {
+    fn execute_beql(&mut self, instr: u32, current_pc: u64) {
         let rs = ((instr >> 21) & 0x1F) as usize;
         let rt = ((instr >> 16) & 0x1F) as usize;
         let offset = ((instr & 0xFFFF) as i16 as i32) << 2;
 
         if self.gpr[rs] == self.gpr[rt] {
-            self.pc = (self.pc as i64).wrapping_add(offset as i64) as u64;
+            // Branch taken: set delay slot
+            self.next_pc = (current_pc.wrapping_add(4) as i64).wrapping_add(offset as i64) as u64;
+            self.in_delay_slot = true;
+        } else {
+            // Branch not taken: nullify delay slot by skipping it (PC += 8 total)
+            self.pc = self.pc.wrapping_add(4); // PC was already incremented by 4, add another 4
         }
         self.cycles += 1;
     }
 
     /// Execute BNEL - Branch on Not Equal Likely
-    fn execute_bnel(&mut self, instr: u32) {
+    fn execute_bnel(&mut self, instr: u32, current_pc: u64) {
         let rs = ((instr >> 21) & 0x1F) as usize;
         let rt = ((instr >> 16) & 0x1F) as usize;
         let offset = ((instr & 0xFFFF) as i16 as i32) << 2;
 
         if self.gpr[rs] != self.gpr[rt] {
-            self.pc = (self.pc as i64).wrapping_add(offset as i64) as u64;
+            // Branch taken: set delay slot
+            self.next_pc = (current_pc.wrapping_add(4) as i64).wrapping_add(offset as i64) as u64;
+            self.in_delay_slot = true;
+        } else {
+            // Branch not taken: nullify delay slot
+            self.pc = self.pc.wrapping_add(4);
         }
         self.cycles += 1;
     }
 
     /// Execute BLEZL - Branch on Less Than or Equal to Zero Likely
-    fn execute_blezl(&mut self, instr: u32) {
+    fn execute_blezl(&mut self, instr: u32, current_pc: u64) {
         let rs = ((instr >> 21) & 0x1F) as usize;
         let offset = ((instr & 0xFFFF) as i16 as i32) << 2;
 
         if (self.gpr[rs] as i64) <= 0 {
-            self.pc = (self.pc as i64).wrapping_add(offset as i64) as u64;
+            // Branch taken: set delay slot
+            self.next_pc = (current_pc.wrapping_add(4) as i64).wrapping_add(offset as i64) as u64;
+            self.in_delay_slot = true;
+        } else {
+            // Branch not taken: nullify delay slot
+            self.pc = self.pc.wrapping_add(4);
         }
         self.cycles += 1;
     }
 
     /// Execute BGTZL - Branch on Greater Than Zero Likely
-    fn execute_bgtzl(&mut self, instr: u32) {
+    fn execute_bgtzl(&mut self, instr: u32, current_pc: u64) {
         let rs = ((instr >> 21) & 0x1F) as usize;
         let offset = ((instr & 0xFFFF) as i16 as i32) << 2;
 
         if (self.gpr[rs] as i64) > 0 {
-            self.pc = (self.pc as i64).wrapping_add(offset as i64) as u64;
+            // Branch taken: set delay slot
+            self.next_pc = (current_pc.wrapping_add(4) as i64).wrapping_add(offset as i64) as u64;
+            self.in_delay_slot = true;
+        } else {
+            // Branch not taken: nullify delay slot
+            self.pc = self.pc.wrapping_add(4);
         }
         self.cycles += 1;
     }
@@ -1301,7 +1426,7 @@ impl<M: MemoryMips> CpuMips<M> {
     // ============================================================================
 
     /// Execute COP0 (Coprocessor 0) instructions
-    fn execute_cop0(&mut self, instr: u32) {
+    fn execute_cop0(&mut self, instr: u32, _current_pc: u64) {
         let rs = (instr >> 21) & 0x1F;
         let rt = ((instr >> 16) & 0x1F) as usize;
         let rd = ((instr >> 11) & 0x1F) as usize;
@@ -1338,8 +1463,9 @@ impl<M: MemoryMips> CpuMips<M> {
                         self.execute_tlbp();
                     }
                     0x18 => {
-                        // ERET - Exception Return (basic implementation)
-                        // Restore PC from EPC
+                        // ERET - Exception Return
+                        // ERET does NOT have a delay slot - it immediately returns to EPC
+                        // This is different from branches/jumps
                         self.pc = self.cp0[CP0_EPC];
                         // Clear EXL bit to re-enable interrupts
                         self.cp0[CP0_STATUS] &= !0x02;
@@ -1357,7 +1483,7 @@ impl<M: MemoryMips> CpuMips<M> {
     }
 
     /// Execute COP1 (Coprocessor 1 - FPU) instructions
-    fn execute_cop1(&mut self, instr: u32) {
+    fn execute_cop1(&mut self, instr: u32, current_pc: u64) {
         let rs = (instr >> 21) & 0x1F;
         let rt = ((instr >> 16) & 0x1F) as usize;
         let fs = ((instr >> 11) & 0x1F) as usize;
@@ -1403,14 +1529,21 @@ impl<M: MemoryMips> CpuMips<M> {
             0x08 => {
                 // BC1 - Branch on FPU condition
                 let cc = (instr >> 18) & 0x7;
-                let _nd = (instr >> 17) & 0x1; // Nullify delay slot (not implemented)
+                let nd = (instr >> 17) & 0x1; // Nullify delay slot bit
                 let tf = (instr >> 16) & 0x1;
                 let offset = ((instr & 0xFFFF) as i16 as i32) << 2;
                 let condition = (self.fcr31 >> (23 + cc)) & 0x1;
 
                 if condition == tf {
-                    self.pc = (self.pc as i64).wrapping_add(offset as i64) as u64;
+                    // Branch taken: set delay slot
+                    self.next_pc =
+                        (current_pc.wrapping_add(4) as i64).wrapping_add(offset as i64) as u64;
+                    self.in_delay_slot = true;
+                } else if nd == 1 {
+                    // Branch not taken with ND bit set (BC1TL/BC1FL): nullify delay slot
+                    self.pc = self.pc.wrapping_add(4);
                 }
+                // If branch not taken and ND bit not set: delay slot executes normally
                 self.cycles += 1;
             }
             0x10 | 0x11 => {
@@ -1871,8 +2004,12 @@ mod tests {
         cpu.gpr[1] = 0x1000;
         // JR $1
         cpu.memory.write_word(0, 0x00200008);
-        cpu.step();
-        assert_eq!(cpu.pc, 0x1000);
+        // NOP delay slot
+        cpu.memory.write_word(4, 0x00000000);
+        cpu.step(); // Execute JR
+        assert_eq!(cpu.pc, 4); // At delay slot
+        cpu.step(); // Execute delay slot
+        assert_eq!(cpu.pc, 0x1000); // Now at target
     }
 
     #[test]
@@ -1883,9 +2020,13 @@ mod tests {
         cpu.gpr[1] = 0x1000;
         // JALR $31, $1
         cpu.memory.write_word(0, 0x0020F809);
-        cpu.step();
-        assert_eq!(cpu.pc, 0x1000);
-        assert_eq!(cpu.gpr[31], 4);
+        // NOP delay slot
+        cpu.memory.write_word(4, 0x00000000);
+        cpu.step(); // Execute JALR, PC becomes 4 (delay slot)
+        assert_eq!(cpu.pc, 4); // Should be at delay slot
+        assert_eq!(cpu.gpr[31], 8); // Return address should be PC+8 from JALR instruction
+        cpu.step(); // Execute delay slot NOP, PC becomes target
+        assert_eq!(cpu.pc, 0x1000); // Now at target
     }
 
     #[test]
@@ -2212,17 +2353,25 @@ mod tests {
         cpu.gpr[1] = 10;
         cpu.gpr[2] = 10;
 
-        // BEQ $1, $2, offset=8
+        // BEQ $1, $2, offset=8 (branch target = 4 + 8 = 12)
         cpu.memory.write_word(0, 0x10220002);
-        cpu.step();
-        assert_eq!(cpu.pc, 12); // 4 + 8
+        // NOP delay slot
+        cpu.memory.write_word(4, 0x00000000);
+        cpu.step(); // Execute BEQ
+        assert_eq!(cpu.pc, 4); // At delay slot
+        cpu.step(); // Execute delay slot
+        assert_eq!(cpu.pc, 12); // Branch target: (0 + 4) + 8 = 12
 
         cpu.pc = 0;
         cpu.gpr[2] = 20;
-        // BNE $1, $2, offset=8
+        // BNE $1, $2, offset=8 (branch target = 4 + 8 = 12)
         cpu.memory.write_word(0, 0x14220002);
-        cpu.step();
-        assert_eq!(cpu.pc, 12); // 4 + 8
+        // NOP delay slot
+        cpu.memory.write_word(4, 0x00000000);
+        cpu.step(); // Execute BNE
+        assert_eq!(cpu.pc, 4); // At delay slot
+        cpu.step(); // Execute delay slot
+        assert_eq!(cpu.pc, 12); // Branch target: (0 + 4) + 8 = 12
     }
 
     #[test]
@@ -2232,17 +2381,89 @@ mod tests {
         cpu.pc = 0;
         cpu.gpr[1] = 0_u64.wrapping_sub(1); // -1
 
-        // BLEZ $1, offset=8
+        // BLEZ $1, offset=8 (should branch)
         cpu.memory.write_word(0, 0x18200002);
-        cpu.step();
-        assert_eq!(cpu.pc, 12); // 4 + 8
+        // NOP delay slot
+        cpu.memory.write_word(4, 0x00000000);
+        cpu.step(); // Execute BLEZ
+        assert_eq!(cpu.pc, 4); // At delay slot
+        cpu.step(); // Execute delay slot
+        assert_eq!(cpu.pc, 12); // Branch target: (0 + 4) + 8 = 12
 
         cpu.pc = 0;
         cpu.gpr[1] = 10;
-        // BGTZ $1, offset=8
+        // BGTZ $1, offset=8 (should branch)
         cpu.memory.write_word(0, 0x1C200002);
-        cpu.step();
-        assert_eq!(cpu.pc, 12); // 4 + 8
+        // NOP delay slot
+        cpu.memory.write_word(4, 0x00000000);
+        cpu.step(); // Execute BGTZ
+        assert_eq!(cpu.pc, 4); // At delay slot
+        cpu.step(); // Execute delay slot
+        assert_eq!(cpu.pc, 12); // Branch target: (0 + 4) + 8 = 12
+    }
+
+    #[test]
+    fn test_branch_likely_not_taken() {
+        let mem = ArrayMemory::new();
+        let mut cpu = CpuMips::new(mem);
+
+        // Test BEQL not taken - should skip delay slot
+        cpu.pc = 0;
+        cpu.gpr[1] = 10;
+        cpu.gpr[2] = 20; // Not equal, branch not taken
+
+        // BEQL $1, $2, offset=8
+        cpu.memory.write_word(0, 0x50220002);
+        // ORI $3, $0, 0x1234 (delay slot - should be skipped)
+        cpu.memory.write_word(4, 0x34030000 | 0x1234);
+        // ORI $4, $0, 0x5678 (next instruction after nullified delay slot)
+        cpu.memory.write_word(8, 0x34040000 | 0x5678);
+
+        cpu.step(); // Execute BEQL - not taken, delay slot nullified
+        assert_eq!(cpu.pc, 8); // Should skip delay slot, PC = 0 + 4 + 4 = 8
+        assert_eq!(cpu.gpr[3], 0); // Delay slot should NOT execute
+
+        cpu.step(); // Execute instruction at PC=8
+        assert_eq!(cpu.gpr[4], 0x5678); // This should execute
+
+        // Test BLTZL not taken - should skip delay slot
+        cpu.pc = 0;
+        cpu.gpr[1] = 10; // Positive, branch not taken
+        cpu.gpr[5] = 0;
+
+        // BLTZL $1, offset=8 (REGIMM opcode 0x01, rt=0x02 for BLTZL)
+        cpu.memory.write_word(0, 0x04220002);
+        // ORI $5, $0, 0xABCD (delay slot - should be skipped)
+        cpu.memory.write_word(4, 0x34050000 | 0xABCD);
+
+        cpu.step(); // Execute BLTZL - not taken, delay slot nullified
+        assert_eq!(cpu.pc, 8); // Should skip delay slot
+        assert_eq!(cpu.gpr[5], 0); // Delay slot should NOT execute
+    }
+
+    #[test]
+    fn test_branch_likely_taken() {
+        let mem = ArrayMemory::new();
+        let mut cpu = CpuMips::new(mem);
+
+        // Test BEQL taken - should execute delay slot
+        cpu.pc = 0;
+        cpu.gpr[1] = 10;
+        cpu.gpr[2] = 10; // Equal, branch taken
+
+        // BEQL $1, $2, offset=8
+        cpu.memory.write_word(0, 0x50220002);
+        // ORI $3, $0, 0x1234 (delay slot - should execute)
+        cpu.memory.write_word(4, 0x34030000 | 0x1234);
+        // NOP at branch target
+        cpu.memory.write_word(12, 0x00000000);
+
+        cpu.step(); // Execute BEQL
+        assert_eq!(cpu.pc, 4); // At delay slot
+
+        cpu.step(); // Execute delay slot
+        assert_eq!(cpu.gpr[3], 0x1234); // Delay slot SHOULD execute
+        assert_eq!(cpu.pc, 12); // Branch target: (0 + 4) + 8 = 12
     }
 
     #[test]
@@ -2302,15 +2523,24 @@ mod tests {
 
         // J 0x1000 (target address = 0x4000)
         cpu.memory.write_word(0, 0x08001000);
-        cpu.step();
-        assert_eq!(cpu.pc, 0x4000);
+        // NOP delay slot
+        cpu.memory.write_word(4, 0x00000000);
+        cpu.step(); // Execute J, PC becomes 4 (delay slot)
+        assert_eq!(cpu.pc, 4); // Should be at delay slot
+        assert!(cpu.is_in_delay_slot()); // Should be marked as in delay slot
+        cpu.step(); // Execute delay slot NOP, PC becomes target
+        assert_eq!(cpu.pc, 0x4000); // Now at target
 
         cpu.pc = 0;
         // JAL 0x1000
         cpu.memory.write_word(0, 0x0C001000);
-        cpu.step();
-        assert_eq!(cpu.pc, 0x4000);
-        assert_eq!(cpu.gpr[31], 4);
+        // NOP delay slot
+        cpu.memory.write_word(4, 0x00000000);
+        cpu.step(); // Execute JAL, PC becomes 4 (delay slot)
+        assert_eq!(cpu.pc, 4); // Should be at delay slot
+        assert_eq!(cpu.gpr[31], 8); // Return address should be PC+8 from JAL instruction
+        cpu.step(); // Execute delay slot NOP, PC becomes target
+        assert_eq!(cpu.pc, 0x4000); // Now at target
     }
 
     // ============================================================================

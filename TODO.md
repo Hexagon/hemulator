@@ -176,13 +176,27 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Impact: Unaligned access currently not validated (most code is properly aligned)
 
 #### MIPS R4300i
+- [x] **Branch Delay Slot Implementation**: CRITICAL BUG FIXED - Implement proper delay slot execution - `crates/core/src/cpu_mips_r4300i.rs`
+  - **FIXED**: Branch/jump instructions now properly execute delay slot before taking branch
+  - **Previous bug**: PC was updated immediately, skipping delay slot execution entirely
+  - **New behavior**: 
+    - Branch/jump sets next_pc and in_delay_slot flag
+    - Delay slot instruction executes
+    - Then PC is updated to branch target
+  - **Affected instructions**: All branches (BEQ, BNE, BLEZ, BGTZ, BLTZ, BGEZ, etc.), jumps (J, JAL), and jump register (JR, JALR)
+  - **Impact**: This was causing wildly incorrect PC behavior and execution of random memory
+  - **Return address fix**: JAL/JALR now correctly save PC+8 (instruction after delay slot) instead of PC+4
+  - All CPU tests updated and passing
 - [ ] **Arithmetic Overflow Traps**: Implement overflow exception handling - `crates/core/src/cpu_mips_r4300i.rs`
   - ADD/ADDI/SUB should trap on overflow (currently ignored)
   - DADD/DADDI/DSUB should trap on overflow (currently ignored)
   - Impact: Some overflow-checking code may not work correctly
-- [ ] **Branch Delay Slot Nullification**: Implement nullify delay slot - `crates/core/src/cpu_mips_r4300i.rs`
-  - Branch likely instructions have ND (nullify delay) bit not implemented
-  - Impact: Minor timing differences in certain branch patterns
+- [x] **Branch Delay Slot Nullification**: Implement nullify delay slot for branch-likely instructions - `crates/core/src/cpu_mips_r4300i.rs`
+  - **IMPLEMENTED**: All branch-likely instructions now skip the delay-slot instruction when the branch is not taken
+    - I-type: BEQL, BNEL, BLEZL, BGTZL
+    - REGIMM: BLTZL, BGEZL, BLTZALL, BGEZALL
+    - FPU: BC1TL, BC1FL (BC1 with ND bit set)
+  - Impact: Correct behavior for all branch-likely instructions per MIPS specification
 
 #### SG-1000
 - [ ] **ROM Banking Support**: Implement memory banking for larger cartridges - `crates/systems/sg1000/src/bus.rs`
