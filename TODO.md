@@ -120,9 +120,11 @@ This file tracks unimplemented features, stubs, and simplified implementations a
 - [ ] **Upload Protocol Test**: Investigate SPC700 index echoing issue - `crates/systems/snes/src/lib.rs:832`, `crates/systems/snes/src/bus.rs:1605`
   - Tests currently ignored - SPC700 not echoing indices during upload
   - Affects: `test_apu_upload_protocol` and `test_apu_ports_echo`
-- [ ] **Sprite Rendering**: Fix sprite rendering issues - `crates/systems/snes/src/lib.rs:970`
-  - Test ignored: `test_sprite_overflow_rom` - "SNES sprite rendering not fully implemented yet - sprites not showing up"
-  - Impact: Sprite overflow detection not working
+- [x] **Sprite Rendering**: Fix sprite overflow test - `crates/systems/snes/src/lib.rs:970`, `test_roms/snes/test_sprite_overflow.s`
+  - **FIXED**: Test ROM was not properly uploading sprite data to VRAM
+  - Fixed by adding VRAM increment mode setup ($2115 = $80) and writing to both $2118 and $2119
+  - Test was also checking wrong scanline (100 instead of 101 due to Y+1 offset)
+  - Test now passes - sprite overflow detection working correctly
 - [x] **Sample Interpolation**: Improve SPC700 sample quality - `crates/core/src/apu/spc700.rs:629-655`
   - **FIXED**: Implemented linear interpolation between DSP output samples
   - DSP generates samples every 32 CPU cycles (32kHz)

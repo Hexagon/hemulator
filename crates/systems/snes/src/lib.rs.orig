@@ -1150,6 +1150,17 @@ mod tests {
         assert_eq!(frame.height, 224);
         assert_eq!(frame.pixels.len(), 256 * 224);
 
+        // Debug: check all scanlines for sprites
+        for y in 95..110 {
+            let mut count = 0;
+            for x in 0..256 {
+                if frame.pixels[y * 256 + x] != 0xFF000000 {
+                    count += 1;
+                }
+            }
+            eprintln!("Scanline {}: {} non-black pixels", y, count);
+        }
+
         // This ROM places 128 sprites all at Y=100
         // Due to SNES Y+1 offset, sprites actually render at Y=101-108
         // Due to the 32 sprite per scanline limit, only the first 32 should render
