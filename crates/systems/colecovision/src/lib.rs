@@ -573,7 +573,9 @@ mod tests {
 
         // Run several frames to allow ROM to initialize and render
         for _ in 0..10 {
-            let _ = system.step_frame();
+            system
+                .step_frame()
+                .expect("Warm-up frame step_frame() failed in ColecoVision smoke test");
         }
 
         // Get final frame
