@@ -350,6 +350,8 @@ impl<M: MemoryMips> CpuMips<M> {
         }
 
         // If we just executed the delay slot, now update PC to the branch target
+        // Note: was_in_delay_slot is only true if the previous instruction was a taken branch/jump
+        // that set in_delay_slot=true. If a branch was not taken, in_delay_slot is never set.
         if was_in_delay_slot {
             self.pc = self.next_pc;
             self.in_delay_slot = false;
