@@ -348,8 +348,7 @@ impl RspHle {
                 self.execute_graphics_task(dmem, rdram, _rdp)
             }
             MicrocodeType::Audio => {
-                // Audio tasks not yet implemented
-                1000
+                self.execute_audio_task(dmem, rdram)
             }
             MicrocodeType::Unknown => {
                 // No-op for unknown microcode
@@ -439,6 +438,68 @@ impl RspHle {
         }
 
         2000 // Average cycles for a graphics task
+    }
+
+    /// Execute audio microcode task
+    /// 
+    /// Audio tasks process game audio through the RSP. Common audio microcodes include:
+    /// - ABI1 (Audio Binary Interface version 1) - early N64 games
+    /// - ABI2 - later N64 games with enhanced features
+    /// - ABI3 (Musyx) - Factor 5 games (e.g., Rogue Squadron)
+    ///
+    /// Audio task structure in DMEM typically contains:
+    /// - Input buffer pointer (RDRAM address)
+    /// - Output buffer pointer (RDRAM address)
+    /// - Command list pointer
+    /// - Number of samples to process
+    /// 
+    /// This is a stub implementation that logs the task structure but doesn't
+    /// produce actual audio output yet. Full implementation requires:
+    /// - ADPCM decompression
+    /// - Resampling
+    /// - Envelope/filtering
+    /// - Mixing multiple audio channels
+    fn execute_audio_task(&mut self, dmem: &[u8; 4096], rdram: &[u8]) -> u32 {
+        // Read audio task structure from DMEM
+        // Common offsets for audio tasks (may vary by microcode version):
+        // 0x00: Task type
+        // 0x04: Flags
+        // 0x08: Input buffer pointer (RDRAM)
+        // 0x0C: Input buffer size
+        // 0x10: Output buffer pointer (RDRAM)
+        // 0x14: Output buffer size
+        // 0x18: Command list pointer (RDRAM)
+        // 0x1C: Command list size
+        
+        let input_ptr = self.read_u32(dmem, 0x08);
+        let input_size = self.read_u32(dmem, 0x0C);
+        let output_ptr = self.read_u32(dmem, 0x10);
+        let output_size = self.read_u32(dmem, 0x14);
+        let cmd_list_ptr = self.read_u32(dmem, 0x18);
+        let cmd_list_size = self.read_u32(dmem, 0x1C);
+        
+        log(LogCategory::APU, LogLevel::Debug, || {
+            format!(
+                "RSP HLE Audio: task structure - input=0x{:08X}[0x{:X}], output=0x{:08X}[0x{:X}], cmd_list=0x{:08X}[0x{:X}]",
+                input_ptr, input_size, output_ptr, output_size, cmd_list_ptr, cmd_list_size
+            )
+        });
+        
+        // Validate pointers are within RDRAM bounds
+        if input_ptr < rdram.len() as u32 && output_ptr < rdram.len() as u32 {
+            log(LogCategory::APU, LogLevel::Debug, || {
+                "RSP HLE Audio: Valid task structure detected".to_string()
+            });
+        }
+        
+        // TODO: Implement actual audio processing:
+        // 1. Parse audio command list
+        // 2. Decompress ADPCM samples
+        // 3. Apply resampling/filtering
+        // 4. Mix audio channels
+        // 5. Write output samples to RDRAM
+        
+        1500 // Average cycles for an audio task
     }
 
     /// Parse F3DEX display list and generate RDP commands
