@@ -444,10 +444,10 @@ impl Voice {
         
         // Get 4 consecutive samples for interpolation
         // Hardware uses a ring buffer with indices wrapped
-        let idx0 = ((self.buffer_index + 15) & 0xF) as usize; // t-1 (previous sample)
-        let idx1 = self.buffer_index as usize;                 // t (current sample)
-        let idx2 = ((self.buffer_index + 1) & 0xF) as usize;  // t+1 (next sample)
-        let idx3 = ((self.buffer_index + 2) & 0xF) as usize;  // t+2 (next next sample)
+        let idx0 = (self.buffer_index + 15) & 0xF; // t-1 (previous sample)
+        let idx1 = self.buffer_index;              // t (current sample)
+        let idx2 = (self.buffer_index + 1) & 0xF;  // t+1 (next sample)
+        let idx3 = (self.buffer_index + 2) & 0xF;  // t+2 (next next sample)
         
         let s0 = self.sample_buffer[idx0] as i32;
         let s1 = self.sample_buffer[idx1] as i32;
