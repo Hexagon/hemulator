@@ -1005,7 +1005,7 @@ impl Renderer for Vdp {
         let backdrop = self.decode_color(self.cram[16] & 0x3F);
         // Check if Mode 4 is enabled to determine display enable logic
         let mode_4_enabled = (self.registers[0] & 0x04) != 0;
-        let bg_enabled = if mode_4_enabled {
+        let display_enabled = if mode_4_enabled {
             // In Mode 4: bit 6 is BLK (blank bit), 1=blank, 0=display
             (self.registers[1] & 0x40) == 0
         } else {
@@ -1021,8 +1021,8 @@ impl Renderer for Vdp {
         }
         log(LogCategory::PPU, LogLevel::Info, || {
             format!(
-                "SMS VDP: get_frame() - BG={} SPR={} R1=${:02X} backdrop=${:08X} non-backdrop={}",
-                bg_enabled, sprite_enabled, self.registers[1], backdrop, non_backdrop
+                "SMS VDP: get_frame() - Display={} SPR={} R1=${:02X} backdrop=${:08X} non-backdrop={}",
+                display_enabled, sprite_enabled, self.registers[1], backdrop, non_backdrop
             )
         });
         &self.frame
