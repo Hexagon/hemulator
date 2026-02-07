@@ -152,7 +152,7 @@ This file tracks unimplemented features, stubs, and simplified implementations a
 
 #### PC/DOS - Performance
 - [ ] **Video Text Rendering Optimization**: Implement dirty region tracking - `crates/systems/pc/src/video_adapter_software.rs:113-200`
-  - Current: Full screen re-render every frame with per-character pixel loops
+  - Current: Full screen rerender every frame with per-character pixel loops
   - Needed: Track dirty regions, cache character glyphs, skip unchanged areas
   - Impact: High CPU usage for text mode rendering; inefficient for large text updates
 - [ ] **Disk Logging Performance**: Move environment variable check outside hot path - `crates/systems/pc/src/disk.rs:82,103,127`
