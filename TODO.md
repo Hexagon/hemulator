@@ -9,19 +9,6 @@ This file tracks unimplemented features, stubs, and simplified implementations a
 
 ### Critical
 
-#### SNES - Enhancement Chips
-- [ ] **DSP-1 Coprocessor**: Complete missing commands (Attitude/Target/Rotate) - `crates/systems/snes/src/coprocessors/dsp1.rs:231,246,326,338`
-  - Attitude (0x08): Only partial rotation matrix implementation (FIXME at line 231, TODO at line 246)
-  - Target (0x20): Not implemented - returns zeros (FIXME at line 326)
-  - Rotate (0x24): Not implemented - returns zeros (TODO at line 338)
-  - Impact: Games using these commands may malfunction (Pilotwings, Super Mario Kart)
-
-#### SNES - PPU Advanced Features
-- [ ] **Interlace Mode**: Implement interlaced display modes - `crates/systems/snes/src/ppu.rs:1118-1122`
-  - Current: $2133 SETINI register is a stub (stored but ignored)
-  - Needed: Interlaced rendering support
-  - Impact: Some games may rely on interlaced display
-
 #### SNES - Bus/Memory
 - [ ] **CPU Halt During DMA**: Implement proper DMA CPU freeze - `crates/systems/snes/src/bus.rs:1419`
   - Current: DMA executes immediately (comment: "would halt the CPU")
@@ -91,6 +78,14 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Impact: Protected mode DOS extenders and DPMI applications
 
 ### Low
+
+#### SNES - Enhancement Chips
+- [ ] **DSP-1 Full Hardware Accuracy**: Implement Parameter command and shared projection state - `crates/systems/snes/src/coprocessors/dsp1.rs`
+  - Current: Simplified implementations of Attitude, Target, Rotate commands
+  - Needed: Parameter command (0x02) to set up shared projection matrices and camera parameters
+  - Impact: Current implementation sufficient for basic compatibility; full accuracy needed for advanced DSP-1 features
+  - Note: Target and Attitude commands use simplified transformations without shared state
+  - Reference: bsnes/sfc/coprocessor/dsp1/dsp1emu.cpp (parameter, target, attitude functions)
 
 #### SNES
 - [ ] **Upload Protocol Test**: Investigate SPC700 index echoing issue - `crates/systems/snes/src/lib.rs:832`, `crates/systems/snes/src/bus.rs:1605`

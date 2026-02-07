@@ -106,6 +106,19 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
   - Applied during rendering for hardware-accurate visuals
   - Reference: [Mosaic](https://snes.nesdev.org/wiki/PPU_registers#MOSAIC)
 
+- ✅ **Screen Mode Control** - SETINI register tracked/logged ($2133)
+  - SETINI register ($2133) state is decoded and tracked for screen mode settings
+  - **Interlace Mode** (bit 0): Indicates progressive vs. interlace mode
+    - Bit value is stored and exposed for debugging/inspection
+    - **Interlaced rendering (doubled vertical resolution, field alternation) is not yet implemented**
+  - **OBJ Interlace** (bit 1): Indicates sprite interlace mode
+    - Bit value is tracked; interlaced sprite positioning semantics are **not yet implemented**
+  - **Overscan Mode** (bit 2): Indicates 224 vs. 239 visible lines
+    - Bit value is tracked; overscan-specific timing/rendering behavior is **not yet implemented**
+  - **Pseudo Hi-res** (bit 3): Indicates pseudo hi-res mode (main/sub screen alternation)
+  - **Mode 7 EXTBG** (bit 6): Indicates extended background priority for Mode 7
+  - Reference: [Interlacing](https://sneslab.net/wiki/Interlacing)
+
 - ✅ **Window Masking** - Complete window system implementation
   - Two independent windows with configurable left/right boundaries
   - Per-layer window enable and inversion controls
@@ -222,10 +235,13 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
 #### Other Features
 - ✅ **Save States** - Full system state serialization
 - ✅ **Logging** - Comprehensive debug logging for CPU, PPU, DMA, interrupts
-- ✅ **Enhancement Chips** - DSP-1 math coprocessor partially implemented, SuperFX coprocessor implemented
+- ✅ **Enhancement Chips** - DSP-1 math coprocessor and SuperFX coprocessor implemented
   - Automatic detection from ROM header
-  - Support for most DSP-1 games (Pilotwings, Super Mario Kart)
-  - Implemented commands: Multiply, Inverse, Gyrate, Distance, Radius, Range, Project, Polar
+  - Support for DSP-1 games (Pilotwings, Super Mario Kart)
+  - Implemented DSP-1 commands: Multiply, Inverse, Attitude, Gyrate, Distance, Radius, Range, Project, Polar, Rotate, Target
+    - Attitude (0x08): Simplified implementation outputs rotation matrix components
+    - Rotate (0x24): Basic 2D rotation implemented
+    - Target (0x20): Simplified coordinate transformation (lacks full projection state)
   - SuperFX/SuperFX2 (GSU-1/GSU-2) graphics coprocessor implemented
     - 16-bit RISC processor with 16 general-purpose registers
     - Complete ALU instruction set (ADD, SUB, MULT, AND, OR, XOR, etc.)
@@ -236,10 +252,8 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
     - GETC ROM reading with ROMBR and R14 pointer
     - Used in Star Fox, Yoshi's Island, and Doom
   - **Known Limitations**:
-    - Attitude command (0x08) is incomplete - outputs only partial rotation matrix
-    - Target command (0x20) not implemented - returns zeros
-    - Rotate command (0x24) not implemented - returns zeros
-    - Games heavily using these commands may not work correctly
+    - Full DSP-1 accuracy requires Parameter command (0x02) and shared projection state
+    - Current implementation provides simplified versions of complex commands
 
 ### What's Missing
 

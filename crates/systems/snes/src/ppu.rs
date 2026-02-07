@@ -442,6 +442,31 @@ pub struct Ppu {
     fixed_color_g: u8,
     fixed_color_b: u8,
 
+    /// Screen mode select ($2133) - SETINI
+    ///
+    /// Controls screen mode and video settings including interlace mode
+    ///
+    /// Bit layout:
+    /// - Bit 0: Interlace enable
+    ///   - 0 = Progressive scan (standard 240p/224 visible lines per frame)
+    ///   - 1 = Interlaced scan (double field, 448 visible lines at 30Hz NTSC)
+    /// - Bit 1: OBJ interlace (when bit 0 is set)
+    ///   - 0 = Normal sprite positioning
+    ///   - 1 = Sprite positions doubled for interlace
+    /// - Bit 2: Overscan mode
+    ///   - 0 = 224 lines visible (standard)
+    ///   - 1 = 239 lines visible (overscan)
+    /// - Bit 3: Pseudo hi-res mode
+    ///   - 0 = Normal resolution
+    ///   - 1 = Pseudo 512 horizontal (alternate pixels main/sub)
+    /// - Bit 6: Mode 7 EXTBG (changes Mode 7 background/priority)
+    ///   - 0 = Normal Mode 7
+    ///   - 1 = Extended background in Mode 7
+    /// - Bit 7: External sync (rarely used)
+    ///
+    /// Reference: https://sneslab.net/wiki/Interlacing
+    setini: u8,
+
     // ============================================================================
     // H/V Counter Registers ($213C-$213D)
     // ============================================================================
@@ -543,6 +568,7 @@ impl Ppu {
             fixed_color_r: 0,
             fixed_color_g: 0,
             fixed_color_b: 0,
+            setini: 0,
             // H/V counter defaults
             h_counter: 0,
             v_counter: 0,
@@ -1150,9 +1176,39 @@ impl Ppu {
                 });
             }
             0x2133 => {
-                // $2133 - SETINI - Screen mode/video select (stub for now)
+                // $2133 - SETINI - Screen mode/video select
+                self.setini = val;
                 log(LogCategory::PPU, LogLevel::Debug, || {
-                    format!("SNES PPU: SETINI (Screen mode) = ${:02X}", val)
+                    let interlace = val & 0x01 != 0;
+                    let obj_interlace = val & 0x02 != 0;
+                    let overscan = val & 0x04 != 0;
+                    let pseudo_hires = val & 0x08 != 0;
+                    let extbg = val & 0x40 != 0;
+
+                    let mut flags = Vec::new();
+                    if interlace {
+                        flags.push("interlace");
+                    }
+                    if obj_interlace {
+                        flags.push("obj-interlace");
+                    }
+                    if overscan {
+                        flags.push("overscan");
+                    }
+                    if pseudo_hires {
+                        flags.push("pseudo-hires");
+                    }
+                    if extbg {
+                        flags.push("extbg");
+                    }
+
+                    let flags_str = if flags.is_empty() {
+                        "none".to_string()
+                    } else {
+                        flags.join(" ")
+                    };
+
+                    format!("SNES PPU: SETINI = ${:02X} ({})", val, flags_str)
                 });
             }
 
