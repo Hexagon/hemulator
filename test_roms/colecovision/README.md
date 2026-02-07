@@ -51,12 +51,28 @@ The ROM uses the standard ColecoVision cartridge format:
 ## Testing
 
 Smoke tests for this ROM are included in `crates/systems/colecovision/src/lib.rs`:
-- `smoke_test_colecovision()`: Tests basic ROM loading and rendering
+- `smoke_test_colecovision()`: Tests VDP functionality with manual initialization
+- `smoke_test_colecovision_with_rom_execution()`: Tests full ROM execution through BIOS
 
 Run tests with:
 ```bash
 cargo test --package emu_colecovision smoke_test
 ```
+
+## Test BIOS
+
+A minimal test BIOS (`test_bios.rom`) is provided for testing ROM execution. This BIOS:
+- Initializes the stack pointer to $73FF
+- Sets interrupt mode 1
+- Jumps to cartridge ROM at $8000
+- Provides interrupt handlers at $0038 (IM 1) and $0066 (NMI)
+
+Build the test BIOS with:
+```bash
+python3 build_test_bios.py
+```
+
+**Note**: This is a minimal BIOS for testing only. Real ColecoVision systems use a proprietary BIOS that cannot be distributed.
 
 ## Implementation Notes
 
