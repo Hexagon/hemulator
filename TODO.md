@@ -191,10 +191,12 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - ADD/ADDI/SUB should trap on overflow (currently ignored)
   - DADD/DADDI/DSUB should trap on overflow (currently ignored)
   - Impact: Some overflow-checking code may not work correctly
-- [ ] **Branch Delay Slot Nullification**: Implement nullify delay slot for branch-likely instructions - `crates/core/src/cpu_mips_r4300i.rs`
-  - Branch likely instructions (BEQL, BNEL, etc.) should nullify delay slot if branch not taken
-  - Current: Delay slot always executes (partially correct - works for taken branches)
-  - Impact: Minor timing differences when branch-likely instructions don't branch
+- [x] **Branch Delay Slot Nullification**: Implement nullify delay slot for branch-likely instructions - `crates/core/src/cpu_mips_r4300i.rs`
+  - **IMPLEMENTED**: All branch-likely instructions now skip the delay-slot instruction when the branch is not taken
+    - I-type: BEQL, BNEL, BLEZL, BGTZL
+    - REGIMM: BLTZL, BGEZL, BLTZALL, BGEZALL
+    - FPU: BC1TL, BC1FL (BC1 with ND bit set)
+  - Impact: Correct behavior for all branch-likely instructions per MIPS specification
 
 #### SG-1000
 - [ ] **ROM Banking Support**: Implement memory banking for larger cartridges - `crates/systems/sg1000/src/bus.rs`

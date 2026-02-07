@@ -362,23 +362,13 @@ impl<M: MemoryMips> CpuMips<M> {
             }
         }
 
-        // If we just executed the delay slot, apply the pending branch target
-        // Note: was_in_delay_slot is only true if the previous instruction was a taken branch/jump
-        // If the delay slot instruction set its own branch, in_delay_slot will be true now
-        // and we need to execute its delay slot next, but first apply the original branch
+        // If we just executed the delay slot of a taken branch/jump, apply its pending branch target.
+        // Note: was_in_delay_slot is only true if the previous instruction was a taken branch/jump.
+        // If the delay slot instruction itself set a new branch, that branch's target is now in next_pc
+        // and will be applied after executing its own delay slot, but we still complete the original
+        // branch by updating pc to pending_branch_target here.
         if was_in_delay_slot {
-            // If the delay slot instruction also branched, we have a branch in delay slot
-            // The delay slot branch wins and will be applied after its own delay slot
-            // But for now, apply the original branch
-            if !self.in_delay_slot {
-                // Normal case: delay slot didn't branch
-                self.pc = pending_branch_target;
-            } else {
-                // Branch in delay slot: apply original branch, delay slot branch will be applied later
-                // This is undefined behavior in MIPS, but we handle it as: execute the delay slot's
-                // delay slot, then jump to the delay slot's target (original branch is lost)
-                self.pc = pending_branch_target;
-            }
+            self.pc = pending_branch_target;
         }
 
         // R0 is always zero
@@ -1539,16 +1529,21 @@ impl<M: MemoryMips> CpuMips<M> {
             0x08 => {
                 // BC1 - Branch on FPU condition
                 let cc = (instr >> 18) & 0x7;
-                let _nd = (instr >> 17) & 0x1; // Nullify delay slot (not implemented)
+                let nd = (instr >> 17) & 0x1; // Nullify delay slot bit
                 let tf = (instr >> 16) & 0x1;
                 let offset = ((instr & 0xFFFF) as i16 as i32) << 2;
                 let condition = (self.fcr31 >> (23 + cc)) & 0x1;
 
                 if condition == tf {
+                    // Branch taken: set delay slot
                     self.next_pc =
                         (current_pc.wrapping_add(4) as i64).wrapping_add(offset as i64) as u64;
                     self.in_delay_slot = true;
+                } else if nd == 1 {
+                    // Branch not taken with ND bit set (BC1TL/BC1FL): nullify delay slot
+                    self.pc = self.pc.wrapping_add(4);
                 }
+                // If branch not taken and ND bit not set: delay slot executes normally
                 self.cycles += 1;
             }
             0x10 | 0x11 => {
@@ -2404,6 +2399,70 @@ mod tests {
         cpu.step(); // Execute BGTZ
         assert_eq!(cpu.pc, 4); // At delay slot
         cpu.step(); // Execute delay slot
+        assert_eq!(cpu.pc, 12); // Branch target: (0 + 4) + 8 = 12
+    }
+
+    #[test]
+    fn test_branch_likely_not_taken() {
+        let mem = ArrayMemory::new();
+        let mut cpu = CpuMips::new(mem);
+
+        // Test BEQL not taken - should skip delay slot
+        cpu.pc = 0;
+        cpu.gpr[1] = 10;
+        cpu.gpr[2] = 20; // Not equal, branch not taken
+
+        // BEQL $1, $2, offset=8
+        cpu.memory.write_word(0, 0x50220002);
+        // ORI $3, $0, 0x1234 (delay slot - should be skipped)
+        cpu.memory.write_word(4, 0x34030000 | 0x1234);
+        // ORI $4, $0, 0x5678 (next instruction after nullified delay slot)
+        cpu.memory.write_word(8, 0x34040000 | 0x5678);
+
+        cpu.step(); // Execute BEQL - not taken, delay slot nullified
+        assert_eq!(cpu.pc, 8); // Should skip delay slot, PC = 0 + 4 + 4 = 8
+        assert_eq!(cpu.gpr[3], 0); // Delay slot should NOT execute
+
+        cpu.step(); // Execute instruction at PC=8
+        assert_eq!(cpu.gpr[4], 0x5678); // This should execute
+
+        // Test BLTZL not taken - should skip delay slot
+        cpu.pc = 0;
+        cpu.gpr[1] = 10; // Positive, branch not taken
+        cpu.gpr[5] = 0;
+
+        // BLTZL $1, offset=8 (REGIMM opcode 0x01, rt=0x02 for BLTZL)
+        cpu.memory.write_word(0, 0x04220002);
+        // ORI $5, $0, 0xABCD (delay slot - should be skipped)
+        cpu.memory.write_word(4, 0x34050000 | 0xABCD);
+
+        cpu.step(); // Execute BLTZL - not taken, delay slot nullified
+        assert_eq!(cpu.pc, 8); // Should skip delay slot
+        assert_eq!(cpu.gpr[5], 0); // Delay slot should NOT execute
+    }
+
+    #[test]
+    fn test_branch_likely_taken() {
+        let mem = ArrayMemory::new();
+        let mut cpu = CpuMips::new(mem);
+
+        // Test BEQL taken - should execute delay slot
+        cpu.pc = 0;
+        cpu.gpr[1] = 10;
+        cpu.gpr[2] = 10; // Equal, branch taken
+
+        // BEQL $1, $2, offset=8
+        cpu.memory.write_word(0, 0x50220002);
+        // ORI $3, $0, 0x1234 (delay slot - should execute)
+        cpu.memory.write_word(4, 0x34030000 | 0x1234);
+        // NOP at branch target
+        cpu.memory.write_word(12, 0x00000000);
+
+        cpu.step(); // Execute BEQL
+        assert_eq!(cpu.pc, 4); // At delay slot
+
+        cpu.step(); // Execute delay slot
+        assert_eq!(cpu.gpr[3], 0x1234); // Delay slot SHOULD execute
         assert_eq!(cpu.pc, 12); // Branch target: (0 + 4) + 8 = 12
     }
 
