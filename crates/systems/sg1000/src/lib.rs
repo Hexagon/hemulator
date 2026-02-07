@@ -48,7 +48,48 @@ mod tests {
         // Verify we have actual pixel data
         assert_eq!(frame.pixels.len(), 256 * 192);
 
-        // The VDP is rendering (even if just backdrop color)
-        // This confirms basic system functionality is working
+        // Count unique colors to verify rendering is happening
+        use std::collections::HashMap;
+        let mut color_counts: HashMap<u32, usize> = HashMap::new();
+        for &pixel in &frame.pixels {
+            *color_counts.entry(pixel).or_insert(0) += 1;
+        }
+
+        // The test ROM attempts to produce a checkerboard pattern
+        // Ideally we'd see 2 colors with ~50/50 distribution, but at minimum
+        // we should verify the VDP is rendering (not all transparent/zero)
+        assert!(
+            !color_counts.is_empty(),
+            "Expected rendered output, got empty frame"
+        );
+
+        let total_pixels = frame.pixels.len();
+
+        if color_counts.len() >= 2 {
+            // Multiple colors detected - validate distribution is reasonable
+            let mut counts: Vec<_> = color_counts.values().cloned().collect();
+            counts.sort_unstable();
+
+            // Check that no single color dominates too heavily (would indicate backdrop only)
+            let max_count = counts[counts.len() - 1];
+            let max_percentage = (max_count as f32 / total_pixels as f32) * 100.0;
+
+            assert!(
+                max_percentage <= 95.0,
+                "Expected meaningful color variation, but one color dominates at {:.1}%",
+                max_percentage
+            );
+        } else {
+            // Single color - acceptable as long as it's a valid color
+            // (indicates VDP is at least rendering backdrop color)
+            let color = *color_counts.keys().next().unwrap();
+            assert!(
+                color != 0,
+                "Expected valid backdrop color, got transparent/zero"
+            );
+
+            // Note: Future enhancement would be to verify the test ROM actually
+            // renders the checkerboard pattern correctly once VDP implementation is complete
+        }
     }
 }
