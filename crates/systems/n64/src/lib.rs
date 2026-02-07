@@ -28,11 +28,7 @@ mod tlb;
 mod vi;
 
 use bus::N64Bus;
-#[cfg(test)]
-use cartridge::N64_ROM_MAGIC;
 use cpu::N64Cpu;
-#[cfg(test)]
-use cpu::{CP0_CONFIG_COMMERCIAL_BOOT, CP0_STATUS_COMMERCIAL_BOOT};
 use emu_core::debug::Debugger;
 use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::{types::Frame, MountPointInfo, System};
