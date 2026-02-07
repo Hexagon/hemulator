@@ -101,19 +101,30 @@ The N64 RDP now uses **OpenGL 3.3+ hardware-accelerated rendering exclusively**.
 ## Testing
 
 ### Test ROMs
-The `test_roms/n64/` directory contains basic test ROMs that verify:
-- RDP fill command rendering
-- Display list processing
-- Triangle rasterization
-- Z-buffer depth testing
 
-Build test ROMs with:
+**Note**: Simple test ROMs have been removed as they don't work in known-good emulators.
+
+For comprehensive N64 testing, use **n64-systemtest** from https://github.com/lemmy-64/n64-systemtest:
+
 ```bash
+# Build n64-systemtest
 cd test_roms/n64
-./build.sh
+./build_systemtest.sh
+
+# Run the test ROM in the emulator
+cargo run --profile release-quick -- test_roms/n64/n64-systemtest.n64
 ```
 
-### Running Tests
+The n64-systemtest ROM tests:
+- CPU instructions (MFC0/DMFC0/MTC0/DMTC0, LLD/LD/SC/SCD)
+- Exceptions (overflow, unaligned memory access, TRAP, BREAK, SYSCALL)
+- TLB (Translation Lookaside Buffer)
+- Memory access (8, 16, 32, 64 bit) to RAM, ROM, SPMEM, PIF
+- RSP (Reality Signal Processor)
+
+Expected output: "Done! Tests: XXX. Failed: 0" if emulator is perfect
+
+### Running Unit Tests
 
 **Note**: N64 tests require an actual OpenGL context and are marked as `#[ignore]` for CI.
 

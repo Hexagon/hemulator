@@ -112,12 +112,6 @@ impl N64Bus {
         self.entry_point
     }
 
-    /// Get a reference to RDRAM (for testing)
-    #[cfg(test)]
-    pub fn rdram(&self) -> &[u8] {
-        &self.rdram
-    }
-
     pub fn unload_cartridge(&mut self) {
         self.cartridge = None;
     }

@@ -172,20 +172,30 @@ cargo test --package emu_n64
 cargo test --package emu_n64 -- --ignored
 ```
 
-**Test Status**: 43 tests pass (non-GL), 77 tests ignored (require OpenGL context)
+**Test Status**: Tests pass (non-GL), many tests ignored (require OpenGL context)
 
 ### Test ROM
 
-The `test_roms/n64/` directory contains a basic test ROM (`test.z64`) that:
-- Draws colored rectangles using RDP fill commands
-- Tests display list processing
-- Verifies basic RDP functionality
+**Note**: The simple test ROMs previously in `test_roms/n64/` have been removed as they don't work in known-good emulators.
 
-Build the test ROM with:
+For comprehensive N64 testing, use **n64-systemtest** from https://github.com/lemmy-64/n64-systemtest:
+
 ```bash
+# Build n64-systemtest
 cd test_roms/n64
-./build.sh
+./build_systemtest.sh
+
+# Run the test ROM
+cargo run --profile release-quick -- test_roms/n64/n64-systemtest.n64
 ```
+
+The n64-systemtest ROM:
+- Tests CPU instructions, exceptions, TLB, memory access, RSP
+- Self-validates and reports results on screen
+- Works in known-good emulators (Project64, Mupen64Plus, etc.)
+- Provides detailed error messages when issues are found
+
+See `test_roms/n64/README.md` for complete information.
 
 ## Usage Example
 
