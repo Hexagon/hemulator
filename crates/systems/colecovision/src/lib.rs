@@ -50,7 +50,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // TODO: Fix sprite collision test - now passes when run with --ignored
     fn test_vdp_sprite_collision_detection() {
         use emu_core::tms9918a::Tms9918a;
 
@@ -104,7 +103,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // TODO: Fix sprite overflow test - now passes when run with --ignored
     fn test_vdp_sprite_overflow() {
         use emu_core::tms9918a::Tms9918a;
 
