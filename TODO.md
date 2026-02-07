@@ -24,10 +24,11 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Impact: Performance optimization for games using FastROM
 
 #### SNES Audio (DSP)
-- [ ] **Gaussian Interpolation**: Replace linear interpolation with Gaussian filter - `crates/core/src/apu/dsp.rs:368`
-  - Current: Linear interpolation (basic quality)
-  - Needed: Gaussian filter for hardware-accurate audio
-  - Code comment: "TODO: Implement Gaussian interpolation for hardware accuracy"
+- [x] **Gaussian Interpolation**: Replace linear interpolation with Gaussian filter - `crates/core/src/apu/dsp.rs:60-129,429-465`
+  - **FIXED**: Implemented hardware-accurate 4-point Gaussian interpolation
+  - Added 512-entry Gaussian coefficient table matching SNES hardware
+  - Uses pitch counter bits 4-11 to index filter coefficients
+  - Significantly improves audio quality and hardware accuracy
 - [ ] **ADSR Envelope**: Implement full envelope with proper curves - `crates/core/src/apu/dsp.rs:187`
   - Current: Simplified envelope rates (not cycle-accurate)
   - Needed: Full ADSR implementation matching hardware timing
