@@ -17,14 +17,6 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Impact: Games using these commands may malfunction (Pilotwings, Super Mario Kart)
 
 #### SNES - PPU Advanced Features
-- [x] **H/V Counter Reading**: Implement beam position tracking - `crates/systems/snes/src/ppu.rs:1214-1218`
-  - Added h_counter and v_counter fields to track beam position (0-339 H, 0-261 V)
-  - Implemented $2137 (SLHV) register to latch current counter values
-  - Implemented $213C (OPHCT) register read with low/high byte toggle
-  - Implemented $213D (OPVCT) register read with low/high byte toggle
-  - Added update_counters() method to PPU
-  - Integrated counter updates in SNES step_frame loop during active display and HBlank
-  - Impact: Games using beam position for raster effects now work properly
 - [ ] **Interlace Mode**: Implement interlaced display modes - `crates/systems/snes/src/ppu.rs:1118-1122`
   - Current: $2133 SETINI register is a stub (stored but ignored)
   - Needed: Interlaced rendering support
@@ -58,15 +50,6 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Needed: All GAIN envelope modes
   - Code comment: "TODO: Implement GAIN modes (direct, linear increase/decrease, exponential)"
 
-#### PC/DOS
-- [x] **PC Speaker Audio**: Connect PIT channel 2 to audio output - `crates/systems/pc/`
-  - Implemented get_audio_samples() method in PcSystem
-  - Generates square wave audio based on PIT channel 2 frequency and output state
-  - Respects speaker gate enable/disable from port 0x61
-  - Added speaker_gate_enabled() getter method to PcBus
-  - Connected to frontend audio system
-  - Impact: PC speaker audio now functional for DOS programs
-
 #### ColecoVision  
 - [ ] **Z80 ROM Execution**: Debug why test ROM doesn't execute properly through BIOS - `crates/systems/colecovision/src/lib.rs`
   - Current: Smoke tests use manual VDP initialization instead of ROM execution
@@ -81,17 +64,6 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Needed: Assembly-based test ROM demonstrating VDP and PSG functionality
   - Follow pattern from other systems (test_roms/README.md)
   - Impact: No automated verification of ROM loading and execution
-- [x] **I/O Port Mirroring Tests**: Add unit tests for port mirroring behavior - `crates/systems/sg1000/src/bus.rs:182-318`
-  - Added comprehensive unit tests for all I/O port mirroring behavior
-  - PSG: Tests verify all ports 0x40-0x7F mirror to same PSG (test_psg_mirroring)
-  - VDP Data: Tests verify all even ports 0x80-0xFF access VDP data (test_vdp_data_mirroring)
-  - VDP Control: Tests verify all odd ports 0x80-0xFF access VDP control (test_vdp_control_mirroring)
-  - Controllers: Tests verify ports 0xC0-0xFF (even=controller1, odd=controller2) (test_controller_mirroring)
-  - Priority: Tests verify controller ports take priority over VDP at 0xC0+ (test_controller_priority_over_vdp)
-  - Boundary: Tests verify VDP works in 0x80-0xBF before controller range (test_vdp_below_controller_range)
-  - Unmapped: Tests verify unmapped ports return 0xFF (test_unmapped_ports)
-  - All 7 new tests passing, total 18 tests in SG-1000 package
-  - Impact: Hardware-accurate port decoding now verified with comprehensive test coverage
 
 #### ColecoVision
 - [ ] **Test ROM**: Create basic test ROM for smoke testing - `test_roms/colecovision/`
@@ -119,27 +91,6 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Impact: Protected mode DOS extenders and DPMI applications
 
 ### Low
-
-#### COMPLETED ✅
-- [x] **SNES H/V Timer IRQ**: Fully implemented (2026-02-05) - `crates/systems/snes/src/bus.rs:155-163`, `crates/systems/snes/src/lib.rs:347-387`
-  - All 4 timer modes (off, H-only, V-only, HV) implemented
-  - IRQ flag register ($4211) with read-and-clear behavior
-  - Mode selection via $4200 bits 5-4
-  - Comprehensive test coverage (4 new tests, all passing)
-  - Impact: Essential for timing-sensitive games using raster effects
-  - Reference: https://sneslab.net/wiki/H/V_Count_Timer
-
-#### UI
-- [x] **Make links in about tab work** - `crates/frontend/gui/src/window_backend/sdl2_egui_backend.rs:206-212`
-  - Implemented egui OutputCommand::OpenUrl handling in end_frame()
-  - Hyperlinks now properly open in default browser via open crate
-  - Fixed: Previously platform_output.commands were ignored
-  - Impact: All hyperlinks in About tab now functional
-- [x] **Check that all systems have the enhanced debugger state** - `crates/frontend/gui/src/main.rs:3623-3685`
-  - Added enhanced debug state support for all emulated systems
-  - Game Boy, Atari 2600, PC, N64, CHIP-8, ColecoVision, and SG-1000 now included
-  - Previously only NES, SMS, and SNES had enhanced debug state
-  - Impact: Debug panel now works consistently across all systems
 
 #### SNES
 - [ ] **Upload Protocol Test**: Investigate SPC700 index echoing issue - `crates/systems/snes/src/lib.rs:832`, `crates/systems/snes/src/bus.rs:1605`
