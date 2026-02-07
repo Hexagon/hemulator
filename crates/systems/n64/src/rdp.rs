@@ -166,6 +166,12 @@ pub struct Rdp {
     dpc_end: u32,
     dpc_current: u32,
     dpc_status: u32,
+
+    /// Performance counters
+    dpc_clock: u32, // Clock counter (increments by a fixed amount per RDP command processed)
+    dpc_bufbusy: u32,  // Buffer busy counter (cycles waiting for buffer)
+    dpc_pipebusy: u32, // Pipe busy counter (cycles with active pipeline)
+    dpc_tmem: u32,     // TMEM load counter (texture loads performed)
 }
 
 impl Rdp {
@@ -225,6 +231,10 @@ impl Rdp {
             dpc_end: 0,
             dpc_current: 0,
             dpc_status: DPC_STATUS_CBUF_READY, // Start ready for commands
+            dpc_clock: 0,
+            dpc_bufbusy: 0,
+            dpc_pipebusy: 0,
+            dpc_tmem: 0,
         })
     }
 
@@ -288,6 +298,11 @@ impl Rdp {
         self.dpc_end = 0;
         self.dpc_current = 0;
         self.dpc_status = DPC_STATUS_CBUF_READY;
+        // Reset performance counters
+        self.dpc_clock = 0;
+        self.dpc_bufbusy = 0;
+        self.dpc_pipebusy = 0;
+        self.dpc_tmem = 0;
     }
 
     /// Set the fill color for clear operations
@@ -435,10 +450,10 @@ impl Rdp {
             DPC_END => self.dpc_end,
             DPC_CURRENT => self.dpc_current,
             DPC_STATUS => self.dpc_status,
-            DPC_CLOCK => 0,    // Clock counter not implemented
-            DPC_BUFBUSY => 0,  // Buffer busy counter not implemented
-            DPC_PIPEBUSY => 0, // Pipe busy counter not implemented
-            DPC_TMEM => 0,     // TMEM counter not implemented
+            DPC_CLOCK => self.dpc_clock,
+            DPC_BUFBUSY => self.dpc_bufbusy,
+            DPC_PIPEBUSY => self.dpc_pipebusy,
+            DPC_TMEM => self.dpc_tmem,
             _ => 0,
         }
     }
@@ -526,6 +541,7 @@ impl Rdp {
         // Process commands from dpc_start to dpc_end
         let mut addr = self.dpc_start as usize;
         let end = self.dpc_end as usize;
+        let mut executed_commands = 0u32;
 
         while addr < end && addr + 7 < rdram.len() {
             // Read 64-bit command (8 bytes)
@@ -555,9 +571,25 @@ impl Rdp {
             // Execute command
             self.execute_rdp_command(cmd_id, cmd_word0, cmd_word1, rdram);
 
+            // Increment performance counters
+            // Clock counter: increments for each command processed
+            self.dpc_clock = self.dpc_clock.wrapping_add(10); // ~10 cycles per command
+
+            // Pipe busy counter: increments when pipeline is active (rendering commands)
+            if (0x08..=0x0F).contains(&cmd_id) || cmd_id == 0x36 {
+                // Triangle or fill commands keep pipeline busy
+                self.dpc_pipebusy = self.dpc_pipebusy.wrapping_add(1);
+            }
+
+            // Track executed commands
+            executed_commands = executed_commands.wrapping_add(1);
+
             // Move to next command (all RDP commands are 8 bytes)
             addr += 8;
         }
+
+        // Buffer busy counter: increments by number of commands actually executed
+        self.dpc_bufbusy = self.dpc_bufbusy.wrapping_add(executed_commands);
 
         // Update current pointer and clear busy flags
         self.dpc_current = self.dpc_end;
@@ -620,6 +652,9 @@ impl Rdp {
             let actual_bytes = (src_end - src_addr).min(bytes_to_copy);
             self.tmem[tmem_addr..tmem_addr + actual_bytes]
                 .copy_from_slice(&rdram[src_addr..src_addr + actual_bytes]);
+
+            // Increment TMEM counter for texture load operations
+            self.dpc_tmem = self.dpc_tmem.wrapping_add(1);
         }
     }
 
@@ -700,6 +735,58 @@ impl Rdp {
                         self.tmem[addr + 2],
                         self.tmem[addr + 3],
                     ])
+                } else {
+                    0xFFFF00FF
+                }
+            }
+            // YUV 16-bit (format=1, size=2) - Used for video textures
+            // Stored as interleaved YUYV: 8-bit Y, 8-bit U/V alternating
+            (1, 2) => {
+                if addr + 1 < self.tmem.len() {
+                    // YUV stored as pairs in memory: (Y0 U0)(Y1 V0)
+                    // Both pixels (Y0 and Y1) share the same U0/V0 chroma.
+                    let texel = u16::from_be_bytes([self.tmem[addr], self.tmem[addr + 1]]);
+                    let y = ((texel >> 8) & 0xFF) as i32;
+                    let uv = (texel & 0xFF) as i32;
+
+                    // Determine if this is a U or V sample based on position
+                    // Even s: current texel is (Y0 U0), U is local, V comes from next texel (Y1 V0)
+                    // Odd  s: current texel is (Y1 V0), V is local, U comes from previous texel (Y0 U0)
+                    let (u, v) = if s & 1 == 0 {
+                        // Even position - this byte is U, get V from next texel if available
+                        let u_val = uv - 128;
+                        let v_val = if addr + 3 < self.tmem.len() {
+                            let next_texel =
+                                u16::from_be_bytes([self.tmem[addr + 2], self.tmem[addr + 3]]);
+                            ((next_texel & 0xFF) as i32) - 128
+                        } else {
+                            // Fallback: reuse U as V when next texel is out of bounds
+                            u_val
+                        };
+                        (u_val, v_val)
+                    } else {
+                        // Odd position - this byte is V, get U from previous texel if available
+                        let v_val = uv - 128;
+                        let u_val = if addr >= 2 {
+                            let prev_texel =
+                                u16::from_be_bytes([self.tmem[addr - 2], self.tmem[addr - 1]]);
+                            ((prev_texel & 0xFF) as i32) - 128
+                        } else {
+                            // Fallback: reuse V as U when previous texel is not available
+                            v_val
+                        };
+                        (u_val, v_val)
+                    };
+
+                    // YUV to RGB conversion (ITU-R BT.601)
+                    // R = Y + 1.402 * V
+                    // G = Y - 0.344 * U - 0.714 * V
+                    // B = Y + 1.772 * U
+                    let r = (y + (1402 * v) / 1000).clamp(0, 255) as u32;
+                    let g = (y - (344 * u) / 1000 - (714 * v) / 1000).clamp(0, 255) as u32;
+                    let b = (y + (1772 * u) / 1000).clamp(0, 255) as u32;
+
+                    0xFF000000 | (r << 16) | (g << 8) | b
                 } else {
                     0xFFFF00FF
                 }
