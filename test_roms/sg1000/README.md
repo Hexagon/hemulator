@@ -63,7 +63,7 @@ The test ROM uses Graphics I mode, the standard mode for SG-1000 games:
 ### VDP Register Setup
 The ROM initializes the following VDP registers:
 - **Register 0** (0x00): Graphics I mode, no external video
-- **Register 1** (0xE0): 16K VRAM, display enabled, interrupts enabled
+- **Register 1** (0xE0): 16K VRAM, display enabled
 - **Register 2** (0x06): Name table at 0x1800
 - **Register 3** (0xFF): Color table at 0x2000
 - **Register 4** (0x01): Pattern table at 0x0800
