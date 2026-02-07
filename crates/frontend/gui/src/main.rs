@@ -2883,7 +2883,7 @@ fn main() {
 
                             let bios_result = load_bios(
                                 cli_args.bios_path.as_ref(),
-                                Some(&p),
+                                Some(p),
                                 &bios_candidates,
                                 None, // SMS BIOS size can vary
                             );
@@ -2945,7 +2945,7 @@ fn main() {
 
                             let bios_result = load_bios(
                                 cli_args.bios_path.as_ref(),
-                                Some(&p),
+                                Some(p),
                                 &bios_candidates,
                                 Some(8192), // ColecoVision BIOS must be 8KB
                             );
