@@ -3635,7 +3635,34 @@ fn main() {
                     let debugger: &dyn Debugger = s.as_ref();
                     Some(create_enhanced_debug_state("SNES", debugger))
                 }
-                _ => None, // Other systems don't have debugger implemented yet
+                EmulatorSystem::GameBoy(s) => {
+                    let debugger: &dyn Debugger = s.as_ref();
+                    Some(create_enhanced_debug_state("Game Boy", debugger))
+                }
+                EmulatorSystem::Atari2600(s) => {
+                    let debugger: &dyn Debugger = s.as_ref();
+                    Some(create_enhanced_debug_state("Atari 2600", debugger))
+                }
+                EmulatorSystem::PC(s) => {
+                    let debugger: &dyn Debugger = s.as_ref();
+                    Some(create_enhanced_debug_state("PC", debugger))
+                }
+                EmulatorSystem::N64(s) => {
+                    let debugger: &dyn Debugger = s.as_ref();
+                    Some(create_enhanced_debug_state("N64", debugger))
+                }
+                EmulatorSystem::Chip8(s) => {
+                    let debugger: &dyn Debugger = s.as_ref();
+                    Some(create_enhanced_debug_state("CHIP-8", debugger))
+                }
+                EmulatorSystem::ColecoVision(s) => {
+                    let debugger: &dyn Debugger = s.as_ref();
+                    Some(create_enhanced_debug_state("ColecoVision", debugger))
+                }
+                EmulatorSystem::SG1000(s) => {
+                    let debugger: &dyn Debugger = s.as_ref();
+                    Some(create_enhanced_debug_state("SG-1000", debugger))
+                }
             };
 
             if let Some(enhanced_state) = enhanced_state_opt {
@@ -3648,7 +3675,13 @@ fn main() {
                     EmulatorSystem::NES(s) => Some(s.as_ref()),
                     EmulatorSystem::SMS(s) => Some(s.as_ref()),
                     EmulatorSystem::SNES(s) => Some(s.as_ref()),
-                    _ => None,
+                    EmulatorSystem::GameBoy(s) => Some(s.as_ref()),
+                    EmulatorSystem::Atari2600(s) => Some(s.as_ref()),
+                    EmulatorSystem::PC(s) => Some(s.as_ref()),
+                    EmulatorSystem::N64(s) => Some(s.as_ref()),
+                    EmulatorSystem::Chip8(s) => Some(s.as_ref()),
+                    EmulatorSystem::ColecoVision(s) => Some(s.as_ref()),
+                    EmulatorSystem::SG1000(s) => Some(s.as_ref()),
                 };
 
                 if let Some(debugger) = debugger {

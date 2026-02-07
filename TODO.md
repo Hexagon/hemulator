@@ -81,13 +81,17 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Needed: Assembly-based test ROM demonstrating VDP and PSG functionality
   - Follow pattern from other systems (test_roms/README.md)
   - Impact: No automated verification of ROM loading and execution
-- [ ] **I/O Port Mirroring Tests**: Add unit tests for port mirroring behavior - `crates/systems/sg1000/src/bus.rs`
-  - Current: I/O port mirroring implemented but not tested
-  - PSG: All ports 0x40-0x7F mirror to same PSG
-  - VDP Data: All even ports 0x80-0xFF
-  - VDP Control: All odd ports 0x80-0xFF
-  - Controllers: Ports 0xC0-0xFF (even=controller1, odd=controller2)
-  - Impact: Verify hardware-accurate port decoding
+- [x] **I/O Port Mirroring Tests**: Add unit tests for port mirroring behavior - `crates/systems/sg1000/src/bus.rs:182-318`
+  - Added comprehensive unit tests for all I/O port mirroring behavior
+  - PSG: Tests verify all ports 0x40-0x7F mirror to same PSG (test_psg_mirroring)
+  - VDP Data: Tests verify all even ports 0x80-0xFF access VDP data (test_vdp_data_mirroring)
+  - VDP Control: Tests verify all odd ports 0x80-0xFF access VDP control (test_vdp_control_mirroring)
+  - Controllers: Tests verify ports 0xC0-0xFF (even=controller1, odd=controller2) (test_controller_mirroring)
+  - Priority: Tests verify controller ports take priority over VDP at 0xC0+ (test_controller_priority_over_vdp)
+  - Boundary: Tests verify VDP works in 0x80-0xBF before controller range (test_vdp_below_controller_range)
+  - Unmapped: Tests verify unmapped ports return 0xFF (test_unmapped_ports)
+  - All 7 new tests passing, total 18 tests in SG-1000 package
+  - Impact: Hardware-accurate port decoding now verified with comprehensive test coverage
 
 #### ColecoVision
 - [ ] **Test ROM**: Create basic test ROM for smoke testing - `test_roms/colecovision/`
@@ -126,8 +130,16 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Reference: https://sneslab.net/wiki/H/V_Count_Timer
 
 #### UI
-- [ ] Make links in about tab work
-- [ ] Check that áll systems has the enhanced debugger state
+- [x] **Make links in about tab work** - `crates/frontend/gui/src/window_backend/sdl2_egui_backend.rs:206-212`
+  - Implemented egui OutputCommand::OpenUrl handling in end_frame()
+  - Hyperlinks now properly open in default browser via open crate
+  - Fixed: Previously platform_output.commands were ignored
+  - Impact: All hyperlinks in About tab now functional
+- [x] **Check that all systems have the enhanced debugger state** - `crates/frontend/gui/src/main.rs:3623-3685`
+  - Added enhanced debug state support for all emulated systems
+  - Game Boy, Atari 2600, PC, N64, CHIP-8, ColecoVision, and SG-1000 now included
+  - Previously only NES, SMS, and SNES had enhanced debug state
+  - Impact: Debug panel now works consistently across all systems
 
 #### SNES
 - [ ] **Upload Protocol Test**: Investigate SPC700 index echoing issue - `crates/systems/snes/src/lib.rs:832`, `crates/systems/snes/src/bus.rs:1605`
