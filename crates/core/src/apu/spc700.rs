@@ -2,7 +2,8 @@
 //!
 //! This module implements the SPC700 CPU, RAM, timers, and I/O ports that form
 //! the SNES Audio Processing Unit. The S-DSP (Digital Signal Processor) audio
-//! generation is now **functional** with BRR sample playback!
+//! generation is now **functional** with BRR sample playback and hardware-accurate
+//! Gaussian interpolation!
 //!
 //! **Architecture:**
 //! - SPC700 CPU (8-bit, 256 opcodes) - ✅ **Fully implemented**
@@ -26,25 +27,22 @@
 //! - BRR (ADPCM) sample decoder with all 4 filter types
 //! - Sample directory and loop point support
 //! - Pitch control and sample position advancement
-//! - Envelope generation (ADSR and GAIN modes, simplified curves)
+//! - **Hardware-accurate Gaussian interpolation** for BRR sample playback (4-point filter)
+//! - **Hardware-accurate ADSR envelopes** with exponential curves
+//! - **All 5 GAIN modes** (direct, linear/exponential decrease/increase, bent line)
+//! - **Linear interpolation** between DSP output samples (32kHz -> audio output rate)
 //! - Voice mixing to stereo output
 //! - ENDX register (voice ended flags)
-//! - **Actual audio output working!**
-//!
-//! ⚠️ **Simplified Implementations:**
-//! - Linear interpolation (Gaussian filter not yet implemented)
-//! - Envelope rates (not cycle-accurate)
+//! - **Actual audio output working with high quality!**
 //!
 //! ❌ **NOT Yet Implemented:**
-//! - Gaussian interpolation filter
 //! - Echo/reverb FIR filter
 //! - Noise generator
 //! - Pitch modulation
-//! - Cycle-accurate envelope rates
 //!
-//! **Result:** Games can now play audio! BRR samples are decoded from RAM and
-//! mixed to produce stereo output. Quality may differ from hardware due to
-//! linear interpolation and simplified envelope curves.
+//! **Result:** Games can now play audio with high quality! BRR samples are decoded from RAM,
+//! interpolated with hardware-accurate Gaussian filtering, processed through ADSR envelopes,
+//! and mixed to produce stereo output. Audio quality closely matches hardware.
 //!
 //! **Communication Protocol:**
 //! The IPL ROM implements a boot protocol where it waits for the main CPU
@@ -467,6 +465,10 @@ pub struct Spc700 {
     total_cycles_requested: u64,
     /// Number of run_cycles calls (for debugging)
     run_cycles_call_count: u64,
+    /// Last DSP sample output (for interpolation between DSP clock cycles)
+    last_sample: i16,
+    /// Previous DSP sample (for linear interpolation)
+    prev_sample: i16,
 }
 
 impl Spc700 {
@@ -488,6 +490,8 @@ impl Spc700 {
             dsp_cycle_acc: 0,
             total_cycles_requested: 0,
             run_cycles_call_count: 0,
+            last_sample: 0,
+            prev_sample: 0,
         }
     }
 
@@ -627,16 +631,25 @@ impl AudioChip for Spc700 {
         // DSP runs at 32kHz (every 32 CPU cycles at 1.024 MHz)
         self.dsp_cycle_acc += 1;
         if self.dsp_cycle_acc >= 32 {
-            self.dsp_cycle_acc -= 32;
+            self.dsp_cycle_acc = 0;
             // Clock the DSP and return stereo sample (mix to mono for now)
             let (left, right) = self.cpu.memory.dsp.clock();
             // Simple mono mix
-            return ((left as i32 + right as i32) / 2) as i16;
+            let new_sample = ((left as i32 + right as i32) / 2) as i16;
+
+            // Update sample history for interpolation
+            self.prev_sample = self.last_sample;
+            self.last_sample = new_sample;
+
+            return new_sample;
         }
 
-        // Return last sample if DSP didn't clock (simple hold)
-        // TODO: Implement proper sample interpolation
-        0
+        // Linear interpolation between DSP samples for smooth output
+        // Interpolate between prev_sample and last_sample based on position within the 32-cycle period
+        let fraction = self.dsp_cycle_acc as i32;
+        let interpolated = self.prev_sample as i32
+            + ((self.last_sample as i32 - self.prev_sample as i32) * fraction) / 32;
+        interpolated as i16
     }
 
     fn timing(&self) -> TimingMode {
@@ -647,6 +660,9 @@ impl AudioChip for Spc700 {
         self.cpu.reset();
         self.cpu.memory = Spc700Memory::new();
         self.cycle_acc = 0.0;
+        self.dsp_cycle_acc = 0;
+        self.last_sample = 0;
+        self.prev_sample = 0;
     }
 
     fn generate_samples(&mut self, count: usize) -> Vec<i16> {

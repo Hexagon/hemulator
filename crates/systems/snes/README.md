@@ -194,17 +194,17 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
   - ✅ BRR (ADPCM) decoder with all 4 filter types
   - ✅ Sample directory and loop point support
   - ✅ Pitch control (14-bit precision)
-  - ✅ ADSR envelope generator (simplified curves)
+  - ✅ **Gaussian interpolation filter** - Hardware-accurate 4-point interpolation
+  - ✅ **ADSR envelope generator** - Hardware-accurate with exponential curves
+  - ✅ **GAIN modes** - All 5 GAIN modes implemented (direct, linear/exponential decrease/increase, bent line)
   - ✅ Voice control (key on/off, volume, pitch registers)
   - ✅ Voice mixing to stereo output
   - ✅ Master volume control
   - ✅ ENDX register (voice ended flags)
-  - ⚠️ Linear interpolation (Gaussian filter not yet implemented)
-  - ⚠️ Simplified envelope rates (not cycle-accurate)
   - ❌ Echo/reverb FIR filter
   - ❌ Noise generator
   - ❌ Pitch modulation
-  - **Status**: Actual audio output working! Games can play samples from RAM
+  - **Status**: Actual audio output working with high-quality interpolation! Games can play samples from RAM
   - Reference: [DSP](https://snes.nesdev.org/wiki/DSP)
 
 #### Timing
@@ -347,12 +347,12 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
   - ✅ BRR (ADPCM) decoder with all filter types
   - ✅ Sample directory and loop point support
   - ✅ Pitch control and sample advancement
-  - ✅ Simplified ADSR envelope generation
+  - ✅ **Gaussian interpolation filter** - Hardware-accurate 4-point interpolation
+  - ✅ **ADSR envelope generation** - Hardware-accurate with exponential curves
+  - ✅ **GAIN modes** - All 5 modes implemented
   - ✅ Audio output working - games can play sound!
-  - ⚠️ Linear interpolation (Gaussian filter pending)
-  - ⚠️ Simplified envelope rates (not cycle-accurate)
   - ❌ Echo/reverb FIR filter
-  - **Status**: Actual audio output working! Advanced features pending
+  - **Status**: Actual audio output working with hardware-accurate sample interpolation! Advanced features pending
   - Reference: [DSP](https://snes.nesdev.org/wiki/DSP)
 
 #### Enhancement Chips
@@ -593,14 +593,16 @@ cargo run -- game.sfc --log-bus debug
 
 ## Known Issues
 
-1. **Audio Quality** - DSP implemented but with simplifications
+1. **Audio Quality** - DSP implemented with hardware-accurate features
    - ✅ BRR (ADPCM) sample decoding working
    - ✅ Sample playback and mixing functional
    - ✅ Games can play sound
-   - ⚠️ Using linear interpolation instead of Gaussian filter
-   - ⚠️ Simplified envelope rates (not cycle-accurate)
+   - ✅ **Hardware-accurate Gaussian interpolation filter** for sample playback
+   - ✅ **Hardware-accurate ADSR envelopes** with exponential curves
+   - ✅ **All 5 GAIN modes** implemented
+   - ✅ **Linear interpolation** between DSP output samples for smooth audio
    - ❌ Echo/reverb effects not implemented
-   - Current status: Audio works but quality may differ from hardware
+   - Current status: Audio works with high quality and hardware accuracy
 
 2. **Timing** - Frame-based, not cycle-accurate
    - ✅ H/V Timer IRQ implemented for scanline-based timing

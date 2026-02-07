@@ -126,7 +126,7 @@ pub struct SnesBus {
     apu_state: ApuState,
     /// Session identifier to track different upload sequences
     apu_session_id: u8,
-    /// Optional real SPC700 APU (if None, uses stub)
+    /// Hardware-accurate SPC700 APU (always enabled for audio output)
     spc700: Option<RefCell<Spc700>>,
     /// Track pending SPC700 cycles for synchronization
     /// This ensures the SPC700 gets enough time to process writes before reads
@@ -187,7 +187,7 @@ impl SnesBus {
     const HBLANK_CYCLES: u32 = 40; // Approximate CPU cycles during H-blank (~40-60 depending on HDMA)
     pub fn new() -> Self {
         log(LogCategory::Bus, LogLevel::Info, || {
-            "SNES Bus: Initializing with stub SPC700 (real SPC700 disabled by default)".to_string()
+            "SNES Bus: Initializing with hardware-accurate SPC700 APU".to_string()
         });
 
         Self {
@@ -214,7 +214,7 @@ impl SnesBus {
             apu_transfer_counter: 0,
             apu_state: ApuState::BootReady, // Start in BootReady state with $BBAA signature
             apu_session_id: 0,
-            spc700: None, // Default to stub protocol; real SPC700 can be enabled explicitly
+            spc700: Some(RefCell::new(Spc700::new())), // Use hardware-accurate SPC700 APU by default
             spc700_pending_cycles: Cell::new(0),
             spc700_cycle_accumulator: Cell::new(0),
 
@@ -241,20 +241,21 @@ impl SnesBus {
         self.last_cpu_pc = pc;
     }
 
-    /// Enable the real SPC700 APU (replaces stub)
+    /// Re-initialize the SPC700 APU (creates a new instance)
+    /// Note: SPC700 is enabled by default, this can be used to reset it
     #[allow(dead_code)]
     pub fn enable_spc700(&mut self) {
         log(LogCategory::Bus, LogLevel::Info, || {
-            "SNES Bus: Enabling SPC700 APU".to_string()
+            "SNES Bus: (Re)initializing SPC700 APU".to_string()
         });
         self.spc700 = Some(RefCell::new(Spc700::new()));
     }
 
-    /// Disable the real SPC700 APU (use stub)
+    /// Disable the SPC700 APU and use stub protocol for testing
     #[allow(dead_code)]
     pub fn disable_spc700(&mut self) {
         log(LogCategory::Bus, LogLevel::Info, || {
-            "SNES Bus: Disabling SPC700 APU (using stub)".to_string()
+            "SNES Bus: Disabling SPC700 APU (using stub protocol)".to_string()
         });
         self.spc700 = None;
     }

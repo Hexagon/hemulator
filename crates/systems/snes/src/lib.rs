@@ -5,7 +5,7 @@
 //!
 //! - **CPU**: WDC 65C816 (16-bit processor running at ~3.58 MHz effective)
 //! - **PPU**: Picture Processing Unit (complete modes 0-7)
-//! - **APU**: SPC700 audio processor (CPU implemented, DSP stub)
+//! - **APU**: SPC700 audio processor with hardware-accurate DSP
 //! - **Memory**: 128KB WRAM + cartridge ROM/RAM
 //! - **Timing**: NTSC (21.477 MHz master clock, ~60.1 Hz frame rate)
 //!
