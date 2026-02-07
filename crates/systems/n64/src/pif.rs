@@ -232,14 +232,14 @@ impl Pif {
     #[allow(dead_code)] // Will be used by N64 system for save persistence
     pub fn set_eeprom_type(&mut self, eeprom_type: EepromType) {
         self.eeprom_type = eeprom_type;
-        
+
         // Initialize EEPROM storage based on type
         let size = match eeprom_type {
             EepromType::None => 0,
-            EepromType::Eeprom4K => 512,  // 4Kbit = 512 bytes
+            EepromType::Eeprom4K => 512,   // 4Kbit = 512 bytes
             EepromType::Eeprom16K => 2048, // 16Kbit = 2048 bytes
         };
-        
+
         self.eeprom_data = vec![0xFF; size]; // EEPROM defaults to all 1s when blank
     }
 
@@ -249,13 +249,13 @@ impl Pif {
         if self.eeprom_type == EepromType::None {
             return Err("No EEPROM configured".to_string());
         }
-        
+
         let expected_size = match self.eeprom_type {
             EepromType::Eeprom4K => 512,
             EepromType::Eeprom16K => 2048,
             EepromType::None => 0,
         };
-        
+
         if data.len() != expected_size {
             return Err(format!(
                 "EEPROM data size mismatch: expected {} bytes, got {}",
@@ -263,7 +263,7 @@ impl Pif {
                 data.len()
             ));
         }
-        
+
         self.eeprom_data = data;
         Ok(())
     }
@@ -415,7 +415,8 @@ impl Pif {
             // Verify the block byte is within valid range before processing
             // This provides some protection against processing partial commands
             let block = self.ram[0x7C3];
-            if block < 0xFF {  // 0xFF is unlikely to be a valid block number
+            if block < 0xFF {
+                // 0xFF is unlikely to be a valid block number
                 self.read_eeprom_block(0x7C4, block);
             }
         }
@@ -438,7 +439,7 @@ impl Pif {
     /// Read an 8-byte block from EEPROM
     fn read_eeprom_block(&mut self, offset: usize, block: u8) {
         use emu_core::logging::{log, LogCategory, LogLevel};
-        
+
         if self.eeprom_type == EepromType::None {
             log(LogCategory::PPU, LogLevel::Warn, || {
                 "PIF: EEPROM read attempted but no EEPROM configured".to_string()
@@ -452,7 +453,7 @@ impl Pif {
 
         let block_size = 8;
         let max_blocks: u16 = match self.eeprom_type {
-            EepromType::Eeprom4K => 64,  // 512 bytes / 8 = 64 blocks
+            EepromType::Eeprom4K => 64,   // 512 bytes / 8 = 64 blocks
             EepromType::Eeprom16K => 256, // 2048 bytes / 8 = 256 blocks
             EepromType::None => 0,
         };
@@ -461,7 +462,8 @@ impl Pif {
             log(LogCategory::PPU, LogLevel::Warn, || {
                 format!(
                     "PIF: EEPROM read out of range: block {} (max {})",
-                    block, max_blocks - 1
+                    block,
+                    max_blocks - 1
                 )
             });
             for i in 0..8 {
@@ -484,7 +486,7 @@ impl Pif {
     /// Write an 8-byte block to EEPROM
     fn write_eeprom_block(&mut self, offset: usize, block: u8, data: &[u8; 8]) {
         use emu_core::logging::{log, LogCategory, LogLevel};
-        
+
         if self.eeprom_type == EepromType::None {
             log(LogCategory::PPU, LogLevel::Warn, || {
                 "PIF: EEPROM write attempted but no EEPROM configured".to_string()
@@ -504,7 +506,8 @@ impl Pif {
             log(LogCategory::PPU, LogLevel::Warn, || {
                 format!(
                     "PIF: EEPROM write out of range: block {} (max {})",
-                    block, max_blocks - 1
+                    block,
+                    max_blocks - 1
                 )
             });
             self.ram[offset] = 0x80; // Error status

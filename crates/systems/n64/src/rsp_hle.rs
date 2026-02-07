@@ -347,9 +347,7 @@ impl RspHle {
             MicrocodeType::F3DEX | MicrocodeType::F3DEX2 => {
                 self.execute_graphics_task(dmem, rdram, _rdp)
             }
-            MicrocodeType::Audio => {
-                self.execute_audio_task(dmem, rdram)
-            }
+            MicrocodeType::Audio => self.execute_audio_task(dmem, rdram),
             MicrocodeType::Unknown => {
                 // No-op for unknown microcode
                 100
@@ -441,7 +439,7 @@ impl RspHle {
     }
 
     /// Execute audio microcode task
-    /// 
+    ///
     /// Audio tasks process game audio through the RSP. Common audio microcodes include:
     /// - ABI1 (Audio Binary Interface version 1) - early N64 games
     /// - ABI2 - later N64 games with enhanced features
@@ -452,7 +450,7 @@ impl RspHle {
     /// - Output buffer pointer (RDRAM address)
     /// - Command list pointer
     /// - Number of samples to process
-    /// 
+    ///
     /// This is a stub implementation that logs the task structure but doesn't
     /// produce actual audio output yet. Full implementation requires:
     /// - ADPCM decompression
@@ -470,21 +468,21 @@ impl RspHle {
         // 0x14: Output buffer size
         // 0x18: Command list pointer (RDRAM)
         // 0x1C: Command list size
-        
+
         let input_ptr = self.read_u32(dmem, 0x08);
         let input_size = self.read_u32(dmem, 0x0C);
         let output_ptr = self.read_u32(dmem, 0x10);
         let output_size = self.read_u32(dmem, 0x14);
         let cmd_list_ptr = self.read_u32(dmem, 0x18);
         let cmd_list_size = self.read_u32(dmem, 0x1C);
-        
+
         log(LogCategory::APU, LogLevel::Debug, || {
             format!(
                 "RSP HLE Audio: task structure - input=0x{:08X}[0x{:X}], output=0x{:08X}[0x{:X}], cmd_list=0x{:08X}[0x{:X}]",
                 input_ptr, input_size, output_ptr, output_size, cmd_list_ptr, cmd_list_size
             )
         });
-        
+
         // Validate ranges are within RDRAM bounds (pointer + size)
         let rdram_len = rdram.len() as u64;
         let in_range = |ptr: u32, size: u32| -> bool {
@@ -493,11 +491,11 @@ impl RspHle {
             // Allow zero-sized ranges; ensure start is in bounds and start+size does not overflow rdram
             start < rdram_len && size <= rdram_len.saturating_sub(start)
         };
-        
+
         let input_ok = in_range(input_ptr, input_size);
         let output_ok = in_range(output_ptr, output_size);
         let cmd_ok = in_range(cmd_list_ptr, cmd_list_size);
-        
+
         if input_ok && output_ok && cmd_ok {
             log(LogCategory::APU, LogLevel::Debug, || {
                 "RSP HLE Audio: Valid task structure detected".to_string()
@@ -510,14 +508,14 @@ impl RspHle {
                 )
             });
         }
-        
+
         // TODO: Implement actual audio processing:
         // 1. Parse audio command list
         // 2. Decompress ADPCM samples
         // 3. Apply resampling/filtering
         // 4. Mix audio channels
         // 5. Write output samples to RDRAM
-        
+
         1500 // Average cycles for an audio task
     }
 
