@@ -175,11 +175,11 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Issue: Early break at `sprites_on_scanline > 8` happens too late in loop
   - Impact: Wastes CPU cycles checking sprites 9-64 when sprite limit already reached
   - Solution: Break immediately when 8 sprites collected (preserve overflow detection logic)
-- [ ] **RefCell Borrow Overhead in Rendering**: Batch CHR callbacks to reduce overhead - `crates/systems/nes/src/ppu.rs:1103-1106`
-  - Current: Individual RefCell upgrade per CHR fetch
-  - Impact: Extra RefCell overhead per scanline (mitigated by `chr_fetch_fast()`)
-  - Solution: Batch callback invocations or cache upgraded reference during scanline
-  - Note: Low priority - current `chr_fetch_fast()` optimization already minimizes impact
+- [ ] **RefCell Borrow & Callback Overhead in Rendering**: Batch CHR callbacks to reduce overhead - `crates/systems/nes/src/ppu.rs:1103-1106`
+  - Current: `chr_read_callback.borrow_mut()` is performed for each callback invocation; when using `chr_fetch_fast()`, callbacks are invoked explicitly per tile/sprite rather than per individual CHR fetch
+  - Impact: Repeated `RefCell` borrows and callback calls in the render hot path add overhead across a scanline/frame
+  - Solution: Reduce callback invocation frequency (e.g., batch work per tile/sprite group) or hold a mutable borrow over a larger scope (such as a scanline) to avoid repeated `borrow_mut()` calls
+  - Note: Low priority - `chr_fetch_fast()` already limits callback frequency, but further batching may yield minor performance gains
 - [ ] **Weak Pointer Upgrade Overhead**: Review mapper A12 callback performance - `crates/systems/nes/src/bus.rs:88,112-114`
   - Current: `.upgrade()` is called from PPU CHR/A12 callback closures and runs once per callback invocation (potentially many times per scanline/frame depending on CHR reads/A12 transitions)
   - Impact: Additional weak-to-strong pointer upgrades on each relevant callback; expected to be minimal on modern CPUs
