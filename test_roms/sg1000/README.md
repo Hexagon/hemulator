@@ -16,8 +16,8 @@ A minimal test ROM that displays a checkerboard pattern using the TMS9918A VDP i
 **Expected Output:**
 - 256×192 pixel resolution
 - Checkerboard pattern (alternating 0xAA and 0x55 patterns)
-- White foreground on black background
-- Approximately 50% white, 50% black pixels
+- White foreground on black background within the playfield tiles
+- Dark blue backdrop/border (VDP register 7 = 0xF4), with approximately 50% white and 50% black pixels in the active pattern area
 
 **Building:**
 ```bash
