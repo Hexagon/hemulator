@@ -1,0 +1,5 @@
+[env]
+# Fix for CMake >= 3.27 (Visual Studio 2026+) which removed compatibility
+# with cmake_minimum_required < 3.5. The bundled SDL2 source in sdl2-sys
+# uses an older minimum version, so we need this override.
+CMAKE_POLICY_VERSION_MINIMUM = "3.5"

@@ -11,6 +11,10 @@ target/
 # Log files
 *.log
 
+# Temporary files
+*.tmp
+tmp*
+
 # User-specific files
 saves/
 screenshots/
