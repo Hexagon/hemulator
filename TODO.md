@@ -121,7 +121,7 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Tests currently ignored - SPC700 not echoing indices during upload
   - Affects: `test_apu_upload_protocol` and `test_apu_ports_echo`
   - Note: This requires deep APU debugging and is not critical for general functionality
-- [x] **Sprite Rendering**: Fix sprite overflow test - `crates/systems/snes/src/lib.rs:970`, `test_roms/snes/test_sprite_overflow.s`
+- [x] **Sprite Rendering**: Fix sprite overflow test - `crates/systems/snes/src/lib.rs:test_sprite_overflow_rom`, `test_roms/snes/test_sprite_overflow.s`
   - **FIXED**: Test ROM was not properly uploading sprite data to VRAM
   - Fixed by adding VRAM increment mode setup ($2115 = $80) and writing to both $2118 and $2119
   - Test was also checking wrong scanline (100 instead of 101 due to Y+1 offset)
