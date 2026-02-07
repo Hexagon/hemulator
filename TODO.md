@@ -9,19 +9,6 @@ This file tracks unimplemented features, stubs, and simplified implementations a
 
 ### Critical
 
-#### SNES - Enhancement Chips
-- [ ] **DSP-1 Coprocessor**: Complete missing commands (Attitude/Target/Rotate) - `crates/systems/snes/src/coprocessors/dsp1.rs:231,246,326,338`
-  - Attitude (0x08): Only partial rotation matrix implementation (FIXME at line 231, TODO at line 246)
-  - Target (0x20): Not implemented - returns zeros (FIXME at line 326)
-  - Rotate (0x24): Not implemented - returns zeros (TODO at line 338)
-  - Impact: Games using these commands may malfunction (Pilotwings, Super Mario Kart)
-
-#### SNES - PPU Advanced Features
-- [ ] **Interlace Mode**: Implement interlaced display modes - `crates/systems/snes/src/ppu.rs:1118-1122`
-  - Current: $2133 SETINI register is a stub (stored but ignored)
-  - Needed: Interlaced rendering support
-  - Impact: Some games may rely on interlaced display
-
 #### SNES - Bus/Memory
 - [ ] **CPU Halt During DMA**: Implement proper DMA CPU freeze - `crates/systems/snes/src/bus.rs:1419`
   - Current: DMA executes immediately (comment: "would halt the CPU")
