@@ -869,12 +869,12 @@ impl APU {
             //   y[n] = x[n] - x[n-1] + α * y[n-1]
             // where α = 0.999 gives us a cutoff around 7 Hz at 44.1 kHz sample rate
             let total = pulse_out + tnd_out;
-            
+
             // High-pass filter to remove DC offset
             const ALPHA: f64 = 0.999;
             let filtered = total - self.hp_filter_acc;
             self.hp_filter_acc = total - ALPHA * filtered;
-            
+
             // Scale to 16-bit signed range
             // The range after filtering is approximately [-1.96, +1.96]
             // Scale conservatively to avoid clipping
