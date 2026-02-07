@@ -450,6 +450,31 @@ impl System for SnesSystem {
                     self.current_cycles += dma_cycles;
                     self.total_cycles += dma_cycles as u64;
                     self.cpu.bus_mut().tick_cycles(dma_cycles);
+
+                    // Keep PPU H/V counters and H/V timer IRQ evaluation in sync during DMA halt
+                    let scanline_cycles = self.current_cycles % SNES_SCANLINE_CYCLES;
+                    // Convert CPU cycles to approximate dot position (340 dots per scanline)
+                    // Clamp to valid range 0-339
+                    let dot = ((scanline_cycles * 340) / SNES_SCANLINE_CYCLES).min(339);
+                    self.cpu
+                        .bus_mut()
+                        .ppu_mut()
+                        .update_counters(scanline as u16, dot as u16);
+
+                    // Check for H/V timer IRQ during DMA halt in HBlank too
+                    if self.cpu.bus().check_hv_timer_irq(scanline, scanline_cycles) {
+                        // Set IRQ flag and trigger CPU IRQ
+                        self.cpu.bus().trigger_hv_irq();
+                        log(LogCategory::Interrupts, LogLevel::Debug, || {
+                            format!(
+                                "SNES: H/V Timer IRQ triggered at scanline {} H-pos {} (mode {}) [HBlank/DMA]",
+                                scanline,
+                                scanline_cycles,
+                                self.cpu.bus().get_hv_irq_mode()
+                            )
+                        });
+                        self.cpu.cpu.trigger_irq();
+                    }
                     continue;
                 }
 
