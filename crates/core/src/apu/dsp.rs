@@ -178,12 +178,10 @@ impl BrrDecoder {
 /// Derived from hardware behavior and verified against bsnes
 const RATE_TABLE: [u16; 32] = [
     // Rate 0-11: Exponential spacing (very slow)
-    0xFFFF, 0x2AAA, 0x1555, 0x0EEE, 0x0AAA, 0x0888, 0x06DB, 0x05B0,
-    0x04EC, 0x0444, 0x03AD, 0x0333,
+    0xFFFF, 0x2AAA, 0x1555, 0x0EEE, 0x0AAA, 0x0888, 0x06DB, 0x05B0, 0x04EC, 0x0444, 0x03AD, 0x0333,
     // Rate 12-31: Linear spacing
-    0x02CD, 0x0266, 0x0200, 0x01B0, 0x0166, 0x0133, 0x0100, 0x00CD,
-    0x00A0, 0x007F, 0x0066, 0x0050, 0x0040, 0x0033, 0x0028, 0x0020,
-    0x0019, 0x0014, 0x0010, 0x000C,
+    0x02CD, 0x0266, 0x0200, 0x01B0, 0x0166, 0x0133, 0x0100, 0x00CD, 0x00A0, 0x007F, 0x0066, 0x0050,
+    0x0040, 0x0033, 0x0028, 0x0020, 0x0019, 0x0014, 0x0010, 0x000C,
 ];
 
 /// ADSR envelope generator
@@ -254,12 +252,12 @@ impl Envelope {
                 // Automated modes: bits 6-5 select mode, bits 4-0 select rate
                 let mode = (self.gain >> 5) & 0x03;
                 let rate = (self.gain & 0x1F) as usize;
-                
+
                 // Update rate counter
                 self.rate_counter = self.rate_counter.wrapping_add(1);
                 if self.rate_counter >= RATE_TABLE[rate] {
                     self.rate_counter = 0;
-                    
+
                     match mode {
                         0 => {
                             // Linear decrease
@@ -301,7 +299,7 @@ impl Envelope {
             let decay_rate = (self.adsr1 & 0x07) as usize;
             let sustain_level = ((self.adsr2 >> 5) & 0x07) as u16;
             let sustain_rate = (self.adsr2 & 0x1F) as usize;
-            
+
             match self.mode {
                 EnvelopeMode::Attack => {
                     // Attack: linear increase
@@ -312,10 +310,10 @@ impl Envelope {
                     } else {
                         RATE_TABLE[attack_rate * 2 + 1]
                     };
-                    
+
                     if self.rate_counter >= rate {
                         self.rate_counter = 0;
-                        
+
                         if attack_rate == 15 {
                             // Instant attack
                             self.level = 0x7FF;
@@ -324,7 +322,7 @@ impl Envelope {
                         } else {
                             self.level = 0x7FF;
                         }
-                        
+
                         if self.level >= 0x7FF {
                             self.level = 0x7FF;
                             self.mode = EnvelopeMode::Decay;
@@ -335,18 +333,18 @@ impl Envelope {
                 EnvelopeMode::Decay => {
                     // Decay: exponential decrease to sustain level
                     let target = (sustain_level + 1) << 8;
-                    
+
                     if self.level > target {
                         self.rate_counter = self.rate_counter.wrapping_add(1);
                         let rate = RATE_TABLE[decay_rate * 2 + 16];
-                        
+
                         if self.rate_counter >= rate {
                             self.rate_counter = 0;
-                            
+
                             // Exponential decay
                             let step = ((self.level - 1) >> 8) + 1;
                             self.level = self.level.saturating_sub(step);
-                            
+
                             if self.level <= target {
                                 self.level = target;
                                 self.mode = EnvelopeMode::Sustain;
@@ -363,10 +361,10 @@ impl Envelope {
                     if sustain_rate != 0 && self.level > 0 {
                         self.rate_counter = self.rate_counter.wrapping_add(1);
                         let rate = RATE_TABLE[sustain_rate];
-                        
+
                         if self.rate_counter >= rate {
                             self.rate_counter = 0;
-                            
+
                             // Exponential decay
                             let step = ((self.level - 1) >> 8) + 1;
                             self.level = self.level.saturating_sub(step);
@@ -379,10 +377,10 @@ impl Envelope {
                         self.rate_counter = self.rate_counter.wrapping_add(1);
                         // Release uses fixed rate of 31 (fastest exponential)
                         let rate = RATE_TABLE[31];
-                        
+
                         if self.rate_counter >= rate {
                             self.rate_counter = 0;
-                            
+
                             // Exponential decay
                             let step = ((self.level - 1) >> 8) + 1;
                             self.level = self.level.saturating_sub(step);

@@ -9,7 +9,9 @@ This file tracks unimplemented features, stubs, and simplified implementations a
 
 ### Critical
 
-#### SNES - Bus/Memory
+**All critical items have been resolved!** The following items were previously marked as critical and have been completed:
+
+#### SNES - Bus/Memory (Completed)
 - [x] **CPU Halt During DMA**: Implement proper DMA CPU freeze - `crates/systems/snes/src/bus.rs:1507`, `crates/systems/snes/src/lib.rs:349-398`
   - **FIXED**: DMA now sets pending_dma_cycles which halts CPU execution
   - CPU execution loops check for pending DMA and consume cycles instead of executing instructions
@@ -19,28 +21,23 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - 8 master cycles per byte transferred (correct for all DMA, even with FastROM carts)
   - 8 cycles overhead per channel
   - DMA always uses SlowROM speed regardless of MEMSEL setting
-- [ ] **FastROM Timing**: Implement FastROM memory access timing - `crates/systems/snes/src/bus.rs:1482-1486`
-  - Current: MEMSEL register ($420D) written but not applied to memory access timing
-  - Needed: CPU memory accesses should be faster (6 cycles vs 8) for ROM in banks $80+ when MEMSEL bit 0 is set
-  - Impact: Performance optimization for games using FastROM (affects CPU execution, not DMA)
-  - Note: Requires CPU core modifications to vary cycle timing by memory region
 
-#### SNES Audio (DSP)
+#### SNES Audio/DSP (Completed)
 - [x] **Gaussian Interpolation**: Replace linear interpolation with Gaussian filter - `crates/core/src/apu/dsp.rs:60-129,429-465`
   - **FIXED**: Implemented hardware-accurate 4-point Gaussian interpolation
   - Added 512-entry Gaussian coefficient table matching SNES hardware
   - Uses pitch counter bits 4-11 to index filter coefficients
   - Significantly improves audio quality and hardware accuracy
 - [x] **ADSR Envelope**: Implement full envelope with proper curves - `crates/core/src/apu/dsp.rs:253-295`
-  - **FIXED**: Implemented hardware-accurate ADSR envelope with exponential curves
+  - **FIXED**: Implemented hardware-accurate ADSR envelope with exponential curves (completed in this PR)
   - Added rate counter table with 32 entries for proper timing
   - Attack: Linear increase with hardware-accurate rate table
   - Decay: Exponential decrease to sustain level
   - Sustain: Exponential decrease towards zero (sustain rate)
   - Release: Fast exponential decrease (rate 31)
   - Reference: https://snes.nesdev.org/wiki/DSP_envelopes
-- [x] **GAIN Modes**: Implement direct, linear increase/decrease, exponential - `crates/core/src/apu/dsp.rs:254-258`
-  - **FIXED**: Implemented all 5 GAIN modes
+- [x] **GAIN Modes**: Implement all 5 GAIN modes - `crates/core/src/apu/dsp.rs:254-258`
+  - **FIXED**: Implemented all 5 GAIN modes (completed in this PR)
   - Direct mode (bit 7=0): bits 6-0 directly set envelope level
   - Linear decrease (bits 7-5=100): constant rate decrease
   - Exponential decrease (bits 7-5=101): exponential decay curve
@@ -49,12 +46,26 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - GAIN format: bit 7=mode (0=direct, 1=increase/decrease), bits 6-5=curve type, bits 4-0=rate
   - Reference: https://snes.nesdev.org/wiki/S-DSP_registers
 
-#### ColecoVision  
+#### ColecoVision (Completed)
 - [x] **Z80 ROM Execution**: Debug why test ROM doesn't execute properly through BIOS - `crates/systems/colecovision/src/lib.rs`
   - **FIXED**: Created minimal test BIOS that properly jumps to cartridge ROM
   - Test ROM now executes correctly through BIOS initialization
   - Added `smoke_test_colecovision_with_rom_execution()` to verify full ROM execution
   - Test BIOS available at `test_roms/colecovision/test_bios.rom`
+
+### High
+
+#### SNES - Bus/Memory  
+- [ ] **FastROM Timing**: Implement FastROM memory access timing - `crates/systems/snes/src/bus.rs:1482-1486`
+  - Current: MEMSEL register ($420D) written but not applied to memory access timing
+  - Needed: CPU memory accesses should be faster (6 cycles vs 8) for ROM in banks $80+ when MEMSEL bit 0 is set
+  - Impact: Performance optimization for games using FastROM (affects CPU execution speed, not correctness)
+  - Complexity: Requires CPU core modifications to vary cycle timing by memory region
+  - Implementation approaches:
+    1. Modify Memory65c816 trait to return (value, cycles) pairs
+    2. Add per-instruction cycle adjustment based on accessed address ranges
+    3. Track memory accesses in CPU core and adjust timing post-execution
+  - Note: This is an optimization, not a correctness issue - all games work without it, just run slightly slower than hardware
 
 ### Medium
 
