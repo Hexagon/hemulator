@@ -106,16 +106,17 @@ The SNES emulator supports comprehensive gameplay with complete CPU, full DMA/HD
   - Applied during rendering for hardware-accurate visuals
   - Reference: [Mosaic](https://snes.nesdev.org/wiki/PPU_registers#MOSAIC)
 
-- ✅ **Screen Mode Control** - Display mode and interlace support ($2133)
-  - SETINI register ($2133) controls screen mode settings
-  - **Interlace Mode** (bit 0): Progressive (224/240 lines) or interlaced (448 lines at 30Hz)
-    - When enabled, doubles vertical resolution in modes 5-6
-    - Background tiles use extra vertical lines
-    - Alternates between odd/even fields each frame
-  - **OBJ Interlace** (bit 1): Sprite positioning in interlace mode
-  - **Overscan Mode** (bit 2): 224 or 239 visible lines
-  - **Pseudo Hi-res** (bit 3): Alternates pixels between main/sub screens for 512px effect
-  - **Mode 7 EXTBG** (bit 6): Extended background priority for Mode 7
+- ✅ **Screen Mode Control** - SETINI register tracked/logged ($2133)
+  - SETINI register ($2133) state is decoded and tracked for screen mode settings
+  - **Interlace Mode** (bit 0): Indicates progressive vs. interlace mode
+    - Bit value is stored and exposed for debugging/inspection
+    - **Interlaced rendering (doubled vertical resolution, field alternation) is not yet implemented**
+  - **OBJ Interlace** (bit 1): Indicates sprite interlace mode
+    - Bit value is tracked; interlaced sprite positioning semantics are **not yet implemented**
+  - **Overscan Mode** (bit 2): Indicates 224 vs. 239 visible lines
+    - Bit value is tracked; overscan-specific timing/rendering behavior is **not yet implemented**
+  - **Pseudo Hi-res** (bit 3): Indicates pseudo hi-res mode (main/sub screen alternation)
+  - **Mode 7 EXTBG** (bit 6): Indicates extended background priority for Mode 7
   - Reference: [Interlacing](https://sneslab.net/wiki/Interlacing)
 
 - ✅ **Window Masking** - Complete window system implementation

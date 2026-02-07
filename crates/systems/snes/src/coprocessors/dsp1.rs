@@ -247,7 +247,7 @@ impl Dsp1 {
                 // - bsnes/sfc/coprocessor/dsp1/dsp1emu.cpp (attitudeA function)
                 for i in 0..4 {
                     let angle = self.read_s16(i * 2);
-                    // Convert to radians: angle is in 1/256th of a full rotation
+                    // Convert to radians: angle is in 1/65536th of a full rotation (16-bit full-turn)
                     let radians = (angle as f64) * 2.0 * PI / 65536.0;
                     let sin_val = (radians.sin() * 32767.0) as i16;
                     self.write_s16(i * 2, sin_val);
@@ -337,7 +337,7 @@ impl Dsp1 {
                 let sin_a = radians.sin();
                 let cos_a = radians.cos();
 
-                // Perform 2D rotation (results are fixed-point scaled by 32767)
+                // Perform 2D rotation; results are written as unscaled 16-bit integers (truncated from f64)
                 let x2 = ((y1 * sin_a) + (x1 * cos_a)) as i16;
                 let y2 = ((y1 * cos_a) - (x1 * sin_a)) as i16;
 
@@ -700,5 +700,92 @@ mod tests {
         // At angle 0, x should be ~100, y should be ~0
         assert!(x > 90 && x < 110);
         assert!(y.abs() < 10);
+    }
+
+    #[test]
+    fn test_dsp1_rotate_zero_angle() {
+        let mut dsp = Dsp1::new();
+
+        // Send rotate command (0x24) - 2D rotation
+        dsp.write_data(0x24);
+
+        // Send parameters: angle=0, x=100, y=0 (should be identity)
+        dsp.write_data(0x00); // angle low
+        dsp.write_data(0x00); // angle high
+        dsp.write_data(0x64); // x low
+        dsp.write_data(0x00); // x high
+        dsp.write_data(0x00); // y low
+        dsp.write_data(0x00); // y high
+
+        // Read result (at 0 degrees, should be x=100, y=0)
+        let x_low = dsp.read_data();
+        let x_high = dsp.read_data();
+        let y_low = dsp.read_data();
+        let y_high = dsp.read_data();
+
+        let x = i16::from_le_bytes([x_low, x_high]);
+        let y = i16::from_le_bytes([y_low, y_high]);
+
+        // At 0 degrees, output should be close to input
+        assert_eq!(x, 100);
+        assert_eq!(y, 0);
+    }
+
+    #[test]
+    fn test_dsp1_rotate_90_degrees() {
+        let mut dsp = Dsp1::new();
+
+        // Send rotate command (0x24) - 2D rotation
+        dsp.write_data(0x24);
+
+        // Send parameters: angle=16384 (90 degrees in DSP-1 units), x=100, y=0
+        // 90 degrees = 0x4000 in 16-bit angle representation (65536 / 4)
+        dsp.write_data(0x00); // angle low
+        dsp.write_data(0x40); // angle high (0x4000)
+        dsp.write_data(0x64); // x low
+        dsp.write_data(0x00); // x high
+        dsp.write_data(0x00); // y low
+        dsp.write_data(0x00); // y high
+
+        // Read result
+        let x_low = dsp.read_data();
+        let x_high = dsp.read_data();
+        let y_low = dsp.read_data();
+        let y_high = dsp.read_data();
+
+        let x = i16::from_le_bytes([x_low, x_high]);
+        let y = i16::from_le_bytes([y_low, y_high]);
+
+        // At 90 degrees clockwise: (100, 0) -> (0, -100)
+        // Allow some tolerance for floating point rounding
+        assert!(x.abs() < 5);
+        assert!(y < -95 && y > -105);
+    }
+
+    #[test]
+    fn test_dsp1_target_passthrough() {
+        let mut dsp = Dsp1::new();
+
+        // Send target command (0x20)
+        dsp.write_data(0x20);
+
+        // Send parameters: H=100, V=50
+        dsp.write_data(0x64); // H low
+        dsp.write_data(0x00); // H high
+        dsp.write_data(0x32); // V low
+        dsp.write_data(0x00); // V high
+
+        // Read result (simplified implementation returns input as output)
+        let x_low = dsp.read_data();
+        let x_high = dsp.read_data();
+        let y_low = dsp.read_data();
+        let y_high = dsp.read_data();
+
+        let x = i16::from_le_bytes([x_low, x_high]);
+        let y = i16::from_le_bytes([y_low, y_high]);
+
+        // Simplified implementation passes through values
+        assert_eq!(x, 100);
+        assert_eq!(y, 50);
     }
 }

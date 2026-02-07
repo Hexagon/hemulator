@@ -1184,15 +1184,31 @@ impl Ppu {
                     let overscan = val & 0x04 != 0;
                     let pseudo_hires = val & 0x08 != 0;
                     let extbg = val & 0x40 != 0;
-                    format!(
-                        "SNES PPU: SETINI = ${:02X} ({}{}{}{}{})",
-                        val,
-                        if interlace { "interlace " } else { "" },
-                        if obj_interlace { "obj-interlace " } else { "" },
-                        if overscan { "overscan " } else { "" },
-                        if pseudo_hires { "pseudo-hires " } else { "" },
-                        if extbg { "extbg" } else { "" }
-                    )
+
+                    let mut flags = Vec::new();
+                    if interlace {
+                        flags.push("interlace");
+                    }
+                    if obj_interlace {
+                        flags.push("obj-interlace");
+                    }
+                    if overscan {
+                        flags.push("overscan");
+                    }
+                    if pseudo_hires {
+                        flags.push("pseudo-hires");
+                    }
+                    if extbg {
+                        flags.push("extbg");
+                    }
+
+                    let flags_str = if flags.is_empty() {
+                        "none".to_string()
+                    } else {
+                        flags.join(" ")
+                    };
+
+                    format!("SNES PPU: SETINI = ${:02X} ({})", val, flags_str)
                 });
             }
 
