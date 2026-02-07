@@ -1129,7 +1129,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // SNES sprite rendering not fully implemented yet - sprites not showing up
     fn test_sprite_overflow_rom() {
         // Load the sprite overflow test ROM
         let test_rom = include_bytes!("../../../../test_roms/snes/test_sprite_overflow.sfc");
@@ -1152,11 +1151,12 @@ mod tests {
         assert_eq!(frame.pixels.len(), 256 * 224);
 
         // This ROM places 128 sprites all at Y=100
+        // Due to SNES Y+1 offset, sprites actually render at Y=101-108
         // Due to the 32 sprite per scanline limit, only the first 32 should render
-        // Count non-black pixels on scanline 100
+        // Count non-black pixels on scanline 101 (first scanline of sprite rendering)
         let mut pixels_on_scanline = 0;
         for x in 0..256 {
-            if frame.pixels[100 * 256 + x] != 0xFF000000 {
+            if frame.pixels[101 * 256 + x] != 0xFF000000 {
                 pixels_on_scanline += 1;
             }
         }
@@ -1165,7 +1165,7 @@ mod tests {
         // but not all 128 sprites (which would be ~128 pixels)
         assert!(
             pixels_on_scanline >= 10,
-            "Should see some sprites on scanline 100, got {} pixels",
+            "Should see some sprites on scanline 101 (Y+1 offset), got {} pixels",
             pixels_on_scanline
         );
 
