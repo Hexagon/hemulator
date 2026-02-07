@@ -79,6 +79,14 @@ This file tracks unimplemented features, stubs, and simplified implementations a
 
 ### Low
 
+#### SNES - Enhancement Chips
+- [ ] **DSP-1 Full Hardware Accuracy**: Implement Parameter command and shared projection state - `crates/systems/snes/src/coprocessors/dsp1.rs`
+  - Current: Simplified implementations of Attitude, Target, Rotate commands
+  - Needed: Parameter command (0x02) to set up shared projection matrices and camera parameters
+  - Impact: Current implementation sufficient for basic compatibility; full accuracy needed for advanced DSP-1 features
+  - Note: Target and Attitude commands use simplified transformations without shared state
+  - Reference: bsnes/sfc/coprocessor/dsp1/dsp1emu.cpp (parameter, target, attitude functions)
+
 #### SNES
 - [ ] **Upload Protocol Test**: Investigate SPC700 index echoing issue - `crates/systems/snes/src/lib.rs:832`, `crates/systems/snes/src/bus.rs:1605`
   - Tests currently ignored - SPC700 not echoing indices during upload
