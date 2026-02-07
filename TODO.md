@@ -14,14 +14,16 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - **FIXED**: DMA now sets pending_dma_cycles which halts CPU execution
   - CPU execution loops check for pending DMA and consume cycles instead of executing instructions
   - Hardware-accurate timing where CPU is frozen during DMA transfers
-- [ ] **Cycle-Accurate DMA Timing**: Fix DMA cycle counting - `crates/systems/snes/src/bus.rs:440-520`
-  - Current: Fixed cycles per transfer (8-16) instead of actual hardware timing
-  - Needed: Account for address bus speed differences
-  - Impact: Not cycle-accurate for timing-sensitive code
-- [ ] **FastROM Timing**: Implement FastROM memory access timing - `crates/systems/snes/src/bus.rs:1388-1391`
-  - Current: MEMSEL register ($420D) written but ignored
-  - Needed: Faster access times for FastROM regions
-  - Impact: Performance optimization for games using FastROM
+- [x] **Cycle-Accurate DMA Timing**: Fix DMA cycle counting - `crates/systems/snes/src/bus.rs:604-665`
+  - **VERIFIED**: Current implementation is hardware-accurate
+  - 8 master cycles per byte transferred (correct for all DMA, even with FastROM carts)
+  - 8 cycles overhead per channel
+  - DMA always uses SlowROM speed regardless of MEMSEL setting
+- [ ] **FastROM Timing**: Implement FastROM memory access timing - `crates/systems/snes/src/bus.rs:1482-1486`
+  - Current: MEMSEL register ($420D) written but not applied to memory access timing
+  - Needed: CPU memory accesses should be faster (6 cycles vs 8) for ROM in banks $80+ when MEMSEL bit 0 is set
+  - Impact: Performance optimization for games using FastROM (affects CPU execution, not DMA)
+  - Note: Requires CPU core modifications to vary cycle timing by memory region
 
 #### SNES Audio (DSP)
 - [x] **Gaussian Interpolation**: Replace linear interpolation with Gaussian filter - `crates/core/src/apu/dsp.rs:60-129,429-465`
@@ -29,14 +31,18 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Added 512-entry Gaussian coefficient table matching SNES hardware
   - Uses pitch counter bits 4-11 to index filter coefficients
   - Significantly improves audio quality and hardware accuracy
-- [ ] **ADSR Envelope**: Implement full envelope with proper curves - `crates/core/src/apu/dsp.rs:187`
-  - Current: Simplified envelope rates (not cycle-accurate)
-  - Needed: Full ADSR implementation matching hardware timing
-  - Code comment: "TODO: Implement full ADSR envelope"
-- [ ] **GAIN Modes**: Implement direct, linear increase/decrease, exponential - `crates/core/src/apu/dsp.rs:182`
-  - Current: Stub implementation
-  - Needed: All GAIN envelope modes
-  - Code comment: "TODO: Implement GAIN modes (direct, linear increase/decrease, exponential)"
+- [ ] **ADSR Envelope**: Implement full envelope with proper curves - `crates/core/src/apu/dsp.rs:253-295`
+  - Current: Simplified envelope (instant attack/decay, no rate tables)
+  - Needed: Exponential attack/decay/release curves with hardware-accurate rate tables
+  - Complexity: Requires implementing 16-value rate table for each phase
+  - Reference: https://snes.nesdev.org/wiki/DSP_envelopes
+  - Impact: More authentic audio envelope shaping for instruments
+- [ ] **GAIN Modes**: Implement direct, linear increase/decrease, exponential - `crates/core/src/apu/dsp.rs:254-258`
+  - Current: Only direct mode implemented (GAIN & 0x7F)
+  - Needed: All 5 GAIN modes (direct, linear increase/decrease, exponential increase/decrease)
+  - GAIN format: bit 7=mode (0=direct, 1=increase/decrease), bits 6-5=curve type, bits 4-0=rate
+  - Reference: https://snes.nesdev.org/wiki/S-DSP_registers
+  - Impact: Alternative envelope control method used by some games
 
 #### ColecoVision  
 - [x] **Z80 ROM Execution**: Debug why test ROM doesn't execute properly through BIOS - `crates/systems/colecovision/src/lib.rs`
