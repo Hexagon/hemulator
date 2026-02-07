@@ -84,6 +84,16 @@ impl TriangleChannel {
         ((value as i16) - 7) << 10
     }
 
+    /// Get the raw 4-bit triangle wave output value (0-15)
+    /// Used for hardware-accurate non-linear mixing
+    pub fn triangle_output_raw(&self) -> u8 {
+        const TRIANGLE_TABLE: [u8; 32] = [
+            15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+            11, 12, 13, 14, 15,
+        ];
+        TRIANGLE_TABLE[self.sequence_pos as usize]
+    }
+
     /// Set timer reload value
     pub fn set_timer(&mut self, t: u16) {
         self.timer_reload = t & 0x07FF;

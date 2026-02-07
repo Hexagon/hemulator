@@ -21,7 +21,7 @@ pub struct NoiseChannel {
     /// Timer counter
     timer: u16,
     /// 15-bit Linear Feedback Shift Register
-    shift_register: u16,
+    pub shift_register: u16,
     /// Length counter
     pub length_counter: u8,
     /// Envelope volume (4-bit, 0-15)

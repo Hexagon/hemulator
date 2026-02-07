@@ -208,6 +208,10 @@ pub struct APU {
     /// Cycle-accurate $4017 write handling
     /// When true, clock envelopes/length counters immediately (5-step mode write)
     pending_immediate_clock: bool,
+
+    /// High-pass filter state for DC offset removal
+    /// Simple 1-pole high-pass filter to remove DC bias from mixer output
+    hp_filter_acc: f64,
 }
 
 impl APU {
@@ -235,6 +239,7 @@ impl APU {
             irq_inhibit: true, // Default is inhibited
             irq_pending: Cell::new(false),
             pending_immediate_clock: false,
+            hp_filter_acc: 0.0,
         }
     }
 
@@ -667,7 +672,13 @@ impl APU {
             }
             self.cycle_accum -= cycles as f64;
 
-            let mut acc = 0i32;
+            // Accumulate raw channel values for hardware-accurate mixing
+            let mut pulse1_acc = 0u32;
+            let mut pulse2_acc = 0u32;
+            let mut triangle_acc = 0u32;
+            let mut noise_acc = 0u32;
+            let mut dmc_acc = 0u32;
+
             for _ in 0..cycles {
                 // Clock frame counter
                 let prev_quarter = self.frame_counter_cycles / quarter_frame_cycles;
@@ -748,51 +759,128 @@ impl APU {
                 self.pulse2.envelope = pulse2_vol;
                 self.noise.envelope = noise_vol;
 
-                let s1 = self.pulse1.clock() as i32;
-                let s2 = self.pulse2.clock() as i32;
-                let s3 = self.triangle.clock() as i32;
-                let s4 = self.noise.clock() as i32;
+                // Get raw channel outputs (before scaling)
+                // Pulse channels output envelope value (0-15) when active
+                let p1_raw = if self.pulse1.enabled
+                    && self.pulse1.length_counter > 0
+                    && self.pulse1.duty_output()
+                {
+                    pulse1_vol as u32
+                } else {
+                    0
+                };
 
-                // Clock DMC channel
-                // Note: DMC memory reads should be handled at the system level via clock_dmc()
-                // Here we just get the current output level for mixing
-                let s5 = self.dmc.output() as i32;
+                let p2_raw = if self.pulse2.enabled
+                    && self.pulse2.length_counter > 0
+                    && self.pulse2.duty_output()
+                {
+                    pulse2_vol as u32
+                } else {
+                    0
+                };
+
+                // Triangle outputs 4-bit value (0-15)
+                let tri_raw = if self.triangle.enabled
+                    && self.triangle.length_counter > 0
+                    && self.triangle.linear_counter > 0
+                {
+                    self.triangle.triangle_output_raw() as u32
+                } else {
+                    0
+                };
+
+                // Noise outputs envelope value (0-15) when active
+                let noise_raw = if self.noise.enabled
+                    && self.noise.length_counter > 0
+                    && (self.noise.shift_register & 1) == 0
+                {
+                    noise_vol as u32
+                } else {
+                    0
+                };
+
+                // DMC outputs 7-bit value (0-127)
+                let dmc_raw = self.dmc.output() as u32;
+
+                // Clock the channels (we still need to clock them to advance state)
+                self.pulse1.clock();
+                self.pulse2.clock();
+                self.triangle.clock();
+                self.noise.clock();
 
                 // Restore original envelope values
                 self.pulse1.envelope = saved_p1_env;
                 self.pulse2.envelope = saved_p2_env;
                 self.noise.envelope = saved_noise_env;
 
-                acc += s1 + s2 + s3 + s4 + s5;
+                // Accumulate raw values for mixing
+                pulse1_acc += p1_raw;
+                pulse2_acc += p2_raw;
+                triangle_acc += tri_raw;
+                noise_acc += noise_raw;
+                dmc_acc += dmc_raw;
             }
 
-            // NES APU non-linear mixing approximation
+            // Average the accumulated values
+            let pulse1 = (pulse1_acc / cycles) as f64;
+            let pulse2 = (pulse2_acc / cycles) as f64;
+            let triangle = (triangle_acc / cycles) as f64;
+            let noise = (noise_acc / cycles) as f64;
+            let dmc = (dmc_acc / cycles) as f64;
+
+            // Hardware-accurate non-linear mixing formulas
             // Reference: https://www.nesdev.org/wiki/APU_Mixer
-            // The NES APU uses a non-linear DAC for mixing channels.
-            // This produces a more authentic sound than simple averaging.
-
-            let avg = acc / cycles as i32;
-
-            // Non-linear mixing formulas (scaled to prevent overflow)
+            //
             // pulse_out = 95.88 / (8128 / (pulse1 + pulse2) + 100)
             // tnd_out = 159.79 / (1 / (triangle/8227 + noise/12241 + dmc/22638) + 100)
+            //
+            // These formulas model the NES's resistor network DAC, which produces
+            // a non-linear output curve that compresses loud signals.
 
-            // For simplicity, use a compromise between linear and true non-linear:
-            // Apply a gentle curve to emphasize mid-range dynamics
-            let mixed = if avg > 0 {
-                // Boost quiet sounds slightly, compress loud sounds slightly
-                let normalized = avg as f32 / 32768.0;
-                let curved = normalized.powf(0.9); // Gentle compression
-                (curved * 32768.0) as i32
-            } else if avg < 0 {
-                let normalized = -avg as f32 / 32768.0;
-                let curved = normalized.powf(0.9);
-                -(curved * 32768.0) as i32
-            } else {
-                0
+            let pulse_out = {
+                let pulse_sum = pulse1 + pulse2;
+                if pulse_sum > 0.0 {
+                    95.88 / ((8128.0 / pulse_sum) + 100.0)
+                } else {
+                    0.0
+                }
             };
 
-            out.push(mixed.clamp(-32768, 32767) as i16);
+            let tnd_out = {
+                let tnd_sum = triangle / 8227.0 + noise / 12241.0 + dmc / 22638.0;
+                if tnd_sum > 0.0 {
+                    159.79 / ((1.0 / tnd_sum) + 100.0)
+                } else {
+                    0.0
+                }
+            };
+
+            // Combine pulse and TND outputs
+            // The formulas produce values in the range:
+            // - pulse_out: 0.0 (silent) to ~0.95883 (both channels at max volume 15)
+            // - tnd_out: 0.0 (silent) to ~1.00367 (all channels at max)
+            // Total range: 0.0 to ~1.9625
+            //
+            // According to the nesdev wiki, these formulas produce the actual DAC
+            // output voltage normalized to 0-2V range. This is a DC-biased signal
+            // (always positive). We need to remove the DC component for audio playback.
+            //
+            // We use a simple first-order high-pass filter to remove DC offset:
+            //   y[n] = x[n] - x[n-1] + α * y[n-1]
+            // where α = 0.999 gives us a cutoff around 7 Hz at 44.1 kHz sample rate
+            let total = pulse_out + tnd_out;
+            
+            // High-pass filter to remove DC offset
+            const ALPHA: f64 = 0.999;
+            let filtered = total - self.hp_filter_acc;
+            self.hp_filter_acc = total - ALPHA * filtered;
+            
+            // Scale to 16-bit signed range
+            // The range after filtering is approximately [-1.96, +1.96]
+            // Scale conservatively to avoid clipping
+            let sample = (filtered * 16384.0) as i32;
+
+            out.push(sample.clamp(-32768, 32767) as i16);
         }
 
         out
