@@ -55,7 +55,27 @@ This file tracks unimplemented features, stubs, and simplified implementations a
 
 ### High
 
-**All high priority items have been resolved!** The following items were previously marked as high and have been completed:
+#### NES (Nintendo Entertainment System)
+- [ ] **Sprite 0 Hit Timing on Odd Frames**: Fix X position calculation during odd-frame skip - `crates/systems/nes/src/lib.rs:620-627,655-656`
+  - Current: Frame rendering triggers at variable dot positions (dot 0 OR first scanline rendering)
+  - Issue: Odd-frame skip (scanline 0, dot 0 skipped when rendering enabled) may cause sprite 0 hit to fire at wrong X position
+  - Impact: Games with tight sprite 0 hit timing windows (e.g., split-screen effects) may fail
+  - Needed: Ensure sprite 0 hit detection accounts for exact dot position when frame is rendered
+  - Reference: https://www.nesdev.org/wiki/PPU_frame_timing#Odd_frames
+- [ ] **APU Non-Linear Mixing**: Implement hardware-accurate mixer impedance curves - `crates/systems/nes/src/apu.rs:38`
+  - Current: Simple average mixing documented at line 38
+  - Needed: Non-linear mixing with impedance curves matching NES hardware
+  - Impact: Audio quality differs from hardware, especially with multiple channels active
+  - Formula: pulse_out = 95.88 / (8128 / (pulse1 + pulse2) + 100)
+  - Formula: tnd_out = 159.79 / (1 / (triangle/8227 + noise/12241 + dmc/22638) + 100)
+  - Reference: https://www.nesdev.org/wiki/APU_Mixer
+- [ ] **Tile Viewer CHR Data Clone Overhead**: Optimize CHR data access in tile viewer - `crates/systems/nes/src/lib.rs:343,358,362`
+  - Current: `.clone()` on CHR data (~8KB) during every tile viewer call
+  - Impact: ~240KB/sec memory allocation overhead at 30fps viewer refresh
+  - Solution: Cache CHR data clone or use `Rc<Vec<u8>>` instead of full copy
+  - Affects: GUI Inspector tile/palette/nametable viewers
+
+**All other high priority items have been resolved!** The following items were previously marked as high and have been completed:
 
 #### SMS (Sega Master System) - Completed
 - [x] **VDP Default Initialization**: Fix VDP reset to enable Mode 4 by default - `crates/systems/sms/src/vdp.rs:1035-1051`
@@ -79,6 +99,36 @@ This file tracks unimplemented features, stubs, and simplified implementations a
     2. Add per-instruction cycle adjustment based on accessed address ranges
     3. Track memory accesses in CPU core and adjust timing post-execution
   - Note: This is an optimization, not a correctness issue - all games work without it, just run slightly slower than hardware
+
+### Medium
+
+#### NES (Nintendo Entertainment System)
+- [ ] **MMC3A Mapper Support**: Implement MMC3A variant IRQ behavior - `crates/systems/nes/src/mappers/mmc3.rs:35-36`
+  - Current: Only MMC3B/C implemented (IRQ triggers after counter reaches 0)
+  - Needed: MMC3A behavior (IRQ triggers when counter==0 after reload)
+  - Impact: Rare early MMC3A cartridges will have broken scanline IRQs
+  - Note: MMC3A is extremely rare; most games use MMC3B/C revision
+  - Reference: https://www.nesdev.org/wiki/MMC3#IRQ_Specifics
+- [ ] **PPU A12 Edge Timing**: Refine A12 callback timing during rendering - `crates/systems/nes/src/ppu.rs:980,1103-1106`
+  - Current: `suppress_a12` flag toggles A12 callbacks off during `render_scanline()`, re-enables in CHR fetch
+  - Issue: May cause subtle timing issues for mappers relying on A12 edge detection at specific dot cycles
+  - Impact: MMC3 IRQ timing could be slightly inaccurate during mid-scanline rendering
+  - Note: Current implementation works for 99%+ of games, only affects edge cases
+- [ ] **Synthetic A12 Edge Generation**: Review mapper A12 edge synthesis - `crates/systems/nes/src/bus.rs:109-114`
+  - Current: `clock_mapper_a12_rising_edge()` synthesizes A12 transitions by forcing false→true
+  - Issue: May not match actual PPU cycle-accurate edges
+  - Impact: MMC3 games with complex scanline IRQ patterns may have inaccurate behavior
+  - Note: Works for standard games, may affect advanced homebrew or edge cases
+- [ ] **First Frame Register Protection**: Validate PPUADDR/PPUSCROLL write protection - `crates/systems/nes/src/ppu.rs:539`
+  - Current: PPUDATA ($2007) is read-protected on first frame (line 539)
+  - Needed: Verify PPUADDR/PPUSCROLL write protection matches hardware behavior
+  - Impact: Some edge-case games relying on first-frame PPU state may behave unexpectedly
+  - Note: Extremely rare case, most games don't access PPU during first frame
+- [ ] **Mapper State Inspection**: Expose mapper registers in debugger - `crates/systems/nes/src/debugger.rs`
+  - Current: Mapper number/name exposed but detailed state not available
+  - Needed: Bank select registers, IRQ counter state, CHR latch state
+  - Impact: Debugging mapper-related issues requires manual memory inspection
+  - Use case: Investigating MMC3 IRQ glitches, verifying bank switching behavior
 
 #### SG-1000
 - [ ] **Test ROM**: Create basic test ROM for smoke testing - `test_roms/sg1000/`
@@ -191,6 +241,40 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Impact: Hard to verify hardware accuracy without original documentation
 
 ### Low
+
+#### NES (Nintendo Entertainment System)
+- [ ] **Duplicate APU Frame Counter State**: Refactor duplicated frame counter tracking - `crates/systems/nes/src/apu.rs:203-206`
+  - Current: `frame_counter_cycles` and `irq_frame_counter_cycles` track same information separately
+  - Code comment: "duplicated to avoid rewriting audio generation"
+  - Impact: Unnecessary memory duplication; maintenance burden
+  - Solution: Unify frame counter state or document rationale for separation
+- [ ] **Duplicate Variable Extraction in PPU**: Remove redundant scroll variable extraction - `crates/systems/nes/src/ppu.rs:1032-1036,1048-1050`
+  - Current: `coarse_x`, `coarse_y`, `nt_x`, `nt_y` extracted twice identically in `render_scanline()`
+  - Impact: Unnecessary redundant calculations (minimal performance impact)
+  - Solution: Use first extraction, remove second
+- [ ] **PC Histogram Allocation**: Only allocate when instruction tracing enabled - `crates/systems/nes/src/lib.rs:589`
+  - Current: `pc_hist: Option<HashMap<u16, u16>>` allocated with capacity 1024 every frame
+  - Impact: ~60KB/sec allocation overhead even when tracing disabled
+  - Solution: Only allocate when `instruction_tracer.is_enabled()`
+- [ ] **Sprite Evaluation Optimization**: Early exit sprite iteration at 8-sprite limit - `crates/systems/nes/src/ppu.rs:1230-1314`
+  - Current: Sprite evaluation iterates all 64 sprites per scanline even when only 8 rendered
+  - Issue: Early break at `sprites_on_scanline > 8` happens too late in loop
+  - Impact: Wastes CPU cycles checking sprites 9-64 when sprite limit already reached
+  - Solution: Break immediately when 8 sprites collected (preserve overflow detection logic)
+- [ ] **RefCell Borrow & Callback Overhead in Rendering**: Batch CHR callbacks to reduce overhead - `crates/systems/nes/src/ppu.rs:1103-1106`
+  - Current: `chr_read_callback.borrow_mut()` is performed for each callback invocation; when using `chr_fetch_fast()`, callbacks are invoked explicitly per tile/sprite rather than per individual CHR fetch
+  - Impact: Repeated `RefCell` borrows and callback calls in the render hot path add overhead across a scanline/frame
+  - Solution: Reduce callback invocation frequency (e.g., batch work per tile/sprite group) or hold a mutable borrow over a larger scope (such as a scanline) to avoid repeated `borrow_mut()` calls
+  - Note: Low priority - `chr_fetch_fast()` already limits callback frequency, but further batching may yield minor performance gains
+- [ ] **Weak Pointer Upgrade Overhead**: Review mapper A12 callback performance - `crates/systems/nes/src/bus.rs:88,112-114`
+  - Current: `.upgrade()` is called from PPU CHR/A12 callback closures and runs once per callback invocation (potentially many times per scanline/frame depending on CHR reads/A12 transitions)
+  - Impact: Additional weak-to-strong pointer upgrades on each relevant callback; expected to be minimal on modern CPUs
+  - Solution: Profile actual callback frequency and optimize (e.g., cache strong references or restructure callbacks) only if a measurable impact is observed
+  - Note: Very low priority - likely negligible performance impact in practice
+- [ ] **Unreachable Panic Branch**: Use `unreachable!()` for impossible flag names - `crates/systems/nes/src/debugger.rs`
+  - Current: `panic!("Unexpected flag: {}", name)` but all flag names are pre-defined
+  - Impact: Code clarity and optimization
+  - Solution: Replace with `unreachable!()` macro
 
 #### SNES - Enhancement Chips
 - [ ] **DSP-1 Full Hardware Accuracy**: Implement Parameter command and shared projection state - `crates/systems/snes/src/coprocessors/dsp1.rs`
