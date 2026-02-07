@@ -171,6 +171,10 @@ pub struct SnesBus {
     /// Allows reading/writing the full 128KB WRAM via a 17-bit address register.
     /// Writes/reads to $2180 auto-increment the address.
     wram_port_addr: Cell<u32>,
+
+    /// Pending DMA cycles that halt the CPU
+    /// When non-zero, the CPU should not execute and these cycles should be consumed
+    pending_dma_cycles: Cell<u32>,
 }
 
 impl SnesBus {
@@ -229,6 +233,7 @@ impl SnesBus {
             memsel: 0,
 
             wram_port_addr: Cell::new(0),
+            pending_dma_cycles: Cell::new(0),
         }
     }
 
@@ -289,6 +294,26 @@ impl SnesBus {
     /// Get H/V IRQ mode for debugging/logging
     pub fn get_hv_irq_mode(&self) -> u8 {
         self.hv_irq_mode
+    }
+
+    /// Check if there are pending DMA cycles that should halt the CPU
+    pub fn has_pending_dma(&self) -> bool {
+        self.pending_dma_cycles.get() > 0
+    }
+
+    /// Get the number of pending DMA cycles
+    #[allow(dead_code)]
+    pub fn get_pending_dma_cycles(&self) -> u32 {
+        self.pending_dma_cycles.get()
+    }
+
+    /// Consume pending DMA cycles
+    /// Returns the actual number of cycles consumed
+    pub fn consume_dma_cycles(&self, cycles: u32) -> u32 {
+        let pending = self.pending_dma_cycles.get();
+        let consumed = cycles.min(pending);
+        self.pending_dma_cycles.set(pending - consumed);
+        consumed
     }
 
     /// Get mutable reference to SPC700 APU if enabled
@@ -1487,10 +1512,12 @@ impl Memory65c816 for SnesBus {
                             log(LogCategory::Bus, LogLevel::Info, || {
                                 format!("SNES Bus: Starting DMA on channels 0b{:08b}", val)
                             });
-                            // Note: In a real implementation, this would halt the CPU
-                            // and perform the DMA transfer. We'll handle this in the CPU step.
-                            // For now, we just trigger it immediately.
-                            let _cycles = self.do_dma(val);
+                            // Execute DMA transfer and set pending cycles to halt the CPU
+                            let cycles = self.do_dma(val);
+                            self.pending_dma_cycles.set(cycles);
+                            log(LogCategory::Bus, LogLevel::Debug, || {
+                                format!("SNES Bus: DMA halting CPU for {} cycles", cycles)
+                            });
                         }
                     }
                     // $420C - HDMAEN - HDMA Enable

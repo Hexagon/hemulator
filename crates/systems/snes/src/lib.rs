@@ -345,6 +345,16 @@ impl System for SnesSystem {
             // Execute CPU until end of active display portion of scanline
             // Only render on visible scanlines (0-223, total 224 scanlines)
             while self.current_cycles < scanline_target.saturating_sub(40) {
+                // Check if DMA is halting the CPU
+                if self.cpu.bus().has_pending_dma() {
+                    // Consume DMA cycles instead of executing CPU instructions
+                    let dma_cycles = self.cpu.bus().consume_dma_cycles(1);
+                    self.current_cycles += dma_cycles;
+                    self.total_cycles += dma_cycles as u64;
+                    self.cpu.bus_mut().tick_cycles(dma_cycles);
+                    continue;
+                }
+
                 let pc_before = ((self.cpu.cpu.pbr as u32) << 16) | (self.cpu.cpu.pc as u32);
                 self.cpu.bus_mut().set_last_cpu_pc(pc_before);
                 let cycles = self.cpu.step();
@@ -396,6 +406,16 @@ impl System for SnesSystem {
 
             // Complete the scanline
             while self.current_cycles < scanline_target {
+                // Check if DMA is halting the CPU
+                if self.cpu.bus().has_pending_dma() {
+                    // Consume DMA cycles instead of executing CPU instructions
+                    let dma_cycles = self.cpu.bus().consume_dma_cycles(1);
+                    self.current_cycles += dma_cycles;
+                    self.total_cycles += dma_cycles as u64;
+                    self.cpu.bus_mut().tick_cycles(dma_cycles);
+                    continue;
+                }
+
                 let pc_before = ((self.cpu.cpu.pbr as u32) << 16) | (self.cpu.cpu.pc as u32);
                 self.cpu.bus_mut().set_last_cpu_pc(pc_before);
                 let cycles = self.cpu.step();
@@ -471,6 +491,16 @@ impl System for SnesSystem {
 
         // Execute remaining VBlank cycles
         while self.current_cycles < self.frame_cycles {
+            // Check if DMA is halting the CPU
+            if self.cpu.bus().has_pending_dma() {
+                // Consume DMA cycles instead of executing CPU instructions
+                let dma_cycles = self.cpu.bus().consume_dma_cycles(1);
+                self.current_cycles += dma_cycles;
+                self.total_cycles += dma_cycles as u64;
+                self.cpu.bus_mut().tick_cycles(dma_cycles);
+                continue;
+            }
+
             let pc_before = ((self.cpu.cpu.pbr as u32) << 16) | (self.cpu.cpu.pc as u32);
             self.cpu.bus_mut().set_last_cpu_pc(pc_before);
             let cycles = self.cpu.step();

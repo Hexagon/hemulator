@@ -10,10 +10,10 @@ This file tracks unimplemented features, stubs, and simplified implementations a
 ### Critical
 
 #### SNES - Bus/Memory
-- [ ] **CPU Halt During DMA**: Implement proper DMA CPU freeze - `crates/systems/snes/src/bus.rs:1419`
-  - Current: DMA executes immediately (comment: "would halt the CPU")
-  - Needed: Freeze CPU during DMA transfers for hardware-accurate timing
-  - Impact: Game timing may be wrong if code relies on CPU being frozen
+- [x] **CPU Halt During DMA**: Implement proper DMA CPU freeze - `crates/systems/snes/src/bus.rs:1507`, `crates/systems/snes/src/lib.rs:349-398`
+  - **FIXED**: DMA now sets pending_dma_cycles which halts CPU execution
+  - CPU execution loops check for pending DMA and consume cycles instead of executing instructions
+  - Hardware-accurate timing where CPU is frozen during DMA transfers
 - [ ] **Cycle-Accurate DMA Timing**: Fix DMA cycle counting - `crates/systems/snes/src/bus.rs:440-520`
   - Current: Fixed cycles per transfer (8-16) instead of actual hardware timing
   - Needed: Account for address bus speed differences
