@@ -4,8 +4,6 @@ SG-1000 test ROM generator
 Creates a minimal Sega SG-1000 ROM that displays a checkerboard pattern using TMS9918A VDP
 """
 
-import struct
-
 def write_byte(rom, addr, value):
     """Write a byte to ROM at address"""
     rom[addr] = value & 0xFF
