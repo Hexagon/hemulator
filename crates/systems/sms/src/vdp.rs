@@ -1036,6 +1036,10 @@ impl Renderer for Vdp {
         self.vram.fill(0);
         self.cram.fill(0);
         self.registers.fill(0);
+        // Set Register 0 to 0x04 to enable Mode 4 by default
+        // Real SMS hardware defaults to Mode 4 enabled (M4 bit set)
+        // This ensures real SMS ROMs work without explicit VDP initialization
+        self.registers[0] = 0x04;
         self.address_register = 0;
         self.code_register = 0;
         self.read_buffer = 0;
