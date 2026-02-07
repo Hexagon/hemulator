@@ -94,14 +94,23 @@ RESET:
     lda #$00                ; Small = 8x8, Large = 16x16, Name base = 0, Name select = 0
     sta $2101               ; OBSEL register
     
+    ; Set up VRAM for sprite data upload
+    ; VRAM auto-increment on $2119 write
+    lda #$80
+    sta $2115               ; VRAM increment mode: +1 on high byte write
+    
     ; Set VRAM address to $0000 (sprite CHR data)
     stz $2116               ; Low byte
     stz $2117               ; High byte
     
-    ; Upload sprite tile data (one simple 8x8 sprite)
+    ; Upload sprite tile data (one simple 8x8 sprite, 4bpp = 32 bytes)
+    ; Write both low and high bytes to upload full 16-bit words
     ldx #$0000
 :   lda SpriteData, x
     sta $2118               ; Write low byte
+    inx
+    lda SpriteData, x
+    sta $2119               ; Write high byte (triggers increment)
     inx
     cpx #$0020              ; 32 bytes (1 tile * 32 bytes for 4bpp)
     bne :-
