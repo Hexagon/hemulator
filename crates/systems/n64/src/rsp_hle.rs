@@ -485,10 +485,29 @@ impl RspHle {
             )
         });
         
-        // Validate pointers are within RDRAM bounds
-        if input_ptr < rdram.len() as u32 && output_ptr < rdram.len() as u32 {
+        // Validate ranges are within RDRAM bounds (pointer + size)
+        let rdram_len = rdram.len() as u64;
+        let in_range = |ptr: u32, size: u32| -> bool {
+            let start = ptr as u64;
+            let size = size as u64;
+            // Allow zero-sized ranges; ensure start is in bounds and start+size does not overflow rdram
+            start < rdram_len && size <= rdram_len.saturating_sub(start)
+        };
+        
+        let input_ok = in_range(input_ptr, input_size);
+        let output_ok = in_range(output_ptr, output_size);
+        let cmd_ok = in_range(cmd_list_ptr, cmd_list_size);
+        
+        if input_ok && output_ok && cmd_ok {
             log(LogCategory::APU, LogLevel::Debug, || {
                 "RSP HLE Audio: Valid task structure detected".to_string()
+            });
+        } else {
+            log(LogCategory::APU, LogLevel::Warn, || {
+                format!(
+                    "RSP HLE Audio: Invalid task structure: input_ok={}, output_ok={}, cmd_ok={}",
+                    input_ok, output_ok, cmd_ok
+                )
             });
         }
         

@@ -333,7 +333,7 @@ This file tracks unimplemented features, stubs, and simplified implementations a
     - Properly applies shift/length/data to othermode_h register
     - Controls cycle type, texture filtering, dithering settings
   - Impact: Improved compatibility with games using these commands
-- [x] **Audio Microcode**: Implement RSP audio task processing - `crates/systems/n64/src/rsp_hle.rs:345-441`
+- [x] **Audio Microcode**: Implement RSP audio task processing - `crates/systems/n64/src/rsp_hle.rs:462-522`
   - **IMPLEMENTED**: Basic audio task structure parsing
     - Parses task structure from DMEM (input/output buffers, command list)
     - Validates RDRAM pointers and logs task information
