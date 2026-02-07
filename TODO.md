@@ -185,7 +185,7 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Impact: Additional weak-to-strong pointer upgrades on each relevant callback; expected to be minimal on modern CPUs
   - Solution: Profile actual callback frequency and optimize (e.g., cache strong references or restructure callbacks) only if a measurable impact is observed
   - Note: Very low priority - likely negligible performance impact in practice
-- [ ] **Unreachable Panic Branch**: Use `unreachable!()` for impossible flag names - `crates/systems/nes/src/debugger.rs:113`
+- [ ] **Unreachable Panic Branch**: Use `unreachable!()` for impossible flag names - `crates/systems/nes/src/debugger.rs`
   - Current: `panic!("Unexpected flag: {}", name)` but all flag names are pre-defined
   - Impact: Code clarity and optimization
   - Solution: Replace with `unreachable!()` macro
