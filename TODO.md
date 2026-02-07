@@ -66,6 +66,8 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Impact: Real SMS ROMs now work without requiring explicit VDP Mode 4 initialization
   - Real SMS hardware defaults to Mode 4 enabled; games without BIOS expect this default state
 
+### Medium
+
 #### SNES - Bus/Memory  
 - [ ] **FastROM Timing**: Implement FastROM memory access timing - `crates/systems/snes/src/bus.rs:1482-1486`
   - Current: MEMSEL register ($420D) written but not applied to memory access timing
@@ -77,8 +79,6 @@ This file tracks unimplemented features, stubs, and simplified implementations a
     2. Add per-instruction cycle adjustment based on accessed address ranges
     3. Track memory accesses in CPU core and adjust timing post-execution
   - Note: This is an optimization, not a correctness issue - all games work without it, just run slightly slower than hardware
-
-### Medium
 
 #### SG-1000
 - [ ] **Test ROM**: Create basic test ROM for smoke testing - `test_roms/sg1000/`
@@ -120,6 +120,7 @@ This file tracks unimplemented features, stubs, and simplified implementations a
 - [ ] **Upload Protocol Test**: Investigate SPC700 index echoing issue - `crates/systems/snes/src/lib.rs:832`, `crates/systems/snes/src/bus.rs:1605`
   - Tests currently ignored - SPC700 not echoing indices during upload
   - Affects: `test_apu_upload_protocol` and `test_apu_ports_echo`
+  - Note: This requires deep APU debugging and is not critical for general functionality
 - [x] **Sprite Rendering**: Fix sprite overflow test - `crates/systems/snes/src/lib.rs:970`, `test_roms/snes/test_sprite_overflow.s`
   - **FIXED**: Test ROM was not properly uploading sprite data to VRAM
   - Fixed by adding VRAM increment mode setup ($2115 = $80) and writing to both $2118 and $2119
@@ -132,13 +133,6 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Eliminates the previous behavior of returning 0 between samples
   - Improves audio quality and reduces clicking/popping artifacts
   - Note: This is interpolation between DSP outputs, separate from the Gaussian interpolation within the DSP for BRR sample playback
-- [ ] **PPU Refactoring**: Use helper methods to reduce code duplication - `crates/systems/snes/src/ppu.rs:2157,2185`
-  - Helper methods `get_tile_color()` exist but not yet applied to all rendering functions
-  - Impact: Code maintainability and consistency
-- [ ] **Hardware Registers $2000-$5FFF**: Implement stubbed hardware register range - `crates/systems/snes/src/bus.rs:1466`
-  - Current: Stub that ignores writes to this range
-  - Needed: Proper handling of expansion/hardware registers
-  - Impact: Some hardware features may not work
 
 #### N64
 - [x] **RSP Microcode Commands**: Implement stubbed F3DEX commands - `crates/systems/n64/src/rsp_hle.rs`
