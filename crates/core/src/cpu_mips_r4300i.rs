@@ -167,11 +167,11 @@ pub struct CpuMips<M: MemoryMips> {
     /// Next PC (for branch delay slot handling)
     /// When a branch/jump executes, this is set to the target address.
     /// After the delay slot executes, PC is updated to next_pc.
-    next_pc: u64,
+    pub(crate) next_pc: u64,
 
     /// Whether we're currently in a branch delay slot
     /// When true, the next instruction is the last before a branch takes effect
-    in_delay_slot: bool,
+    pub(crate) in_delay_slot: bool,
 
     /// HI register (for multiply/divide results)
     pub hi: u64,
@@ -1406,11 +1406,10 @@ impl<M: MemoryMips> CpuMips<M> {
                     }
                     0x18 => {
                         // ERET - Exception Return
-                        // Restore PC from EPC (this is the target, not a branch)
-                        // ERET doesn't have a delay slot, so we update next_pc directly
-                        self.next_pc = self.cp0[CP0_EPC];
-                        self.in_delay_slot = true; // Next PC will be applied after current instruction completes
-                                                   // Clear EXL bit to re-enable interrupts
+                        // ERET does NOT have a delay slot - it immediately returns to EPC
+                        // This is different from branches/jumps
+                        self.pc = self.cp0[CP0_EPC];
+                        // Clear EXL bit to re-enable interrupts
                         self.cp0[CP0_STATUS] &= !0x02;
                         self.cycles += 1;
                     }
