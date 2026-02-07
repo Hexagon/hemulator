@@ -55,6 +55,18 @@ This file tracks unimplemented features, stubs, and simplified implementations a
 
 ### High
 
+#### SMS (Sega Master System)
+- [ ] **VDP Default Initialization**: Fix VDP reset to enable Mode 4 by default - `crates/systems/sms/src/vdp.rs:1035-1051`
+  - Current: VDP reset sets all registers to 0, which leaves system in TMS mode with display blanked
+  - Problem: After reset, Register 0 = 0x00 (M4 bit clear = TMS mode), Register 1 = 0x00 (display blanked in TMS mode)
+  - Impact: Real SMS ROMs don't produce images; only test ROMs that explicitly initialize VDP work
+  - Root cause: 
+    - Register 0 bit 2 (M4) = 0 → system starts in TMS mode instead of Mode 4
+    - In TMS mode, Register 1 bit 6 = 0 → display is BLANKED
+  - Solution: Set Register 0 to 0x04 on reset to enable Mode 4 by default
+  - Testing: Test ROM works because it explicitly sets R0=0x04 and R1=0x20; real games assume Mode 4 is enabled
+  - Reference: SMS hardware likely defaults to Mode 4; BIOS would normally initialize this but games without BIOS expect Mode 4
+
 #### SNES - Bus/Memory  
 - [ ] **FastROM Timing**: Implement FastROM memory access timing - `crates/systems/snes/src/bus.rs:1482-1486`
   - Current: MEMSEL register ($420D) written but not applied to memory access timing

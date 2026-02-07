@@ -20,7 +20,7 @@ A cross-platform, multi-system console emulator written in Rust. **NES emulation
 | **NES** | ✅ Fully Working | ~90% of games via 14 mappers |
 | **Game Boy** | ✅ Fully Functional | ~99% of games; MBC0/1/2/3/5, HuC1 |
 | **CHIP-8** | ✅ Fully Working | CHIP-8/Hires/Super-CHIP/XO-CHIP/Mega-CHIP |
-| **SMS** | ✅ Fully Working | Z80 CPU, VDP, PSG; Mode 4 rendering working |
+| **SMS** | 🚧 In Development | VDP initialization issue; test ROMs work, real games don't display |
 | **ColecoVision** | 🚧 In Development | Not producing image; full hardware emulation |
 | **SG-1000** | ⚠️ Experimental | Full hardware emulation |
 | **Atari 2600** | 🚧 In Development | Most cartridge formats; rendering WIP |
