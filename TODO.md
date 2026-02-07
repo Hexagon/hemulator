@@ -102,6 +102,20 @@ This file tracks unimplemented features, stubs, and simplified implementations a
 
 ### Medium
 
+**SG-1000 items completed in this PR:**
+
+#### SG-1000 (Completed)
+- [x] **Test ROM**: Create basic test ROM for smoke testing - `test_roms/sg1000/`
+  - **COMPLETED**: Created Python-based test ROM generator following SMS/ColecoVision pattern
+  - Test ROM displays checkerboard pattern using TMS9918A VDP in Graphics I mode
+  - Added smoke test to `crates/systems/sg1000/src/lib.rs`
+  - Built ROM: `test_roms/sg1000/test.sg` (32KB)
+  - Impact: Automated verification of ROM loading and basic system functionality
+- [x] **Controller API Refinement**: Add type-safe controller methods - `crates/systems/sg1000/src/system.rs`, `crates/systems/sg1000/src/bus.rs`
+  - **COMPLETED**: Added explicit `set_controller1(state: u8)` and `set_controller2(state: u8)` methods
+  - Follows ColecoVision pattern for consistency
+  - Kept generic `set_controller(port, state)` method for backward compatibility
+  - Impact: Better API design with type safety
 #### NES (Nintendo Entertainment System)
 - [ ] **MMC3A Mapper Support**: Implement MMC3A variant IRQ behavior - `crates/systems/nes/src/mappers/mmc3.rs:35-36`
   - Current: Only MMC3B/C implemented (IRQ triggers after counter reaches 0)
@@ -391,9 +405,4 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Current: Fixed 48KB ROM space (0x0000-0xBFFF)
   - Most SG-1000 games are under 48KB, so not critical
   - Impact: Cannot run games larger than 48KB (rare)
-- [ ] **Controller API Refinement**: Add type-safe controller methods - `crates/systems/sg1000/src/system.rs`
-  - Current: Generic `set_controller(port: u8, state: u8)` method
-  - Consider: Explicit `set_controller1(state: u8)` and `set_controller2(state: u8)` methods
-  - Follow ColecoVision pattern for consistency
-  - Impact: Better API design and type safety
 
