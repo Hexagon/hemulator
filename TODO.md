@@ -172,5 +172,3 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Follow ColecoVision pattern for consistency
   - Impact: Better API design and type safety
 
-#### Chores
-- [ ] Update dependencies (cargo)
