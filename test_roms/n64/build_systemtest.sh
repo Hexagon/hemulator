@@ -27,6 +27,12 @@ if [ ! -d "n64-systemtest" ]; then
 fi
 
 # Navigate to n64-systemtest directory
+if [ ! -d "n64-systemtest" ]; then
+    echo "ERROR: 'n64-systemtest' directory not found."
+    echo "If this repository uses git submodules, try running:"
+    echo "  git submodule update --init --recursive"
+    exit 1
+fi
 cd n64-systemtest
 
 # Build the test ROM (default feature set)
