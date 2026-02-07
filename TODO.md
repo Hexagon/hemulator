@@ -112,10 +112,13 @@ This file tracks unimplemented features, stubs, and simplified implementations a
 - [ ] **Sprite Rendering**: Fix sprite rendering issues - `crates/systems/snes/src/lib.rs:970`
   - Test ignored: `test_sprite_overflow_rom` - "SNES sprite rendering not fully implemented yet - sprites not showing up"
   - Impact: Sprite overflow detection not working
-- [ ] **Sample Interpolation**: Improve SPC700 sample quality - `crates/core/src/apu/spc700.rs:638`
-  - Current: Basic interpolation
-  - Needed: Proper sample interpolation for better audio quality
-  - Code comment: "TODO: Implement proper sample interpolation"
+- [x] **Sample Interpolation**: Improve SPC700 sample quality - `crates/core/src/apu/spc700.rs:629-655`
+  - **FIXED**: Implemented linear interpolation between DSP output samples
+  - DSP generates samples every 32 CPU cycles (32kHz)
+  - Linear interpolation smoothly fills the gaps between DSP samples
+  - Eliminates the previous behavior of returning 0 between samples
+  - Improves audio quality and reduces clicking/popping artifacts
+  - Note: This is interpolation between DSP outputs, separate from the Gaussian interpolation within the DSP for BRR sample playback
 - [ ] **PPU Refactoring**: Use helper methods to reduce code duplication - `crates/systems/snes/src/ppu.rs:2157,2185`
   - Helper methods `get_tile_color()` exist but not yet applied to all rendering functions
   - Impact: Code maintainability and consistency
