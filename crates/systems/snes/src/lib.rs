@@ -498,6 +498,14 @@ impl System for SnesSystem {
                 self.current_cycles += dma_cycles;
                 self.total_cycles += dma_cycles as u64;
                 self.cpu.bus_mut().tick_cycles(dma_cycles);
+
+                // Check for NMI that may have become pending during DMA
+                if self.cpu.bus_mut().ppu_mut().take_nmi_pending() {
+                    log(LogCategory::Interrupts, LogLevel::Debug, || {
+                        "SNES: NMI triggered during DMA".to_string()
+                    });
+                    self.cpu.cpu.trigger_nmi();
+                }
                 continue;
             }
 
