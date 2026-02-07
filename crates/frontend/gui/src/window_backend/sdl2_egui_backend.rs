@@ -195,12 +195,21 @@ impl Sdl2EguiBackend {
     /// End an egui frame and render
     pub fn end_frame(&mut self) {
         let egui::FullOutput {
-            platform_output: _,
+            platform_output,
             textures_delta,
             shapes,
             pixels_per_point,
             viewport_output: _,
         } = self.egui_ctx.end_pass();
+
+        // Handle URL opening requests from egui (e.g., hyperlink clicks)
+        for command in platform_output.commands {
+            if let egui::OutputCommand::OpenUrl(open_url) = command {
+                if let Err(e) = open::that(&open_url.url) {
+                    eprintln!("Failed to open URL {}: {}", open_url.url, e);
+                }
+            }
+        }
 
         // Paint
         let clipped_primitives = self.egui_ctx.tessellate(shapes, pixels_per_point);

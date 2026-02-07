@@ -126,7 +126,11 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Reference: https://sneslab.net/wiki/H/V_Count_Timer
 
 #### UI
-- [ ] Make links in about tab work
+- [x] **Make links in about tab work** - `crates/frontend/gui/src/window_backend/sdl2_egui_backend.rs:206-212`
+  - Implemented egui OutputCommand::OpenUrl handling in end_frame()
+  - Hyperlinks now properly open in default browser via open crate
+  - Fixed: Previously platform_output.commands were ignored
+  - Impact: All hyperlinks in About tab now functional
 - [ ] Check that áll systems has the enhanced debugger state
 
 #### SNES
