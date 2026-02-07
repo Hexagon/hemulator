@@ -507,14 +507,9 @@ mod tests {
         assert_eq!(frame.height, 240);
     }
 
-    // Note: N64 smoke tests removed as the simple test ROMs don't work in known-good emulators.
+    // N64 smoke tests have been removed as the simple test ROMs don't work in known-good emulators.
     // For comprehensive N64 testing, use n64-systemtest: https://github.com/lemmy-64/n64-systemtest
     // See test_roms/n64/README.md for details on building and running n64-systemtest.
-
-    // Additional tests removed: test_ipl3_boot_complete, test_enhanced_rom_interrupts, test_pong3d_rom_rendering
-    // These tests depended on the removed test ROMs (test.z64, test_enhanced.z64, test_pong3d.z64)
-    // For N64 testing, use n64-systemtest instead: https://github.com/lemmy-64/n64-systemtest
-
 
     #[test]
     #[ignore] // Requires OpenGL context

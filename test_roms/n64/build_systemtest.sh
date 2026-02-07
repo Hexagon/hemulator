@@ -2,7 +2,7 @@
 # Build script for n64-systemtest test ROM
 # This builds the comprehensive N64 test suite from @lemmy-64/n64-systemtest
 
-set -e
+set -euo pipefail
 
 echo "Building n64-systemtest ROM..."
 
@@ -13,9 +13,17 @@ if ! command -v cargo &> /dev/null; then
 fi
 
 # Check if nust64 is installed
-if ! cargo install --list | grep -q "nust64"; then
+if ! command -v nust64 &> /dev/null; then
     echo "Installing nust64 (N64 ROM builder)..."
     cargo +stable install nust64
+fi
+
+# Check if submodule has been initialized
+if [ ! -d "n64-systemtest" ]; then
+    echo "ERROR: 'n64-systemtest' directory not found."
+    echo "If this repository uses git submodules, try running:"
+    echo "  git submodule update --init --recursive"
+    exit 1
 fi
 
 # Navigate to n64-systemtest directory
