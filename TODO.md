@@ -131,7 +131,11 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Hyperlinks now properly open in default browser via open crate
   - Fixed: Previously platform_output.commands were ignored
   - Impact: All hyperlinks in About tab now functional
-- [ ] Check that áll systems has the enhanced debugger state
+- [x] **Check that all systems have the enhanced debugger state** - `crates/frontend/gui/src/main.rs:3623-3685`
+  - Added enhanced debug state support for all emulated systems
+  - Game Boy, Atari 2600, PC, N64, CHIP-8, ColecoVision, and SG-1000 now included
+  - Previously only NES, SMS, and SNES had enhanced debug state
+  - Impact: Debug panel now works consistently across all systems
 
 #### SNES
 - [ ] **Upload Protocol Test**: Investigate SPC700 index echoing issue - `crates/systems/snes/src/lib.rs:832`, `crates/systems/snes/src/bus.rs:1605`
