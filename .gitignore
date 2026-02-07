@@ -41,6 +41,7 @@ debug_run.txt
 *.backup
 *~
 .*.swp
+*.orig
 
 # Anti-ignores
 !workbench/workbench.hemu
