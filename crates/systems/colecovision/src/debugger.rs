@@ -103,4 +103,86 @@ impl Debugger for ColecoVisionSystem {
 
         state
     }
+
+    emu_core::impl_debugger_execution_history!();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_colecovision_memory_regions() {
+        let system = ColecoVisionSystem::new();
+        let regions = system.get_memory_regions();
+
+        // Should have 4 memory regions
+        assert_eq!(regions.len(), 4);
+
+        // Check BIOS region
+        let bios = regions.iter().find(|r| r.name == "BIOS");
+        assert!(bios.is_some());
+        let bios = bios.unwrap();
+        assert_eq!(bios.start, 0x0000);
+        assert_eq!(bios.end, 0x1FFF);
+        assert!(bios.readable);
+        assert!(!bios.writable);
+
+        // Check RAM region
+        let ram = regions.iter().find(|r| r.name == "RAM");
+        assert!(ram.is_some());
+        let ram = ram.unwrap();
+        assert_eq!(ram.start, 0x6000);
+        assert_eq!(ram.end, 0x63FF);
+        assert!(ram.readable);
+        assert!(ram.writable);
+    }
+
+    #[test]
+    fn test_colecovision_cpu_state() {
+        let system = ColecoVisionSystem::new();
+        let state = system.get_cpu_state();
+
+        // Should have all Z80 registers
+        assert!(state.registers.iter().any(|r| r.name == "A"));
+        assert!(state.registers.iter().any(|r| r.name == "B"));
+        assert!(state.registers.iter().any(|r| r.name == "C"));
+        assert!(state.registers.iter().any(|r| r.name == "D"));
+        assert!(state.registers.iter().any(|r| r.name == "E"));
+        assert!(state.registers.iter().any(|r| r.name == "H"));
+        assert!(state.registers.iter().any(|r| r.name == "L"));
+        assert!(state.registers.iter().any(|r| r.name == "F"));
+        assert!(state.registers.iter().any(|r| r.name == "SP"));
+        assert!(state.registers.iter().any(|r| r.name == "IX"));
+        assert!(state.registers.iter().any(|r| r.name == "IY"));
+        assert!(state.registers.iter().any(|r| r.name == "I"));
+        assert!(state.registers.iter().any(|r| r.name == "R"));
+
+        // Should have flags in correct order (S Z H P/V N C IFF1 IFF2)
+        assert_eq!(state.flags.flags.len(), 8);
+        let flag_names: Vec<&str> = state
+            .flags
+            .flags
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect();
+        assert_eq!(
+            flag_names,
+            vec!["S", "Z", "H", "P/V", "N", "C", "IFF1", "IFF2"]
+        );
+    }
+
+    #[test]
+    fn test_colecovision_read_memory() {
+        let system = ColecoVisionSystem::new();
+
+        // Should be able to read from valid addresses
+        let memory = system.read_memory(0x0000, 16);
+        assert!(memory.is_some());
+        assert_eq!(memory.unwrap().len(), 16);
+
+        // Should return None for invalid addresses
+        let invalid = system.read_memory(0x10000, 1);
+        assert!(invalid.is_none());
+    }
 }

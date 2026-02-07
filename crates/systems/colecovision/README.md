@@ -81,8 +81,23 @@ Full save state support includes:
 
 ## System Requirements
 
-The ColecoVision requires a BIOS ROM to boot, which must be provided separately via the mount points system:
+The ColecoVision requires a BIOS ROM to boot. The emulator supports loading BIOS via:
 
+1. **Command-line argument** (recommended):
+   ```bash
+   hemu --bios coleco.rom game.col
+   ```
+
+2. **Auto-detection**: If `--bios` is not specified, the emulator automatically searches for BIOS files in the same directory as the cartridge ROM using these filenames:
+   - `coleco.rom`
+   - `coleco.bin`
+   - `bios.rom`
+   - `bios.bin`
+   - `ColecoVision BIOS (1982).col`
+
+The BIOS must be 8KB (8192 bytes) in size.
+
+**Mount points:**
 - **BIOS**: 8 KB system ROM (required)
 - **Cartridge**: Game ROM up to 32 KB (required)
 
@@ -139,9 +154,16 @@ The 12-key numeric keypad is read separately from the main controller state in t
 - No tape/disk drive support
 - Controllers limited to standard joystick (no Super Action Controllers, spinners, etc.)
 - Numeric keypad (12 keys) not fully implemented - only joystick and fire buttons currently functional
-- Audio output currently stubbed (PSG implemented but not connected to audio pipeline)
 
 ## Recent Improvements
+
+### Audio Pipeline Integration (February 2026)
+- **PSG Audio Now Functional**: Complete audio pipeline integration with frontend
+  - SN76489 PSG now generates and outputs audio samples to the frontend
+  - Cycle-accurate audio generation matching SMS implementation
+  - PSG properly resets on system reset
+  - Audio quality: 44.1 kHz mono output with exponential volume curve
+- **Impact**: Games now have sound! All 3 tone channels and 1 noise channel working correctly
 
 ### VDP Edge Cases (January 2026)
 - **Sprite Collision Detection**: Now uses dedicated sprite buffer instead of color comparison, correctly detecting sprite-to-sprite overlap
@@ -217,13 +239,28 @@ hemu --system coleco ...  # Shorter alias
 
 ## Testing
 
-Currently no test ROM or smoke tests are implemented. Test ROMs can be created using:
-- z80asm assembler
-- SDCC (Small Device C Compiler) for Z80
+Test ROM and smoke tests are now implemented:
 
-Example test ROM structure would verify:
-- VDP initialization and mode switching
-- Pattern/color table loading
-- Sprite rendering
-- Controller input
-- Audio output
+**Test ROM** (`test_roms/colecovision/test.col`):
+- Production-like test ROM demonstrating Graphics II mode
+- 4 horizontal colored bands (white, red, green, cyan)
+- 2 sprites (yellow and magenta)
+- Built using Python ROM generator (`build_rom.py`)
+
+**Smoke Tests** (`crates/systems/colecovision/src/lib.rs`):
+- `smoke_test_colecovision` - Manual VDP initialization test (passing)
+- `smoke_test_colecovision_manual` - Direct VDP rendering test (passing)
+- Unit tests for VDP address wrapping, save states, sprite transparency
+
+To build the test ROM:
+```bash
+cd test_roms/colecovision
+python3 build_rom.py
+# or
+./build.sh
+```
+
+To run tests:
+```bash
+cargo test --package emu_colecovision
+```

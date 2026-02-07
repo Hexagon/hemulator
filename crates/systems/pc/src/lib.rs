@@ -313,6 +313,82 @@ impl PcSystem {
         (self.video.fb_width(), self.video.fb_height())
     }
 
+    /// Get audio samples from the PC speaker
+    ///
+    /// Generates audio samples based on the PIT channel 2 (PC speaker) output.
+    /// The PC speaker's cone position directly follows the PIT output state:
+    /// high = cone in one position, low = cone in opposite position.
+    ///
+    /// # Arguments
+    /// * `count` - Number of samples to generate (typically for one frame)
+    ///
+    /// # Returns
+    /// Vector of 16-bit audio samples at 44.1 kHz sample rate
+    pub fn get_audio_samples(&self, count: usize) -> Vec<i16> {
+        const SAMPLE_RATE: f64 = 44_100.0; // Standard audio sample rate
+        const AMPLITUDE: i16 = 8192; // Quarter of max 16-bit range for reasonable volume
+
+        let mut samples = Vec::with_capacity(count);
+
+        // Get speaker state from PIT channel 2
+        let speaker_enabled = self.cpu.bus().speaker_gate_enabled();
+
+        // If speaker is disabled, generate silence
+        if !speaker_enabled {
+            samples.resize(count, 0);
+            return samples;
+        }
+
+        // Get the current frequency from PIT channel 2
+        let frequency = self.cpu.bus().pit.speaker_frequency();
+
+        // If the frequency is zero, negative or non-finite, treat as silence
+        if !frequency.is_finite() || frequency <= 0.0 {
+            samples.resize(count, 0);
+            return samples;
+        }
+
+        // The PIT output toggles at the specified frequency in square wave mode.
+        // We sample this output state at the audio sample rate.
+        // Since the PIT state changes over time and we can't retroactively sample it,
+        // we approximate by generating a square wave at the PIT frequency.
+        //
+        // Note: This is a simplified implementation. A more accurate version would
+        // maintain PIT state and sample it at precise intervals, but this approximation
+        // works well for most PC speaker applications.
+
+        let speaker_output = self.cpu.bus().pit.speaker_output();
+        let samples_per_cycle = SAMPLE_RATE / frequency;
+
+        for i in 0..count {
+            // Calculate phase within the current cycle (0.0 to 1.0)
+            let phase = (i as f64 % samples_per_cycle) / samples_per_cycle;
+
+            // The speaker cone follows the PIT output state
+            // In square wave mode, output toggles: high for half period, low for half period
+            // We use the current output state as the initial state
+            let sample = if speaker_output {
+                // Start high
+                if phase < 0.5 {
+                    AMPLITUDE
+                } else {
+                    -AMPLITUDE
+                }
+            } else {
+                // Start low
+                if phase < 0.5 {
+                    -AMPLITUDE
+                } else {
+                    AMPLITUDE
+                }
+            };
+
+            samples.push(sample);
+        }
+
+        samples
+    }
+
     /// Trigger boot sector loading (called before first execution or on reset)
     fn ensure_boot_sector_loaded(&mut self) {
         self.cpu.bus_mut().load_boot_sector();

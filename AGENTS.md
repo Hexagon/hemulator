@@ -333,6 +333,37 @@ ROM loading workflow:
 4. ROM hash is calculated for save state management
 5. Last ROM path is saved to settings for auto-load on next start
 
+### BIOS Support
+
+Some systems support or require a separate BIOS file:
+- **ColecoVision**: BIOS required (8KB ROM)
+- **SMS**: BIOS optional (for compatibility)
+- **PC**: BIOS optional (has default BIOS, custom BIOS can be loaded)
+
+**Command-line BIOS loading:**
+```bash
+# ColecoVision with BIOS
+hemu --bios coleco.rom game.col
+
+# SMS with BIOS
+hemu --bios bios.sms game.sms
+
+# PC with custom BIOS and floppy
+hemu --bios custom.bin --slot2 boot.img
+```
+
+**Auto-detection fallback:**
+If `--bios` is not specified, the emulator will automatically search for BIOS files in the same directory as the ROM using common filenames:
+- ColecoVision: `coleco.rom`, `coleco.bin`, `bios.rom`, `bios.bin`
+- SMS: `bios.sms`, `sms.rom`, `sms.bin`, `bios.rom`, `bios.bin`
+
+**PC system BIOS:**
+For PC systems, `--bios` is an alternative to `--slot1`. Both work identically:
+```bash
+hemu --bios custom.bin --slot2 boot.img  # Using --bios
+hemu --slot1 custom.bin --slot2 boot.img # Using --slot1 (equivalent)
+```
+
 ### Save States
 
 Save states are stored in `/saves/<rom_hash>/states.json` relative to the executable:

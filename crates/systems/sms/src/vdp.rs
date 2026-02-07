@@ -14,6 +14,12 @@ use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::renderer::Renderer;
 use emu_core::types::Frame;
 
+// Rendering metadata constants
+// During rendering, we use the upper 8 bits of the pixel value to store metadata
+// that is cleaned up before the frame is presented to the user
+const PRIORITY_BIT: u32 = 0x01000000; // Bit 24: Background tile has priority over sprites
+const RGB_MASK: u32 = 0x00FFFFFF; // Lower 24 bits: RGB color value (0xRRGGBB)
+
 /// VDP state and rendering
 pub struct Vdp {
     // Video RAM (16KB)
@@ -81,6 +87,76 @@ impl Vdp {
         self.timing_mode = mode;
     }
 
+    /// Get the current video mode
+    /// Returns (mode_4_enabled, tms_mode)
+    /// TMS modes: 0 = Graphics I, 1 = Text, 2 = Graphics II, 3 = Multicolor
+    fn get_video_mode(&self) -> (bool, u8) {
+        let m4 = (self.registers[0] & 0x04) != 0; // Register 0, bit 2
+
+        if m4 {
+            return (true, 0); // Mode 4 (SMS native mode)
+        }
+
+        // TMS9918A mode detection (when M4=0)
+        // M1 = Register 1, bit 4
+        // M2 = Register 1, bit 3
+        // M3 = Register 0, bit 1
+        let m1 = (self.registers[1] >> 4) & 1;
+        let m2 = (self.registers[1] >> 3) & 1;
+        let m3 = (self.registers[0] >> 1) & 1;
+
+        let tms_mode = match (m3, m2, m1) {
+            (0, 0, 0) => 0, // Graphics I
+            (0, 1, 0) => 1, // Text
+            (1, 0, 0) => 2, // Graphics II
+            (0, 0, 1) => 3, // Multicolor
+            _ => 0,         // Default to Graphics I for invalid combinations
+        };
+
+        (false, tms_mode)
+    }
+
+    /// Get the active display height based on current mode
+    fn get_display_height(&self) -> u32 {
+        let m4 = (self.registers[0] & 0x04) != 0; // M4 (Mode 4 enable)
+
+        if m4 {
+            // Mode 4 (SMS): Check M2, M1, M3 for resolution
+            let m2 = (self.registers[0] & 0x02) != 0; // Register 0, bit 1
+            let m1 = (self.registers[1] & 0x10) != 0; // Register 1, bit 4
+            let m3 = (self.registers[1] & 0x08) != 0; // Register 1, bit 3
+
+            if m2 {
+                // M2=1 allows M1 and M3 to select height
+                if m3 && m1 {
+                    192 // Both M1 and M3 set: default 192
+                } else if m3 {
+                    240 // M3 set: 240-line mode
+                } else if m1 {
+                    224 // M1 set: 224-line mode
+                } else {
+                    192 // Neither set: 192 lines
+                }
+            } else {
+                192 // M2=0: standard 192 lines
+            }
+        } else {
+            // TMS modes always use 192 lines
+            192
+        }
+    }
+
+    /// Update frame buffer size based on current display mode
+    fn update_frame_size(&mut self) {
+        let new_height = self.get_display_height();
+        if self.frame.height != new_height {
+            log(LogCategory::PPU, LogLevel::Info, || {
+                format!("SMS VDP: Resizing frame buffer to 256x{}", new_height)
+            });
+            self.frame = Frame::new(256, new_height);
+        }
+    }
+
     /// Write to VDP control port (0xBF)
     pub fn write_control(&mut self, data: u8) {
         if !self.write_latch {
@@ -125,6 +201,12 @@ impl Vdp {
                         log(LogCategory::PPU, LogLevel::Info, || {
                             format!("SMS VDP: Register R{} = ${:02X}", reg, value)
                         });
+
+                        // Check if this register write affects display height
+                        // Registers 0 and 1 contain mode bits
+                        if reg == 0 || reg == 1 {
+                            self.update_frame_size();
+                        }
                     }
                 }
                 _ => {
@@ -235,10 +317,12 @@ impl Vdp {
     /// Step VDP by one scanline
     #[allow(dead_code)]
     pub fn step_scanline(&mut self) {
-        if self.scanline < 192 {
+        let display_height = self.get_display_height() as u16;
+
+        if self.scanline < display_height {
             // Render visible scanline
             self.render_scanline(self.scanline as u8);
-        } else if self.scanline == 192 {
+        } else if self.scanline == display_height {
             // Frame interrupt occurs at start of VBlank
             self.vblank_flag = true;
             if (self.registers[1] & 0x20) != 0 {
@@ -265,18 +349,21 @@ impl Vdp {
 
         self.scanline = scanline;
 
+        // Get the active display height
+        let display_height = self.get_display_height() as u16;
+
         // Render any scanlines that were crossed
         if scanline < old_scanline {
             // Wrapped around to new frame
-            // Render remaining scanlines from old_scanline to end of visible area (192)
-            for line in old_scanline..192 {
+            // Render remaining scanlines from old_scanline to end of visible area
+            for line in old_scanline..display_height {
                 self.render_scanline(line as u8);
             }
             // Render scanlines from start of new frame up to and including current scanline
-            for line in 0..=scanline.min(191) {
+            for line in 0..=scanline.min(display_height - 1) {
                 self.render_scanline(line as u8);
             }
-            // Check for frame interrupt at scanline 192
+            // Check for frame interrupt at end of visible area
             self.vblank_flag = true;
             if (self.registers[1] & 0x20) != 0 {
                 self.frame_interrupt_pending = true;
@@ -284,15 +371,16 @@ impl Vdp {
         } else {
             // Normal forward progress within same frame
             // Render all scanlines from old_scanline+1 up to and including scanline
-            for line in (old_scanline + 1)..=scanline.min(191) {
+            for line in (old_scanline + 1)..=scanline.min(display_height - 1) {
                 self.render_scanline(line as u8);
             }
-            // Check for frame interrupt when crossing scanline 192
-            if old_scanline < 192 && scanline >= 192 {
+            // Check for frame interrupt when crossing into VBlank
+            if old_scanline < display_height
+                && scanline >= display_height
+                && (self.registers[1] & 0x20) != 0
+            {
                 self.vblank_flag = true;
-                if (self.registers[1] & 0x20) != 0 {
-                    self.frame_interrupt_pending = true;
-                }
+                self.frame_interrupt_pending = true;
             }
         }
     }
@@ -448,8 +536,10 @@ impl Vdp {
 
     /// Render a single scanline
     fn render_scanline(&mut self, line: u8) {
+        let display_height = self.get_display_height() as u8;
+
         // Handle line counter and line interrupts
-        if line < 192 {
+        if line < display_height {
             if self.line_counter == 0 {
                 // Reload line counter from register 10
                 self.line_counter = self.registers[10];
@@ -461,7 +551,7 @@ impl Vdp {
             } else {
                 self.line_counter = self.line_counter.wrapping_sub(1);
             }
-        } else if line == 192 {
+        } else if line == display_height {
             // Reset line counter at start of VBlank
             self.line_counter = self.registers[10];
         }
@@ -476,9 +566,17 @@ impl Vdp {
         // Check if Mode 4 is enabled (register 0, bit 2)
         let mode_4_enabled = (self.registers[0] & 0x04) != 0;
 
-        // In Mode 4, display is always on (bit 6 of register 1 controls 224-line mode)
-        // In TMS modes (0-3), bit 6 of register 1 controls display blanking (0=blank, 1=display)
-        let display_enabled = mode_4_enabled || (self.registers[1] & 0x40) != 0;
+        // Display enable logic differs between Mode 4 and TMS modes
+        let display_enabled = if mode_4_enabled {
+            // In Mode 4 (SMS mode):
+            // - Bit 6 of register 1 is BLK (blank bit): 1=blank, 0=display
+            (self.registers[1] & 0x40) == 0 // Display when BLK=0
+        } else {
+            // In TMS modes (0-3) for backward compatibility:
+            // - Bit 6 of register 1 controls display: 1=display, 0=blank
+            // - TMS9918A uses opposite polarity from Mode 4
+            (self.registers[1] & 0x40) != 0 // Display when bit 6=1
+        };
 
         // Render background if display enabled
         if display_enabled {
@@ -494,6 +592,26 @@ impl Vdp {
 
     /// Render background layer for a scanline
     fn render_background(&mut self, line: u8, line_offset: usize) {
+        // Check which mode we're in
+        let (mode_4, tms_mode) = self.get_video_mode();
+
+        if mode_4 {
+            // SMS Mode 4 rendering (current implementation)
+            self.render_mode4_background(line, line_offset);
+        } else {
+            // TMS9918A mode rendering
+            match tms_mode {
+                0 => self.render_tms_graphics1(line, line_offset),
+                1 => self.render_tms_text(line, line_offset),
+                2 => self.render_tms_graphics2(line, line_offset),
+                3 => self.render_tms_multicolor(line, line_offset),
+                _ => {} // Invalid mode, do nothing
+            }
+        }
+    }
+
+    /// Render Mode 4 (SMS native) background for a scanline
+    fn render_mode4_background(&mut self, line: u8, line_offset: usize) {
         let name_table_addr = ((self.registers[2] as u16) & 0x0E) << 10;
 
         // Get scroll values
@@ -523,10 +641,17 @@ impl Vdp {
             let tile_data_high = self.vram[(name_addr + 1) as usize];
             let tile_data = tile_data_low as u16 | ((tile_data_high as u16) << 8);
 
+            // SMS Mode 4 name table format (16-bit):
+            // Bits 0-8: Tile index (9 bits, 512 tiles max)
+            // Bit 9: Horizontal flip
+            // Bit 10: Vertical flip
+            // Bit 11: Palette select (0 or 1)
+            // Bit 12: Priority (1 = sprite behind bg, 0 = sprite in front)
             let tile_index = tile_data & 0x1FF;
-            let palette = ((tile_data >> 11) & 1) as usize;
             let h_flip = (tile_data >> 9) & 1;
             let v_flip = (tile_data >> 10) & 1;
+            let palette = ((tile_data >> 11) & 1) as usize;
+            let priority = (tile_data >> 12) & 1;
 
             // Calculate pixel position within tile
             let px = if h_flip != 0 { 7 - pixel_x } else { pixel_x };
@@ -554,7 +679,14 @@ impl Vdp {
             if pixel != 0 {
                 let color_index = palette * 16 + pixel as usize;
                 let color = self.decode_color(self.cram[color_index] & 0x3F);
-                self.frame.pixels[line_offset + x as usize] = color;
+                // Store both the color and priority bit for sprite rendering
+                // Priority: if bit 12 is set, sprites should render behind this pixel
+                let pixel_data = if priority != 0 {
+                    color | PRIORITY_BIT // Set priority bit (sprite behind bg)
+                } else {
+                    color
+                };
+                self.frame.pixels[line_offset + x as usize] = pixel_data;
             }
         }
     }
@@ -563,26 +695,26 @@ impl Vdp {
     fn render_sprites(&mut self, line: u8, line_offset: usize) {
         let sprite_attr_table = ((self.registers[5] as u16) & 0x7E) << 7;
         let sprite_size = if (self.registers[1] & 0x02) != 0 {
-            16
+            16 // 16x16 sprites (zoomed/double-size mode)
         } else {
-            8
+            8 // 8x8 sprites
         };
 
         let mut sprites_on_line = 0;
 
         // Track which pixels have sprites for collision detection
-        // Using a simple array for the scanline
         let mut sprite_pixels = [false; 256];
 
-        // Sprites are rendered in reverse order (higher priority first)
+        // Sprites are rendered in reverse order (sprite 0 has highest priority)
         for i in (0..64).rev() {
             let y = self.vram[(sprite_attr_table + i) as usize];
 
-            // Check for end marker
+            // Check for end marker (Y = 0xD0 terminates sprite list)
             if y == 0xD0 {
                 break;
             }
 
+            // Y position is offset by 1
             let y_pos = y.wrapping_add(1);
             if line < y_pos || line >= y_pos + sprite_size {
                 continue;
@@ -599,11 +731,28 @@ impl Vdp {
             let x_pos = self.vram[(sprite_attr_table + 128 + i * 2) as usize];
             let tile_num = self.vram[(sprite_attr_table + 128 + i * 2 + 1) as usize];
 
-            // Calculate sprite row
+            // Calculate sprite row within the sprite (0-7 for 8x8, 0-15 for 16x16)
             let sprite_y = line - y_pos;
 
-            // Read tile pattern (once per sprite row, not per pixel)
-            let tile_addr = (tile_num as u16) * 32 + (sprite_y as u16) * 4;
+            // For 16x16 sprites in Mode 4:
+            // - Uses 2 tiles vertically (tile N and tile N+1)
+            // - Each tile is still 8 pixels wide
+            // - Pattern reads from consecutive tiles
+            let (actual_tile, actual_y) = if sprite_size == 16 {
+                // 16x16 mode: sprite_y can be 0-15
+                // Rows 0-7: use tile N, rows 8-15: use tile N+1
+                if sprite_y < 8 {
+                    (tile_num, sprite_y)
+                } else {
+                    (tile_num.wrapping_add(1), sprite_y - 8)
+                }
+            } else {
+                // 8x8 mode: sprite_y is already 0-7
+                (tile_num, sprite_y)
+            };
+
+            // Read tile pattern for this row
+            let tile_addr = (actual_tile as u16) * 32 + (actual_y as u16) * 4;
             if tile_addr >= 0x3FFC {
                 continue;
             }
@@ -613,7 +762,9 @@ impl Vdp {
             let byte2 = self.vram[(tile_addr + 2) as usize];
             let byte3 = self.vram[(tile_addr + 3) as usize];
 
-            // Render sprite pixels
+            // Render sprite pixels (always 8 pixels wide per tile, even in 16x16 mode)
+            // For 16x16 sprites, this renders one 8x16 column
+            // SMS hardware vertically doubles sprites but keeps them 8 pixels wide
             for px in 0..8u8 {
                 let x = x_pos.wrapping_add(px);
                 if x as u16 >= 256 {
@@ -630,7 +781,7 @@ impl Vdp {
                 if pixel != 0 {
                     let x_index = x as usize;
 
-                    // Check for sprite collision
+                    // Check for sprite collision (two non-transparent sprite pixels overlap)
                     if sprite_pixels[x_index] {
                         self.sprite_collision = true;
                     }
@@ -638,11 +789,250 @@ impl Vdp {
                     // Mark this pixel as having a sprite
                     sprite_pixels[x_index] = true;
 
-                    let color_index = 16 + pixel as usize; // Sprites use second palette
-                    let color = self.decode_color(self.cram[color_index] & 0x3F);
-                    self.frame.pixels[line_offset + x_index] = color;
+                    // Check if background pixel has priority bit set
+                    let bg_pixel = self.frame.pixels[line_offset + x_index];
+                    let bg_has_priority = (bg_pixel & PRIORITY_BIT) != 0;
+
+                    // Only render sprite if:
+                    // 1. Background pixel is transparent (backdrop color), OR
+                    // 2. Background pixel doesn't have priority bit set
+                    let backdrop_color = self.decode_color(self.cram[16] & 0x3F);
+                    let bg_is_backdrop = (bg_pixel & RGB_MASK) == (backdrop_color & RGB_MASK);
+
+                    if bg_is_backdrop || !bg_has_priority {
+                        // Sprites always use palette 1 (colors 16-31 in CRAM)
+                        let color_index = 16 + pixel as usize;
+                        let color = self.decode_color(self.cram[color_index] & 0x3F);
+                        self.frame.pixels[line_offset + x_index] = color;
+                    }
                 }
             }
+        }
+
+        // Clean up priority bits from final frame (keep only RGB, clear metadata)
+        for x in 0..256 {
+            self.frame.pixels[line_offset + x] &= RGB_MASK;
+        }
+    }
+
+    /// TMS9918A Graphics I Mode (Mode 0) rendering
+    /// 256x192 resolution, 32x24 tiles, 2 colors per 8 tiles
+    fn render_tms_graphics1(&mut self, line: u8, line_offset: usize) {
+        // Pattern name table at $0800 + (Register 2 & 0x0F) * 0x400
+        let name_table_base = ((self.registers[2] as u16) & 0x0F) << 10;
+
+        // Pattern generator table at (Register 4 & 0x07) * 0x800
+        let pattern_gen_base = ((self.registers[4] as u16) & 0x07) << 11;
+
+        // Color table at (Register 3 & 0xFF) * 0x40
+        let color_table_base = (self.registers[3] as u16) << 6;
+
+        let y = line as u16;
+        let tile_row = y / 8;
+        let pixel_y = y % 8;
+
+        for x in 0..256u16 {
+            let tile_col = x / 8;
+
+            // Get pattern name (which tile to use)
+            let name_addr = name_table_base + (tile_row * 32 + tile_col);
+            let pattern_name = self.vram[name_addr as usize] as u16;
+
+            // Get pattern data (8 bytes per pattern)
+            let pattern_addr = pattern_gen_base + pattern_name * 8 + pixel_y;
+            let pattern_byte = self.vram[pattern_addr as usize];
+
+            // Get color (1 byte per 8 patterns)
+            let color_addr = color_table_base + (pattern_name / 8);
+            let color_byte = self.vram[color_addr as usize];
+
+            // Extract pixel bit (MSB first)
+            let pixel_x = x % 8;
+            let pixel_bit = (pattern_byte >> (7 - pixel_x)) & 1;
+
+            // Select foreground or background color
+            let color_index = if pixel_bit != 0 {
+                (color_byte >> 4) & 0x0F // Foreground color (upper 4 bits)
+            } else {
+                color_byte & 0x0F // Background color (lower 4 bits)
+            };
+
+            // TMS9918A fixed palette (16 colors)
+            let color = self.decode_tms_color(color_index);
+            self.frame.pixels[line_offset + x as usize] = color;
+        }
+    }
+
+    /// TMS9918A Text Mode (Mode 1) rendering
+    /// 40x24 characters, 6x8 pixels per character, monochrome
+    fn render_tms_text(&mut self, line: u8, line_offset: usize) {
+        // Pattern name table at (Register 2 & 0x0F) * 0x400
+        let name_table_base = ((self.registers[2] as u16) & 0x0F) << 10;
+
+        // Pattern generator table at (Register 4 & 0x07) * 0x800
+        let pattern_gen_base = ((self.registers[4] as u16) & 0x07) << 11;
+
+        // Text mode uses register 7 for foreground/background colors
+        let fg_color = self.decode_tms_color((self.registers[7] >> 4) & 0x0F);
+        let bg_color = self.decode_tms_color(self.registers[7] & 0x0F);
+
+        let y = line as u16;
+        let char_row = y / 8;
+        let pixel_y = y % 8;
+
+        // Text mode: 40 characters wide, each 6 pixels, left-aligned
+        for char_col in 0..40 {
+            // Get character pattern
+            let name_addr = name_table_base + (char_row * 40 + char_col);
+            let pattern_name = self.vram[name_addr as usize] as u16;
+
+            // Get pattern data
+            let pattern_addr = pattern_gen_base + pattern_name * 8 + pixel_y;
+            let pattern_byte = self.vram[pattern_addr as usize];
+
+            // Draw 6 pixels (text mode uses only 6 bits, MSB first)
+            for pixel_x in 0..6 {
+                let pixel_bit = (pattern_byte >> (7 - pixel_x)) & 1;
+                let color = if pixel_bit != 0 { fg_color } else { bg_color };
+                let screen_x = char_col * 6 + pixel_x;
+                if (screen_x as usize) < 256 {
+                    self.frame.pixels[line_offset + screen_x as usize] = color;
+                }
+            }
+        }
+
+        // Fill remaining pixels with background color (240-256)
+        for x in 240..256 {
+            self.frame.pixels[line_offset + x] = bg_color;
+        }
+    }
+
+    /// TMS9918A Graphics II Mode (Mode 2) rendering
+    /// 256x192 resolution, enhanced color flexibility (2 colors per 8x1 row)
+    fn render_tms_graphics2(&mut self, line: u8, line_offset: usize) {
+        // Pattern name table at (Register 2 & 0x0F) * 0x400
+        let name_table_base = ((self.registers[2] as u16) & 0x0F) << 10;
+
+        // Pattern generator table - can address up to 3 sections
+        // Register 4: bits 2-0 select the pattern base, bit 2 is AND mask for pattern addressing
+        let pattern_gen_base = ((self.registers[4] as u16) & 0x04) << 11;
+        let pattern_gen_mask = if (self.registers[4] & 0x03) == 0x03 {
+            0x1FFF // All three sections
+        } else {
+            0x07FF // Single section
+        };
+
+        // Color table - similar masking to pattern table
+        let color_table_base = (self.registers[3] as u16) << 6;
+        let color_table_mask = if (self.registers[3] & 0x7F) == 0x7F {
+            0x1FFF
+        } else {
+            0x07FF
+        };
+
+        let y = line as u16;
+        let tile_row = y / 8;
+        let pixel_y = y % 8;
+
+        // Graphics II divides screen into thirds vertically for addressing
+        let third = (y / 64) * 0x0800;
+
+        for x in 0..256u16 {
+            let tile_col = x / 8;
+
+            // Get pattern name
+            let name_addr = name_table_base + (tile_row * 32 + tile_col);
+            let pattern_name = self.vram[name_addr as usize] as u16;
+
+            // Calculate pattern address with third offset
+            let pattern_offset = (pattern_name * 8 + pixel_y + third) & pattern_gen_mask;
+            let pattern_addr = pattern_gen_base + pattern_offset;
+            let pattern_byte = self.vram[pattern_addr as usize];
+
+            // Calculate color address with third offset
+            let color_offset = (pattern_name * 8 + pixel_y + third) & color_table_mask;
+            let color_addr = color_table_base + color_offset;
+            let color_byte = self.vram[color_addr as usize];
+
+            // Extract pixel bit
+            let pixel_x = x % 8;
+            let pixel_bit = (pattern_byte >> (7 - pixel_x)) & 1;
+
+            // Select color
+            let color_index = if pixel_bit != 0 {
+                (color_byte >> 4) & 0x0F
+            } else {
+                color_byte & 0x0F
+            };
+
+            let color = self.decode_tms_color(color_index);
+            self.frame.pixels[line_offset + x as usize] = color;
+        }
+    }
+
+    /// TMS9918A Multicolor Mode (Mode 3) rendering
+    /// 64x48 blocks, each block is 4x4 pixels of a single color
+    fn render_tms_multicolor(&mut self, line: u8, line_offset: usize) {
+        // Pattern name table at (Register 2 & 0x0F) * 0x400
+        let name_table_base = ((self.registers[2] as u16) & 0x0F) << 10;
+
+        // Pattern generator table at (Register 4 & 0x07) * 0x800
+        let pattern_gen_base = ((self.registers[4] as u16) & 0x07) << 11;
+
+        let y = line as u16;
+        let block_row = y / 4; // 4 pixel rows per block
+        let block_y = (y % 4) / 2; // 2 pixel rows share same pattern byte
+
+        for x in 0..256u16 {
+            let block_col = x / 4; // 4 pixel columns per block
+            let block_x = (x % 4) / 2; // 2 pixel columns share same nibble
+
+            // Each "tile" in name table represents 4 blocks vertically
+            let tile_row = block_row / 4;
+            let tile_col = block_col / 4;
+
+            // Get pattern name
+            let name_addr = name_table_base + (tile_row * 8 + tile_col);
+            let pattern_name = self.vram[name_addr as usize] as u16;
+
+            // Pattern data: each pattern is 8 bytes, but only 2 are used in multicolor
+            // Each byte defines colors for a 2x4 pixel area
+            let pattern_addr = pattern_gen_base + pattern_name * 8 + (block_row % 4) * 2 + block_y;
+            let pattern_byte = self.vram[pattern_addr as usize];
+
+            // Get color from nibble (upper or lower 4 bits)
+            let color_index = if block_x == 0 {
+                (pattern_byte >> 4) & 0x0F
+            } else {
+                pattern_byte & 0x0F
+            };
+
+            let color = self.decode_tms_color(color_index);
+            self.frame.pixels[line_offset + x as usize] = color;
+        }
+    }
+
+    /// Decode TMS9918A fixed color palette
+    fn decode_tms_color(&self, color_index: u8) -> u32 {
+        // TMS9918A fixed 16-color palette
+        match color_index & 0x0F {
+            0 => 0xFF000000,  // Transparent (black)
+            1 => 0xFF000000,  // Black
+            2 => 0xFF21C842,  // Medium Green
+            3 => 0xFF5EDC78,  // Light Green
+            4 => 0xFF5455ED,  // Dark Blue
+            5 => 0xFF7D76FC,  // Light Blue
+            6 => 0xFFD4524D,  // Dark Red
+            7 => 0xFF42EBF5,  // Cyan
+            8 => 0xFFFC5554,  // Medium Red
+            9 => 0xFFFF7978,  // Light Red
+            10 => 0xFFD4C154, // Dark Yellow
+            11 => 0xFFE6CE80, // Light Yellow
+            12 => 0xFF21B03B, // Dark Green
+            13 => 0xFFC95BBA, // Magenta
+            14 => 0xFFCCCCCC, // Gray
+            15 => 0xFFFFFFFF, // White
+            _ => 0xFF000000,
         }
     }
 
