@@ -53,7 +53,18 @@ def create_test_bios():
     
     # --- Interrupt vector at 0x0038 (for IM 1) ---
     # This is where VDP interrupts go in IM 1
+    # Proper handler clears VDP interrupt and re-enables interrupts
     pc = 0x0038
+    
+    # IN A, ($BF) - Read VDP status to clear interrupt flag
+    bios[pc] = 0xDB  # IN A, (n)
+    pc += 1
+    bios[pc] = 0xBF  # VDP status port
+    pc += 1
+    
+    # EI - Re-enable interrupts (takes effect after next instruction)
+    bios[pc] = 0xFB
+    pc += 1
     
     # RETI - Return from interrupt
     bios[pc] = 0xED
@@ -85,7 +96,9 @@ def main():
     print("  - Initializes stack pointer to $73FF")
     print("  - Sets interrupt mode 1")
     print("  - Jumps to cartridge ROM at $8000")
-    print("  - Provides interrupt handlers at $0038 (IM 1) and $0066 (NMI)")
+    print("  - Provides interrupt handlers:")
+    print("    - $0038 (IM 1): Clears VDP interrupt and re-enables interrupts")
+    print("    - $0066 (NMI): Returns from NMI")
 
 if __name__ == '__main__':
     main()

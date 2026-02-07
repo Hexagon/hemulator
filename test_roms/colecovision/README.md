@@ -65,7 +65,9 @@ A minimal test BIOS (`test_bios.rom`) is provided for testing ROM execution. Thi
 - Initializes the stack pointer to $73FF
 - Sets interrupt mode 1
 - Jumps to cartridge ROM at $8000
-- Provides interrupt handlers at $0038 (IM 1) and $0066 (NMI)
+- Provides proper interrupt handlers:
+  - **$0038 (IM 1)**: Reads VDP status port to clear interrupt flag, re-enables interrupts with EI before RETI
+  - **$0066 (NMI)**: Returns from NMI with RETN
 
 Build the test BIOS with:
 ```bash
