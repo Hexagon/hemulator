@@ -104,6 +104,7 @@ use emu_core::{apu::TimingMode, types::Frame, MountPointInfo, System};
 use ppu::Ppu;
 use ppu_renderer::{NesPpuRenderer, SoftwareNesPpuRenderer};
 use std::collections::HashMap;
+use std::rc::Rc;
 
 /// Debug information for the NES system.
 ///
@@ -164,7 +165,8 @@ pub struct CartridgeInfo {
 #[derive(Debug, Clone)]
 pub struct TileViewerData {
     /// CHR data (pattern tables) - typically 8KB for NES
-    pub chr_data: Vec<u8>,
+    /// Uses Rc to avoid cloning the full CHR data on every call
+    pub chr_data: Rc<Vec<u8>>,
     /// Palette data - 32 bytes (4 colors x 8 palettes)
     pub palette: Vec<u8>,
     /// NES master palette for color lookup (64 colors, RGB as 0xFFRRGGBB)
@@ -340,7 +342,7 @@ impl NesSystem {
         if let Some(b) = self.cpu.bus() {
             let mirroring_str = format!("{:?}", b.ppu.get_mirroring());
             TileViewerData {
-                chr_data: b.ppu.chr.clone(),
+                chr_data: Rc::new(b.ppu.chr.clone()),
                 palette: b.ppu.palette.to_vec(),
                 master_palette: Ppu::get_master_palette(),
                 oam: b.ppu.oam.to_vec(),
@@ -355,7 +357,7 @@ impl NesSystem {
         } else {
             // Return empty data if no bus is available
             TileViewerData {
-                chr_data: Vec::new(),
+                chr_data: Rc::new(Vec::new()),
                 palette: Vec::new(),
                 master_palette: Ppu::get_master_palette(),
                 oam: Vec::new(),
