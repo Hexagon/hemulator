@@ -167,11 +167,11 @@ pub struct CpuMips<M: MemoryMips> {
     /// Next PC (for branch delay slot handling)
     /// When a branch/jump executes, this is set to the target address.
     /// After the delay slot executes, PC is updated to next_pc.
-    pub(crate) next_pc: u64,
+    next_pc: u64,
 
     /// Whether we're currently in a branch delay slot
     /// When true, the next instruction is the last before a branch takes effect
-    pub(crate) in_delay_slot: bool,
+    in_delay_slot: bool,
 
     /// HI register (for multiply/divide results)
     pub hi: u64,
@@ -271,6 +271,12 @@ impl<M: MemoryMips> CpuMips<M> {
         self.cycles = 0;
     }
 
+    /// Test accessor for delay slot state
+    #[cfg(test)]
+    pub(crate) fn is_in_delay_slot(&self) -> bool {
+        self.in_delay_slot
+    }
+
     /// Execute a single instruction and return cycles consumed
     pub fn step(&mut self) -> u32 {
         let start_cycles = self.cycles;
@@ -290,8 +296,15 @@ impl<M: MemoryMips> CpuMips<M> {
         // Check if we're in a delay slot (from a previous branch/jump)
         let was_in_delay_slot = self.in_delay_slot;
 
+        // Save the pending branch target before executing the delay slot
+        let pending_branch_target = self.next_pc;
+
         // Update PC to next sequential instruction
         self.pc = self.pc.wrapping_add(4);
+
+        // Clear in_delay_slot flag before executing instruction
+        // This allows the delay slot instruction to set its own branch if needed
+        self.in_delay_slot = false;
 
         // Decode opcode (bits 26-31)
         let opcode = (instr >> 26) & 0x3F;
@@ -349,12 +362,23 @@ impl<M: MemoryMips> CpuMips<M> {
             }
         }
 
-        // If we just executed the delay slot, now update PC to the branch target
+        // If we just executed the delay slot, apply the pending branch target
         // Note: was_in_delay_slot is only true if the previous instruction was a taken branch/jump
-        // that set in_delay_slot=true. If a branch was not taken, in_delay_slot is never set.
+        // If the delay slot instruction set its own branch, in_delay_slot will be true now
+        // and we need to execute its delay slot next, but first apply the original branch
         if was_in_delay_slot {
-            self.pc = self.next_pc;
-            self.in_delay_slot = false;
+            // If the delay slot instruction also branched, we have a branch in delay slot
+            // The delay slot branch wins and will be applied after its own delay slot
+            // But for now, apply the original branch
+            if !self.in_delay_slot {
+                // Normal case: delay slot didn't branch
+                self.pc = pending_branch_target;
+            } else {
+                // Branch in delay slot: apply original branch, delay slot branch will be applied later
+                // This is undefined behavior in MIPS, but we handle it as: execute the delay slot's
+                // delay slot, then jump to the delay slot's target (original branch is lost)
+                self.pc = pending_branch_target;
+            }
         }
 
         // R0 is always zero
@@ -410,8 +434,20 @@ impl<M: MemoryMips> CpuMips<M> {
         // Set EXL bit in Status register (disable further interrupts)
         self.cp0[CP0_STATUS] |= 0x02; // Set EXL bit
 
-        // Save return address in EPC (current PC, not incremented)
-        self.cp0[CP0_EPC] = self.pc;
+        // If we're in a delay slot, set BD bit in Cause and save EPC to the branch instruction
+        if self.in_delay_slot {
+            // Set BD (Branch Delay) bit in Cause register (bit 31)
+            self.cp0[CP0_CAUSE] |= 1u64 << 31;
+            // EPC should point to the branch instruction (PC - 4)
+            self.cp0[CP0_EPC] = self.pc.wrapping_sub(4);
+            // Clear delay slot state to prevent incorrect PC update after exception handler
+            self.in_delay_slot = false;
+        } else {
+            // Clear BD bit
+            self.cp0[CP0_CAUSE] &= !(1u64 << 31);
+            // Save return address in EPC (current PC)
+            self.cp0[CP0_EPC] = self.pc;
+        }
 
         // Set exception code in Cause register
         self.cp0[CP0_CAUSE] &= !0x7C; // Clear exception code bits (2-6)
@@ -830,18 +866,26 @@ impl<M: MemoryMips> CpuMips<M> {
             0x02 => {
                 // BLTZL - Branch on Less Than Zero Likely
                 if (self.gpr[rs] as i64) < 0 {
+                    // Branch taken: set delay slot
                     self.next_pc =
                         (current_pc.wrapping_add(4) as i64).wrapping_add(offset as i64) as u64;
                     self.in_delay_slot = true;
+                } else {
+                    // Branch not taken: nullify delay slot
+                    self.pc = self.pc.wrapping_add(4);
                 }
                 self.cycles += 1;
             }
             0x03 => {
                 // BGEZL - Branch on Greater Than or Equal to Zero Likely
                 if (self.gpr[rs] as i64) >= 0 {
+                    // Branch taken: set delay slot
                     self.next_pc =
                         (current_pc.wrapping_add(4) as i64).wrapping_add(offset as i64) as u64;
                     self.in_delay_slot = true;
+                } else {
+                    // Branch not taken: nullify delay slot
+                    self.pc = self.pc.wrapping_add(4);
                 }
                 self.cycles += 1;
             }
@@ -872,6 +916,9 @@ impl<M: MemoryMips> CpuMips<M> {
                     self.next_pc =
                         (current_pc.wrapping_add(4) as i64).wrapping_add(offset as i64) as u64;
                     self.in_delay_slot = true;
+                } else {
+                    // Branch not taken: nullify delay slot
+                    self.pc = self.pc.wrapping_add(4);
                 }
                 self.cycles += 1;
             }
@@ -882,6 +929,9 @@ impl<M: MemoryMips> CpuMips<M> {
                     self.next_pc =
                         (current_pc.wrapping_add(4) as i64).wrapping_add(offset as i64) as u64;
                     self.in_delay_slot = true;
+                } else {
+                    // Branch not taken: nullify delay slot
+                    self.pc = self.pc.wrapping_add(4);
                 }
                 self.cycles += 1;
             }
@@ -894,7 +944,7 @@ impl<M: MemoryMips> CpuMips<M> {
     /// Execute J - Jump
     fn execute_j(&mut self, instr: u32, current_pc: u64) {
         let target = instr & 0x03FFFFFF;
-        // Jump target = (delay_slot_addr & 0xFFFFF000_00000000) | (target << 2)
+        // Jump target = (delay_slot_addr & 0xFFFFFFFF_F0000000) | (target << 2)
         // delay_slot_addr = current_pc + 4
         let delay_slot_addr = current_pc.wrapping_add(4);
         self.next_pc = (delay_slot_addr & 0xFFFFFFFF_F0000000) | ((target << 2) as u64);
@@ -972,8 +1022,12 @@ impl<M: MemoryMips> CpuMips<M> {
         let offset = ((instr & 0xFFFF) as i16 as i32) << 2;
 
         if self.gpr[rs] == self.gpr[rt] {
+            // Branch taken: set delay slot
             self.next_pc = (current_pc.wrapping_add(4) as i64).wrapping_add(offset as i64) as u64;
             self.in_delay_slot = true;
+        } else {
+            // Branch not taken: nullify delay slot by skipping it (PC += 8 total)
+            self.pc = self.pc.wrapping_add(4); // PC was already incremented by 4, add another 4
         }
         self.cycles += 1;
     }
@@ -985,8 +1039,12 @@ impl<M: MemoryMips> CpuMips<M> {
         let offset = ((instr & 0xFFFF) as i16 as i32) << 2;
 
         if self.gpr[rs] != self.gpr[rt] {
+            // Branch taken: set delay slot
             self.next_pc = (current_pc.wrapping_add(4) as i64).wrapping_add(offset as i64) as u64;
             self.in_delay_slot = true;
+        } else {
+            // Branch not taken: nullify delay slot
+            self.pc = self.pc.wrapping_add(4);
         }
         self.cycles += 1;
     }
@@ -997,8 +1055,12 @@ impl<M: MemoryMips> CpuMips<M> {
         let offset = ((instr & 0xFFFF) as i16 as i32) << 2;
 
         if (self.gpr[rs] as i64) <= 0 {
+            // Branch taken: set delay slot
             self.next_pc = (current_pc.wrapping_add(4) as i64).wrapping_add(offset as i64) as u64;
             self.in_delay_slot = true;
+        } else {
+            // Branch not taken: nullify delay slot
+            self.pc = self.pc.wrapping_add(4);
         }
         self.cycles += 1;
     }
@@ -1009,8 +1071,12 @@ impl<M: MemoryMips> CpuMips<M> {
         let offset = ((instr & 0xFFFF) as i16 as i32) << 2;
 
         if (self.gpr[rs] as i64) > 0 {
+            // Branch taken: set delay slot
             self.next_pc = (current_pc.wrapping_add(4) as i64).wrapping_add(offset as i64) as u64;
             self.in_delay_slot = true;
+        } else {
+            // Branch not taken: nullify delay slot
+            self.pc = self.pc.wrapping_add(4);
         }
         self.cycles += 1;
     }
@@ -2402,7 +2468,7 @@ mod tests {
         cpu.memory.write_word(4, 0x00000000);
         cpu.step(); // Execute J, PC becomes 4 (delay slot)
         assert_eq!(cpu.pc, 4); // Should be at delay slot
-        assert!(cpu.in_delay_slot); // Should be marked as in delay slot
+        assert!(cpu.is_in_delay_slot()); // Should be marked as in delay slot
         cpu.step(); // Execute delay slot NOP, PC becomes target
         assert_eq!(cpu.pc, 0x4000); // Now at target
 
