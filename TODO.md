@@ -87,15 +87,49 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Follow pattern from other systems (test_roms/README.md)
   - Impact: No automated verification of ROM loading and execution
 
-#### PC/DOS
+#### PC/DOS - Hardware Accuracy
 - [ ] **INT 21h DOS API**: Expand file I/O and DOS functions - `crates/systems/pc/src/cpu.rs`
   - Current: Character I/O works, file operations are stubs
   - Impact: DOS program compatibility
+- [ ] **BIOS Interrupt Stubs**: Complete stub implementations - `crates/systems/pc/src/cpu.rs`
+  - INT 05h (Print Screen) - stub only (cpu.rs:820)
+  - INT 09h (Keyboard IRQ) - partial stub (cpu.rs:900-920)
+  - INT 1Ah AH=01h/03h/05h (RTC set) - read-only stubs (cpu.rs:1040-1080)
+  - INT 14h, 17h, 18h, 19h, 1Bh, 1Ch, 2Ah - stub implementations
+  - INT 2Fh (Multiplex) - mostly unimplemented (cpu.rs:1600+)
+  - Impact: Many BIOS services non-functional, breaks some DOS programs
+- [ ] **INT 08h Chaining**: Review INT 1Ch chain skipping logic - `crates/systems/pc/src/cpu.rs:900-920`
+  - Current: Skips calling INT 1Ch if it points to default BIOS stub (F000:0040) as optimization
+  - Risk: Could break programs expecting chaining behavior
+  - Impact: Potential compatibility issue with DOS programs that rely on INT 1Ch
+- [ ] **PIT Timer IRQ Generation**: Connect PIT to actual IRQ0 generation - `crates/systems/pc/src/pit.rs`
+  - Current: PIT tracks state but doesn't trigger interrupts; INT 08h simulated elsewhere
+  - Needed: PIT counter decrement should trigger IRQ0 when reaching zero
+  - Impact: Timer behavior may not match hardware timing accurately
+- [ ] **Disk CHS Parameter Validation**: Add CHS bounds checking - `crates/systems/pc/src/disk.rs:117`
+  - Current: Only validates final offset, not cylinder/head limits
+  - Needed: Validate cylinder < max_cylinders, head < max_heads against drive geometry
+  - Impact: Invalid disk operations may succeed when they should fail
+- [ ] **Disk Geometry Detection**: Parse BIOS Parameter Block instead of hardcoding - `crates/systems/pc/src/disk.rs:65`
+  - Current: Assumes floppy is always 1.44MB (18 sectors/track)
+  - Needed: Read BPB from boot sector to detect 360KB, 720KB, 1.2MB, 1.44MB formats
+  - Impact: Cannot correctly read non-1.44MB floppy images
+- [ ] **Video Memory Banking**: Implement EGA/VGA extended memory banking - `crates/systems/pc/src/bus.rs`
+  - Current: Only 128KB video memory allocated (0xA0000-0xBFFFF)
+  - Needed: Support for memory plane banking in EGA/VGA modes
+  - Impact: Advanced EGA/VGA modes may not work correctly
+- [ ] **VGA Register Documentation**: Document VGA register bit layouts - `crates/systems/pc/src/bus.rs`
+  - Graphics controller registers (bus.rs:100) - no bit documentation
+  - Sequencer registers (bus.rs:97) - no description
+  - Attribute controller (bus.rs:101-102) - no bit layout
+  - DAC state machine (bus.rs:87-88) - transitions not explained
+  - Impact: Makes code maintenance and debugging difficult
 - [ ] **32-bit Support (80386+)**: Implement full 32-bit operations - `crates/core/src/cpu_8086.rs`
   - Register extension (EAX, EBX, etc.)
   - 32-bit addressing with SIB byte
   - 32-bit operand support
   - Extended instructions (MOVZX, MOVSX, SHLD/SHRD)
+  - Impact: Cannot run 32-bit protected mode DOS extenders
 - [ ] **Protected Mode Instructions**: Complete stubbed 80286+ instructions - `crates/core/src/cpu_8086.rs`
   - INVLPG (Invalidate TLB Entry) - stub at line 3484: "No TLB implementation"
   - LAR (Load Access Rights) - stub at line 3506: "Set ZF=0 (invalid selector)"
@@ -104,7 +138,57 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - VERW (Verify Segment for Writing) - stub at line 3599: "Set ZF=0 (segment not writable)"
   - SHLD (Double Precision Shift Left) - stub at lines 3881, 3893
   - SHRD (Double Precision Shift Right) - stub at lines 3907, 3919
-  - Impact: Protected mode DOS extenders and DPMI applications
+  - Impact: Protected mode DOS extenders and DPMI applications won't work
+
+#### PC/DOS - Timing Accuracy
+- [ ] **Cycle-Accurate Timing**: Implement proper CPU cycle counting - `crates/systems/pc/src/bus.rs:265-266`
+  - Current: Hardcoded 80,000 cycles/frame; I/O timing generic (10-8 cycles)
+  - Needed: Scale cycles with actual CPU model frequency; instruction-accurate timing
+  - Impact: Frame timing approximate; some timing-sensitive code may not work
+- [ ] **VGA Retrace Timing**: Use hardware-accurate retrace windows - `crates/systems/pc/src/bus.rs:252-277`
+  - Current: Generic 5% retrace simulation
+  - Needed: Real CRT timing specifications (horizontal/vertical blank periods)
+  - Impact: Games relying on precise retrace timing may glitch
+
+#### PC/DOS - Performance
+- [ ] **Video Text Rendering Optimization**: Implement dirty region tracking - `crates/systems/pc/src/video_adapter_software.rs:113-200`
+  - Current: Full screen re-render every frame with per-character pixel loops
+  - Needed: Track dirty regions, cache character glyphs, skip unchanged areas
+  - Impact: High CPU usage for text mode rendering; inefficient for large text updates
+- [ ] **Disk Logging Performance**: Move environment variable check outside hot path - `crates/systems/pc/src/disk.rs:82,103,127`
+  - Current: `std::env::var("EMU_LOG_BUS")` called on every disk read/write
+  - Needed: Use static log level initialized once at startup
+  - Impact: Unnecessary overhead on every disk operation
+- [ ] **Font Data Pre-rendering**: Pre-bake font glyphs to pixel patterns - `crates/systems/pc/src/font.rs`
+  - Current: Font arrays stored as `[u8]` requiring pixel extraction on every render
+  - Needed: Pre-computed pixel patterns for common resolutions/zoom levels
+  - Impact: Faster character rendering, reduced CPU overhead
+- [ ] **Keyboard Buffer Implementation**: Use fixed ring buffer instead of VecDeque - `crates/systems/pc/src/keyboard.rs:11`
+  - Current: VecDeque with allocation overhead
+  - Needed: Fixed 16-byte ring buffer matching hardware
+  - Impact: Reduced allocations, better cache locality
+
+#### PC/DOS - Documentation
+- [ ] **Magic Number Documentation**: Add comments for hardcoded values - `crates/systems/pc/src/cpu.rs`, `crates/systems/pc/src/bus.rs`
+  - 0xB8000 (video memory) - used without comment (cpu.rs:526)
+  - 0x400 (BIOS Data Area) - offset hardcoded in multiple places (cpu.rs:103-110)
+  - Port addresses: 0x40-0x43 (PIT), 0x60/0x64 (keyboard), 0x3C0-0x3C9 (VGA) - mostly uncommented
+  - Boot sector signature 0xAA55 - no reference to standard (bus.rs:395)
+  - Impact: Makes code harder to understand and maintain
+- [ ] **INT 10h Documentation**: Add high-level function overview - `crates/systems/pc/src/cpu.rs:412+`
+  - Current: ~1000+ lines with no module-level description
+  - Needed: Summary of supported video BIOS functions and modes
+  - Impact: Hard to understand what's implemented without reading all code
+- [ ] **I/O Port Documentation**: Document port ranges in io_read/io_write - `crates/systems/pc/src/bus.rs:694-1000`
+  - Current: 300+ lines with scattered port documentation
+  - Needed: Port map table at top of each function
+  - Impact: Difficult to find which ports are implemented
+- [ ] **Hardware Reference Citations**: Add IBM PC Technical Reference links
+  - No references to IBM PC documentation
+  - No 8086 CPU instruction set references
+  - No VGA BIOS Programmer's Reference notes
+  - No BIOS INT specification documents
+  - Impact: Hard to verify hardware accuracy without original documentation
 
 ### Low
 
