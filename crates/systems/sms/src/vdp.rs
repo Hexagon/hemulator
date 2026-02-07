@@ -1003,7 +1003,15 @@ impl Renderer for Vdp {
     fn get_frame(&self) -> &Frame {
         // Log every time frame is retrieved
         let backdrop = self.decode_color(self.cram[16] & 0x3F);
-        let bg_enabled = (self.registers[1] & 0x40) != 0;
+        // Check if Mode 4 is enabled to determine display enable logic
+        let mode_4_enabled = (self.registers[0] & 0x04) != 0;
+        let bg_enabled = if mode_4_enabled {
+            // In Mode 4: bit 6 is BLK (blank bit), 1=blank, 0=display
+            (self.registers[1] & 0x40) == 0
+        } else {
+            // In TMS modes: bit 6 controls display, 1=display, 0=blank
+            (self.registers[1] & 0x40) != 0
+        };
         let sprite_enabled = (self.registers[1] & 0x08) != 0;
         let mut non_backdrop = 0;
         for &pixel in &self.frame.pixels {
