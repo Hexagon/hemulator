@@ -95,7 +95,17 @@ impl Sg1000System {
         }
     }
 
-    /// Set controller state
+    /// Set controller 1 state (type-safe method)
+    pub fn set_controller1(&mut self, state: u8) {
+        self.cpu.memory.set_controller1(state);
+    }
+
+    /// Set controller 2 state (type-safe method)
+    pub fn set_controller2(&mut self, state: u8) {
+        self.cpu.memory.set_controller2(state);
+    }
+
+    /// Set controller state (generic method for backward compatibility)
     pub fn set_controller(&mut self, port: u8, state: u8) {
         self.cpu.memory.set_controller(port, state);
     }

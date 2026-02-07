@@ -18,3 +18,37 @@ mod psg;
 mod system;
 
 pub use system::Sg1000System;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use emu_core::System;
+
+    #[test]
+    fn smoke_test_sg1000() {
+        // Load the test ROM
+        let rom = include_bytes!("../../../../test_roms/sg1000/test.sg");
+        let mut system = Sg1000System::new();
+        system.mount("Cartridge", rom).unwrap();
+
+        system.reset();
+
+        // Run for several frames to allow initialization
+        for _ in 0..10 {
+            let _ = system.step_frame();
+        }
+
+        // Get a frame
+        let frame = system.step_frame().unwrap();
+
+        // Verify frame dimensions (TMS9918A Graphics I mode)
+        assert_eq!(frame.width, 256);
+        assert_eq!(frame.height, 192);
+
+        // Verify we have actual pixel data
+        assert_eq!(frame.pixels.len(), 256 * 192);
+
+        // The VDP is rendering (even if just backdrop color)
+        // This confirms basic system functionality is working
+    }
+}
