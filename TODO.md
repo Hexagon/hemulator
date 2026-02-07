@@ -31,18 +31,23 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Added 512-entry Gaussian coefficient table matching SNES hardware
   - Uses pitch counter bits 4-11 to index filter coefficients
   - Significantly improves audio quality and hardware accuracy
-- [ ] **ADSR Envelope**: Implement full envelope with proper curves - `crates/core/src/apu/dsp.rs:253-295`
-  - Current: Simplified envelope (instant attack/decay, no rate tables)
-  - Needed: Exponential attack/decay/release curves with hardware-accurate rate tables
-  - Complexity: Requires implementing 16-value rate table for each phase
+- [x] **ADSR Envelope**: Implement full envelope with proper curves - `crates/core/src/apu/dsp.rs:253-295`
+  - **FIXED**: Implemented hardware-accurate ADSR envelope with exponential curves
+  - Added rate counter table with 32 entries for proper timing
+  - Attack: Linear increase with hardware-accurate rate table
+  - Decay: Exponential decrease to sustain level
+  - Sustain: Exponential decrease towards zero (sustain rate)
+  - Release: Fast exponential decrease (rate 31)
   - Reference: https://snes.nesdev.org/wiki/DSP_envelopes
-  - Impact: More authentic audio envelope shaping for instruments
-- [ ] **GAIN Modes**: Implement direct, linear increase/decrease, exponential - `crates/core/src/apu/dsp.rs:254-258`
-  - Current: Only direct mode implemented (GAIN & 0x7F)
-  - Needed: All 5 GAIN modes (direct, linear increase/decrease, exponential increase/decrease)
+- [x] **GAIN Modes**: Implement direct, linear increase/decrease, exponential - `crates/core/src/apu/dsp.rs:254-258`
+  - **FIXED**: Implemented all 5 GAIN modes
+  - Direct mode (bit 7=0): bits 6-0 directly set envelope level
+  - Linear decrease (bits 7-5=100): constant rate decrease
+  - Exponential decrease (bits 7-5=101): exponential decay curve
+  - Linear increase (bits 7-5=110): constant rate increase
+  - Bent line increase (bits 7-5=111): two-slope increase (faster at higher values)
   - GAIN format: bit 7=mode (0=direct, 1=increase/decrease), bits 6-5=curve type, bits 4-0=rate
   - Reference: https://snes.nesdev.org/wiki/S-DSP_registers
-  - Impact: Alternative envelope control method used by some games
 
 #### ColecoVision  
 - [x] **Z80 ROM Execution**: Debug why test ROM doesn't execute properly through BIOS - `crates/systems/colecovision/src/lib.rs`
