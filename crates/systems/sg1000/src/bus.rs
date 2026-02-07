@@ -197,52 +197,101 @@ mod tests {
         // PSG should be accessible on all ports 0x40-0x7F
         let mut bus = create_test_bus();
 
+        // Get initial PSG state
+        let initial_state = bus.psg.borrow().get_state();
+
         // Write to different PSG ports - all should write to the same PSG
         bus.io_write(0x40, 0x80); // Tone 0 frequency low
         bus.io_write(0x50, 0x81); // Tone 0 frequency high
         bus.io_write(0x60, 0x90); // Tone 0 attenuation
         bus.io_write(0x7F, 0xBF); // Noise attenuation
 
-        // All writes should have been accepted without error
-        // (no way to read back PSG state directly, but no panic = success)
+        // PSG state should have changed after writes
+        let updated_state = bus.psg.borrow().get_state();
+        assert_ne!(
+            initial_state, updated_state,
+            "PSG state should change after writes through mirrored ports"
+        );
+
+        // Write through unmapped port should not affect PSG
+        let state_before = bus.psg.borrow().get_state();
+        bus.io_write(0x3F, 0xFF); // Port before PSG range
+        let state_after = bus.psg.borrow().get_state();
+        assert_eq!(
+            state_before, state_after,
+            "PSG state should not change from writes to unmapped ports"
+        );
     }
 
     #[test]
     fn test_vdp_data_mirroring() {
-        // VDP data should be accessible on all even ports 0x80-0xFF
+        // VDP data should be accessible on all even ports 0x80-0xBF
+        // (0xC0+ is reserved for controllers and takes priority)
         let mut bus = create_test_bus();
 
-        // Write to different even VDP data ports
+        // Write to different even VDP data ports in the VDP range
         bus.io_write(0x80, 0x12);
         bus.io_write(0x82, 0x34);
-        bus.io_write(0xBE, 0x56);
-        bus.io_write(0xE0, 0x78);
-        bus.io_write(0xFE, 0x9A);
+        bus.io_write(0xA0, 0x56);
+        bus.io_write(0xBE, 0x78);
 
-        // All writes should have been accepted
-        // Reading from even ports should return VDP data
-        let _data = bus.io_read(0x80);
-        let _data = bus.io_read(0xA0);
-        let _data = bus.io_read(0xFE);
+        // All writes should have been accepted and VDP VRAM should have changed
+        let vdp_state = bus.vdp.borrow().get_state();
+        let vram = vdp_state.get("vram").unwrap().as_array().unwrap();
+        assert!(!vram.is_empty(), "VDP VRAM should exist after data writes");
+
+        // Reading from even ports in VDP range should return mirrored VDP data
+        let data1 = bus.io_read(0x80);
+        let data2 = bus.io_read(0xA0);
+        let data3 = bus.io_read(0xBE);
+
+        // All mirrored ports should read from the same underlying VDP data register
+        assert_eq!(
+            data1, data2,
+            "Even ports should mirror the same VDP data register"
+        );
+        assert_eq!(
+            data1, data3,
+            "Even ports should mirror the same VDP data register"
+        );
     }
 
     #[test]
     fn test_vdp_control_mirroring() {
-        // VDP control should be accessible on all odd ports 0x80-0xFF
+        // VDP control should be accessible on all odd ports 0x80-0xBF
+        // (0xC0+ is reserved for controllers and takes priority)
         let mut bus = create_test_bus();
 
-        // Write to different odd VDP control ports
+        // Get initial VDP state
+        let initial_state = bus.vdp.borrow().get_state();
+
+        // Write to different odd VDP control ports in the VDP range
         bus.io_write(0x81, 0x00);
         bus.io_write(0x83, 0x80);
-        bus.io_write(0xBF, 0xC0);
-        bus.io_write(0xE1, 0xE0);
-        bus.io_write(0xFF, 0xFF);
+        bus.io_write(0xA1, 0xC0);
+        bus.io_write(0xBF, 0xE0);
 
-        // All writes should have been accepted
-        // Reading from odd ports should return VDP status
-        let _status = bus.io_read(0x81);
-        let _status = bus.io_read(0xA1);
-        let _status = bus.io_read(0xFF);
+        // VDP registers should have changed after control writes
+        let updated_state = bus.vdp.borrow().get_state();
+        assert_ne!(
+            initial_state, updated_state,
+            "VDP state should change after control writes through mirrored ports"
+        );
+
+        // Reading from odd ports in the VDP range should return mirrored VDP status
+        let status1 = bus.io_read(0x81);
+        let status2 = bus.io_read(0xA1);
+        let status3 = bus.io_read(0xBF);
+
+        // All mirrored ports should read from the same underlying VDP status register
+        assert_eq!(
+            status1, status2,
+            "Odd ports should mirror the same VDP status register"
+        );
+        assert_eq!(
+            status1, status3,
+            "Odd ports should mirror the same VDP status register"
+        );
     }
 
     #[test]
