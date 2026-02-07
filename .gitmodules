@@ -1,0 +1,3 @@
+[submodule "test_roms/n64/n64-systemtest"]
+	path = test_roms/n64/n64-systemtest
+	url = https://github.com/lemmy-64/n64-systemtest.git
