@@ -148,10 +148,10 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Current: No save data persistence
   - Needed: EEPROM (4Kbit/16Kbit), Flash RAM, Controller Pak
   - Impact: Games cannot save progress
-- [ ] **RDP SET_OTHER_MODES**: Implement rendering mode configuration - `crates/systems/n64/src/rdp.rs:1160`
-  - Current: Logged as stub and ignored
-  - Needed: Proper blend/combine mode application
-  - Impact: Advanced graphics effects not working
+- [x] **RDP SET_OTHER_MODES**: Implement rendering mode configuration - `crates/systems/n64/src/rdp.rs:1160`
+  - **IMPLEMENTED**: Now stores full 64-bit othermode value
+  - Extracts and logs cycle type, texture filtering, alpha compare, and z-mode
+  - Impact: RDP properly tracks rendering mode settings for future use
 - [ ] **Texture Format Support**: Implement missing texture formats - `crates/systems/n64/src/rdp.rs:805`
   - Current: "Other formats not yet implemented - return white"
   - Impact: Some textures render as white instead of proper images

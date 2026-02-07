@@ -157,6 +157,10 @@ pub struct Rdp {
     /// Z-buffer image address in RDRAM
     z_image_addr: u32,
 
+    /// Other mode settings (64-bit value from SET_OTHER_MODES)
+    /// Controls cycle type, alpha blend, Z-buffer, texture filtering, etc.
+    othermode: u64,
+
     /// DPC registers
     dpc_start: u32,
     dpc_end: u32,
@@ -216,6 +220,7 @@ impl Rdp {
             fog_color: 0xFF000000,   // Black
             combine_mode: 0,         // No combine mode
             z_image_addr: 0,
+            othermode: 0,            // Default other modes
             dpc_start: 0,
             dpc_end: 0,
             dpc_current: 0,
@@ -1153,12 +1158,21 @@ impl Rdp {
             // SET_OTHER_MODES (0x2F - full 64-bit command)
             0x2F => {
                 // Configure rendering modes (cycle type, alpha blend, Z-buffer, etc.)
-                // For now, we just accept and ignore these settings
-                // Full implementation would configure the rendering pipeline
-                log(LogCategory::Stubs, LogLevel::Debug, || {
+                // word0: upper 32 bits of othermode
+                // word1: lower 32 bits of othermode
+                let othermode = ((word0 as u64) << 32) | (word1 as u64);
+                self.othermode = othermode;
+
+                // Extract some common fields for logging
+                let cycle_type = (othermode >> 52) & 0x3;
+                let text_filt = (othermode >> 53) & 0x3;
+                let alpha_compare = othermode & 0x3;
+                let z_mode = (othermode >> 10) & 0x3;
+
+                log(LogCategory::PPU, LogLevel::Debug, || {
                     format!(
-                        "N64 RDP: SET_OTHER_MODES stub - ignoring rendering mode configuration (word0=0x{:08X}, word1=0x{:08X})",
-                        word0, word1
+                        "N64 RDP: SET_OTHER_MODES - cycle={}, filt={}, alpha={}, z={}, full=0x{:016X}",
+                        cycle_type, text_filt, alpha_compare, z_mode, othermode
                     )
                 });
             }
