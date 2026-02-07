@@ -347,8 +347,20 @@ impl System for SnesSystem {
             while self.current_cycles < scanline_target.saturating_sub(40) {
                 // Check if DMA is halting the CPU
                 if self.cpu.bus().has_pending_dma() {
-                    // Consume DMA cycles instead of executing CPU instructions
-                    let dma_cycles = self.cpu.bus().consume_dma_cycles(1);
+                    // Consume DMA cycles instead of executing CPU instructions.
+                    // Batch consumption up to the remaining cycles in the active display
+                    // portion of this scanline to avoid per-cycle tight loops.
+                    let display_limit = scanline_target.saturating_sub(40);
+                    let remaining_display_cycles = display_limit.saturating_sub(self.current_cycles);
+                    if remaining_display_cycles == 0 {
+                        break;
+                    }
+                    let dma_cycles = self.cpu.bus().consume_dma_cycles(remaining_display_cycles);
+                    if dma_cycles == 0 {
+                        // Defensive: avoid an infinite loop if DMA reports pending
+                        // but does not actually consume any cycles.
+                        break;
+                    }
                     self.current_cycles += dma_cycles;
                     self.total_cycles += dma_cycles as u64;
                     self.cpu.bus_mut().tick_cycles(dma_cycles);
