@@ -48,10 +48,10 @@
 //! ## Memory Alignment
 //!
 //! Load/store instructions have specific alignment requirements:
-//! - **LH/SH**: Must be 2-byte aligned
-//! - **LW/SW**: Must be 4-byte aligned
+//! - **LH/LHU/SH**: Must be 2-byte aligned
+//! - **LW/LWU/SW**: Must be 4-byte aligned
 //! - **LD/SD**: Must be 8-byte aligned
-//! - **Unaligned access**: Should cause Address Error exception (not currently validated)
+//! - **Unaligned access**: Logs a warning (alignment validated)
 //! - **LWL/LWR/LDL/LDR**: Used for unaligned access, don't require alignment
 //!
 //! ## Register 0 Immutability
@@ -67,6 +67,8 @@
 //! - **32-bit shifts**: Shift amount masked to 5 bits (0-31)
 //! - **64-bit shifts**: Shift amount masked to 6 bits (0-63)
 //! - Safe against overflow/underflow
+
+use crate::logging::{log, LogCategory, LogLevel};
 
 /// TLB entry data structure for CP0 TLB instructions
 /// This is a simplified representation that matches CP0 register format
@@ -805,6 +807,17 @@ impl<M: MemoryMips> CpuMips<M> {
         let offset = (instr & 0xFFFF) as i16 as i32;
 
         let addr = (self.gpr[rs] as i64).wrapping_add(offset as i64) as u32;
+
+        // Validate 4-byte alignment
+        if addr & 3 != 0 {
+            log(LogCategory::CPU, LogLevel::Warn, || {
+                format!(
+                    "LW: Unaligned word access at 0x{:08X} (PC=0x{:016X})",
+                    addr, self.pc
+                )
+            });
+        }
+
         let val = self.memory.read_word(addr);
         // Critical: Sign-extend 32-bit word to 64 bits
         // Example: 0x80000000 becomes 0xFFFFFFFF80000000 (negative number)
@@ -819,6 +832,17 @@ impl<M: MemoryMips> CpuMips<M> {
         let offset = (instr & 0xFFFF) as i16 as i32;
 
         let addr = (self.gpr[rs] as i64).wrapping_add(offset as i64) as u32;
+
+        // Validate 4-byte alignment
+        if addr & 3 != 0 {
+            log(LogCategory::CPU, LogLevel::Warn, || {
+                format!(
+                    "SW: Unaligned word access at 0x{:08X} (PC=0x{:016X})",
+                    addr, self.pc
+                )
+            });
+        }
+
         self.memory.write_word(addr, self.gpr[rt] as u32);
         self.cycles += 1;
     }
@@ -1188,6 +1212,17 @@ impl<M: MemoryMips> CpuMips<M> {
         let offset = (instr & 0xFFFF) as i16 as i32;
 
         let addr = (self.gpr[rs] as i64).wrapping_add(offset as i64) as u32;
+
+        // Validate 2-byte alignment
+        if addr & 1 != 0 {
+            log(LogCategory::CPU, LogLevel::Warn, || {
+                format!(
+                    "LH: Unaligned halfword access at 0x{:08X} (PC=0x{:016X})",
+                    addr, self.pc
+                )
+            });
+        }
+
         let val = self.memory.read_halfword(addr);
         self.gpr[rt] = val as i16 as i64 as u64; // Sign-extend to 64-bit
         self.cycles += 1;
@@ -1200,6 +1235,17 @@ impl<M: MemoryMips> CpuMips<M> {
         let offset = (instr & 0xFFFF) as i16 as i32;
 
         let addr = (self.gpr[rs] as i64).wrapping_add(offset as i64) as u32;
+
+        // Validate 2-byte alignment
+        if addr & 1 != 0 {
+            log(LogCategory::CPU, LogLevel::Warn, || {
+                format!(
+                    "LHU: Unaligned halfword access at 0x{:08X} (PC=0x{:016X})",
+                    addr, self.pc
+                )
+            });
+        }
+
         let val = self.memory.read_halfword(addr);
         self.gpr[rt] = val as u64; // Zero-extend to 64-bit
         self.cycles += 1;
@@ -1212,6 +1258,17 @@ impl<M: MemoryMips> CpuMips<M> {
         let offset = (instr & 0xFFFF) as i16 as i32;
 
         let addr = (self.gpr[rs] as i64).wrapping_add(offset as i64) as u32;
+
+        // Validate 4-byte alignment
+        if addr & 3 != 0 {
+            log(LogCategory::CPU, LogLevel::Warn, || {
+                format!(
+                    "LWU: Unaligned word access at 0x{:08X} (PC=0x{:016X})",
+                    addr, self.pc
+                )
+            });
+        }
+
         let val = self.memory.read_word(addr);
         self.gpr[rt] = val as u64; // Zero-extend to 64-bit
         self.cycles += 1;
@@ -1224,6 +1281,17 @@ impl<M: MemoryMips> CpuMips<M> {
         let offset = (instr & 0xFFFF) as i16 as i32;
 
         let addr = (self.gpr[rs] as i64).wrapping_add(offset as i64) as u32;
+
+        // Validate 8-byte alignment
+        if addr & 7 != 0 {
+            log(LogCategory::CPU, LogLevel::Warn, || {
+                format!(
+                    "LD: Unaligned doubleword access at 0x{:08X} (PC=0x{:016X})",
+                    addr, self.pc
+                )
+            });
+        }
+
         let val = self.memory.read_doubleword(addr);
         self.gpr[rt] = val;
         self.cycles += 1;
@@ -1323,6 +1391,17 @@ impl<M: MemoryMips> CpuMips<M> {
         let offset = (instr & 0xFFFF) as i16 as i32;
 
         let addr = (self.gpr[rs] as i64).wrapping_add(offset as i64) as u32;
+
+        // Validate 2-byte alignment
+        if addr & 1 != 0 {
+            log(LogCategory::CPU, LogLevel::Warn, || {
+                format!(
+                    "SH: Unaligned halfword access at 0x{:08X} (PC=0x{:016X})",
+                    addr, self.pc
+                )
+            });
+        }
+
         self.memory.write_halfword(addr, self.gpr[rt] as u16);
         self.cycles += 1;
     }
@@ -1334,6 +1413,17 @@ impl<M: MemoryMips> CpuMips<M> {
         let offset = (instr & 0xFFFF) as i16 as i32;
 
         let addr = (self.gpr[rs] as i64).wrapping_add(offset as i64) as u32;
+
+        // Validate 8-byte alignment
+        if addr & 7 != 0 {
+            log(LogCategory::CPU, LogLevel::Warn, || {
+                format!(
+                    "SD: Unaligned doubleword access at 0x{:08X} (PC=0x{:016X})",
+                    addr, self.pc
+                )
+            });
+        }
+
         self.memory.write_doubleword(addr, self.gpr[rt]);
         self.cycles += 1;
     }

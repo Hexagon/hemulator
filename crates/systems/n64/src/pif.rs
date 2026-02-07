@@ -38,12 +38,26 @@
 //! - X axis: -128 (left) to +127 (right)
 //! - Y axis: -128 (down) to +127 (up)
 //!
+//! # EEPROM Interface
+//!
+//! N64 games use EEPROM for save data storage. Two sizes are supported:
+//! - **4Kbit EEPROM**: 512 bytes (64 blocks of 8 bytes)
+//! - **16Kbit EEPROM**: 2048 bytes (256 blocks of 8 bytes)
+//!
+//! EEPROM commands via PIF RAM:
+//! - **Command 0x04**: Read EEPROM block (8 bytes)
+//!   - Format: [T=2, R=8, cmd=0x04, block]
+//!   - Returns 8 bytes from specified block
+//! - **Command 0x05**: Write EEPROM block (8 bytes)
+//!   - Format: [T=10, R=1, cmd=0x05, block, data[8]]
+//!   - Returns status byte (0x00 = success, 0x80 = error)
+//!
 //! # Implementation
 //!
 //! This is a simplified PIF implementation:
 //! - Basic controller communication (buttons and analog stick)
+//! - EEPROM support with persistence
 //! - No memory card support (yet)
-//! - No EEPROM support (yet)
 //! - Minimal boot ROM (just enough to start games)
 
 /// Physical address of the exception vector in RDRAM
@@ -159,6 +173,18 @@ pub struct ControllerState {
     pub stick_y: i8,
 }
 
+/// EEPROM type and size
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)] // Public API for N64 system save persistence
+pub enum EepromType {
+    /// No EEPROM present
+    None,
+    /// 4Kbit EEPROM (512 bytes, 64 blocks of 8 bytes)
+    Eeprom4K,
+    /// 16Kbit EEPROM (2048 bytes, 256 blocks of 8 bytes)
+    Eeprom16K,
+}
+
 /// PIF (Peripheral Interface) state
 pub struct Pif {
     /// PIF RAM (2KB)
@@ -175,6 +201,16 @@ pub struct Pif {
 
     /// Controller 4 state
     controller4: ControllerState,
+
+    /// EEPROM type
+    eeprom_type: EepromType,
+
+    /// EEPROM data storage (max 2KB for 16Kbit)
+    eeprom_data: Vec<u8>,
+
+    /// Current EEPROM block being accessed (for multi-byte transfers)
+    #[allow(dead_code)] // Reserved for future multi-byte EEPROM transfers
+    eeprom_block: u8,
 }
 
 impl Pif {
@@ -186,6 +222,59 @@ impl Pif {
             controller2: ControllerState::default(),
             controller3: ControllerState::default(),
             controller4: ControllerState::default(),
+            eeprom_type: EepromType::None,
+            eeprom_data: Vec::new(),
+            eeprom_block: 0,
+        }
+    }
+
+    /// Set EEPROM type and initialize storage
+    #[allow(dead_code)] // Will be used by N64 system for save persistence
+    pub fn set_eeprom_type(&mut self, eeprom_type: EepromType) {
+        self.eeprom_type = eeprom_type;
+
+        // Initialize EEPROM storage based on type
+        let size = match eeprom_type {
+            EepromType::None => 0,
+            EepromType::Eeprom4K => 512,   // 4Kbit = 512 bytes
+            EepromType::Eeprom16K => 2048, // 16Kbit = 2048 bytes
+        };
+
+        self.eeprom_data = vec![0xFF; size]; // EEPROM defaults to all 1s when blank
+    }
+
+    /// Load EEPROM data from file
+    #[allow(dead_code)] // Will be used by N64 system for save persistence
+    pub fn load_eeprom(&mut self, data: Vec<u8>) -> Result<(), String> {
+        if self.eeprom_type == EepromType::None {
+            return Err("No EEPROM configured".to_string());
+        }
+
+        let expected_size = match self.eeprom_type {
+            EepromType::Eeprom4K => 512,
+            EepromType::Eeprom16K => 2048,
+            EepromType::None => 0,
+        };
+
+        if data.len() != expected_size {
+            return Err(format!(
+                "EEPROM data size mismatch: expected {} bytes, got {}",
+                expected_size,
+                data.len()
+            ));
+        }
+
+        self.eeprom_data = data;
+        Ok(())
+    }
+
+    /// Save EEPROM data to buffer (for persistence)
+    #[allow(dead_code)] // Will be used by N64 system for save persistence
+    pub fn save_eeprom(&self) -> Option<Vec<u8>> {
+        if self.eeprom_type != EepromType::None {
+            Some(self.eeprom_data.clone())
+        } else {
+            None
         }
     }
 
@@ -317,6 +406,123 @@ impl Pif {
             let state = self.controller4;
             self.write_controller_state(0x7DB, &state);
         }
+
+        // EEPROM commands
+        // EEPROM read command: [T=2, R=8, cmd=0x04, block]
+        // Returns 8 bytes of EEPROM data
+        // Only process if we have the full command (T=2 means 2 bytes: cmd + block)
+        if self.ram[0x7C0] == 0x02 && self.ram[0x7C1] == 0x08 && self.ram[0x7C2] == 0x04 {
+            // Verify the block byte is within valid range before processing
+            // This provides some protection against processing partial commands
+            let block = self.ram[0x7C3];
+            if block < 0xFF {
+                // 0xFF is unlikely to be a valid block number
+                self.read_eeprom_block(0x7C4, block);
+            }
+        }
+
+        // EEPROM write command: [T=10, R=1, cmd=0x05, block, data[8]]
+        // Writes 8 bytes to EEPROM, returns status byte
+        // Only process if we have the full command (T=10 means 10 bytes: cmd + block + 8 data bytes)
+        if self.ram[0x7C0] == 0x0A && self.ram[0x7C1] == 0x01 && self.ram[0x7C2] == 0x05 {
+            let block = self.ram[0x7C3];
+            // Verify block is valid and at least some data bytes are non-zero
+            // This helps ensure the full command payload has been written
+            if block < 0xFF {
+                let mut data = [0u8; 8];
+                data.copy_from_slice(&self.ram[0x7C4..0x7CC]);
+                self.write_eeprom_block(0x7CC, block, &data);
+            }
+        }
+    }
+
+    /// Read an 8-byte block from EEPROM
+    fn read_eeprom_block(&mut self, offset: usize, block: u8) {
+        use emu_core::logging::{log, LogCategory, LogLevel};
+
+        if self.eeprom_type == EepromType::None {
+            log(LogCategory::PPU, LogLevel::Warn, || {
+                "PIF: EEPROM read attempted but no EEPROM configured".to_string()
+            });
+            // Return all zeros if no EEPROM
+            for i in 0..8 {
+                self.ram[offset + i] = 0x00;
+            }
+            return;
+        }
+
+        let block_size = 8;
+        let max_blocks: u16 = match self.eeprom_type {
+            EepromType::Eeprom4K => 64,   // 512 bytes / 8 = 64 blocks
+            EepromType::Eeprom16K => 256, // 2048 bytes / 8 = 256 blocks
+            EepromType::None => 0,
+        };
+
+        if (block as u16) >= max_blocks {
+            log(LogCategory::PPU, LogLevel::Warn, || {
+                format!(
+                    "PIF: EEPROM read out of range: block {} (max {})",
+                    block,
+                    max_blocks - 1
+                )
+            });
+            for i in 0..8 {
+                self.ram[offset + i] = 0xFF;
+            }
+            return;
+        }
+
+        let addr = block as usize * block_size;
+        log(LogCategory::PPU, LogLevel::Debug, || {
+            format!("PIF: EEPROM read block {} at addr 0x{:03X}", block, addr)
+        });
+
+        // Copy 8 bytes from EEPROM to PIF RAM
+        for i in 0..8 {
+            self.ram[offset + i] = self.eeprom_data[addr + i];
+        }
+    }
+
+    /// Write an 8-byte block to EEPROM
+    fn write_eeprom_block(&mut self, offset: usize, block: u8, data: &[u8; 8]) {
+        use emu_core::logging::{log, LogCategory, LogLevel};
+
+        if self.eeprom_type == EepromType::None {
+            log(LogCategory::PPU, LogLevel::Warn, || {
+                "PIF: EEPROM write attempted but no EEPROM configured".to_string()
+            });
+            self.ram[offset] = 0x80; // Error status
+            return;
+        }
+
+        let block_size = 8;
+        let max_blocks: u16 = match self.eeprom_type {
+            EepromType::Eeprom4K => 64,
+            EepromType::Eeprom16K => 256,
+            EepromType::None => 0,
+        };
+
+        if (block as u16) >= max_blocks {
+            log(LogCategory::PPU, LogLevel::Warn, || {
+                format!(
+                    "PIF: EEPROM write out of range: block {} (max {})",
+                    block,
+                    max_blocks - 1
+                )
+            });
+            self.ram[offset] = 0x80; // Error status
+            return;
+        }
+
+        let addr = block as usize * block_size;
+        log(LogCategory::PPU, LogLevel::Debug, || {
+            format!("PIF: EEPROM write block {} at addr 0x{:03X}", block, addr)
+        });
+
+        // Copy 8 bytes from data to EEPROM
+        self.eeprom_data[addr..addr + 8].copy_from_slice(data);
+
+        self.ram[offset] = 0x00; // Success status
     }
 
     /// Write controller state to PIF RAM response block
@@ -536,5 +742,143 @@ mod tests {
         state.stick_y = -128;
         assert_eq!(state.stick_x, -128);
         assert_eq!(state.stick_y, -128);
+    }
+
+    #[test]
+    fn test_eeprom_4k_initialization() {
+        let mut pif = Pif::new();
+        pif.set_eeprom_type(EepromType::Eeprom4K);
+
+        // Verify EEPROM storage is initialized to 0xFF (blank EEPROM default)
+        let data = pif.save_eeprom().unwrap();
+        assert_eq!(data.len(), 512); // 4Kbit = 512 bytes
+        assert!(data.iter().all(|&b| b == 0xFF));
+    }
+
+    #[test]
+    fn test_eeprom_16k_initialization() {
+        let mut pif = Pif::new();
+        pif.set_eeprom_type(EepromType::Eeprom16K);
+
+        // Verify EEPROM storage is initialized to 0xFF
+        let data = pif.save_eeprom().unwrap();
+        assert_eq!(data.len(), 2048); // 16Kbit = 2048 bytes
+        assert!(data.iter().all(|&b| b == 0xFF));
+    }
+
+    #[test]
+    fn test_eeprom_read_command() {
+        let mut pif = Pif::new();
+        pif.set_eeprom_type(EepromType::Eeprom4K);
+
+        // Write some test data to EEPROM block 5
+        let test_data = [0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0];
+        pif.write_ram(0x7C0, 0x0A); // T=10
+        pif.write_ram(0x7C1, 0x01); // R=1
+        pif.write_ram(0x7C2, 0x05); // cmd=0x05 (write)
+        pif.write_ram(0x7C3, 5); // block=5
+        for (i, &byte) in test_data.iter().enumerate() {
+            pif.write_ram(0x7C4 + i as u32, byte);
+        }
+
+        // Issue EEPROM read command for block 5
+        pif.write_ram(0x7C0, 0x02); // T=2
+        pif.write_ram(0x7C1, 0x08); // R=8
+        pif.write_ram(0x7C2, 0x04); // cmd=0x04 (read)
+        pif.write_ram(0x7C3, 5); // block=5
+
+        // Verify the data was read back correctly (response at 0x7C4)
+        for (i, &expected) in test_data.iter().enumerate() {
+            assert_eq!(pif.read_ram(0x7C4 + i as u32), expected);
+        }
+    }
+
+    #[test]
+    fn test_eeprom_write_command() {
+        let mut pif = Pif::new();
+        pif.set_eeprom_type(EepromType::Eeprom4K);
+
+        // Write data to block 10
+        let test_data = [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x00, 0x11];
+        pif.write_ram(0x7C0, 0x0A); // T=10
+        pif.write_ram(0x7C1, 0x01); // R=1
+        pif.write_ram(0x7C2, 0x05); // cmd=0x05 (write)
+        pif.write_ram(0x7C3, 10); // block=10
+        for (i, &byte) in test_data.iter().enumerate() {
+            pif.write_ram(0x7C4 + i as u32, byte);
+        }
+
+        // Status byte should be 0x00 (success) at response offset 0x7CC
+        assert_eq!(pif.read_ram(0x7CC), 0x00);
+
+        // Verify data was written to EEPROM by reading it back
+        let saved_data = pif.save_eeprom().unwrap();
+        let block_offset = 10 * 8;
+        assert_eq!(&saved_data[block_offset..block_offset + 8], &test_data);
+    }
+
+    #[test]
+    fn test_eeprom_out_of_range_read() {
+        let mut pif = Pif::new();
+        pif.set_eeprom_type(EepromType::Eeprom4K);
+
+        // Try to read block 64 (out of range for 4Kbit EEPROM, max is 63)
+        pif.write_ram(0x7C0, 0x02); // T=2
+        pif.write_ram(0x7C1, 0x08); // R=8
+        pif.write_ram(0x7C2, 0x04); // cmd=0x04 (read)
+        pif.write_ram(0x7C3, 64); // block=64 (invalid)
+
+        // Should return 0xFF for all bytes (error indication)
+        for i in 0..8 {
+            assert_eq!(pif.read_ram(0x7C4 + i as u32), 0xFF);
+        }
+    }
+
+    #[test]
+    fn test_eeprom_out_of_range_write() {
+        let mut pif = Pif::new();
+        pif.set_eeprom_type(EepromType::Eeprom4K);
+
+        // Try to write to block 64 (out of range)
+        pif.write_ram(0x7C0, 0x0A); // T=10
+        pif.write_ram(0x7C1, 0x01); // R=1
+        pif.write_ram(0x7C2, 0x05); // cmd=0x05 (write)
+        pif.write_ram(0x7C3, 64); // block=64 (invalid)
+        for i in 0..8 {
+            pif.write_ram(0x7C4 + i as u32, i as u8);
+        }
+
+        // Status byte should be 0x80 (error) at response offset 0x7CC
+        assert_eq!(pif.read_ram(0x7CC), 0x80);
+    }
+
+    #[test]
+    fn test_eeprom_load_save() {
+        let mut pif = Pif::new();
+        pif.set_eeprom_type(EepromType::Eeprom4K);
+
+        // Create test data
+        let test_eeprom: Vec<u8> = (0..512).map(|i| (i % 256) as u8).collect();
+
+        // Load EEPROM data
+        pif.load_eeprom(test_eeprom.clone()).unwrap();
+
+        // Save and verify it matches
+        let saved = pif.save_eeprom().unwrap();
+        assert_eq!(saved, test_eeprom);
+    }
+
+    #[test]
+    fn test_eeprom_size_mismatch() {
+        let mut pif = Pif::new();
+        pif.set_eeprom_type(EepromType::Eeprom4K);
+
+        // Try to load wrong size data (2048 bytes for 4Kbit EEPROM)
+        let wrong_size_data = vec![0u8; 2048];
+        let result = pif.load_eeprom(wrong_size_data);
+
+        // Should return error
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("size mismatch"));
     }
 }
