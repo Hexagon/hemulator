@@ -38,10 +38,11 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Code comment: "TODO: Implement GAIN modes (direct, linear increase/decrease, exponential)"
 
 #### ColecoVision  
-- [ ] **Z80 ROM Execution**: Debug why test ROM doesn't execute properly through BIOS - `crates/systems/colecovision/src/lib.rs`
-  - Current: Smoke tests use manual VDP initialization instead of ROM execution
-  - Test ROM exists (`test_roms/colecovision/test.col`) but doesn't render when executed
-  - Impact: Full system integration not validated via ROM execution
+- [x] **Z80 ROM Execution**: Debug why test ROM doesn't execute properly through BIOS - `crates/systems/colecovision/src/lib.rs`
+  - **FIXED**: Created minimal test BIOS that properly jumps to cartridge ROM
+  - Test ROM now executes correctly through BIOS initialization
+  - Added `smoke_test_colecovision_with_rom_execution()` to verify full ROM execution
+  - Test BIOS available at `test_roms/colecovision/test_bios.rom`
 
 ### Medium
 
@@ -51,12 +52,6 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Needed: Assembly-based test ROM demonstrating VDP and PSG functionality
   - Follow pattern from other systems (test_roms/README.md)
   - Impact: No automated verification of ROM loading and execution
-
-#### ColecoVision
-- [ ] **Test ROM**: Create basic test ROM for smoke testing - `test_roms/colecovision/`
-  - Current: Test ROM exists but doesn't execute properly through BIOS
-  - Smoke tests use manual VDP initialization instead of ROM execution
-  - Impact: Full system integration not validated via ROM execution
 
 #### PC/DOS
 - [ ] **INT 21h DOS API**: Expand file I/O and DOS functions - `crates/systems/pc/src/cpu.rs`

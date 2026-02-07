@@ -550,13 +550,67 @@ mod tests {
     }
 
     #[test]
+    fn smoke_test_colecovision_with_rom_execution() {
+        // This test uses the actual test BIOS and ROM to verify proper Z80 execution
+        let mut system = ColecoVisionSystem::new();
+
+        // Load test BIOS and cartridge
+        // CARGO_MANIFEST_DIR points to crates/systems/colecovision, so go up 3 levels to workspace root
+        let bios_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../test_roms/colecovision/test_bios.rom"
+        );
+        let rom_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../test_roms/colecovision/test.col"
+        );
+
+        let bios = std::fs::read(bios_path).expect("Failed to load test BIOS");
+        let rom = std::fs::read(rom_path).expect("Failed to load test ROM");
+
+        system.load_bios(bios);
+        system.load_cartridge(rom);
+
+        // Run several frames to allow ROM to initialize and render
+        for _ in 0..10 {
+            system
+                .step_frame()
+                .expect("Warm-up frame step_frame() failed in ColecoVision smoke test");
+        }
+
+        // Get final frame
+        let frame = system.step_frame().unwrap();
+
+        // Verify dimensions
+        assert_eq!(frame.width, 256);
+        assert_eq!(frame.height, 192);
+
+        // Verify we have multiple colors (the ROM creates colored bands)
+        use std::collections::HashSet;
+        let colors: HashSet<u32> = frame.pixels.iter().copied().collect();
+
+        assert!(
+            colors.len() >= 3,
+            "Expected at least 3 colors from ROM execution (backdrop + multiple colored bands), found {}",
+            colors.len()
+        );
+
+        // Verify significant rendering happened (not just black screen)
+        let non_black = frame.pixels.iter().filter(|&&p| p != 0xFF000000).count();
+        assert!(
+            non_black > 5000,
+            "Expected significant rendering from ROM execution, found only {} non-black pixels",
+            non_black
+        );
+    }
+
+    #[test]
     fn smoke_test_colecovision() {
         use emu_core::cpu_z80::MemoryZ80;
 
         // Note: This is a simplified smoke test that manually initializes the VDP
-        // rather than executing the test ROM's Z80 code. The full ROM-based test
-        // is available but currently having issues with Z80 execution integration.
-        // TODO: Debug and enable full ROM execution test
+        // for testing VDP functionality without requiring ROM execution.
+        // For ROM execution tests, see smoke_test_colecovision_with_rom_execution
 
         let mut system = ColecoVisionSystem::new();
 
