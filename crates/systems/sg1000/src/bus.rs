@@ -177,3 +177,139 @@ impl MemoryZ80 for Sg1000Memory {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    /// Create a test memory bus with minimal ROM and shared components
+    fn create_test_bus() -> Sg1000Memory {
+        let rom = vec![0; 0x8000]; // 32KB dummy ROM
+        let vdp = Rc::new(RefCell::new(Tms9918a::new()));
+        let psg = Rc::new(RefCell::new(Sg1000Psg::new()));
+        Sg1000Memory::new(rom, vdp, psg)
+    }
+
+    #[test]
+    fn test_psg_mirroring() {
+        // PSG should be accessible on all ports 0x40-0x7F
+        let mut bus = create_test_bus();
+
+        // Write to different PSG ports - all should write to the same PSG
+        bus.io_write(0x40, 0x80); // Tone 0 frequency low
+        bus.io_write(0x50, 0x81); // Tone 0 frequency high
+        bus.io_write(0x60, 0x90); // Tone 0 attenuation
+        bus.io_write(0x7F, 0xBF); // Noise attenuation
+
+        // All writes should have been accepted without error
+        // (no way to read back PSG state directly, but no panic = success)
+    }
+
+    #[test]
+    fn test_vdp_data_mirroring() {
+        // VDP data should be accessible on all even ports 0x80-0xFF
+        let mut bus = create_test_bus();
+
+        // Write to different even VDP data ports
+        bus.io_write(0x80, 0x12);
+        bus.io_write(0x82, 0x34);
+        bus.io_write(0xBE, 0x56);
+        bus.io_write(0xE0, 0x78);
+        bus.io_write(0xFE, 0x9A);
+
+        // All writes should have been accepted
+        // Reading from even ports should return VDP data
+        let _data = bus.io_read(0x80);
+        let _data = bus.io_read(0xA0);
+        let _data = bus.io_read(0xFE);
+    }
+
+    #[test]
+    fn test_vdp_control_mirroring() {
+        // VDP control should be accessible on all odd ports 0x80-0xFF
+        let mut bus = create_test_bus();
+
+        // Write to different odd VDP control ports
+        bus.io_write(0x81, 0x00);
+        bus.io_write(0x83, 0x80);
+        bus.io_write(0xBF, 0xC0);
+        bus.io_write(0xE1, 0xE0);
+        bus.io_write(0xFF, 0xFF);
+
+        // All writes should have been accepted
+        // Reading from odd ports should return VDP status
+        let _status = bus.io_read(0x81);
+        let _status = bus.io_read(0xA1);
+        let _status = bus.io_read(0xFF);
+    }
+
+    #[test]
+    fn test_controller_mirroring() {
+        // Controller 1 should be readable from all even ports 0xC0-0xFF
+        // Controller 2 should be readable from all odd ports 0xC0-0xFF
+        let mut bus = create_test_bus();
+
+        // Set controller states
+        bus.set_controller(1, 0x12);
+        bus.set_controller(2, 0x34);
+
+        // Read controller 1 from various even ports in 0xC0-0xFF range
+        assert_eq!(bus.io_read(0xC0), 0x12);
+        assert_eq!(bus.io_read(0xC2), 0x12);
+        assert_eq!(bus.io_read(0xFE), 0x12);
+
+        // Read controller 2 from various odd ports in 0xC0-0xFF range
+        assert_eq!(bus.io_read(0xC1), 0x34);
+        assert_eq!(bus.io_read(0xC3), 0x34);
+        assert_eq!(bus.io_read(0xFF), 0x34);
+    }
+
+    #[test]
+    fn test_controller_priority_over_vdp() {
+        // Controller ports (0xC0-0xFF) should take priority over VDP
+        // Even though VDP is also mapped to 0x80-0xFF, controllers override at 0xC0+
+        let mut bus = create_test_bus();
+
+        // Set controller states
+        bus.set_controller(1, 0xAA);
+        bus.set_controller(2, 0x55);
+
+        // Reading from 0xC0+ should return controller values, not VDP
+        assert_eq!(bus.io_read(0xC0), 0xAA); // Controller 1, not VDP data
+        assert_eq!(bus.io_read(0xC1), 0x55); // Controller 2, not VDP status
+        assert_eq!(bus.io_read(0xFE), 0xAA); // Controller 1
+        assert_eq!(bus.io_read(0xFF), 0x55); // Controller 2
+    }
+
+    #[test]
+    fn test_vdp_below_controller_range() {
+        // VDP should still work in 0x80-0xBF range (before controller priority)
+        let mut bus = create_test_bus();
+
+        // These should access VDP, not controllers
+        bus.io_write(0x80, 0x12); // VDP data
+        bus.io_write(0x81, 0x80); // VDP control
+        bus.io_write(0xBE, 0x34); // VDP data
+        bus.io_write(0xBF, 0xC0); // VDP control
+
+        // Reading should return VDP values
+        let _data = bus.io_read(0x80); // VDP data
+        let _status = bus.io_read(0x81); // VDP status
+    }
+
+    #[test]
+    fn test_unmapped_ports() {
+        // Ports outside the defined ranges should return 0xFF
+        let mut bus = create_test_bus();
+
+        // Read from unmapped ports
+        assert_eq!(bus.io_read(0x00), 0xFF);
+        assert_eq!(bus.io_read(0x3F), 0xFF);
+
+        // Writes to unmapped ports should not crash
+        bus.io_write(0x00, 0x12);
+        bus.io_write(0x3F, 0x34);
+    }
+}
