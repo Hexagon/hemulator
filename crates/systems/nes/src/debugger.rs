@@ -189,7 +189,7 @@ mod tests {
                     // I flag (bit 2) should be true after reset (0x24 & 0x04 = 0x04)
                     assert!(*value, "I flag should be true after reset");
                 }
-                _ => panic!("Unexpected flag: {}", name),
+                _ => unreachable!("Unexpected flag: {}", name),
             }
         }
     }

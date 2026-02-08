@@ -266,17 +266,18 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Current: Index calculation and palette lookup per pixel (23,040 times/frame)
   - Needed: Precompute RGB palette array (8 palettes × 4 colors = 32 entries)
   - Impact: Reduced arithmetic in tight pixel loop
-- [ ] **Tight Loop Division Operations**: Replace division with bit shifts - `crates/systems/gb/src/ppu.rs:636-638`
-  - Current: `x / 8` division operation in per-pixel loop
-  - Needed: Replace with `x >> 3` bit shift (equivalent for power-of-2)
-  - Impact: Minor speedup in hot path
+- [x] **Tight Loop Division Operations**: Replace division with bit shifts - `crates/systems/gb/src/ppu.rs:636-638`
+  - **FIXED**: Replaced all division and modulo operations by 8 with bit operations
+  - `x / 8` → `x >> 3` (right shift by 3)
+  - `x % 8` → `x & 7` (bitwise AND with 7)
+  - Impact: Minor performance improvement in tight pixel rendering loops
 
 #### Game Boy / Game Boy Color - Documentation
 
-- [ ] **PPU Magic Numbers**: Document inline color constants - `crates/systems/gb/src/ppu.rs:860-863,1066-1069`
-  - Current: Hardcoded color values (0xFFFFFFFF, 0xFFAAAAAA, etc.) without explanation
-  - Needed: Add comments explaining ARGB8888 (0xAARRGGBB) format and DMG grayscale mapping
-  - Impact: Code readability and maintainability
+- [x] **PPU Magic Numbers**: Document inline color constants - `crates/systems/gb/src/ppu.rs` (DMG palette constants)
+  - **FIXED**: Added detailed comments explaining ARGB8888 format (0xAARRGGBB) and DMG grayscale mapping
+  - White: 0xFFFFFFFF (lightest), Light gray: 0xFFAAAAAA (2/3 brightness), Dark gray: 0xFF555555 (1/3 brightness), Black: 0xFF000000 (darkest)
+  - Impact: Improved code readability and maintainability
 - [x] **LCDC Register Reference**: Add Pan Docs cross-reference - `crates/systems/gb/src/ppu.rs:242-254`
   - Completed: LCDC bits now include a Pan Docs URL comment referencing the LCDC section
   - Impact: Easier verification of hardware accuracy
@@ -290,14 +291,14 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Code comment: "duplicated to avoid rewriting audio generation"
   - Impact: Unnecessary memory duplication; maintenance burden
   - Solution: Unify frame counter state or document rationale for separation
-- [ ] **Duplicate Variable Extraction in PPU**: Remove redundant scroll variable extraction - `crates/systems/nes/src/ppu.rs:1032-1036,1048-1050`
-  - Current: `coarse_x`, `coarse_y`, `nt_x`, `nt_y` extracted twice identically in `render_scanline()`
-  - Impact: Unnecessary redundant calculations (minimal performance impact)
-  - Solution: Use first extraction, remove second
-- [ ] **PC Histogram Allocation**: Only allocate when instruction tracing enabled - `crates/systems/nes/src/lib.rs:589`
-  - Current: `pc_hist: Option<HashMap<u16, u16>>` allocated with capacity 1024 every frame
-  - Impact: ~60KB/sec allocation overhead even when tracing disabled
-  - Solution: Only allocate when `instruction_tracer.is_enabled()`
+- [x] **Duplicate Variable Extraction in PPU**: Remove redundant scroll variable extraction - `crates/systems/nes/src/ppu.rs`
+  - **FIXED**: Removed duplicate scroll variable extraction in the NES PPU scroll calculation code
+  - Variables `coarse_x`, `coarse_y`, `nt_x`, `nt_y`, `fine_y` are now extracted only once
+  - Impact: Cleaner code without redundant calculations
+- [x] **PC Histogram Allocation**: Only allocate when instruction tracing enabled - `crates/systems/nes/src/lib.rs`
+  - **FIXED**: PC histogram now only allocated when `instruction_tracer.is_enabled()` returns true
+  - Eliminates ~60KB/sec allocation overhead when tracing is disabled
+  - Impact: Reduced memory allocation overhead in normal operation
 - [ ] **Sprite Evaluation Optimization**: Early exit sprite iteration at 8-sprite limit - `crates/systems/nes/src/ppu.rs:1230-1314`
   - Current: Sprite evaluation iterates all 64 sprites per scanline even when only 8 rendered
   - Issue: Early break at `sprites_on_scanline > 8` happens too late in loop
@@ -313,10 +314,10 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Impact: Additional weak-to-strong pointer upgrades on each relevant callback; expected to be minimal on modern CPUs
   - Solution: Profile actual callback frequency and optimize (e.g., cache strong references or restructure callbacks) only if a measurable impact is observed
   - Note: Very low priority - likely negligible performance impact in practice
-- [ ] **Unreachable Panic Branch**: Use `unreachable!()` for impossible flag names - `crates/systems/nes/src/debugger.rs`
-  - Current: `panic!("Unexpected flag: {}", name)` but all flag names are pre-defined
-  - Impact: Code clarity and optimization
-  - Solution: Replace with `unreachable!()` macro
+- [x] **Unreachable Panic Branch**: Use `unreachable!()` for impossible flag names - `crates/systems/nes/src/debugger.rs`
+  - **FIXED**: Replaced `panic!()` with `unreachable!()` macro in test code
+  - All flag names are pre-defined, so the default case is truly unreachable
+  - Impact: Better code clarity and potential compiler optimizations
 
 #### NES APU - Missing Features
 - [ ] **Sweep Unit**: Implement pulse channel sweep units - `crates/core/src/apu/rp2a03.rs:52,78`, `crates/core/src/apu/rp2a07.rs:53,79`

@@ -1045,12 +1045,6 @@ impl Ppu {
             });
         }
 
-        let coarse_x = (v & 0x001F) as u8; // Bits 0-4: tile column (0-31)
-        let coarse_y = ((v >> 5) & 0x001F) as u8; // Bits 5-9: tile row (0-31)
-        let nt_x = ((v >> 10) & 0x0001) as u8; // Bit 10: nametable X
-        let nt_y = ((v >> 11) & 0x0001) as u8; // Bit 11: nametable Y
-        let fine_y = ((v >> 12) & 0x0007) as u8; // Bits 12-14: fine Y scroll (0-7)
-
         // Use v register values directly - no screen scanline offset!
         // The v register already points to the correct nametable position for this scanline.
         let tile_y_wrapped = coarse_y;

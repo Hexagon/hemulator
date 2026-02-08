@@ -587,8 +587,12 @@ impl System for NesSystem {
         let mut nmis: u32 = 0;
         let mut mmc3_a12_edges: u32 = 0;
 
-        // Track PC histogram for trace logging
-        let mut pc_hist: Option<HashMap<u16, u16>> = Some(HashMap::with_capacity(1024));
+        // Track PC histogram for trace logging (only allocate when tracing is enabled)
+        let mut pc_hist: Option<HashMap<u16, u16>> = if self.instruction_tracer.is_enabled() {
+            Some(HashMap::with_capacity(1024))
+        } else {
+            None
+        };
 
         // Prepare an output frame and render scanlines incrementally during visible time.
         let mut rendered_scanlines: u32 = 0;
