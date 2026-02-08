@@ -32,8 +32,11 @@ use emu_core::apu::TimingMode;
 ///   * Uses "new" MMC3B/C behavior: IRQ fires after counter decrements to 0
 ///
 /// # Implementation Notes
-/// - Uses MMC3B/C (Sharp/new) IRQ behavior: IRQ triggers only when counter decrements to 0
-/// - MMC3A behavior (IRQ on counter==0 after reload) is NOT implemented
+/// - Supports MMC3A, MMC3B, and MMC3C variants via iNES 2.0 submapper:
+///   * Submapper 0 (default): MMC3C behavior (IRQ on counter decrement to 0)
+///   * Submapper 1: MMC3A behavior (IRQ when counter==0, including after reload)
+///   * Submapper 2: MMC3B behavior (IRQ on counter decrement to 0)
+///   * Submapper 3+: MC-ACC (treated as MMC3C)
 /// - Respects 4-screen VRAM from cartridge header, ignoring $A000 when present
 /// - This covers F1 Sensation (mapper-controlled H/V) and Rad Racer 2 (4-screen VRAM)
 #[derive(Debug)]
@@ -60,6 +63,9 @@ pub struct Mmc3 {
     /// Whether the cartridge has 4-screen VRAM (from iNES header)
     /// When true, $A000 mirroring control is ignored (hardware has extra VRAM chips)
     has_four_screen_vram: bool,
+    /// MMC3 variant (A, B, or C) - affects IRQ behavior
+    /// true = MMC3A (old behavior), false = MMC3B/C (new behavior)
+    is_mmc3a: bool,
 }
 
 impl Mmc3 {
@@ -68,6 +74,10 @@ impl Mmc3 {
         let initial_mirroring = cart.get_initial_mirroring();
         // Check if cartridge has 4-screen VRAM (extra VRAM chips on board)
         let has_four_screen = initial_mirroring == Mirroring::FourScreen;
+        
+        // Determine MMC3 variant from submapper (iNES 2.0)
+        // Submapper 1 = MMC3A (old IRQ behavior), others = MMC3B/C (new IRQ behavior)
+        let is_mmc3a = cart.submapper == 1;
 
         let mut m = Self {
             prg_rom: cart.prg_rom,
@@ -88,6 +98,7 @@ impl Mmc3 {
             // and previous "always on" behavior of NesBus.
             prg_ram_protect: 0x80,
             has_four_screen_vram: has_four_screen,
+            is_mmc3a,
         };
         m.apply_banks(ppu);
         // Use safe initial mirroring (respects header for MMC3)
@@ -275,11 +286,17 @@ impl Mmc3 {
                 true // Decremented
             };
 
-            // MMC3B/C (Sharp/new) behavior: trigger IRQ only when counter DECREMENTS to 0.
-            // MMC3A (NEC/old/alternate) behavior would trigger when counter==0 regardless of reload.
-            // We use MMC3B/C by default as it's more common and matches most emulator behavior.
-            if self.irq_counter == 0 && self.irq_enabled && did_decrement {
-                self.irq_pending = true;
+            // IRQ behavior differs between MMC3A and MMC3B/C:
+            // - MMC3A (old/NEC): IRQ triggers when counter==0, even after reload
+            // - MMC3B/C (new/Sharp): IRQ triggers only when counter DECREMENTS to 0
+            if self.irq_counter == 0 && self.irq_enabled {
+                if self.is_mmc3a {
+                    // MMC3A: IRQ on counter==0 regardless of reload
+                    self.irq_pending = true;
+                } else if did_decrement {
+                    // MMC3B/C: IRQ only when counter decrements to 0
+                    self.irq_pending = true;
+                }
             }
         }
         self.last_a12 = a12_high;
