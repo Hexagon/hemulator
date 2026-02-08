@@ -722,10 +722,10 @@ impl Ppu {
                     // DMG mode: use monochrome palette
                     let palette_color = (self.bgp >> (color_index * 2)) & 0x03;
                     match palette_color {
-                        0 => 0xFFFFFFFF, // White
-                        1 => 0xFFAAAAAA, // Light gray
-                        2 => 0xFF555555, // Dark gray
-                        3 => 0xFF000000, // Black
+                        0 => 0xFFFFFFFF, // White (lightest) - ARGB8888 format: 0xAARRGGBB
+                        1 => 0xFFAAAAAA, // Light gray (2/3 brightness)
+                        2 => 0xFF555555, // Dark gray (1/3 brightness)
+                        3 => 0xFF000000, // Black (darkest)
                         _ => unreachable!(),
                     }
                 };
@@ -867,10 +867,10 @@ impl Ppu {
                     // DMG mode: use monochrome palette
                     let palette_color = (self.bgp >> (color_index * 2)) & 0x03;
                     match palette_color {
-                        0 => 0xFFFFFFFF, // White
-                        1 => 0xFFAAAAAA, // Light gray
-                        2 => 0xFF555555, // Dark gray
-                        3 => 0xFF000000, // Black
+                        0 => 0xFFFFFFFF, // White (lightest) - ARGB8888 format: 0xAARRGGBB
+                        1 => 0xFFAAAAAA, // Light gray (2/3 brightness)
+                        2 => 0xFF555555, // Dark gray (1/3 brightness)
+                        3 => 0xFF000000, // Black (darkest)
                         _ => unreachable!(),
                     }
                 };
@@ -1075,8 +1075,8 @@ impl Ppu {
                         let palette_color = (palette >> (color_index * 2)) & 0x03;
                         match palette_color {
                             0 => 0xFFFFFFFF, // White (lightest) - ARGB8888 format: 0xAARRGGBB
-                            1 => 0xFFAAAAAA, // Light gray
-                            2 => 0xFF555555, // Dark gray
+                            1 => 0xFFAAAAAA, // Light gray (2/3 brightness)
+                            2 => 0xFF555555, // Dark gray (1/3 brightness)
                             3 => 0xFF000000, // Black (darkest)
                             _ => unreachable!(),
                         }
@@ -1284,10 +1284,10 @@ impl Ppu {
         let palette = self.bgp;
         let shade = (palette >> (color * 2)) & 0x03;
         match shade {
-            0 => 0xFFFFFFFF, // White
-            1 => 0xFFAAAAAA, // Light gray
-            2 => 0xFF555555, // Dark gray
-            _ => 0xFF000000, // Black
+            0 => 0xFFFFFFFF, // White (lightest) - ARGB8888 format: 0xAARRGGBB
+            1 => 0xFFAAAAAA, // Light gray (2/3 brightness)
+            2 => 0xFF555555, // Dark gray (1/3 brightness)
+            _ => 0xFF000000, // Black (darkest)
         }
     }
 
@@ -1301,9 +1301,9 @@ impl Ppu {
         let shade = (palette >> (color * 2)) & 0x03;
         match shade {
             0 => 0xFFFFFFFF, // White (transparent for sprites, but we'll show it)
-            1 => 0xFFAAAAAA, // Light gray
-            2 => 0xFF555555, // Dark gray
-            _ => 0xFF000000, // Black
+            1 => 0xFFAAAAAA, // Light gray (2/3 brightness)
+            2 => 0xFF555555, // Dark gray (1/3 brightness)
+            _ => 0xFF000000, // Black (darkest)
         }
     }
 }
