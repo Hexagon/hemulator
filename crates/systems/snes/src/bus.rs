@@ -1716,7 +1716,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // TODO: Same issue as upload protocol test - SPC700 not echoing indices
+    #[test]
     fn test_apu_ports_echo() {
         let mut bus = SnesBus::new();
 
@@ -1750,10 +1750,15 @@ mod tests {
         // SPC700 should echo $CC back
         assert_eq!(bus.read(0x2140), 0xCC, "SPC700 should acknowledge with $CC");
 
+        // CRITICAL: Write 0 to port 0 to signal ready for upload
+        // The IPL ROM at $FFD6-$FFD8 waits for port 0 to become 0 before proceeding
+        bus.write(0x2140, 0x00);
+        bus.tick_cycles(50); // Give SPC700 time to see the 0
+
         // Now upload a byte (index 1, data $DE)
-        // Note: IPL ROM waits for NON-ZERO index at $FFD6-$FFD8
+        // Note: IPL ROM waits for port 0 = 0 at $FFD6-$FFD8, then proceeds to upload loop
         bus.write(0x2141, 0xDE); // Data
-        bus.write(0x2140, 0x01); // Index 1 (not 0!)
+        bus.write(0x2140, 0x01); // Index 1
 
         bus.tick_cycles(500);
 
