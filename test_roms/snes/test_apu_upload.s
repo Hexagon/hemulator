@@ -50,28 +50,54 @@ RESET:
     lda #$01
     sta $0100               ; Marker: passed first ready wait
     
-    ; Step 2: Send upload start command ($CC)
+    ; Step 2: Set up entry point and port 1 BEFORE sending command
+    ; (SPC700 reads these immediately after receiving $CC)
+    ; Entry point: The IPL stores the entry point at $0000/$0001, so we can't
+    ; put code there. Indices 1-15 go to $0001-$000F. We'll use $0002 as entry
+    ; point (skipping index 1, starting code at index 2).
+    lda #$02
+    sta $2142               ; Entry point low byte = $02
+    lda #$00
+    sta $2143               ; Entry point high byte = $00
+    lda #$01
+    sta $2141               ; Non-zero = upload mode (vs. execute mode)
+    
+    ; Step 3: Send upload start command ($CC)
     lda #$CC
     sta $2140
     
-    ; CRITICAL: Give SPC700 time to process $CC command!
-    ; The SPC700 needs ~20 cycles to read $CC, exit wait loop, and branch to upload routine
-    ; With clock ratio of 0.286, main CPU needs ~70 cycles
-    ldy #$0020              ; Delay loop
+    ; CRITICAL: Wait for SPC700 to echo $CC
+    ; The SPC700 needs time to process $CC and echo it back
+:   lda $2140
+    cmp #$CC
+    bne :-
+    
+    ; CRITICAL: Write 0 to port 0 to signal "ready for upload"
+    ; The IPL ROM at $FFD6-$FFD8 waits for port 0 = 0 before entering upload loop
+    lda #$00
+    sta $2140
+    
+    ; Small delay to give SPC700 time to see the 0 and enter upload loop
+    ldy #$0010
 :   dey
     bne :-
     
-    ; Step 3: Send destination address ($0200) to ports 2/3
-    lda #$00
-    sta $2142               ; Low byte
-    lda #$02
-    sta $2143               ; High byte
-    
     ; Step 4: Upload some bytes
-    ; Note: SPC700 IPL ROM waits for NON-ZERO index at $FFD6-$FFD8
-    ; So we start with index 1, not 0
-    ldx #$0001              ; Start with index 1, not 0!
+    ; The IPL ROM now waits for non-zero index at $FFDA
+    ldx #$0001              ; Start with index 1
 upload_loop1:
+    ; Wait for SPC700 to be ready (port 0 should match previous index or be 0)
+    ; This ensures we don't write new data before SPC700 processed the previous byte
+    .a8
+    cpx #$0001              ; First iteration?
+    beq upload_first_byte   ; Skip wait on first byte
+    ; Wait for previous index echo
+    dex                     ; Get previous index  
+    txa
+    inx                     ; Restore current index
+:   cmp $2140               ; Wait for SPC700 to echo previous index
+    bne :-
+upload_first_byte:
     ; Send index to port 0
     txa
     sta $2140
@@ -80,13 +106,7 @@ upload_loop1:
     lda test_data, x
     sta $2141
     
-    ; Small delay to give SPC700 time to process
-    ; (Real games have code here that provides natural delays)
-    ldy #$0020              ; Larger delay
-:   dey
-    bne :-
-    
-    ; Wait for SPC700 to echo the index
+    ; Wait for SPC700 to echo the index (acknowledge receipt)
     .a8
 :   txa                     ; Get index back into A for comparison
     cmp $2140
@@ -99,36 +119,39 @@ upload_loop1:
     lda #$02
     sta $0101               ; Marker: completed first upload
     
-    ; Step 5: Signal end of upload (send $00 $00 to ports 0/1)
+    ; Step 5: Signal end of upload
+    ; After uploading index $0F, SPC700 expects index $10 next
+    ; To exit the upload loop and make SPC700 jump to the entry point,
+    ; we need to write port 0 > current index ($10)
+    ; Port 1 = $00 signals execute mode (not upload mode)
+    ; Keep entry point ports $F6/$F7 unchanged (still $0200)
+    
     lda #$00
-    sta $2140
-    sta $2141
+    sta $2141               ; Port 1 = $00 (execute mode)
+    lda #$FF                ; Large value to trigger exit
+    sta $2140               ; Port 0 = $FF > $10, triggers exit to $FFEF
     
-    ; Wait for echo
-    .a8
-:   lda $2140
-    bne :-
+    ; SPC700 will now:
+    ; 1. Exit the upload loop at $FFE9/$FFED
+    ; 2. Read entry point from ports $F6/$F7 ($0200)
+    ; 3. Read ports $F4/$F5 at $FFF3 (will read $FF/$00)
+    ; 4. Check port $F5 at $FFF9 (it's $00, so don't loop)
+    ; 5. Jump to entry point at $FFFB
+    ; 6. Execute uploaded code which writes $BBAA to ports
     
+    ; Mark that we signaled the upload end
+    ; The real test is whether the uploaded code executes (marker $0103)
     lda #$03
-    sta $0102               ; Marker: got end-of-upload echo
+    sta $0102               ; Marker: end-of-upload signaled
     
     ; ========================================
     ; SECOND UPLOAD: This is where real games often hang!
     ; ========================================
     
-    ; Clear all ports
-    lda #$00
-    sta $2140
-    sta $2141
-    sta $2142
-    sta $2143
-    
-    ; Wait for driver to re-enable IPL or provide ready signal
-    ; In real hardware, the uploaded driver should handle this
-    ; For testing, we're checking if the IPL ROM remains active
-    
-    ; Small delay
-    ldx #$1000
+    ; Give SPC700 lots of time to execute the uploaded code
+    ; The uploaded code writes $BBAA to ports and loops
+    ; We need to wait for it to finish writing the ports
+    ldx #$8000              ; Large delay
 :   dex
     bne :-
     
@@ -187,9 +210,10 @@ IRQ:
 
 ; Test data to upload
 test_data:
-    .byte $CD, $EF          ; MOV X, #$EF
-    .byte $BD               ; MOV SP, X  
-    .byte $8F, $AA, $F4     ; MOV $F4, #$AA
-    .byte $8F, $BB, $F5     ; MOV $F5, #$BB
-    .byte $2F, $FE          ; BRA *-2
-    .byte $00, $00, $00, $00, $00, $00
+    .byte $00               ; Index 1: dummy byte (will be overwritten by entry point)
+    .byte $CD, $EF          ; Index 2-3: MOV X, #$EF
+    .byte $BD               ; Index 4: MOV SP, X  
+    .byte $8F, $AA, $F4     ; Index 5-7: MOV $F4, #$AA
+    .byte $8F, $BB, $F5     ; Index 8-10: MOV $F5, #$BB
+    .byte $2F, $FE          ; Index 11-12: BRA *-2
+    .byte $00, $00, $00     ; Index 13-15: padding
