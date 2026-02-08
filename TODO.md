@@ -286,15 +286,13 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Current: Magic numbers (1024, 16, 64, 256) without rationale
   - Needed: Explain calculation (e.g., "4.194304 MHz / 1024 = 4096 Hz")
   - Impact: Understanding of timer frequency selection
-- [ ] **LCDC Register Reference**: Add Pan Docs cross-reference - `crates/systems/gb/src/ppu.rs:242-254`
-  - Current: LCDC bits documented with values but no external reference
-  - Needed: Add URL comment linking to Pan Docs LCDC section
+- [x] **LCDC Register Reference**: Add Pan Docs cross-reference - `crates/systems/gb/src/ppu.rs:242-254`
+  - Completed: LCDC bits now include a Pan Docs URL comment referencing the LCDC section
   - Impact: Easier verification of hardware accuracy
-- [ ] **Signed Tile Addressing**: Explain 2's complement behavior - `crates/systems/gb/src/ppu.rs:809`
-  - Current: `calculate_signed_tile_address()` call without explanation
-  - Needed: Comment explaining signed/unsigned tile indexing modes
-  - Impact: Understanding of tile data addressing
 
+- [x] **Signed Tile Addressing**: Explain 2's complement behavior - `crates/systems/gb/src/ppu.rs:809`
+  - Completed: `calculate_signed_tile_address()` is documented with signed/unsigned tile indexing behavior
+  - Impact: Understanding of tile data addressing
 #### NES (Nintendo Entertainment System)
 - [ ] **Duplicate APU Frame Counter State**: Refactor duplicated frame counter tracking - `crates/systems/nes/src/apu.rs:203-206`
   - Current: `frame_counter_cycles` and `irq_frame_counter_cycles` track same information separately
