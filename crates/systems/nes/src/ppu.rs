@@ -37,7 +37,7 @@
 //! - **Trigger Delay**: Flag is set at PPU dot = X + 2 (accounting for 2-cycle pipeline delay)
 //! - **Earliest Trigger**: Dot 2 of a visible scanline (dots 2-257)
 //! - **Flag Lifetime**: Persists until pre-render scanline (dot 1 of scanline 261/311)
-//! - **Compatibility**: Also cleared at VBlank start for game compatibility (Battletoads)
+//! - **VBlank Persistence**: Flag persists through VBlank (games like Battletoads poll during NMI)
 //!
 //! ### Edge Cases
 //!
@@ -1438,25 +1438,16 @@ impl Ppu {
             // Set VBlank flag
             let was_vblank = self.vblank.replace(true);
 
-            // COMPATIBILITY FIX: Clear sprite 0 hit at VBlank start.
+            // NOTE: Sprite 0 hit is NOT cleared at VBlank start on real hardware.
+            // The flag persists through VBlank and is only cleared at the pre-render scanline.
+            // This is intentional hardware behavior - games like Battletoads poll the sprite 0
+            // hit flag during VBlank and expect it to still be set from the visible frame.
             //
-            // Hardware-accurate behavior is to clear sprite 0 hit on the pre-render scanline
-            // at dot 1 (261/311). This implementation still performs that hardware-timed clear
-            // on the pre-render line; this earlier clear at VBlank start is *in addition* to
-            // that, not a replacement.
+            // Previous incorrect "compatibility fix": We were clearing sprite 0 hit here,
+            // thinking it would help Battletoads. This was backwards - Battletoads NEEDS
+            // the flag to persist through VBlank so it can detect it during NMI processing.
             //
-            // Rationale: some games poll the sprite 0 hit flag during VBlank. If we only clear
-            // on the pre-render scanline, those games can observe a "stale" hit flag from the
-            // previous frame (e.g., Battletoads screen jumping). Clearing at VBlank start
-            // prevents such games from reading stale state while still allowing the pre-render
-            // clear to occur at the hardware-accurate time before the next visible frame.
-            //
-            // Double-clearing here is intentional and safe: the flag is simply guaranteed to be
-            // false throughout VBlank, and it will be cleared again on the pre-render scanline
-            // for correctness with code that assumes the hardware timing.
-            // NOTE: This is a deviation from strict hardware accuracy for better game compatibility.
-            self.sprite_0_hit.set(false);
-            self.sprite_0_hit_pending.set(None);
+            // Correct behavior: Only clear sprite 0 hit at pre-render scanline (dot 1).
 
             // If VBlank just started and NMI is enabled, trigger NMI
             if !was_vblank && self.nmi_enabled() {
@@ -4452,10 +4443,12 @@ mod tests {
     }
 
     #[test]
-    fn test_sprite_0_hit_cleared_at_vblank_for_compatibility() {
-        // Test compatibility behavior: sprite 0 hit flag is cleared at VBlank start
-        // This deviates from strict hardware behavior (which clears only at pre-render)
-        // but fixes games like Battletoads that poll sprite 0 during VBlank
+    fn test_sprite_0_hit_persists_through_vblank() {
+        // Test hardware-accurate behavior: sprite 0 hit flag persists through VBlank
+        // and is only cleared at the pre-render scanline (dot 1).
+        //
+        // This is critical for games like Battletoads that poll sprite 0 hit during
+        // VBlank (in the NMI handler) to detect split-screen timing.
         let ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
         ppu.clear_first_frame_lock();
 
@@ -4484,15 +4477,39 @@ mod tests {
         assert_eq!(ppu.scanline.get(), 241);
         assert_eq!(ppu.dot.get(), 2);
         assert!(ppu.vblank_flag(), "VBlank should be set");
-        // Compatibility fix: sprite 0 hit IS cleared when VBlank starts (unlike hardware)
-        // This prevents games like Battletoads from seeing stale hit flags during VBlank
+
+        // HARDWARE-ACCURATE: Sprite 0 hit should PERSIST through VBlank
+        // Games like Battletoads poll this flag during VBlank (NMI handler)
         assert!(
-            !ppu.sprite_0_hit.get(),
-            "Sprite 0 hit should be cleared at VBlank start (compatibility fix for Battletoads)"
+            ppu.sprite_0_hit.get(),
+            "Sprite 0 hit MUST persist through VBlank (hardware-accurate behavior)"
         );
 
-        // Sprite 0 hit should remain cleared through VBlank
-        // (It's also cleared again at pre-render scanline for hardware timing correctness)
+        // Continue through VBlank - flag should still be set
+        ppu.scanline.set(250);
+        ppu.tick();
+        assert!(
+            ppu.sprite_0_hit.get(),
+            "Sprite 0 hit should persist throughout VBlank"
+        );
+
+        // Pre-render scanline, dot 0 - flag should still be set
+        ppu.scanline.set(261);
+        ppu.dot.set(0);
+        ppu.tick();
+        assert!(
+            ppu.sprite_0_hit.get(),
+            "Sprite 0 hit should persist until pre-render scanline dot 1"
+        );
+
+        // Pre-render scanline, dot 1 - NOW it should be cleared
+        ppu.tick(); // Advances to 261,1, clears flags, advances to 261,2
+        assert_eq!(ppu.scanline.get(), 261);
+        assert_eq!(ppu.dot.get(), 2);
+        assert!(
+            !ppu.sprite_0_hit.get(),
+            "Sprite 0 hit should be cleared at pre-render scanline, dot 1"
+        );
     }
 
     #[test]
@@ -4619,9 +4636,9 @@ mod tests {
 
         // Set up sprite 0 at X position 50
         ppu.oam[0] = 16 - 1; // Y position
-        ppu.oam[1] = 1;      // Tile index
-        ppu.oam[2] = 0;      // Attributes
-        ppu.oam[3] = 50;     // X position = 50
+        ppu.oam[1] = 1; // Tile index
+        ppu.oam[2] = 0; // Attributes
+        ppu.oam[3] = 50; // X position = 50
 
         // Create opaque sprite tile
         for i in 0..8 {
@@ -4667,7 +4684,7 @@ mod tests {
 
         // Simulate PPU ticking - set scanline and dot
         ppu.scanline.set(16);
-        
+
         // Test before trigger point (dot 51 = X + 1)
         ppu.dot.set(51);
         ppu.tick();
@@ -4678,7 +4695,7 @@ mod tests {
 
         // Reset for next test
         ppu.dot.set(51);
-        
+
         // Test at exact trigger point (dot 52 = X + 2)
         ppu.dot.set(52);
         ppu.tick();
@@ -4873,7 +4890,7 @@ mod tests {
         // Scroll 16 pixels right - now the BG tile appears 16 pixels to the left
         ppu.sprite_0_hit.set(false);
         ppu.sprite_0_hit_pending.set(None);
-        
+
         // v register: coarse_y = 8, coarse_x = 2 (2 tiles * 8 pixels = 16 pixel shift)
         // This shifts the background 16 pixels left, so the tile that was at screen X=64
         // is now at X=48. Sprite at X=64 won't overlap anymore.
@@ -4970,10 +4987,12 @@ mod tests {
         ppu.odd_frame.set(false);
         let mut frame = Frame::new(256, 240);
         ppu.render_scanline(16, &mut frame);
-        
-        let (even_scanline, even_x) = ppu.sprite_0_hit_pending.get()
+
+        let (even_scanline, even_x) = ppu
+            .sprite_0_hit_pending
+            .get()
             .expect("Sprite 0 hit should be scheduled on even frame");
-        
+
         // Clear for odd frame test
         ppu.sprite_0_hit.set(false);
         ppu.sprite_0_hit_pending.set(None);
@@ -4982,8 +5001,10 @@ mod tests {
         ppu.odd_frame.set(true);
         ppu.vram_addr.set(0x0040);
         ppu.render_scanline(16, &mut frame);
-        
-        let (odd_scanline, odd_x) = ppu.sprite_0_hit_pending.get()
+
+        let (odd_scanline, odd_x) = ppu
+            .sprite_0_hit_pending
+            .get()
             .expect("Sprite 0 hit should be scheduled on odd frame");
 
         // Verify that sprite 0 hit position is IDENTICAL on even and odd frames
@@ -4997,10 +5018,7 @@ mod tests {
             even_x, odd_x,
             "Sprite 0 hit X position should be same on even and odd frames"
         );
-        assert_eq!(
-            odd_x, 50,
-            "Sprite 0 hit should be at X=50 on odd frame"
-        );
+        assert_eq!(odd_x, 50, "Sprite 0 hit should be at X=50 on odd frame");
     }
 
     #[test]

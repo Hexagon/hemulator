@@ -381,11 +381,10 @@ Since hit detection uses pixel positions (not dot positions), the odd frame skip
 ### Flag Lifetime
 
 - **Set**: During visible scanline rendering (scanlines 0-239)
-- **Cleared**: Two places for compatibility
-  1. **Pre-render scanline**: Dot 1 of scanline 261 (hardware behavior)
-  2. **VBlank start**: Dot 1 of scanline 241 (compatibility fix for games like Battletoads)
+- **Cleared**: Pre-render scanline (dot 1) - hardware-accurate timing
+- **VBlank Behavior**: Flag **persists through VBlank** - critical for Battletoads and other games
 
-The dual clearing ensures both hardware accuracy and game compatibility.
+Games like Battletoads poll the sprite 0 hit flag during VBlank (in the NMI handler) to detect split-screen timing. The flag must persist from when it's set during rendering through the entire VBlank period until the pre-render scanline clears it.
 
 ### References
 
