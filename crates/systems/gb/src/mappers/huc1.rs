@@ -97,7 +97,10 @@ impl Huc1 {
             0x4000..=0x5FFF => {
                 if self.ir_mode {
                     // IR mode register - stubbed (not commonly used)
-                    // Games that use this are very rare
+                    // NOTE: Infrared sensor hardware is not emulated.
+                    // Writing to this register has no effect. Reading in IR mode
+                    // always returns 0xC0 (no signal detected).
+                    // Affects: Pocket Bomberman, Tamagotchi series (<1% of games)
                 } else {
                     // RAM Bank Select (2 bits)
                     self.ram_bank = val & 0x03;
@@ -119,6 +122,8 @@ impl Huc1 {
         if self.ir_mode {
             // IR mode - return 0xC0 (no IR signal detected)
             // This is a stub for the infrared sensor feature
+            // Hardware Limitation: IR communication is not emulated.
+            // Real hardware would detect IR signals from other Game Boys or accessories.
             return 0xC0;
         }
 

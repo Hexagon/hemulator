@@ -256,6 +256,45 @@ This file tracks unimplemented features, stubs, and simplified implementations a
 
 ### Low
 
+#### Game Boy / Game Boy Color - Performance
+
+- [ ] **Per-Scanline Sprite Vector Allocation**: Use fixed array instead of Vec - `crates/systems/gb/src/ppu.rs:887`
+  - Current: `Vec::new()` allocated 144 times per frame (once per scanline)
+  - Needed: Use fixed array `[(u8, u8); 40]` or reuse preallocated buffer
+  - Impact: ~5-10% frame rendering overhead from allocator pressure
+  - Max 40 sprites total, fixed size known at compile time
+- [ ] **Background Color Index Buffer**: Optimize per-frame array allocation - `crates/systems/gb/src/ppu.rs:614-873`
+  - Current: `bg_color_indices` array created fresh each frame (23KB)
+  - Needed: Reuse buffer across frames or make it a struct field
+  - Impact: Memory allocator overhead every frame
+- [ ] **Palette Lookup Optimization**: Cache RGB palette conversions - `crates/systems/gb/src/ppu.rs:852-854`
+  - Current: Index calculation and palette lookup per pixel (23,040 times/frame)
+  - Needed: Precompute RGB palette array (8 palettes × 4 colors = 32 entries)
+  - Impact: Reduced arithmetic in tight pixel loop
+- [ ] **Tight Loop Division Operations**: Replace division with bit shifts - `crates/systems/gb/src/ppu.rs:636-638`
+  - Current: `x / 8` division operation in per-pixel loop
+  - Needed: Replace with `x >> 3` bit shift (equivalent for power-of-2)
+  - Impact: Minor speedup in hot path
+
+#### Game Boy / Game Boy Color - Documentation
+
+- [ ] **PPU Magic Numbers**: Document inline color constants - `crates/systems/gb/src/ppu.rs:860-863,1066-1069`
+  - Current: Hardcoded color values (0xFFFFFFFF, 0xFFAAAAAA, etc.) without explanation
+  - Needed: Add comments explaining RGBA format and DMG grayscale mapping
+  - Impact: Code readability and maintainability
+- [ ] **Timer Period Constants**: Add frequency calculation comments - `crates/systems/gb/src/timer.rs:136-139`
+  - Current: Magic numbers (1024, 16, 64, 256) without rationale
+  - Needed: Explain calculation (e.g., "4.194304 MHz / 1024 = 4096 Hz")
+  - Impact: Understanding of timer frequency selection
+- [ ] **LCDC Register Reference**: Add Pan Docs cross-reference - `crates/systems/gb/src/ppu.rs:242-254`
+  - Current: LCDC bits documented with values but no external reference
+  - Needed: Add URL comment linking to Pan Docs LCDC section
+  - Impact: Easier verification of hardware accuracy
+- [ ] **Signed Tile Addressing**: Explain 2's complement behavior - `crates/systems/gb/src/ppu.rs:809`
+  - Current: `calculate_signed_tile_address()` call without explanation
+  - Needed: Comment explaining signed/unsigned tile indexing modes
+  - Impact: Understanding of tile data addressing
+
 #### NES (Nintendo Entertainment System)
 - [ ] **Duplicate APU Frame Counter State**: Refactor duplicated frame counter tracking - `crates/systems/nes/src/apu.rs:203-206`
   - Current: `frame_counter_cycles` and `irq_frame_counter_cycles` track same information separately
@@ -413,6 +452,25 @@ This file tracks unimplemented features, stubs, and simplified implementations a
     - REGIMM: BLTZL, BGEZL, BLTZALL, BGEZALL
     - FPU: BC1TL, BC1FL (BC1 with ND bit set)
   - Impact: Correct behavior for all branch-likely instructions per MIPS specification
+
+#### Game Boy / Game Boy Color
+
+- [ ] **MBC3 RTC Tick Frequency**: Improve RTC accuracy from ~60 Hz to proper 1 Hz precision - `crates/systems/gb/src/mappers/mbc3.rs:47,254-300`
+  - Current: RTC incremented at ~60 Hz frame rate instead of 1 Hz
+  - Issue: `rtc_ticks` counter uses frame rate (60 ticks = 1 second approximation)
+  - Needed: Proper 1 Hz timing using actual elapsed time or cycle counting
+  - Impact: RTC time drifts slightly from real time, affects time-based gameplay in Pokemon Gold/Silver/Crystal
+  - Note: Day counter overflow and carry flag ARE implemented correctly (lines 286-296)
+- [ ] **MBC3 RTC Persistence**: Add RTC state save/load support - `crates/systems/gb/src/mappers/mbc3.rs`
+  - Current: RTC state resets on emulator restart
+  - Needed: Persist RTC values (seconds, minutes, hours, days) across sessions
+  - Impact: Time-based events in Pokemon games reset when emulator closes
+  - Implementation: Add RTC state to mapper's save state serialization
+- [ ] **HuC1 IR Sensor Stub Documentation**: Document IR sensor limitation - `crates/systems/gb/src/mappers/huc1.rs:99-100,119-122`
+  - Current: Returns hardcoded 0xC0 (no signal) without clear documentation
+  - Needed: Add comment explaining IR communication not emulated
+  - Impact: Affects <1% of games (Pocket Bomberman, Tamagotchi series)
+  - Note: IR mode register write is silently ignored (line 99-100)
 
 #### SG-1000
 - [ ] **ROM Banking Support**: Implement memory banking for larger cartridges - `crates/systems/sg1000/src/bus.rs`
