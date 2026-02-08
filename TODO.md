@@ -274,7 +274,7 @@ This file tracks unimplemented features, stubs, and simplified implementations a
 
 #### Game Boy / Game Boy Color - Documentation
 
-- [x] **PPU Magic Numbers**: Document inline color constants - `crates/systems/gb/src/ppu.rs:860-863,1066-1069`
+- [x] **PPU Magic Numbers**: Document inline color constants - `crates/systems/gb/src/ppu.rs` (DMG palette constants)
   - **FIXED**: Added detailed comments explaining ARGB8888 format (0xAARRGGBB) and DMG grayscale mapping
   - White: 0xFFFFFFFF (lightest), Light gray: 0xFFAAAAAA (2/3 brightness), Dark gray: 0xFF555555 (1/3 brightness), Black: 0xFF000000 (darkest)
   - Impact: Improved code readability and maintainability
