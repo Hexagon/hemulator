@@ -169,6 +169,8 @@ impl Default for BreakpointManager {
 ///
 /// Provides:
 /// - `add_breakpoint(address: u32)` - Add an execution breakpoint
+/// - `add_read_breakpoint(address: u32)` - Add a read breakpoint
+/// - `add_write_breakpoint(address: u32)` - Add a write breakpoint
 /// - `remove_breakpoint(address: u32)` - Remove an execution breakpoint
 /// - `clear_breakpoints()` - Clear all breakpoints
 /// - `get_breakpoints() -> Vec<u32>` - Get all execution breakpoint addresses
@@ -187,6 +189,16 @@ macro_rules! impl_breakpoint_methods {
         /// Add an execution breakpoint
         pub fn add_breakpoint(&mut self, address: u32) {
             self.breakpoint_manager.add_execute(address);
+        }
+
+        /// Add a read breakpoint
+        pub fn add_read_breakpoint(&mut self, address: u32) {
+            self.breakpoint_manager.add_read(address);
+        }
+
+        /// Add a write breakpoint
+        pub fn add_write_breakpoint(&mut self, address: u32) {
+            self.breakpoint_manager.add_write(address);
         }
 
         /// Remove an execution breakpoint

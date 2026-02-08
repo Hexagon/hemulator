@@ -1403,7 +1403,9 @@ struct CliArgs {
     trace_limit: Option<usize>,      // Max instructions to keep in trace buffer
     trace_dump_file: Option<String>, // File to dump trace on breakpoint/exit
     // Breakpoint configuration
-    breakpoints: Vec<u32>, // List of breakpoint addresses
+    breakpoints: Vec<u32>,        // List of execution breakpoint addresses
+    read_breakpoints: Vec<u32>,   // List of read breakpoint addresses
+    write_breakpoints: Vec<u32>,  // List of write breakpoint addresses
 }
 
 impl CliArgs {
@@ -1615,6 +1617,44 @@ impl CliArgs {
                         std::process::exit(1);
                     }
                 }
+                "--read-breakpoint" | "-r" => {
+                    if let Some(value) = arg_iter.next() {
+                        let addr = if value.starts_with("0x") || value.starts_with("0X") {
+                            u32::from_str_radix(&value[2..], 16)
+                        } else {
+                            value.parse::<u32>()
+                        };
+                        match addr {
+                            Ok(address) => args.read_breakpoints.push(address),
+                            Err(_) => {
+                                eprintln!("Error: --read-breakpoint requires a valid address (hex: 0x2000 or decimal: 8192).");
+                                std::process::exit(1);
+                            }
+                        }
+                    } else {
+                        eprintln!("Error: --read-breakpoint requires an address.");
+                        std::process::exit(1);
+                    }
+                }
+                "--write-breakpoint" | "-w" => {
+                    if let Some(value) = arg_iter.next() {
+                        let addr = if value.starts_with("0x") || value.starts_with("0X") {
+                            u32::from_str_radix(&value[2..], 16)
+                        } else {
+                            value.parse::<u32>()
+                        };
+                        match addr {
+                            Ok(address) => args.write_breakpoints.push(address),
+                            Err(_) => {
+                                eprintln!("Error: --write-breakpoint requires a valid address (hex: 0x2000 or decimal: 8192).");
+                                std::process::exit(1);
+                            }
+                        }
+                    } else {
+                        eprintln!("Error: --write-breakpoint requires an address.");
+                        std::process::exit(1);
+                    }
+                }
                 _ => {
                     // First non-flag argument is treated as ROM path for backward compatibility
                     if args.rom_path.is_none() && !arg.starts_with("--") {
@@ -1687,9 +1727,17 @@ impl CliArgs {
         eprintln!("  --trace-dump-file <PATH> File to dump trace (default: trace_dump.txt)");
         eprintln!("                           Automatically dumps when breakpoint is hit or debug dump is triggered.");
         eprintln!(
-            "  -b, --breakpoint <ADDR>  Set breakpoint at address (can be used multiple times)"
+            "  -b, --breakpoint <ADDR>  Set execution breakpoint at address (can be used multiple times)"
         );
         eprintln!("                           Breakpoint checking is implemented for SNES. Stops execution and dumps trace when hit.");
+        eprintln!(
+            "  -r, --read-breakpoint <ADDR>  Set read breakpoint at address (can be used multiple times)"
+        );
+        eprintln!("                           Breaks when memory at address is read. Useful for debugging memory corruption.");
+        eprintln!(
+            "  -w, --write-breakpoint <ADDR> Set write breakpoint at address (can be used multiple times)"
+        );
+        eprintln!("                           Breaks when memory at address is written. Useful for tracking variable changes.");
         eprintln!();
         eprintln!("Disk formats:");
         eprintln!("  360k, 720k, 1.2m, 1.44m  Floppy disk formats");
@@ -2035,6 +2083,38 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
             EmulatorSystem::PC(s) => s.add_breakpoint(addr),
             EmulatorSystem::ColecoVision(s) => s.add_breakpoint(addr),
             EmulatorSystem::SG1000(s) => s.add_breakpoint(addr),
+        }
+    }
+
+    // Add read breakpoints
+    for &addr in &cli_args.read_breakpoints {
+        match sys {
+            EmulatorSystem::NES(s) => s.add_read_breakpoint(addr),
+            EmulatorSystem::GameBoy(s) => s.add_read_breakpoint(addr),
+            EmulatorSystem::Atari2600(s) => s.add_read_breakpoint(addr),
+            EmulatorSystem::Chip8(s) => s.add_read_breakpoint(addr),
+            EmulatorSystem::SMS(s) => s.add_read_breakpoint(addr),
+            EmulatorSystem::SNES(s) => s.add_read_breakpoint(addr),
+            EmulatorSystem::N64(s) => s.add_read_breakpoint(addr),
+            EmulatorSystem::PC(s) => s.add_read_breakpoint(addr),
+            EmulatorSystem::ColecoVision(s) => s.add_read_breakpoint(addr),
+            EmulatorSystem::SG1000(s) => s.add_read_breakpoint(addr),
+        }
+    }
+
+    // Add write breakpoints
+    for &addr in &cli_args.write_breakpoints {
+        match sys {
+            EmulatorSystem::NES(s) => s.add_write_breakpoint(addr),
+            EmulatorSystem::GameBoy(s) => s.add_write_breakpoint(addr),
+            EmulatorSystem::Atari2600(s) => s.add_write_breakpoint(addr),
+            EmulatorSystem::Chip8(s) => s.add_write_breakpoint(addr),
+            EmulatorSystem::SMS(s) => s.add_write_breakpoint(addr),
+            EmulatorSystem::SNES(s) => s.add_write_breakpoint(addr),
+            EmulatorSystem::N64(s) => s.add_write_breakpoint(addr),
+            EmulatorSystem::PC(s) => s.add_write_breakpoint(addr),
+            EmulatorSystem::ColecoVision(s) => s.add_write_breakpoint(addr),
+            EmulatorSystem::SG1000(s) => s.add_write_breakpoint(addr),
         }
     }
 }
