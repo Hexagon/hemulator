@@ -776,8 +776,8 @@ impl EmulatorSystem {
             EmulatorSystem::N64(sys) => Some(sys.get_instruction_tracer()),
             EmulatorSystem::SMS(sys) => Some(sys.get_instruction_tracer()),
             EmulatorSystem::Chip8(sys) => Some(sys.get_instruction_tracer()),
-            EmulatorSystem::ColecoVision(sys) => Some(&sys.instruction_tracer),
-            EmulatorSystem::SG1000(sys) => Some(&sys.instruction_tracer),
+            EmulatorSystem::ColecoVision(sys) => Some(sys.get_instruction_tracer()),
+            EmulatorSystem::SG1000(sys) => Some(sys.get_instruction_tracer()),
         }
     }
 
@@ -794,8 +794,8 @@ impl EmulatorSystem {
             EmulatorSystem::N64(sys) => Some(sys.get_instruction_tracer_mut()),
             EmulatorSystem::SMS(sys) => Some(sys.get_instruction_tracer_mut()),
             EmulatorSystem::Chip8(sys) => Some(sys.get_instruction_tracer_mut()),
-            EmulatorSystem::ColecoVision(_) => None,
-            EmulatorSystem::SG1000(_) => None,
+            EmulatorSystem::ColecoVision(sys) => Some(sys.get_instruction_tracer_mut()),
+            EmulatorSystem::SG1000(sys) => Some(sys.get_instruction_tracer_mut()),
         }
     }
 }
@@ -2008,15 +2008,15 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
                 }
             }
             EmulatorSystem::ColecoVision(s) => {
-                s.instruction_tracer.set_enabled(true);
+                s.set_instruction_tracing(true);
                 if let Some(limit) = cli_args.trace_limit {
-                    s.instruction_tracer.set_max_history(limit);
+                    s.get_instruction_tracer_mut().set_max_history(limit);
                 }
             }
             EmulatorSystem::SG1000(s) => {
-                s.instruction_tracer.set_enabled(true);
+                s.set_instruction_tracing(true);
                 if let Some(limit) = cli_args.trace_limit {
-                    s.instruction_tracer.set_max_history(limit);
+                    s.get_instruction_tracer_mut().set_max_history(limit);
                 }
             }
         }
@@ -2033,8 +2033,8 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
             EmulatorSystem::SNES(s) => s.add_breakpoint(addr),
             EmulatorSystem::N64(s) => s.add_breakpoint(addr),
             EmulatorSystem::PC(s) => s.add_breakpoint(addr),
-            EmulatorSystem::ColecoVision(s) => s.breakpoint_manager.add_execute(addr),
-            EmulatorSystem::SG1000(s) => s.breakpoint_manager.add_execute(addr),
+            EmulatorSystem::ColecoVision(s) => s.add_breakpoint(addr),
+            EmulatorSystem::SG1000(s) => s.add_breakpoint(addr),
         }
     }
 }
