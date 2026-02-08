@@ -18,7 +18,10 @@ pub struct TracerConfig {
 impl Default for TracerConfig {
     fn default() -> Self {
         Self {
-            max_history: 10_000_000, // Last 10 million instructions
+            // Default to 10,000 instructions (~320KB for typical instruction size)
+            // Previous default of 10M could use 3GB+ of RAM
+            // Users can increase via set_max_history() or with_config() if needed
+            max_history: 10_000,
             enabled: false,
         }
     }
@@ -58,6 +61,24 @@ impl InstructionTracer {
     /// Check if tracing is enabled
     pub fn is_enabled(&self) -> bool {
         self.config.enabled
+    }
+
+    /// Set the maximum history size
+    /// Note: This will truncate the existing history if the new size is smaller
+    pub fn set_max_history(&mut self, max_history: usize) {
+        self.config.max_history = max_history;
+        // Truncate if necessary
+        while self.history.len() > max_history {
+            self.history.pop_front();
+        }
+        // Update capacity hint
+        self.history.shrink_to_fit();
+        self.history.reserve(max_history.saturating_sub(self.history.len()));
+    }
+
+    /// Get the maximum history size
+    pub fn get_max_history(&self) -> usize {
+        self.config.max_history
     }
 
     /// Record an executed instruction
