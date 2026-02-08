@@ -1105,10 +1105,13 @@ impl Memory65c816 for SnesBus {
                             0
                         }
                     }
-                    0x421C => 0, // JOY3L (not implemented)
-                    0x421D => 0, // JOY3H (not implemented)
-                    0x421E => 0, // JOY4L (not implemented)
-                    0x421F => 0, // JOY4H (not implemented)
+                    // JOY3/JOY4 - Controllers 3 and 4 (multitap support not implemented)
+                    // Low priority: Most games only use 2 controllers
+                    // Would require full multitap implementation for 3-4 player games
+                    0x421C => 0, // JOY3L
+                    0x421D => 0, // JOY3H
+                    0x421E => 0, // JOY4L
+                    0x421F => 0, // JOY4H
                     // $420C - HDMAEN - HDMA Enable (read)
                     0x420C => {
                         let v = self.hdma_enable;
