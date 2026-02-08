@@ -297,14 +297,14 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Code comment: "duplicated to avoid rewriting audio generation"
   - Impact: Unnecessary memory duplication; maintenance burden
   - Solution: Unify frame counter state or document rationale for separation
-- [ ] **Duplicate Variable Extraction in PPU**: Remove redundant scroll variable extraction - `crates/systems/nes/src/ppu.rs:1032-1036,1048-1050`
-  - Current: `coarse_x`, `coarse_y`, `nt_x`, `nt_y` extracted twice identically in `render_scanline()`
-  - Impact: Unnecessary redundant calculations (minimal performance impact)
-  - Solution: Use first extraction, remove second
-- [ ] **PC Histogram Allocation**: Only allocate when instruction tracing enabled - `crates/systems/nes/src/lib.rs:589`
-  - Current: `pc_hist: Option<HashMap<u16, u16>>` allocated with capacity 1024 every frame
-  - Impact: ~60KB/sec allocation overhead even when tracing disabled
-  - Solution: Only allocate when `instruction_tracer.is_enabled()`
+- [x] **Duplicate Variable Extraction in PPU**: Remove redundant scroll variable extraction - `crates/systems/nes/src/ppu.rs:1032-1036,1048-1050`
+  - **FIXED**: Removed duplicate variable extraction lines 1048-1052
+  - Variables `coarse_x`, `coarse_y`, `nt_x`, `nt_y`, `fine_y` now extracted only once (lines 1032-1036)
+  - Impact: Cleaner code without redundant calculations
+- [x] **PC Histogram Allocation**: Only allocate when instruction tracing enabled - `crates/systems/nes/src/lib.rs:589`
+  - **FIXED**: PC histogram now only allocated when `instruction_tracer.is_enabled()` returns true
+  - Eliminates ~60KB/sec allocation overhead when tracing is disabled
+  - Impact: Reduced memory allocation overhead in normal operation
 - [ ] **Sprite Evaluation Optimization**: Early exit sprite iteration at 8-sprite limit - `crates/systems/nes/src/ppu.rs:1230-1314`
   - Current: Sprite evaluation iterates all 64 sprites per scanline even when only 8 rendered
   - Issue: Early break at `sprites_on_scanline > 8` happens too late in loop
@@ -320,10 +320,10 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Impact: Additional weak-to-strong pointer upgrades on each relevant callback; expected to be minimal on modern CPUs
   - Solution: Profile actual callback frequency and optimize (e.g., cache strong references or restructure callbacks) only if a measurable impact is observed
   - Note: Very low priority - likely negligible performance impact in practice
-- [ ] **Unreachable Panic Branch**: Use `unreachable!()` for impossible flag names - `crates/systems/nes/src/debugger.rs`
-  - Current: `panic!("Unexpected flag: {}", name)` but all flag names are pre-defined
-  - Impact: Code clarity and optimization
-  - Solution: Replace with `unreachable!()` macro
+- [x] **Unreachable Panic Branch**: Use `unreachable!()` for impossible flag names - `crates/systems/nes/src/debugger.rs`
+  - **FIXED**: Replaced `panic!()` with `unreachable!()` macro in test code
+  - All flag names are pre-defined, so the default case is truly unreachable
+  - Impact: Better code clarity and potential compiler optimizations
 
 #### SNES - Enhancement Chips
 - [ ] **DSP-1 Full Hardware Accuracy**: Implement Parameter command and shared projection state - `crates/systems/snes/src/coprocessors/dsp1.rs`
