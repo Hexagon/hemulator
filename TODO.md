@@ -80,7 +80,36 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Impact: Real SMS ROMs now work without requiring explicit VDP Mode 4 initialization
   - Real SMS hardware defaults to Mode 4 enabled; games without BIOS expect this default state
 
+
 ### Medium
+
+#### Debugger/Tracing System
+
+- [ ] **Read/Write Breakpoint Support**: Add memory access breakpoints to CLI - `crates/core/src/breakpoints.rs`, `crates/frontend/gui/src/main.rs`
+  - Current: Only execution breakpoints supported via --breakpoint flag
+  - Needed: --read-breakpoint and --write-breakpoint CLI flags
+  - Impact: Users can't pause on memory access, only on execution
+  - Use case: Debugging memory corruption, tracking variable changes
+- [ ] **GUI Breakpoint Management**: Add breakpoint UI to debug tab - `crates/frontend/gui/src/egui_ui/inspector_tabs.rs`
+  - Current: Breakpoints only configurable via CLI arguments
+  - Needed: UI panel to add/remove/view breakpoints while running
+  - Impact: Can't set breakpoints interactively in GUI mode
+  - Features: List view, add/remove buttons, address input, enable/disable toggle
+- [ ] **Performance Profiling Mode**: Add hotspot tracking - `crates/core/src/instruction_tracer.rs`
+  - Current: Instruction tracer only records execution history
+  - Needed: Track instruction frequency, execution time per address
+  - Impact: Cannot identify performance bottlenecks in emulated code
+  - Use case: Finding slow loops, optimizing emulated game code
+- [ ] **Memory Watchpoints**: Add memory change detection in GUI - `crates/frontend/gui/src/egui_ui/inspector_tabs.rs`
+  - Current: Memory viewer shows static snapshot only
+  - Needed: Highlight changed memory addresses, watch specific ranges
+  - Impact: Hard to track memory changes during debugging
+  - Features: Color-coded changes, watch list, change history
+- [ ] **Conditional Breakpoints**: Add expression-based breakpoints - `crates/core/src/breakpoints.rs`
+  - Current: Breakpoints trigger on address only
+  - Needed: Break when register/memory equals value (e.g., "PC=0x8000 && A=0x42")
+  - Impact: Too many false breakpoint hits without conditions
+  - Requires: Expression parser, state evaluation
 
 #### SNES - Bus/Memory  
 - [ ] **FastROM Timing**: Implement FastROM memory access timing - `crates/systems/snes/src/bus.rs:1482-1486`
@@ -254,6 +283,34 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Impact: Hard to verify hardware accuracy without original documentation
 
 ### Low
+
+#### Debugger/Tracing System
+
+- [ ] **JSON Debug Dump Export**: Add JSON format option for debug dumps - `crates/frontend/gui/src/main.rs:1993-2179`
+  - Current: Debug dumps only in human-readable text format
+  - Needed: --debug-dump-format json flag for machine-parseable output
+  - Impact: Cannot easily parse debug dumps programmatically
+  - Use case: Automated testing, diff comparison, external analysis tools
+- [ ] **Interactive Debugger Mode**: Add step/continue/inspect commands - `crates/frontend/gui/src/main.rs`
+  - Current: Emulator runs continuously or dumps at breakpoint then exits
+  - Needed: Interactive mode with commands: step, continue, inspect, modify
+  - Impact: Cannot debug interactively without restarting
+  - Requires: Command parser, execution control, state modification
+- [ ] **CPU Performance Counters**: Add instructions per second tracking - `crates/core/src/debug.rs`
+  - Current: Only cycle count available
+  - Needed: Track instructions/second, cycles/instruction, frame timing
+  - Impact: Cannot measure emulation performance metrics
+  - Use case: Performance tuning, accuracy verification
+- [ ] **Trace Compression**: Add compression for long trace sessions - `crates/core/src/instruction_tracer.rs`
+  - Current: Full instruction data stored per entry (~32 bytes)
+  - Needed: Run-length encoding for repeated instructions, delta compression
+  - Impact: Large trace buffers consume excessive memory
+  - Benefit: 2-5x memory reduction for typical code patterns
+- [ ] **Debugger Scripting Support**: Add Lua/JavaScript scripting - `crates/core/src/debug.rs`
+  - Current: Debugging requires code changes or recompilation
+  - Needed: Script engine for custom breakpoint logic, automated testing
+  - Impact: Cannot automate complex debugging scenarios
+  - Use case: Automated regression testing, custom analysis tools
 
 #### Game Boy / Game Boy Color - Performance
 

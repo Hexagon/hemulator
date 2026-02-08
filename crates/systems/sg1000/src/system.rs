@@ -119,6 +119,27 @@ impl Sg1000System {
             registers,
         }
     }
+
+    // Use standard instruction tracer helper methods
+    emu_core::impl_instruction_tracer_methods!();
+
+    /// Check if instruction tracing is enabled
+    pub fn is_instruction_tracing_enabled(&self) -> bool {
+        self.instruction_tracer.is_enabled()
+    }
+
+    // Use standard breakpoint management helper methods
+    emu_core::impl_breakpoint_methods!();
+
+    /// Enable or disable breakpoints
+    pub fn set_breakpoints_enabled(&mut self, enabled: bool) {
+        self.breakpoint_manager.set_enabled(enabled);
+    }
+
+    /// Get the breakpoint manager
+    pub fn get_breakpoint_manager(&self) -> &emu_core::breakpoints::BreakpointManager {
+        &self.breakpoint_manager
+    }
 }
 
 impl System for Sg1000System {

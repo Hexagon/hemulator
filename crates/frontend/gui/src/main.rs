@@ -776,8 +776,8 @@ impl EmulatorSystem {
             EmulatorSystem::N64(sys) => Some(sys.get_instruction_tracer()),
             EmulatorSystem::SMS(sys) => Some(sys.get_instruction_tracer()),
             EmulatorSystem::Chip8(sys) => Some(sys.get_instruction_tracer()),
-            EmulatorSystem::ColecoVision(sys) => Some(&sys.instruction_tracer),
-            EmulatorSystem::SG1000(sys) => Some(&sys.instruction_tracer),
+            EmulatorSystem::ColecoVision(sys) => Some(sys.get_instruction_tracer()),
+            EmulatorSystem::SG1000(sys) => Some(sys.get_instruction_tracer()),
         }
     }
 
@@ -794,8 +794,8 @@ impl EmulatorSystem {
             EmulatorSystem::N64(sys) => Some(sys.get_instruction_tracer_mut()),
             EmulatorSystem::SMS(sys) => Some(sys.get_instruction_tracer_mut()),
             EmulatorSystem::Chip8(sys) => Some(sys.get_instruction_tracer_mut()),
-            EmulatorSystem::ColecoVision(_) => None,
-            EmulatorSystem::SG1000(_) => None,
+            EmulatorSystem::ColecoVision(sys) => Some(sys.get_instruction_tracer_mut()),
+            EmulatorSystem::SG1000(sys) => Some(sys.get_instruction_tracer_mut()),
         }
     }
 }
@@ -1680,9 +1680,10 @@ impl CliArgs {
         eprintln!("                           Fully functional for NES, Game Boy, Atari 2600, SMS, SNES, CHIP-8, and N64.");
         eprintln!("                           PC requires Debugger trait implementation.");
         eprintln!(
-            "  --trace-limit <N>        Max instructions to keep in trace buffer (default: 10000)"
+            "  --trace-limit <N>        Max instructions to keep in trace buffer (default: 10,000)"
         );
-        eprintln!("                           Note: Limit is set at tracer creation and cannot be changed at runtime.");
+        eprintln!("                           Note: Configurable at runtime via --trace-limit (default: 10,000 instructions).");
+        eprintln!("                           Higher limits provide more history but consume more RAM (~32 bytes per instruction).");
         eprintln!("  --trace-dump-file <PATH> File to dump trace (default: trace_dump.txt)");
         eprintln!("                           Automatically dumps when breakpoint is hit or debug dump is triggered.");
         eprintln!(
@@ -1958,16 +1959,66 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
     // Enable instruction tracing if requested
     if cli_args.trace_instructions {
         match sys {
-            EmulatorSystem::NES(s) => s.set_instruction_tracing(true),
-            EmulatorSystem::GameBoy(s) => s.set_instruction_tracing(true),
-            EmulatorSystem::Atari2600(s) => s.set_instruction_tracing(true),
-            EmulatorSystem::Chip8(s) => s.set_instruction_tracing(true),
-            EmulatorSystem::SMS(s) => s.set_instruction_tracing(true),
-            EmulatorSystem::SNES(s) => s.set_instruction_tracing(true),
-            EmulatorSystem::N64(s) => s.set_instruction_tracing(true),
-            EmulatorSystem::PC(s) => s.set_instruction_tracing(true),
-            EmulatorSystem::ColecoVision(s) => s.instruction_tracer.set_enabled(true),
-            EmulatorSystem::SG1000(s) => s.instruction_tracer.set_enabled(true),
+            EmulatorSystem::NES(s) => {
+                s.set_instruction_tracing(true);
+                if let Some(limit) = cli_args.trace_limit {
+                    s.get_instruction_tracer_mut().set_max_history(limit);
+                }
+            }
+            EmulatorSystem::GameBoy(s) => {
+                s.set_instruction_tracing(true);
+                if let Some(limit) = cli_args.trace_limit {
+                    s.get_instruction_tracer_mut().set_max_history(limit);
+                }
+            }
+            EmulatorSystem::Atari2600(s) => {
+                s.set_instruction_tracing(true);
+                if let Some(limit) = cli_args.trace_limit {
+                    s.get_instruction_tracer_mut().set_max_history(limit);
+                }
+            }
+            EmulatorSystem::Chip8(s) => {
+                s.set_instruction_tracing(true);
+                if let Some(limit) = cli_args.trace_limit {
+                    s.get_instruction_tracer_mut().set_max_history(limit);
+                }
+            }
+            EmulatorSystem::SMS(s) => {
+                s.set_instruction_tracing(true);
+                if let Some(limit) = cli_args.trace_limit {
+                    s.get_instruction_tracer_mut().set_max_history(limit);
+                }
+            }
+            EmulatorSystem::SNES(s) => {
+                s.set_instruction_tracing(true);
+                if let Some(limit) = cli_args.trace_limit {
+                    s.get_instruction_tracer_mut().set_max_history(limit);
+                }
+            }
+            EmulatorSystem::N64(s) => {
+                s.set_instruction_tracing(true);
+                if let Some(limit) = cli_args.trace_limit {
+                    s.get_instruction_tracer_mut().set_max_history(limit);
+                }
+            }
+            EmulatorSystem::PC(s) => {
+                s.set_instruction_tracing(true);
+                if let Some(limit) = cli_args.trace_limit {
+                    s.get_instruction_tracer_mut().set_max_history(limit);
+                }
+            }
+            EmulatorSystem::ColecoVision(s) => {
+                s.set_instruction_tracing(true);
+                if let Some(limit) = cli_args.trace_limit {
+                    s.get_instruction_tracer_mut().set_max_history(limit);
+                }
+            }
+            EmulatorSystem::SG1000(s) => {
+                s.set_instruction_tracing(true);
+                if let Some(limit) = cli_args.trace_limit {
+                    s.get_instruction_tracer_mut().set_max_history(limit);
+                }
+            }
         }
     }
 
@@ -1982,8 +2033,8 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
             EmulatorSystem::SNES(s) => s.add_breakpoint(addr),
             EmulatorSystem::N64(s) => s.add_breakpoint(addr),
             EmulatorSystem::PC(s) => s.add_breakpoint(addr),
-            EmulatorSystem::ColecoVision(s) => s.breakpoint_manager.add_execute(addr),
-            EmulatorSystem::SG1000(s) => s.breakpoint_manager.add_execute(addr),
+            EmulatorSystem::ColecoVision(s) => s.add_breakpoint(addr),
+            EmulatorSystem::SG1000(s) => s.add_breakpoint(addr),
         }
     }
 }
