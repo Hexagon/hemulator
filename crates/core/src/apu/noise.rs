@@ -21,7 +21,7 @@ pub struct NoiseChannel {
     /// Timer counter
     timer: u16,
     /// 15-bit Linear Feedback Shift Register
-    pub shift_register: u16,
+    shift_register: u16,
     /// Length counter
     pub length_counter: u8,
     /// Envelope volume (4-bit, 0-15)
@@ -104,6 +104,12 @@ impl NoiseChannel {
     /// Reset the shift register
     pub fn reset_shift_register(&mut self) {
         self.shift_register = 1;
+    }
+
+    /// Get the LSB of the shift register for mixer calculations
+    /// Returns true if the output should be silent (bit 0 is set)
+    pub fn is_silenced(&self) -> bool {
+        (self.shift_register & 1) != 0
     }
 }
 

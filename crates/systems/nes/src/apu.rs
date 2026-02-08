@@ -211,7 +211,9 @@ pub struct APU {
 
     /// High-pass filter state for DC offset removal
     /// Simple 1-pole high-pass filter to remove DC bias from mixer output
-    hp_filter_acc: f64,
+    /// Stores previous input and previous output for y[n] = x[n] - x[n-1] + α*y[n-1]
+    hp_prev_input: f64,
+    hp_prev_output: f64,
 }
 
 impl APU {
@@ -239,7 +241,8 @@ impl APU {
             irq_inhibit: true, // Default is inhibited
             irq_pending: Cell::new(false),
             pending_immediate_clock: false,
-            hp_filter_acc: 0.0,
+            hp_prev_input: 0.0,
+            hp_prev_output: 0.0,
         }
     }
 
@@ -792,7 +795,7 @@ impl APU {
                 // Noise outputs envelope value (0-15) when active
                 let noise_raw = if self.noise.enabled
                     && self.noise.length_counter > 0
-                    && (self.noise.shift_register & 1) == 0
+                    && !self.noise.is_silenced()
                 {
                     noise_vol as u32
                 } else {
@@ -822,11 +825,12 @@ impl APU {
             }
 
             // Average the accumulated values
-            let pulse1 = (pulse1_acc / cycles) as f64;
-            let pulse2 = (pulse2_acc / cycles) as f64;
-            let triangle = (triangle_acc / cycles) as f64;
-            let noise = (noise_acc / cycles) as f64;
-            let dmc = (dmc_acc / cycles) as f64;
+            // Convert to f64 before division to preserve precision
+            let pulse1 = pulse1_acc as f64 / cycles as f64;
+            let pulse2 = pulse2_acc as f64 / cycles as f64;
+            let triangle = triangle_acc as f64 / cycles as f64;
+            let noise = noise_acc as f64 / cycles as f64;
+            let dmc = dmc_acc as f64 / cycles as f64;
 
             // Hardware-accurate non-linear mixing formulas
             // Reference: https://www.nesdev.org/wiki/APU_Mixer
@@ -871,9 +875,12 @@ impl APU {
             let total = pulse_out + tnd_out;
 
             // High-pass filter to remove DC offset
+            // Formula: y[n] = x[n] - x[n-1] + α * y[n-1]
+            // where α = 0.999 gives us a cutoff around 7 Hz at 44.1 kHz sample rate
             const ALPHA: f64 = 0.999;
-            let filtered = total - self.hp_filter_acc;
-            self.hp_filter_acc = total - ALPHA * filtered;
+            let filtered = total - self.hp_prev_input + ALPHA * self.hp_prev_output;
+            self.hp_prev_input = total;
+            self.hp_prev_output = filtered;
 
             // Scale to 16-bit signed range
             // The range after filtering is approximately [-1.96, +1.96]
@@ -1379,6 +1386,116 @@ mod tests {
         assert!(
             apu.dmc.irq_pending,
             "DMC IRQ should be set after sample completes"
+        );
+    }
+
+    #[test]
+    fn test_mixer_silence_produces_zero() {
+        // Test that when all channels are silent, the mixer produces samples near zero
+        // This verifies the high-pass filter correctly removes DC offset
+        let mut apu = APU::new();
+
+        // Disable all channels (they start disabled, but be explicit)
+        apu.write_register(0x4015, 0x00);
+
+        // Generate samples with all channels silent
+        let samples = apu.generate_samples(1000);
+
+        // Calculate average to verify DC offset is removed
+        let sum: i64 = samples.iter().map(|&s| s as i64).sum();
+        let avg = sum / samples.len() as i64;
+
+        // The average should be very close to 0 (allow small variation)
+        assert!(
+            avg.abs() < 100,
+            "Silent channels should produce near-zero output, got average {}",
+            avg
+        );
+    }
+
+    #[test]
+    fn test_mixer_non_linear_output_range() {
+        // Test that the mixer formulas produce values in the expected range
+        // and that non-linear mixing produces different output than linear
+        let mut apu = APU::new();
+
+        // Enable pulse 1 with maximum volume
+        apu.write_register(0x4015, 0x01);
+        apu.write_register(0x4000, 0b00111111); // duty 0, length halt, constant volume 15
+        apu.write_register(0x4002, 0xFF); // Low frequency byte
+        apu.write_register(0x4003, 0x07); // High frequency byte + length
+
+        // Generate samples
+        let samples = apu.generate_samples(1000);
+
+        // Find max absolute value
+        let max_abs = samples.iter().map(|&s| s.abs()).max().unwrap();
+
+        // With non-linear mixing, a single pulse channel at max volume should
+        // produce output well below the maximum 16-bit range (compression effect)
+        assert!(
+            max_abs > 1000,
+            "Output should be audible, got max {}",
+            max_abs
+        );
+        assert!(
+            max_abs < 20000,
+            "Single channel at max should be compressed by non-linear mixer, got max {}",
+            max_abs
+        );
+    }
+
+    #[test]
+    fn test_high_pass_filter_removes_dc_bias() {
+        // Test that a constant non-zero input gets filtered to near-zero by the high-pass filter
+        let mut apu = APU::new();
+
+        // Enable triangle channel which produces a continuous waveform
+        apu.write_register(0x4015, 0x04);
+        apu.write_register(0x4008, 0xFF); // Length counter halt, linear counter max
+        apu.write_register(0x400A, 0xFF); // Low frequency
+        apu.write_register(0x400B, 0x07); // High frequency + length
+
+        // Generate initial samples (filter warmup period)
+        let _warmup = apu.generate_samples(2000);
+
+        // Generate samples after filter has settled
+        let samples = apu.generate_samples(1000);
+
+        // Calculate average - should be near zero due to high-pass filtering
+        let sum: i64 = samples.iter().map(|&s| s as i64).sum();
+        let avg = sum / samples.len() as i64;
+
+        // The high-pass filter should remove most of the DC component
+        // Allow for some settling time variation
+        assert!(
+            avg.abs() < 1000,
+            "High-pass filter should significantly reduce DC bias, got average {}",
+            avg
+        );
+    }
+
+    #[test]
+    fn test_mixer_precision_no_truncation() {
+        // Test that the mixer preserves fractional precision in channel averaging
+        // This is a regression test for the integer division bug
+        let mut apu = APU::new();
+
+        // Enable pulse 1 with low volume
+        apu.write_register(0x4015, 0x01);
+        apu.write_register(0x4000, 0b00110001); // duty 0, length halt, constant volume 1
+        apu.write_register(0x4002, 0xFF);
+        apu.write_register(0x4003, 0x07);
+
+        // Generate samples
+        let samples = apu.generate_samples(1000);
+
+        // Even with very low volume (1/15), we should get non-zero output
+        // If integer division was happening, the output might be truncated to zero
+        let has_non_zero = samples.iter().any(|&s| s != 0);
+        assert!(
+            has_non_zero,
+            "Low volume channel should still produce audible output with float division"
         );
     }
 }

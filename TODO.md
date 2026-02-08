@@ -55,8 +55,6 @@ This file tracks unimplemented features, stubs, and simplified implementations a
 
 ### High
 
-**All high priority items have been resolved!** The following items were previously marked as high and have been completed:
-
 #### NES (Nintendo Entertainment System) - Completed
 - [x] **APU Non-Linear Mixing**: Implement hardware-accurate mixer impedance curves - `crates/systems/nes/src/apu.rs:609-880`
   - **FIXED**: Implemented hardware-accurate non-linear mixing formulas
@@ -71,15 +69,7 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - CHR data now reference-counted instead of fully copied on each call
   - Impact: Significantly reduced memory allocation overhead in GUI inspector
 
-#### Sprite 0 Hit - Needs Investigation
-- [ ] **Sprite 0 Hit Timing on Odd Frames**: Verify X position calculation during odd-frame skip - `crates/systems/nes/src/lib.rs:620-627,655-656`, `crates/systems/nes/src/ppu.rs:1235-1249`
-  - Current: Sprite 0 hit X position is calculated during render_scanline() and triggered in tick() at dot = X + 2
-  - Analysis: The current implementation appears correct - sprite 0 hit is pixel-based (0-255), not dot-based
-  - Odd-frame skip affects when rendering happens (dot 0 vs dot 1) but not the sprite 0 hit X position
-  - The hit trigger is based on PPU dot counter reaching hit_x + 2, which is independent of rendering timing
-  - Status: No actual bug identified; current implementation handles odd/even frames correctly
-  - Action: Needs real-world testing with games that use tight sprite 0 hit timing (e.g., split-screen effects)
-  - Reference: https://www.nesdev.org/wiki/PPU_frame_timing#Odd_frames
+**All other high priority items have been resolved!** The following items were previously marked as high and have been completed:
 
 #### SMS (Sega Master System) - Completed
 - [x] **VDP Default Initialization**: Fix VDP reset to enable Mode 4 by default - `crates/systems/sms/src/vdp.rs:1035-1051`
@@ -121,6 +111,14 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Kept generic `set_controller(port, state)` method for backward compatibility
   - Impact: Better API design with type safety
 #### NES (Nintendo Entertainment System)
+- [ ] **Sprite 0 Hit Timing on Odd Frames**: Verify X position calculation during odd-frame skip - `crates/systems/nes/src/lib.rs:620-627,655-656`, `crates/systems/nes/src/ppu.rs:1235-1249`
+  - Current: Sprite 0 hit X position is calculated during render_scanline() and triggered in tick() at dot = X + 2
+  - Analysis: The current implementation appears correct - sprite 0 hit is pixel-based (0-255), not dot-based
+  - Odd-frame skip affects when rendering happens (dot 0 vs dot 1) but not the sprite 0 hit X position
+  - The hit trigger is based on PPU dot counter reaching hit_x + 2, which is independent of rendering timing
+  - Status: No actual bug identified; current implementation handles odd/even frames correctly
+  - Action: Needs real-world testing with games that use tight sprite 0 hit timing (e.g., split-screen effects)
+  - Reference: https://www.nesdev.org/wiki/PPU_frame_timing#Odd_frames
 - [ ] **MMC3A Mapper Support**: Implement MMC3A variant IRQ behavior - `crates/systems/nes/src/mappers/mmc3.rs:35-36`
   - Current: Only MMC3B/C implemented (IRQ triggers after counter reaches 0)
   - Needed: MMC3A behavior (IRQ triggers when counter==0 after reload)
