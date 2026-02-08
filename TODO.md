@@ -295,7 +295,7 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - **FIXED**: Removed duplicate scroll variable extraction in the NES PPU scroll calculation code
   - Variables `coarse_x`, `coarse_y`, `nt_x`, `nt_y`, `fine_y` are now extracted only once
   - Impact: Cleaner code without redundant calculations
-- [x] **PC Histogram Allocation**: Only allocate when instruction tracing enabled - `crates/systems/nes/src/lib.rs:589`
+- [x] **PC Histogram Allocation**: Only allocate when instruction tracing enabled - `crates/systems/nes/src/lib.rs`
   - **FIXED**: PC histogram now only allocated when `instruction_tracer.is_enabled()` returns true
   - Eliminates ~60KB/sec allocation overhead when tracing is disabled
   - Impact: Reduced memory allocation overhead in normal operation
