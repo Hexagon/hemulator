@@ -1074,7 +1074,7 @@ impl Ppu {
                         // Map 2-bit color to grayscale using OBP0/OBP1 palette
                         let palette_color = (palette >> (color_index * 2)) & 0x03;
                         match palette_color {
-                            0 => 0xFFFFFFFF, // White (lightest) - RGBA format: 0xAARRGGBB
+                            0 => 0xFFFFFFFF, // White (lightest) - ARGB8888 format: 0xAARRGGBB
                             1 => 0xFFAAAAAA, // Light gray
                             2 => 0xFF555555, // Dark gray
                             3 => 0xFF000000, // Black (darkest)
