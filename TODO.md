@@ -280,7 +280,7 @@ This file tracks unimplemented features, stubs, and simplified implementations a
 
 - [ ] **PPU Magic Numbers**: Document inline color constants - `crates/systems/gb/src/ppu.rs:860-863,1066-1069`
   - Current: Hardcoded color values (0xFFFFFFFF, 0xFFAAAAAA, etc.) without explanation
-  - Needed: Add comments explaining RGBA format and DMG grayscale mapping
+  - Needed: Add comments explaining ARGB8888 (0xAARRGGBB) format and DMG grayscale mapping
   - Impact: Code readability and maintainability
 - [ ] **Timer Period Constants**: Add frequency calculation comments - `crates/systems/gb/src/timer.rs:136-139`
   - Current: Magic numbers (1024, 16, 64, 256) without rationale
