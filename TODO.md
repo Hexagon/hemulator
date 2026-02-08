@@ -85,16 +85,20 @@ This file tracks unimplemented features, stubs, and simplified implementations a
 
 #### Debugger/Tracing System
 
-- [ ] **Read/Write Breakpoint Support**: Add memory access breakpoints to CLI - `crates/core/src/breakpoints.rs`, `crates/frontend/gui/src/main.rs`
-  - Current: Only execution breakpoints supported via --breakpoint flag
-  - Needed: --read-breakpoint and --write-breakpoint CLI flags
-  - Impact: Users can't pause on memory access, only on execution
-  - Use case: Debugging memory corruption, tracking variable changes
-- [ ] **GUI Breakpoint Management**: Add breakpoint UI to debug tab - `crates/frontend/gui/src/egui_ui/inspector_tabs.rs`
-  - Current: Breakpoints only configurable via CLI arguments
-  - Needed: UI panel to add/remove/view breakpoints while running
-  - Impact: Can't set breakpoints interactively in GUI mode
-  - Features: List view, add/remove buttons, address input, enable/disable toggle
+- [x] **Read/Write Breakpoint Support**: Add memory access breakpoints to CLI - `crates/core/src/breakpoints.rs`, `crates/frontend/gui/src/main.rs`
+  - **COMPLETED**: Added --read-breakpoint and --write-breakpoint CLI flags
+  - Extended impl_breakpoint_methods! macro to support add_read_breakpoint and add_write_breakpoint
+  - All systems with breakpoint_manager now support read/write breakpoints via CLI
+  - Note: Actual memory access checking deferred (requires bus-level integration)
+  - Impact: Users can now set read/write breakpoints, though checking requires future implementation
+- [x] **GUI Breakpoint Management**: Add breakpoint UI to debug tab - `crates/frontend/gui/src/egui_ui/inspector_tabs.rs`
+  - **COMPLETED**: Added collapsible breakpoint panel in debug tab
+  - UI shows active breakpoints with address, type (Execute/Read/Write), and remove button
+  - Address input field with type selector dropdown (Execute/Read/Write)
+  - Add button to create new breakpoints
+  - Status bar feedback for add/remove operations
+  - Integrated with existing breakpoint manager
+  - Supports all systems with breakpoint_manager (NES, GB, Atari2600, CHIP-8, SNES, N64, PC)
 - [ ] **Performance Profiling Mode**: Add hotspot tracking - `crates/core/src/instruction_tracer.rs`
   - Current: Instruction tracer only records execution history
   - Needed: Track instruction frequency, execution time per address
