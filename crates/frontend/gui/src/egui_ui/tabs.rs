@@ -298,11 +298,11 @@ pub enum TabAction {
 /// Debug actions that can be triggered from the debug tab
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DebugAction {
-    Step,                     // Step one instruction
-    Pause,                    // Pause emulation
-    Resume,                   // Resume emulation
-    StartTrace(String),       // Start instruction tracing with specified filename
-    StopTrace,                // Stop instruction tracing and dump to file
+    Step,                                                         // Step one instruction
+    Pause,                                                        // Pause emulation
+    Resume,                                                       // Resume emulation
+    StartTrace(String), // Start instruction tracing with specified filename
+    StopTrace,          // Stop instruction tracing and dump to file
     AddBreakpoint(u32, emu_core::breakpoints::BreakpointType), // Add breakpoint (address, type)
     RemoveBreakpoint(u32, emu_core::breakpoints::BreakpointType), // Remove breakpoint
 }
@@ -1065,7 +1065,7 @@ impl TabManager {
                     ui.horizontal(|ui| {
                         ui.label("Address:");
                         ui.text_edit_singleline(&mut self.breakpoint_address_input);
-                        
+
                         ui.label("Type:");
                         egui::ComboBox::from_id_salt("breakpoint_type")
                             .selected_text(match self.breakpoint_type_selected {
@@ -1075,11 +1075,15 @@ impl TabManager {
                                 _ => "Execute",
                             })
                             .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut self.breakpoint_type_selected, 0, "Execute");
+                                ui.selectable_value(
+                                    &mut self.breakpoint_type_selected,
+                                    0,
+                                    "Execute",
+                                );
                                 ui.selectable_value(&mut self.breakpoint_type_selected, 1, "Read");
                                 ui.selectable_value(&mut self.breakpoint_type_selected, 2, "Write");
                             });
-                        
+
                         if ui.button("➕ Add").clicked() {
                             // Parse address (support hex with 0x prefix or decimal)
                             let addr_str = self.breakpoint_address_input.trim();
@@ -1088,7 +1092,7 @@ impl TabManager {
                             } else {
                                 addr_str.parse::<u32>()
                             };
-                            
+
                             if let Ok(address) = addr {
                                 let bp_type = match self.breakpoint_type_selected {
                                     0 => emu_core::breakpoints::BreakpointType::Execute,
@@ -1096,19 +1100,20 @@ impl TabManager {
                                     2 => emu_core::breakpoints::BreakpointType::Write,
                                     _ => emu_core::breakpoints::BreakpointType::Execute,
                                 };
-                                self.pending_debug_action = Some(DebugAction::AddBreakpoint(address, bp_type));
+                                self.pending_debug_action =
+                                    Some(DebugAction::AddBreakpoint(address, bp_type));
                                 self.breakpoint_address_input.clear();
                             }
                         }
                     });
-                    
+
                     ui.add_space(5.0);
-                    
+
                     // Show active breakpoints
                     if let Some(ref debug_state) = self.enhanced_debug_state {
                         if !debug_state.breakpoints.is_empty() {
                             ui.label(egui::RichText::new("Active Breakpoints:").strong());
-                            
+
                             egui::Grid::new("breakpoints_grid")
                                 .striped(true)
                                 .spacing([10.0, 4.0])
@@ -1117,12 +1122,17 @@ impl TabManager {
                                     ui.label(egui::RichText::new("Type").strong());
                                     ui.label(""); // For remove button
                                     ui.end_row();
-                                    
-                                    let mut to_remove: Option<(u32, emu_core::breakpoints::BreakpointType)> = None;
+
+                                    let mut to_remove: Option<(
+                                        u32,
+                                        emu_core::breakpoints::BreakpointType,
+                                    )> = None;
                                     for bp in &debug_state.breakpoints {
                                         ui.label(format!("${:04X}", bp.address));
                                         let type_str = match bp.breakpoint_type {
-                                            emu_core::breakpoints::BreakpointType::Execute => "Execute",
+                                            emu_core::breakpoints::BreakpointType::Execute => {
+                                                "Execute"
+                                            }
                                             emu_core::breakpoints::BreakpointType::Read => "Read",
                                             emu_core::breakpoints::BreakpointType::Write => "Write",
                                         };
@@ -1132,9 +1142,10 @@ impl TabManager {
                                         }
                                         ui.end_row();
                                     }
-                                    
+
                                     if let Some((addr, bp_type)) = to_remove {
-                                        self.pending_debug_action = Some(DebugAction::RemoveBreakpoint(addr, bp_type));
+                                        self.pending_debug_action =
+                                            Some(DebugAction::RemoveBreakpoint(addr, bp_type));
                                     }
                                 });
                         } else {

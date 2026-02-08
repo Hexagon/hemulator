@@ -213,10 +213,11 @@ macro_rules! impl_breakpoint_methods {
             address: u32,
             bp_type: $crate::breakpoints::BreakpointType,
         ) -> bool {
-            self.breakpoint_manager.remove(&$crate::breakpoints::Breakpoint {
-                address,
-                breakpoint_type: bp_type,
-            })
+            self.breakpoint_manager
+                .remove(&$crate::breakpoints::Breakpoint {
+                    address,
+                    breakpoint_type: bp_type,
+                })
         }
 
         /// Clear all breakpoints

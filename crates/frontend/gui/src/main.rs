@@ -777,7 +777,7 @@ impl EmulatorSystem {
             EmulatorSystem::SMS(_) => Vec::new(), // TODO: Add breakpoint_manager to SMS
             EmulatorSystem::Chip8(sys) => sys.get_breakpoint_manager().get_all(),
             EmulatorSystem::ColecoVision(_) => Vec::new(), // TODO: Add breakpoint_manager to ColecoVision
-            EmulatorSystem::SG1000(_) => Vec::new(), // TODO: Add breakpoint_manager to SG1000
+            EmulatorSystem::SG1000(_) => Vec::new(),       // TODO: Add breakpoint_manager to SG1000
         }
     }
 
@@ -1419,9 +1419,9 @@ struct CliArgs {
     trace_limit: Option<usize>,      // Max instructions to keep in trace buffer
     trace_dump_file: Option<String>, // File to dump trace on breakpoint/exit
     // Breakpoint configuration
-    breakpoints: Vec<u32>,        // List of execution breakpoint addresses
-    read_breakpoints: Vec<u32>,   // List of read breakpoint addresses
-    write_breakpoints: Vec<u32>,  // List of write breakpoint addresses
+    breakpoints: Vec<u32>,       // List of execution breakpoint addresses
+    read_breakpoints: Vec<u32>,  // List of read breakpoint addresses
+    write_breakpoints: Vec<u32>, // List of write breakpoint addresses
 }
 
 impl CliArgs {
@@ -6531,9 +6531,10 @@ fn main() {
                             emu_core::breakpoints::BreakpointType::Read => "read",
                             emu_core::breakpoints::BreakpointType::Write => "write",
                         };
-                        egui_app
-                            .status_bar
-                            .set_message(format!("Added {} breakpoint at ${:04X}", type_str, address));
+                        egui_app.status_bar.set_message(format!(
+                            "Added {} breakpoint at ${:04X}",
+                            type_str, address
+                        ));
                     } else {
                         egui_app.status_bar.set_message("No ROM loaded".to_string());
                     }
@@ -6543,24 +6544,33 @@ fn main() {
                         // We need mutable access, so match on each system
                         let success = match &mut sys {
                             EmulatorSystem::NES(s) => s.remove_breakpoint_by_type(address, bp_type),
-                            EmulatorSystem::GameBoy(s) => s.remove_breakpoint_by_type(address, bp_type),
-                            EmulatorSystem::Atari2600(s) => s.remove_breakpoint_by_type(address, bp_type),
-                            EmulatorSystem::Chip8(s) => s.remove_breakpoint_by_type(address, bp_type),
-                            EmulatorSystem::SNES(s) => s.remove_breakpoint_by_type(address, bp_type),
+                            EmulatorSystem::GameBoy(s) => {
+                                s.remove_breakpoint_by_type(address, bp_type)
+                            }
+                            EmulatorSystem::Atari2600(s) => {
+                                s.remove_breakpoint_by_type(address, bp_type)
+                            }
+                            EmulatorSystem::Chip8(s) => {
+                                s.remove_breakpoint_by_type(address, bp_type)
+                            }
+                            EmulatorSystem::SNES(s) => {
+                                s.remove_breakpoint_by_type(address, bp_type)
+                            }
                             EmulatorSystem::N64(s) => s.remove_breakpoint_by_type(address, bp_type),
                             EmulatorSystem::PC(s) => s.remove_breakpoint_by_type(address, bp_type),
                             _ => false, // SMS, ColecoVision, SG1000 don't have breakpoint manager yet
                         };
-                        
+
                         if success {
                             let type_str = match bp_type {
                                 emu_core::breakpoints::BreakpointType::Execute => "execution",
                                 emu_core::breakpoints::BreakpointType::Read => "read",
                                 emu_core::breakpoints::BreakpointType::Write => "write",
                             };
-                            egui_app
-                                .status_bar
-                                .set_message(format!("Removed {} breakpoint at ${:04X}", type_str, address));
+                            egui_app.status_bar.set_message(format!(
+                                "Removed {} breakpoint at ${:04X}",
+                                type_str, address
+                            ));
                         } else {
                             egui_app
                                 .status_bar
