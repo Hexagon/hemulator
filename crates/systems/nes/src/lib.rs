@@ -1528,7 +1528,7 @@ mod tests {
             // Test PPUCTRL ($2000) write protection
             bus.write(0x2000, 0xFF);
             // PPUCTRL should remain 0 (can't read it directly, but we can verify side effects)
-            
+
             // Test PPUMASK ($2001) write protection
             bus.write(0x2001, 0xFF);
             // PPUMASK should remain 0 (can't read directly)

@@ -74,7 +74,7 @@ impl Mmc3 {
         let initial_mirroring = cart.get_initial_mirroring();
         // Check if cartridge has 4-screen VRAM (extra VRAM chips on board)
         let has_four_screen = initial_mirroring == Mirroring::FourScreen;
-        
+
         // Determine MMC3 variant from submapper (iNES 2.0)
         // Submapper 1 = MMC3A (old IRQ behavior), others = MMC3B/C (new IRQ behavior)
         let is_mmc3a = cart.submapper == 1;
