@@ -105,6 +105,12 @@ impl NoiseChannel {
     pub fn reset_shift_register(&mut self) {
         self.shift_register = 1;
     }
+
+    /// Get the LSB of the shift register for mixer calculations
+    /// Returns true if the output should be silent (bit 0 is set)
+    pub fn is_silenced(&self) -> bool {
+        (self.shift_register & 1) != 0
+    }
 }
 
 impl Default for NoiseChannel {

@@ -55,25 +55,19 @@ This file tracks unimplemented features, stubs, and simplified implementations a
 
 ### High
 
-#### NES (Nintendo Entertainment System)
-- [ ] **Sprite 0 Hit Timing on Odd Frames**: Fix X position calculation during odd-frame skip - `crates/systems/nes/src/lib.rs:620-627,655-656`
-  - Current: Frame rendering triggers at variable dot positions (dot 0 OR first scanline rendering)
-  - Issue: Odd-frame skip (scanline 0, dot 0 skipped when rendering enabled) may cause sprite 0 hit to fire at wrong X position
-  - Impact: Games with tight sprite 0 hit timing windows (e.g., split-screen effects) may fail
-  - Needed: Ensure sprite 0 hit detection accounts for exact dot position when frame is rendered
-  - Reference: https://www.nesdev.org/wiki/PPU_frame_timing#Odd_frames
-- [ ] **APU Non-Linear Mixing**: Implement hardware-accurate mixer impedance curves - `crates/systems/nes/src/apu.rs:38`
-  - Current: Simple average mixing documented at line 38
-  - Needed: Non-linear mixing with impedance curves matching NES hardware
-  - Impact: Audio quality differs from hardware, especially with multiple channels active
+#### NES (Nintendo Entertainment System) - Completed
+- [x] **APU Non-Linear Mixing**: Implement hardware-accurate mixer impedance curves - `crates/systems/nes/src/apu.rs:609-880`
+  - **FIXED**: Implemented hardware-accurate non-linear mixing formulas
   - Formula: pulse_out = 95.88 / (8128 / (pulse1 + pulse2) + 100)
   - Formula: tnd_out = 159.79 / (1 / (triangle/8227 + noise/12241 + dmc/22638) + 100)
+  - Added high-pass filter to remove DC offset from mixer output
+  - Impact: Audio quality now matches NES hardware mixing behavior
   - Reference: https://www.nesdev.org/wiki/APU_Mixer
-- [ ] **Tile Viewer CHR Data Clone Overhead**: Optimize CHR data access in tile viewer - `crates/systems/nes/src/lib.rs:343,358,362`
-  - Current: `.clone()` on CHR data (~8KB) during every tile viewer call
-  - Impact: ~240KB/sec memory allocation overhead at 30fps viewer refresh
-  - Solution: Cache CHR data clone or use `Rc<Vec<u8>>` instead of full copy
-  - Affects: GUI Inspector tile/palette/nametable viewers
+- [x] **Tile Viewer CHR Data Clone Overhead**: Optimize CHR data access in tile viewer - `crates/systems/nes/src/lib.rs:167,343`
+  - **FIXED**: Replaced `Vec<u8>` with `Rc<Vec<u8>>` for CHR data in TileViewerData
+  - Eliminated ~240KB/sec memory allocation overhead at 30fps viewer refresh
+  - CHR data now reference-counted instead of fully copied on each call
+  - Impact: Significantly reduced memory allocation overhead in GUI inspector
 
 **All other high priority items have been resolved!** The following items were previously marked as high and have been completed:
 
@@ -117,6 +111,14 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Kept generic `set_controller(port, state)` method for backward compatibility
   - Impact: Better API design with type safety
 #### NES (Nintendo Entertainment System)
+- [ ] **Sprite 0 Hit Timing on Odd Frames**: Verify X position calculation during odd-frame skip - `crates/systems/nes/src/lib.rs:620-627,655-656`, `crates/systems/nes/src/ppu.rs:1235-1249`
+  - Current: Sprite 0 hit X position is calculated during render_scanline() and triggered in tick() at dot = X + 2
+  - Analysis: The current implementation appears correct - sprite 0 hit is pixel-based (0-255), not dot-based
+  - Odd-frame skip affects when rendering happens (dot 0 vs dot 1) but not the sprite 0 hit X position
+  - The hit trigger is based on PPU dot counter reaching hit_x + 2, which is independent of rendering timing
+  - Status: No actual bug identified; current implementation handles odd/even frames correctly
+  - Action: Needs real-world testing with games that use tight sprite 0 hit timing (e.g., split-screen effects)
+  - Reference: https://www.nesdev.org/wiki/PPU_frame_timing#Odd_frames
 - [ ] **MMC3A Mapper Support**: Implement MMC3A variant IRQ behavior - `crates/systems/nes/src/mappers/mmc3.rs:35-36`
   - Current: Only MMC3B/C implemented (IRQ triggers after counter reaches 0)
   - Needed: MMC3A behavior (IRQ triggers when counter==0 after reload)

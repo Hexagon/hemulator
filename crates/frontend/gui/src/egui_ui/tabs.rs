@@ -4,6 +4,7 @@ use crate::settings::ScalingMode;
 use crate::system_adapter::{EnhancedDebugState, SystemDebugInfo};
 use egui::{ScrollArea, TextureHandle, Ui};
 use emu_core::debug::MemoryRegion;
+use std::rc::Rc;
 
 /// Application version constant
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -63,7 +64,8 @@ pub struct CartridgeData {
 #[derive(Clone)]
 pub struct NesTileData {
     /// CHR data (pattern tables) - 8KB for NES
-    pub chr_data: Vec<u8>,
+    /// Uses Rc to avoid cloning the full CHR data
+    pub chr_data: Rc<Vec<u8>>,
     /// Palette data - 32 bytes for NES (4 colors x 8 palettes)
     pub palette: Vec<u8>,
     /// NES master palette for color lookup
