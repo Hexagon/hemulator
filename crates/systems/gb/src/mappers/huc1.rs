@@ -99,7 +99,7 @@ impl Huc1 {
                     // IR mode register - stubbed (not commonly used)
                     // NOTE: Infrared sensor hardware is not emulated.
                     // Writing to this register has no effect. Reading in IR mode
-                    // always returns 0xC0 (no signal detected).
+                    // returns 0xC0 when RAM is enabled (no signal detected), or 0xFF when disabled.
                     // Affects: Pocket Bomberman, Tamagotchi series (<1% of games)
                 } else {
                     // RAM Bank Select (2 bits)
