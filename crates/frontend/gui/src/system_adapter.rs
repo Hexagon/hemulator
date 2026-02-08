@@ -19,6 +19,8 @@ pub struct EnhancedDebugState {
     pub disassembly: Vec<DisassembledInstruction>,
     /// Current PC for highlighting
     pub current_pc: u32,
+    /// Active breakpoints
+    pub breakpoints: Vec<emu_core::breakpoints::Breakpoint>,
 }
 
 impl EnhancedDebugState {
@@ -29,6 +31,7 @@ impl EnhancedDebugState {
             memory_regions: Vec::new(),
             disassembly: Vec::new(),
             current_pc: 0,
+            breakpoints: Vec::new(),
         }
     }
 }

@@ -765,6 +765,22 @@ impl EmulatorSystem {
         }
     }
 
+    /// Get all active breakpoints
+    fn get_breakpoints(&self) -> Vec<emu_core::breakpoints::Breakpoint> {
+        match self {
+            EmulatorSystem::NES(sys) => sys.get_breakpoint_manager().get_all(),
+            EmulatorSystem::GameBoy(sys) => sys.get_breakpoint_manager().get_all(),
+            EmulatorSystem::Atari2600(sys) => sys.get_breakpoint_manager().get_all(),
+            EmulatorSystem::PC(sys) => sys.get_breakpoint_manager().get_all(),
+            EmulatorSystem::SNES(sys) => sys.get_breakpoint_manager().get_all(),
+            EmulatorSystem::N64(sys) => sys.get_breakpoint_manager().get_all(),
+            EmulatorSystem::SMS(_) => Vec::new(), // TODO: Add breakpoint_manager to SMS
+            EmulatorSystem::Chip8(sys) => sys.get_breakpoint_manager().get_all(),
+            EmulatorSystem::ColecoVision(_) => Vec::new(), // TODO: Add breakpoint_manager to ColecoVision
+            EmulatorSystem::SG1000(_) => Vec::new(),       // TODO: Add breakpoint_manager to SG1000
+        }
+    }
+
     /// Get the instruction tracer for dumping trace to file
     fn get_instruction_tracer(&self) -> Option<&emu_core::instruction_tracer::InstructionTracer> {
         match self {
@@ -1403,7 +1419,9 @@ struct CliArgs {
     trace_limit: Option<usize>,      // Max instructions to keep in trace buffer
     trace_dump_file: Option<String>, // File to dump trace on breakpoint/exit
     // Breakpoint configuration
-    breakpoints: Vec<u32>, // List of breakpoint addresses
+    breakpoints: Vec<u32>,       // List of execution breakpoint addresses
+    read_breakpoints: Vec<u32>,  // List of read breakpoint addresses
+    write_breakpoints: Vec<u32>, // List of write breakpoint addresses
 }
 
 impl CliArgs {
@@ -1615,6 +1633,44 @@ impl CliArgs {
                         std::process::exit(1);
                     }
                 }
+                "--read-breakpoint" | "-r" => {
+                    if let Some(value) = arg_iter.next() {
+                        let addr = if value.starts_with("0x") || value.starts_with("0X") {
+                            u32::from_str_radix(&value[2..], 16)
+                        } else {
+                            value.parse::<u32>()
+                        };
+                        match addr {
+                            Ok(address) => args.read_breakpoints.push(address),
+                            Err(_) => {
+                                eprintln!("Error: --read-breakpoint requires a valid address (hex: 0x2000 or decimal: 8192).");
+                                std::process::exit(1);
+                            }
+                        }
+                    } else {
+                        eprintln!("Error: --read-breakpoint requires an address.");
+                        std::process::exit(1);
+                    }
+                }
+                "--write-breakpoint" | "-w" => {
+                    if let Some(value) = arg_iter.next() {
+                        let addr = if value.starts_with("0x") || value.starts_with("0X") {
+                            u32::from_str_radix(&value[2..], 16)
+                        } else {
+                            value.parse::<u32>()
+                        };
+                        match addr {
+                            Ok(address) => args.write_breakpoints.push(address),
+                            Err(_) => {
+                                eprintln!("Error: --write-breakpoint requires a valid address (hex: 0x2000 or decimal: 8192).");
+                                std::process::exit(1);
+                            }
+                        }
+                    } else {
+                        eprintln!("Error: --write-breakpoint requires an address.");
+                        std::process::exit(1);
+                    }
+                }
                 _ => {
                     // First non-flag argument is treated as ROM path for backward compatibility
                     if args.rom_path.is_none() && !arg.starts_with("--") {
@@ -1687,9 +1743,17 @@ impl CliArgs {
         eprintln!("  --trace-dump-file <PATH> File to dump trace (default: trace_dump.txt)");
         eprintln!("                           Automatically dumps when breakpoint is hit or debug dump is triggered.");
         eprintln!(
-            "  -b, --breakpoint <ADDR>  Set breakpoint at address (can be used multiple times)"
+            "  -b, --breakpoint <ADDR>  Set execution breakpoint at address (can be used multiple times)"
         );
         eprintln!("                           Breakpoint checking is implemented for SNES. Stops execution and dumps trace when hit.");
+        eprintln!(
+            "  -r, --read-breakpoint <ADDR>  Set read breakpoint at address (can be used multiple times)"
+        );
+        eprintln!("                           Breaks when memory at address is read. Useful for debugging memory corruption.");
+        eprintln!(
+            "  -w, --write-breakpoint <ADDR> Set write breakpoint at address (can be used multiple times)"
+        );
+        eprintln!("                           Breaks when memory at address is written. Useful for tracking variable changes.");
         eprintln!();
         eprintln!("Disk formats:");
         eprintln!("  360k, 720k, 1.2m, 1.44m  Floppy disk formats");
@@ -1927,6 +1991,7 @@ fn configure_system_ui(
 fn create_enhanced_debug_state(
     system_name: &str,
     debugger: &dyn emu_core::debug::Debugger,
+    system: &EmulatorSystem,
 ) -> system_adapter::EnhancedDebugState {
     let cpu_state = debugger.get_cpu_state();
     let memory_regions = debugger.get_memory_regions();
@@ -1950,6 +2015,7 @@ fn create_enhanced_debug_state(
     enhanced_state.memory_regions = memory_regions;
     enhanced_state.disassembly = disassembly;
     enhanced_state.current_pc = pc;
+    enhanced_state.breakpoints = system.get_breakpoints();
 
     enhanced_state
 }
@@ -2035,6 +2101,38 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
             EmulatorSystem::PC(s) => s.add_breakpoint(addr),
             EmulatorSystem::ColecoVision(s) => s.add_breakpoint(addr),
             EmulatorSystem::SG1000(s) => s.add_breakpoint(addr),
+        }
+    }
+
+    // Add read breakpoints
+    for &addr in &cli_args.read_breakpoints {
+        match sys {
+            EmulatorSystem::NES(s) => s.add_read_breakpoint(addr),
+            EmulatorSystem::GameBoy(s) => s.add_read_breakpoint(addr),
+            EmulatorSystem::Atari2600(s) => s.add_read_breakpoint(addr),
+            EmulatorSystem::Chip8(s) => s.add_read_breakpoint(addr),
+            EmulatorSystem::SMS(s) => s.add_read_breakpoint(addr),
+            EmulatorSystem::SNES(s) => s.add_read_breakpoint(addr),
+            EmulatorSystem::N64(s) => s.add_read_breakpoint(addr),
+            EmulatorSystem::PC(s) => s.add_read_breakpoint(addr),
+            EmulatorSystem::ColecoVision(s) => s.add_read_breakpoint(addr),
+            EmulatorSystem::SG1000(s) => s.add_read_breakpoint(addr),
+        }
+    }
+
+    // Add write breakpoints
+    for &addr in &cli_args.write_breakpoints {
+        match sys {
+            EmulatorSystem::NES(s) => s.add_write_breakpoint(addr),
+            EmulatorSystem::GameBoy(s) => s.add_write_breakpoint(addr),
+            EmulatorSystem::Atari2600(s) => s.add_write_breakpoint(addr),
+            EmulatorSystem::Chip8(s) => s.add_write_breakpoint(addr),
+            EmulatorSystem::SMS(s) => s.add_write_breakpoint(addr),
+            EmulatorSystem::SNES(s) => s.add_write_breakpoint(addr),
+            EmulatorSystem::N64(s) => s.add_write_breakpoint(addr),
+            EmulatorSystem::PC(s) => s.add_write_breakpoint(addr),
+            EmulatorSystem::ColecoVision(s) => s.add_write_breakpoint(addr),
+            EmulatorSystem::SG1000(s) => s.add_write_breakpoint(addr),
         }
     }
 }
@@ -3676,43 +3774,43 @@ fn main() {
             let enhanced_state_opt = match &sys {
                 EmulatorSystem::NES(s) => {
                     let debugger: &dyn Debugger = s.as_ref();
-                    Some(create_enhanced_debug_state("NES", debugger))
+                    Some(create_enhanced_debug_state("NES", debugger, &sys))
                 }
                 EmulatorSystem::SMS(s) => {
                     let debugger: &dyn Debugger = s.as_ref();
-                    Some(create_enhanced_debug_state("SMS", debugger))
+                    Some(create_enhanced_debug_state("SMS", debugger, &sys))
                 }
                 EmulatorSystem::SNES(s) => {
                     let debugger: &dyn Debugger = s.as_ref();
-                    Some(create_enhanced_debug_state("SNES", debugger))
+                    Some(create_enhanced_debug_state("SNES", debugger, &sys))
                 }
                 EmulatorSystem::GameBoy(s) => {
                     let debugger: &dyn Debugger = s.as_ref();
-                    Some(create_enhanced_debug_state("Game Boy", debugger))
+                    Some(create_enhanced_debug_state("Game Boy", debugger, &sys))
                 }
                 EmulatorSystem::Atari2600(s) => {
                     let debugger: &dyn Debugger = s.as_ref();
-                    Some(create_enhanced_debug_state("Atari 2600", debugger))
+                    Some(create_enhanced_debug_state("Atari 2600", debugger, &sys))
                 }
                 EmulatorSystem::PC(s) => {
                     let debugger: &dyn Debugger = s.as_ref();
-                    Some(create_enhanced_debug_state("PC", debugger))
+                    Some(create_enhanced_debug_state("PC", debugger, &sys))
                 }
                 EmulatorSystem::N64(s) => {
                     let debugger: &dyn Debugger = s.as_ref();
-                    Some(create_enhanced_debug_state("N64", debugger))
+                    Some(create_enhanced_debug_state("N64", debugger, &sys))
                 }
                 EmulatorSystem::Chip8(s) => {
                     let debugger: &dyn Debugger = s.as_ref();
-                    Some(create_enhanced_debug_state("CHIP-8", debugger))
+                    Some(create_enhanced_debug_state("CHIP-8", debugger, &sys))
                 }
                 EmulatorSystem::ColecoVision(s) => {
                     let debugger: &dyn Debugger = s.as_ref();
-                    Some(create_enhanced_debug_state("ColecoVision", debugger))
+                    Some(create_enhanced_debug_state("ColecoVision", debugger, &sys))
                 }
                 EmulatorSystem::SG1000(s) => {
                     let debugger: &dyn Debugger = s.as_ref();
-                    Some(create_enhanced_debug_state("SG-1000", debugger))
+                    Some(create_enhanced_debug_state("SG-1000", debugger, &sys))
                 }
             };
 
@@ -6344,6 +6442,142 @@ fn main() {
                                 }
                             }
                         }
+                    }
+                }
+                DebugAction::AddBreakpoint(address, bp_type) => {
+                    if rom_loaded {
+                        match &mut sys {
+                            EmulatorSystem::NES(s) => match bp_type {
+                                emu_core::breakpoints::BreakpointType::Execute => {
+                                    s.add_breakpoint(address)
+                                }
+                                emu_core::breakpoints::BreakpointType::Read => {
+                                    s.add_read_breakpoint(address)
+                                }
+                                emu_core::breakpoints::BreakpointType::Write => {
+                                    s.add_write_breakpoint(address)
+                                }
+                            },
+                            EmulatorSystem::GameBoy(s) => match bp_type {
+                                emu_core::breakpoints::BreakpointType::Execute => {
+                                    s.add_breakpoint(address)
+                                }
+                                emu_core::breakpoints::BreakpointType::Read => {
+                                    s.add_read_breakpoint(address)
+                                }
+                                emu_core::breakpoints::BreakpointType::Write => {
+                                    s.add_write_breakpoint(address)
+                                }
+                            },
+                            EmulatorSystem::Atari2600(s) => match bp_type {
+                                emu_core::breakpoints::BreakpointType::Execute => {
+                                    s.add_breakpoint(address)
+                                }
+                                emu_core::breakpoints::BreakpointType::Read => {
+                                    s.add_read_breakpoint(address)
+                                }
+                                emu_core::breakpoints::BreakpointType::Write => {
+                                    s.add_write_breakpoint(address)
+                                }
+                            },
+                            EmulatorSystem::Chip8(s) => match bp_type {
+                                emu_core::breakpoints::BreakpointType::Execute => {
+                                    s.add_breakpoint(address)
+                                }
+                                emu_core::breakpoints::BreakpointType::Read => {
+                                    s.add_read_breakpoint(address)
+                                }
+                                emu_core::breakpoints::BreakpointType::Write => {
+                                    s.add_write_breakpoint(address)
+                                }
+                            },
+                            EmulatorSystem::SNES(s) => match bp_type {
+                                emu_core::breakpoints::BreakpointType::Execute => {
+                                    s.add_breakpoint(address)
+                                }
+                                emu_core::breakpoints::BreakpointType::Read => {
+                                    s.add_read_breakpoint(address)
+                                }
+                                emu_core::breakpoints::BreakpointType::Write => {
+                                    s.add_write_breakpoint(address)
+                                }
+                            },
+                            EmulatorSystem::N64(s) => match bp_type {
+                                emu_core::breakpoints::BreakpointType::Execute => {
+                                    s.add_breakpoint(address)
+                                }
+                                emu_core::breakpoints::BreakpointType::Read => {
+                                    s.add_read_breakpoint(address)
+                                }
+                                emu_core::breakpoints::BreakpointType::Write => {
+                                    s.add_write_breakpoint(address)
+                                }
+                            },
+                            EmulatorSystem::PC(s) => match bp_type {
+                                emu_core::breakpoints::BreakpointType::Execute => {
+                                    s.add_breakpoint(address)
+                                }
+                                emu_core::breakpoints::BreakpointType::Read => {
+                                    s.add_read_breakpoint(address)
+                                }
+                                emu_core::breakpoints::BreakpointType::Write => {
+                                    s.add_write_breakpoint(address)
+                                }
+                            },
+                            _ => {} // SMS, ColecoVision, SG1000 don't have breakpoint manager yet
+                        }
+                        let type_str = match bp_type {
+                            emu_core::breakpoints::BreakpointType::Execute => "execution",
+                            emu_core::breakpoints::BreakpointType::Read => "read",
+                            emu_core::breakpoints::BreakpointType::Write => "write",
+                        };
+                        egui_app.status_bar.set_message(format!(
+                            "Added {} breakpoint at ${:04X}",
+                            type_str, address
+                        ));
+                    } else {
+                        egui_app.status_bar.set_message("No ROM loaded".to_string());
+                    }
+                }
+                DebugAction::RemoveBreakpoint(address, bp_type) => {
+                    if rom_loaded {
+                        // We need mutable access, so match on each system
+                        let success = match &mut sys {
+                            EmulatorSystem::NES(s) => s.remove_breakpoint_by_type(address, bp_type),
+                            EmulatorSystem::GameBoy(s) => {
+                                s.remove_breakpoint_by_type(address, bp_type)
+                            }
+                            EmulatorSystem::Atari2600(s) => {
+                                s.remove_breakpoint_by_type(address, bp_type)
+                            }
+                            EmulatorSystem::Chip8(s) => {
+                                s.remove_breakpoint_by_type(address, bp_type)
+                            }
+                            EmulatorSystem::SNES(s) => {
+                                s.remove_breakpoint_by_type(address, bp_type)
+                            }
+                            EmulatorSystem::N64(s) => s.remove_breakpoint_by_type(address, bp_type),
+                            EmulatorSystem::PC(s) => s.remove_breakpoint_by_type(address, bp_type),
+                            _ => false, // SMS, ColecoVision, SG1000 don't have breakpoint manager yet
+                        };
+
+                        if success {
+                            let type_str = match bp_type {
+                                emu_core::breakpoints::BreakpointType::Execute => "execution",
+                                emu_core::breakpoints::BreakpointType::Read => "read",
+                                emu_core::breakpoints::BreakpointType::Write => "write",
+                            };
+                            egui_app.status_bar.set_message(format!(
+                                "Removed {} breakpoint at ${:04X}",
+                                type_str, address
+                            ));
+                        } else {
+                            egui_app
+                                .status_bar
+                                .set_message(format!("Breakpoint not found at ${:04X}", address));
+                        }
+                    } else {
+                        egui_app.status_bar.set_message("No ROM loaded".to_string());
                     }
                 }
             }
