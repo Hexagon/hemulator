@@ -1716,7 +1716,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn test_apu_ports_echo() {
         let mut bus = SnesBus::new();
 
