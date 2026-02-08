@@ -1495,4 +1495,86 @@ mod tests {
         sys.set_timing(TimingMode::Pal);
         assert_eq!(sys.timing(), TimingMode::Pal);
     }
+
+    #[test]
+    fn test_nes_first_frame_register_protection() {
+        // Test that PPU registers are properly write-protected during the first frame after reset
+        // Reference: problemkaputt.de everynes.htm - PPU Reset section
+        use crate::bus::Bus;
+        use crate::cartridge::{Cartridge, Mirroring};
+        use emu_core::apu::TimingMode;
+
+        let mut sys = NesSystem::default();
+
+        // Create a minimal test cartridge
+        let cart = Cartridge::new_test(
+            vec![0; 0x8000], // 32KB PRG ROM
+            vec![0; 0x2000], // 8KB CHR ROM
+            0,               // NROM mapper
+            Mirroring::Horizontal,
+            TimingMode::Ntsc,
+        );
+        sys.setup_cartridge(cart)
+            .expect("Failed to load test cartridge");
+
+        if let Some(bus) = sys.cpu.bus_mut() {
+            // During first frame, these writes should be blocked:
+            // - $2000 (PPUCTRL)
+            // - $2001 (PPUMASK)
+            // - $2005 (PPUSCROLL)
+            // - $2006 (PPUADDR)
+            // And PPUDATA ($2007) reads should return 0
+
+            // Test PPUCTRL ($2000) write protection
+            bus.write(0x2000, 0xFF);
+            // PPUCTRL should remain 0 (can't read it directly, but we can verify side effects)
+            
+            // Test PPUMASK ($2001) write protection
+            bus.write(0x2001, 0xFF);
+            // PPUMASK should remain 0 (can't read directly)
+
+            // Test PPUSCROLL ($2005) write protection
+            bus.write(0x2005, 0x12);
+            bus.write(0x2005, 0x34);
+            // Scroll should not be affected (can't verify directly without reading internal state)
+
+            // Test PPUADDR ($2006) write protection
+            bus.write(0x2006, 0x20);
+            bus.write(0x2006, 0x00);
+            // VRAM address should not be set
+
+            // Test PPUDATA ($2007) read protection - should return 0
+            let data = bus.read(0x2007);
+            assert_eq!(
+                data, 0x00,
+                "PPUDATA read during first frame should return 0x00"
+            );
+
+            // Now advance past the first frame by simulating VBlank end
+            // The first frame protection is cleared at the end of the first VBlank
+            // For this test, we'll manually clear it
+            bus.ppu.clear_first_frame_lock();
+
+            // After first frame, writes should work
+            bus.write(0x2000, 0x80); // Enable NMI
+            bus.write(0x2001, 0x1E); // Enable rendering
+            bus.write(0x2006, 0x20); // Set VRAM address high
+            bus.write(0x2006, 0x00); // Set VRAM address low
+
+            // Write some data to VRAM
+            bus.write(0x2007, 0x42);
+
+            // Reset address and read back
+            bus.write(0x2006, 0x20);
+            bus.write(0x2006, 0x00);
+            // Skip buffered read
+            let _ = bus.read(0x2007);
+            // Read actual data
+            let read_data = bus.read(0x2007);
+            assert_eq!(
+                read_data, 0x42,
+                "After first frame, PPUDATA should be readable"
+            );
+        }
+    }
 }

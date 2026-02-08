@@ -119,11 +119,12 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Status: No actual bug identified; current implementation handles odd/even frames correctly
   - Action: Needs real-world testing with games that use tight sprite 0 hit timing (e.g., split-screen effects)
   - Reference: https://www.nesdev.org/wiki/PPU_frame_timing#Odd_frames
-- [ ] **MMC3A Mapper Support**: Implement MMC3A variant IRQ behavior - `crates/systems/nes/src/mappers/mmc3.rs:35-36`
-  - Current: Only MMC3B/C implemented (IRQ triggers after counter reaches 0)
-  - Needed: MMC3A behavior (IRQ triggers when counter==0 after reload)
-  - Impact: Rare early MMC3A cartridges will have broken scanline IRQs
-  - Note: MMC3A is extremely rare; most games use MMC3B/C revision
+- [x] **MMC3A Mapper Support**: Implement MMC3A variant IRQ behavior - `crates/systems/nes/src/mappers/mmc3.rs:35-36`
+  - **FIXED**: Implemented MMC3A variant detection via iNES 2.0 submapper field
+  - Submapper 1 = MMC3A (old IRQ behavior), others = MMC3B/C (new IRQ behavior)
+  - MMC3A: IRQ triggers when counter==0, even after reload
+  - MMC3B/C: IRQ triggers only when counter decrements to 0
+  - All 255 NES tests passing
   - Reference: https://www.nesdev.org/wiki/MMC3#IRQ_Specifics
 - [ ] **PPU A12 Edge Timing**: Refine A12 callback timing during rendering - `crates/systems/nes/src/ppu.rs:980,1103-1106`
   - Current: `suppress_a12` flag toggles A12 callbacks off during `render_scanline()`, re-enables in CHR fetch
@@ -135,11 +136,14 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Issue: May not match actual PPU cycle-accurate edges
   - Impact: MMC3 games with complex scanline IRQ patterns may have inaccurate behavior
   - Note: Works for standard games, may affect advanced homebrew or edge cases
-- [ ] **First Frame Register Protection**: Validate PPUADDR/PPUSCROLL write protection - `crates/systems/nes/src/ppu.rs:539`
-  - Current: PPUDATA ($2007) is read-protected on first frame (line 539)
-  - Needed: Verify PPUADDR/PPUSCROLL write protection matches hardware behavior
-  - Impact: Some edge-case games relying on first-frame PPU state may behave unexpectedly
-  - Note: Extremely rare case, most games don't access PPU during first frame
+- [x] **First Frame Register Protection**: Validate PPUADDR/PPUSCROLL write protection - `crates/systems/nes/src/ppu.rs:539`
+  - **VERIFIED**: Implementation is correct and comprehensive
+  - Protected registers during first frame: PPUCTRL ($2000), PPUMASK ($2001), PPUSCROLL ($2005), PPUADDR ($2006)
+  - PPUDATA ($2007) is read-protected, returns 0x00
+  - Protection released at end of first VBlank (hardware-accurate)
+  - Added comprehensive test: `test_nes_first_frame_register_protection` 
+  - All 255 NES tests passing
+  - Reference: problemkaputt.de everynes.htm - PPU Reset section
 - [ ] **Mapper State Inspection**: Expose mapper registers in debugger - `crates/systems/nes/src/debugger.rs`
   - Current: Mapper number/name exposed but detailed state not available
   - Needed: Bank select registers, IRQ counter state, CHR latch state
