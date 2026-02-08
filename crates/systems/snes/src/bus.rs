@@ -1756,8 +1756,9 @@ mod tests {
 
         // Now upload a byte (index 1, data $DE)
         // Note: IPL ROM waits for port 0 = 0 at $FFD6-$FFD8, then proceeds to upload loop
-        bus.write(0x2141, 0xDE); // Data
+        // Write index first, then data (matches IPL ROM read order)
         bus.write(0x2140, 0x01); // Index 1
+        bus.write(0x2141, 0xDE); // Data
 
         bus.tick_cycles(500);
 

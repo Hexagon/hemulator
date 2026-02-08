@@ -52,10 +52,13 @@ RESET:
     
     ; Step 2: Set up entry point and port 1 BEFORE sending command
     ; (SPC700 reads these immediately after receiving $CC)
-    lda #$00
-    sta $2142               ; Entry point low byte
+    ; Entry point: The IPL stores the entry point at $0000/$0001, so we can't
+    ; put code there. Indices 1-15 go to $0001-$000F. We'll use $0002 as entry
+    ; point (skipping index 1, starting code at index 2).
     lda #$02
-    sta $2143               ; Entry point high byte  
+    sta $2142               ; Entry point low byte = $02
+    lda #$00
+    sta $2143               ; Entry point high byte = $00
     lda #$01
     sta $2141               ; Non-zero = upload mode (vs. execute mode)
     
@@ -87,13 +90,14 @@ upload_loop1:
     ; This ensures we don't write new data before SPC700 processed the previous byte
     .a8
     cpx #$0001              ; First iteration?
-    beq :+                  ; Skip wait on first byte
-:   dex                     ; Get previous index  
+    beq upload_first_byte   ; Skip wait on first byte
+    ; Wait for previous index echo
+    dex                     ; Get previous index  
     txa
     inx                     ; Restore current index
 :   cmp $2140               ; Wait for SPC700 to echo previous index
     bne :-
-:   
+upload_first_byte:
     ; Send index to port 0
     txa
     sta $2140
@@ -117,22 +121,11 @@ upload_loop1:
     
     ; Step 5: Signal end of upload
     ; After uploading index $0F, SPC700 expects index $10 next
-    ; To exit the upload loop, write port 1 = $00 (execute mode) and any value to port 0
-    ; The SPC700 will proceed to the entry point jump logic
-    
-    lda #$00
-    sta $2141               ; Port 1 = $00 (signals execute mode, not upload mode)
-    sta $2142               ; Clear port 2
-    sta $2143               ; Clear port 3
-    
-    ; Don't wait for a specific echo - just mark success
-    ; The upload completed successfully, that's all that matters
-    lda #$03
-    sta $0102               ; Marker: end-of-upload signaled
-    
     ; To exit the upload loop and make SPC700 jump to the entry point,
     ; we need to write port 0 > current index ($10)
-    ; Also set port 1 = $00 to signal execute mode (not upload mode)
+    ; Port 1 = $00 signals execute mode (not upload mode)
+    ; Keep entry point ports $F6/$F7 unchanged (still $0200)
+    
     lda #$00
     sta $2141               ; Port 1 = $00 (execute mode)
     lda #$FF                ; Large value to trigger exit
@@ -140,11 +133,16 @@ upload_loop1:
     
     ; SPC700 will now:
     ; 1. Exit the upload loop at $FFE9/$FFED
-    ; 2. Read entry point from ports $F6/$F7 (should still be $0200)
+    ; 2. Read entry point from ports $F6/$F7 ($0200)
     ; 3. Read ports $F4/$F5 at $FFF3 (will read $FF/$00)
     ; 4. Check port $F5 at $FFF9 (it's $00, so don't loop)
     ; 5. Jump to entry point at $FFFB
     ; 6. Execute uploaded code which writes $BBAA to ports
+    
+    ; Mark that we signaled the upload end
+    ; The real test is whether the uploaded code executes (marker $0103)
+    lda #$03
+    sta $0102               ; Marker: end-of-upload signaled
     
     ; ========================================
     ; SECOND UPLOAD: This is where real games often hang!
@@ -212,9 +210,10 @@ IRQ:
 
 ; Test data to upload
 test_data:
-    .byte $CD, $EF          ; MOV X, #$EF
-    .byte $BD               ; MOV SP, X  
-    .byte $8F, $AA, $F4     ; MOV $F4, #$AA
-    .byte $8F, $BB, $F5     ; MOV $F5, #$BB
-    .byte $2F, $FE          ; BRA *-2
-    .byte $00, $00, $00, $00, $00, $00
+    .byte $00               ; Index 1: dummy byte (will be overwritten by entry point)
+    .byte $CD, $EF          ; Index 2-3: MOV X, #$EF
+    .byte $BD               ; Index 4: MOV SP, X  
+    .byte $8F, $AA, $F4     ; Index 5-7: MOV $F4, #$AA
+    .byte $8F, $BB, $F5     ; Index 8-10: MOV $F5, #$BB
+    .byte $2F, $FE          ; Index 11-12: BRA *-2
+    .byte $00, $00, $00     ; Index 13-15: padding

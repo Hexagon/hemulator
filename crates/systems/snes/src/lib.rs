@@ -1022,7 +1022,7 @@ mod tests {
             // Also check APU ports to see what's happening
             let apu_ports = sys.read_memory(0x2140, 4).unwrap();
 
-            if i > 5 && i % 5 == 0 {
+            if i > 3 && i % 3 == 0 {
                 println!("Frame {}: Markers={:02X} {:02X} {:02X} {:02X}, APU ports={:02X} {:02X} {:02X} {:02X}, PC={:04X}", 
                     i, markers[0], markers[1], markers[2], markers[3],
                     apu_ports[0], apu_ports[1], apu_ports[2], apu_ports[3],
@@ -1041,33 +1041,47 @@ mod tests {
                 );
             }
 
-            if markers[2] == 0x03 {
-                // First upload completed successfully! That's the main test.
-                // The second ready check is optional - it verifies that the uploaded
-                // SPC700 code executes and writes the $BBAA signature.
+            // Check if uploaded code executed and wrote the $BBAA signature
+            if markers[3] == 0x04 {
                 println!("APU upload protocol test PASSED after {} frames", i + 1);
                 println!(
-                    "Upload markers: $0100=${:02X} (first ready), $0101=${:02X} (upload OK), $0102=${:02X} (end signaled)",
-                    markers[0], markers[1], markers[2]
+                    "All markers: $0100=${:02X} (first ready), $0101=${:02X} (upload OK), $0102=${:02X} (end signaled), $0103=${:02X} (second ready)",
+                    markers[0], markers[1], markers[2], markers[3]
                 );
-
-                // Check if uploaded code executed (optional, may not work yet)
-                if markers[3] == 0x04 {
-                    println!("BONUS: Second ready check also passed!");
-                }
                 return;
             }
 
-            if i > 20 && markers[0] == 0x01 && markers[2] == 0x03 && markers[3] == 0x00 {
-                // Upload completed but second ready check hasn't passed yet
-                // This is OK - the upload protocol test mainly verifies the upload works
-                println!(
-                    "APU upload protocol test PASSED (upload OK, second ready pending) after {} frames.\n\
+            // Check if upload protocol completed successfully (even if code execution doesn't work yet)
+            // Require both CPU-side marker AND APU-side confirmation (last index echoed)
+            if i > 5 && markers[0] == 0x01 && markers[1] == 0x02 && markers[2] == 0x03 {
+                // Upload completed - verify APU echoed the last index
+                if apu_ports[0] == 0x0F {
+                    println!("APU upload protocol test PASSED after {} frames (upload verified, code execution pending)", i + 1);
+                    println!(
+                        "Markers: $0100=${:02X} (first ready), $0101=${:02X} (upload OK), $0102=${:02X} (end signaled)",
+                        markers[0], markers[1], markers[2]
+                    );
+                    println!("Note: Uploaded code execution (marker $0103) not yet working - this is a known limitation");
+                    return;
+                }
+            }
+
+            // After sufficient frames, check if we're stuck
+            if i > 30
+                && markers[0] == 0x01
+                && markers[1] == 0x02
+                && markers[2] == 0x03
+                && markers[3] == 0x00
+            {
+                // Upload completed but uploaded code hasn't executed yet
+                panic!(
+                    "APU upload test FAILED: Upload completed but second ready signal not received after {} frames.\n\
                      Progress: $0100=${:02X} (first ready OK), $0101=${:02X} (upload OK), \
-                     $0102=${:02X} (end signaled), $0103=${:02X} (second ready pending)",
-                    i + 1, markers[0], markers[1], markers[2], markers[3]
+                     $0102=${:02X} (end signaled), $0103=${:02X} (second ready - FAILED!)\n\
+                     APU ports: {:02X} {:02X} {:02X} {:02X}",
+                    i + 1, markers[0], markers[1], markers[2], markers[3],
+                    apu_ports[0], apu_ports[1], apu_ports[2], apu_ports[3]
                 );
-                return;
             }
         }
 
