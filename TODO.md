@@ -417,11 +417,10 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Reference: bsnes/sfc/coprocessor/dsp1/dsp1emu.cpp (parameter, target, attitude functions)
 
 #### SNES - Audio
-- [ ] **SPC700 DSP Audio Generation**: Implement audio output - `crates/frontend/gui/src/main.rs:600`
-  - Current: Returns silence (vec![0; count]) instead of actual audio
-  - Needed: Wire up SPC700 DSP audio generation to frontend
-  - Impact: SNES games have no audio
-  - Note: DSP engine is implemented in core, needs integration with frontend audio system
+- [x] **SPC700 DSP Audio Generation**: Implement audio output - `crates/frontend/gui/src/main.rs:600`
+  - **FIXED**: Wired up SPC700 DSP audio generation to frontend
+  - Changed from returning silence to calling `sys.get_audio_samples(count)`
+  - SNES games now have audio (SPC700 DSP implementation was already complete in core)
 
 #### SNES - I/O
 - [ ] **JOY3/JOY4 Controller Ports**: Implement multitap support - `crates/systems/snes/src/bus.rs:1108-1111`
@@ -429,20 +428,20 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Needed: Full multitap implementation for 3-4 player games
   - Impact: 3-4 player games cannot use additional controllers
   - Note: Low priority - most games use only 2 controllers
+  - Status: Documented in code comments as a known limitation
 
 #### SNES - PPU
-- [ ] **Unused Helper Methods**: Refactor or document dead code - `crates/systems/snes/src/ppu.rs:2301,2329`
-  - Current: `parse_tilemap_entry()` and `calculate_16x16_tile_info()` marked #[allow(dead_code)]
-  - Issue: Helper methods created but never used in rendering functions
-  - Impact: Code maintainability and potential duplication
-  - Solution: Either use these helpers in rendering code or remove if truly not needed
-  - Note: Methods appear to be refactoring opportunities to reduce code duplication
+- [x] **Unused Helper Methods**: Refactor or document dead code - `crates/systems/snes/src/ppu.rs:2301,2329`
+  - **FIXED**: Removed unused helper methods
+  - Removed `parse_tilemap_entry()` and `calculate_16x16_tile_info()` as they were never used
+  - Improves code maintainability by eliminating dead code
 
 #### SNES
-- [ ] **Upload Protocol Test**: Investigate SPC700 index echoing issue - `crates/systems/snes/src/lib.rs:832`, `crates/systems/snes/src/bus.rs:1605`
+- [ ] **Upload Protocol Test**: Investigate SPC700 index echoing issue - `crates/systems/snes/src/lib.rs:832`
   - Tests currently ignored - SPC700 not echoing indices during upload
   - Affects: `test_apu_upload_protocol` and `test_apu_ports_echo`
   - Note: This requires deep APU debugging and is not critical for general functionality
+  - Status: Improved test comments to clarify this is a known issue, not blocking
 - [x] **Sprite Rendering**: Fix sprite overflow test - `crates/systems/snes/src/lib.rs:test_sprite_overflow_rom`, `test_roms/snes/test_sprite_overflow.s`
   - **FIXED**: Test ROM was not properly uploading sprite data to VRAM
   - Fixed by adding VRAM increment mode setup ($2115 = $80) and writing to both $2118 and $2119
