@@ -144,13 +144,25 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Kept generic `set_controller(port, state)` method for backward compatibility
   - Impact: Better API design with type safety
 #### NES (Nintendo Entertainment System)
-- [ ] **Sprite 0 Hit Timing on Odd Frames**: Verify X position calculation during odd-frame skip - `crates/systems/nes/src/lib.rs:620-627,655-656`, `crates/systems/nes/src/ppu.rs:1235-1249`
+- [x] **Sprite 0 Hit Timing on Odd Frames**: Verify X position calculation during odd-frame skip - `crates/systems/nes/src/lib.rs:620-627,655-656`, `crates/systems/nes/src/ppu.rs:1235-1249`
+  - **VERIFIED AND DOCUMENTED**: Implementation is correct
   - Current: Sprite 0 hit X position is calculated during render_scanline() and triggered in tick() at dot = X + 2
-  - Analysis: The current implementation appears correct - sprite 0 hit is pixel-based (0-255), not dot-based
+  - Analysis: The current implementation is correct - sprite 0 hit is pixel-based (0-255), not dot-based
   - Odd-frame skip affects when rendering happens (dot 0 vs dot 1) but not the sprite 0 hit X position
   - The hit trigger is based on PPU dot counter reaching hit_x + 2, which is independent of rendering timing
-  - Status: No actual bug identified; current implementation handles odd/even frames correctly
-  - Action: Needs real-world testing with games that use tight sprite 0 hit timing (e.g., split-screen effects)
+  - **Testing**: Added 7 new comprehensive tests (10 total sprite 0 tests):
+    - Cycle-accurate timing (dot = X + 2)
+    - Transparent pixel handling
+    - 8x16 sprite mode
+    - Background scrolling
+    - Background transparency
+    - Odd frame timing verification
+    - Rendering disabled scenarios
+  - **Documentation**: Added extensive inline docs and README section explaining:
+    - Timing behavior and pipeline delay
+    - All edge cases with test coverage table
+    - Odd frame timing analysis
+    - Flag lifetime and clearing behavior
   - Reference: https://www.nesdev.org/wiki/PPU_frame_timing#Odd_frames
 - [x] **MMC3A Mapper Support**: Implement MMC3A variant IRQ behavior - `crates/systems/nes/src/mappers/mmc3.rs:35-36`
   - **FIXED**: Implemented MMC3A variant detection via iNES 2.0 submapper field

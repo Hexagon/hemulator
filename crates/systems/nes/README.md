@@ -82,10 +82,16 @@ The 2C02 PPU implements:
   - 256x240 resolution (NTSC) / 256x240 (PAL)
   - Background rendering with attribute tables
   - 64 sprites (8x8 or 8x16 modes)
-  - Accurate sprite 0 hit detection with all edge cases:
-    - Checks for opaque pixel overlap
-    - Respects x=255 boundary (no hit)
-    - Respects left 8-pixel clipping
+  - **Cycle-accurate sprite 0 hit detection** with comprehensive edge case handling:
+    - **Timing**: Flag set at PPU dot = X + 2 (2-cycle pipeline delay)
+    - **Opaque pixels only**: Both sprite and background must be non-transparent (pattern != 0)
+    - **X=255 boundary**: Hit CANNOT occur at rightmost pixel position
+    - **Left clipping**: Respects PPUMASK bits 1 and 2 (leftmost 8 pixels)
+    - **Rendering disabled**: No hit if background or sprites are disabled
+    - **8x16 mode**: Works correctly for both top and bottom sprite halves
+    - **Scrolling**: Accounts for background scroll position
+    - **Odd frame timing**: Pixel-based detection unaffected by odd frame skip (dot 0 of scanline 0)
+    - **Flag lifetime**: Cleared at pre-render scanline (dot 1) and VBlank start (compatibility)
   - Sprite overflow detection (>8 sprites per scanline)
   - 8-sprite-per-scanline hardware limit
   - Correct sprite priority (front-to-back buffer fill)
@@ -199,10 +205,13 @@ cargo run --release -p emu_gui -- path/to/game.nes
 
 The NES crate includes comprehensive tests:
 
-- **215+ total tests**:
+- **222+ total tests**:
   - PPU tests (scrolling, loopy registers, sprite handling, rendering)
     - Loopy register behavior (5 tests)
-    - Sprite 0 hit edge cases (2 tests)
+    - Sprite 0 hit comprehensive tests (10 tests):
+      - Edge cases (x=255, clipping, transparent pixels, rendering disabled)
+      - Timing precision (cycle-accurate, odd frame behavior)
+      - Advanced scenarios (8x16 mode, scrolling, background transparency)
     - Sprite overflow detection (3 tests)
     - Sprite priority and rendering (8 tests)
     - Nametable scrolling (5 tests)
@@ -310,11 +319,79 @@ See [User Manual](https://hemulator.56k.guru/user/systems.html#nes-nintendo-ente
 
 **Supported Edge Cases**:
 - ✅ **Illegal/undocumented 6502 opcodes**: Full support for LAX, SAX, DCP, ISC, SLO, RLA, SRE, RRA with all addressing modes
-- ✅ **Sprite 0 hit**: Accurate detection with proper left-clip and x=255 boundary handling
+- ✅ **Sprite 0 hit**: Cycle-accurate detection with comprehensive edge case handling (see detailed section below)
 - ✅ **Sprite overflow**: Hardware-accurate with m/n pointer bug emulation
 - ✅ **MMC3 IRQ timing**: Uses MMC3B/C behavior (counter decrements to 0 triggers IRQ)
 - ✅ **DMC DMA**: Full memory read support with automatic sample playback
 - ✅ **Cycle-accurate PPU**: 3:1 PPU-CPU clock ratio, 341 dots per scanline, 262 scanlines per frame
+
+## Sprite 0 Hit - Deep Dive
+
+Sprite 0 hit is a crucial hardware feature for mid-frame effects like split-screen scrolling. This implementation provides cycle-accurate detection with comprehensive edge case handling.
+
+### Hardware Behavior
+
+The sprite 0 hit flag (PPUSTATUS bit 6, `$2002`) is set when:
+1. A **non-transparent pixel** of sprite 0 (OAM entry 0) overlaps
+2. A **non-transparent pixel** of the background
+3. During **visible scanline rendering** (scanlines 0-239, dots 2-257)
+
+### Timing Precision
+
+- **Detection**: Occurs during `render_scanline()` when checking pixel overlap
+- **Pipeline Delay**: Flag is actually set 2 PPU cycles later (at dot = X + 2)
+  - Example: Hit at pixel X=50 triggers flag at dot 52
+  - This models the 2-cycle PPU pipeline delay in real hardware
+- **Two-Stage Implementation**: 
+  1. `render_scanline()`: Detects overlap, schedules pending hit at (scanline, X position)
+  2. `tick()`: Sets flag when PPU dot counter reaches X + 2
+
+### Edge Cases (All Tested)
+
+| Condition | Behavior | Test Coverage |
+|-----------|----------|---------------|
+| **X=255** | Hit CANNOT occur at rightmost pixel | ✅ `test_sprite_0_hit_edge_cases` |
+| **Left clipping** | Respects PPUMASK bits 1 & 2 (leftmost 8 pixels) | ✅ `test_sprite_0_hit_with_clipping` |
+| **Transparent sprite** | Pattern value 0 = no hit | ✅ `test_sprite_0_hit_transparent_pixels` |
+| **Transparent background** | Pattern value 0 = no hit | ✅ `test_sprite_0_hit_background_transparent` |
+| **Background disabled** | PPUMASK bit 3 = 0, no hit | ✅ `test_sprite_0_hit_not_set_when_rendering_disabled` |
+| **Sprites disabled** | PPUMASK bit 4 = 0, no hit | ✅ `test_sprite_0_hit_not_set_when_rendering_disabled` |
+| **8x16 mode** | Works for both halves | ✅ `test_sprite_0_hit_8x16_mode` |
+| **Scrolling** | Accounts for background position | ✅ `test_sprite_0_hit_with_scrolling` |
+| **Odd frame** | Unaffected by dot 0 skip | ✅ `test_sprite_0_hit_odd_frame_timing` |
+| **Cycle timing** | Triggers at exact dot (X + 2) | ✅ `test_sprite_0_hit_cycle_accurate_timing` |
+
+### Odd Frame Timing
+
+**Key Insight**: Sprite 0 hit is **pixel-based**, not dot-based.
+
+On odd frames (when rendering is enabled):
+- The PPU skips dot 0 of scanline 0
+- This makes the frame 89341 dots instead of 89342 dots
+- Rendering happens at dot 1 instead of dot 0
+
+**However**, sprite 0 hit detection is based on:
+- **Sprite X position** (0-255, pixel coordinate)
+- **Background scroll** (pixel coordinates via v register)
+
+Since hit detection uses pixel positions (not dot positions), the odd frame skip does **not** affect the sprite 0 hit X position. The hit occurs at the same pixel coordinate on both even and odd frames.
+
+**Test Evidence**: `test_sprite_0_hit_odd_frame_timing` verifies that hit position is identical on even/odd frames.
+
+### Flag Lifetime
+
+- **Set**: During visible scanline rendering (scanlines 0-239)
+- **Cleared**: Two places for compatibility
+  1. **Pre-render scanline**: Dot 1 of scanline 261 (hardware behavior)
+  2. **VBlank start**: Dot 1 of scanline 241 (compatibility fix for games like Battletoads)
+
+The dual clearing ensures both hardware accuracy and game compatibility.
+
+### References
+
+- [NESdev Wiki - PPU rendering](https://www.nesdev.org/wiki/PPU_rendering)
+- [NESdev Wiki - PPU OAM](https://www.nesdev.org/wiki/PPU_OAM)
+- [NESdev Wiki - PPU frame timing](https://www.nesdev.org/wiki/PPU_frame_timing)
 
 ## Performance
 

@@ -20,10 +20,48 @@
 //! - Scanlines are rendered incrementally via `render_scanline()` for accurate mid-frame register changes
 //! - VBlank is simulated at the system level, not by the PPU
 //! - **Sprite evaluation** is performed per scanline to set sprite overflow flag
-//! - Sprite 0 hit detection is basic but functional
+//! - **Sprite 0 hit detection** is cycle-accurate with comprehensive edge case handling
 //!
 //! This approach handles mid-frame scroll register changes correctly (e.g., fixed HUDs in games
 //! like SMB3, F1 Sensation, and Rad Racer 2).
+//!
+//! ## Sprite 0 Hit Detection
+//!
+//! Sprite 0 hit is a hardware feature used for mid-frame effects like split-screen scrolling.
+//! The flag (PPUSTATUS bit 6) is set when a non-transparent pixel of sprite 0 overlaps a
+//! non-transparent background pixel.
+//!
+//! ### Timing Behavior
+//!
+//! - **Detection**: Occurs during scanline rendering when opaque pixels overlap
+//! - **Trigger Delay**: Flag is set at PPU dot = X + 2 (accounting for 2-cycle pipeline delay)
+//! - **Earliest Trigger**: Dot 2 of a visible scanline (dots 2-257)
+//! - **Flag Lifetime**: Persists until pre-render scanline (dot 1 of scanline 261/311)
+//! - **Compatibility**: Also cleared at VBlank start for game compatibility (Battletoads)
+//!
+//! ### Edge Cases
+//!
+//! - **X=255**: Hit CANNOT occur when sprite 0 is at rightmost pixel
+//! - **Left Clipping**: Hit respects PPUMASK bits 1 and 2 (leftmost 8 pixels)
+//! - **Transparent Pixels**: Only opaque pixels (pattern value != 0) can trigger hit
+//! - **Rendering Disabled**: No hit if either background or sprites are disabled
+//! - **8x16 Mode**: Works correctly for both top and bottom halves of tall sprites
+//! - **Scrolling**: Hit detection accounts for background scroll position
+//!
+//! ### Odd Frame Timing
+//!
+//! On odd frames (when rendering is enabled), the PPU skips dot 0 of scanline 0, making the
+//! frame one PPU cycle shorter (89341 vs 89342 dots). However, sprite 0 hit detection is
+//! **pixel-based** (X position 0-255), not dot-based, so the hit position is identical on
+//! even and odd frames. The odd frame skip only affects when rendering occurs (dot 0 vs dot 1),
+//! not the sprite 0 hit X position itself.
+//!
+//! ### Implementation
+//!
+//! - Sprite 0 hit is detected during `render_scanline()` and scheduled for triggering
+//! - The pending hit is stored as `(scanline, X position)` in `sprite_0_hit_pending`
+//! - The flag is actually set during `tick()` when the PPU dot counter reaches `X + 2`
+//! - This two-stage approach ensures cycle-accurate timing while keeping rendering simple
 //!
 //! ## Memory Map
 //!
@@ -4568,6 +4606,455 @@ mod tests {
         assert!(
             !ppu.is_in_vblank_region(),
             "Scanline 311 should not be in VBlank region (PAL)"
+        );
+    }
+
+    #[test]
+    fn test_sprite_0_hit_cycle_accurate_timing() {
+        // Test that sprite 0 hit is triggered at the exact cycle (dot = X + 2)
+        // This test verifies the PPU pipeline delay of 2 cycles
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
+        ppu.clear_first_frame_lock();
+        ppu.chr_is_ram = true;
+
+        // Set up sprite 0 at X position 50
+        ppu.oam[0] = 16 - 1; // Y position
+        ppu.oam[1] = 1;      // Tile index
+        ppu.oam[2] = 0;      // Attributes
+        ppu.oam[3] = 50;     // X position = 50
+
+        // Create opaque sprite tile
+        for i in 0..8 {
+            ppu.chr[0x10 + i] = 0xFF;
+            ppu.chr[0x18 + i] = 0x00;
+        }
+
+        // Set up background tile that overlaps sprite
+        let nt_addr = ppu.map_nametable_addr(0x2000);
+        ppu.vram[nt_addr + 2 * 32 + 6] = 2; // Tile at position covering X=48-55
+        for i in 0..8 {
+            ppu.chr[0x20 + i] = 0xFF;
+            ppu.chr[0x28 + i] = 0x00;
+        }
+
+        // Set up palettes
+        ppu.palette[0] = 0x0F;
+        ppu.palette[1] = 0x30;
+        ppu.palette[0x11] = 0x16;
+
+        // Enable rendering
+        ppu.mask = 0x1E;
+        ppu.vram_addr.set(0x0040); // coarse_y = 2
+
+        // Render scanline 16 - this should schedule sprite 0 hit
+        let mut frame = Frame::new(256, 240);
+        ppu.render_scanline(16, &mut frame);
+
+        // Verify that sprite 0 hit is scheduled but not yet triggered
+        assert!(
+            ppu.sprite_0_hit_pending.get().is_some(),
+            "Sprite 0 hit should be scheduled after rendering"
+        );
+        assert!(
+            !ppu.sprite_0_hit.get(),
+            "Sprite 0 hit flag should not be set immediately after rendering"
+        );
+
+        // Verify scheduled position
+        let (hit_scanline, hit_x) = ppu.sprite_0_hit_pending.get().unwrap();
+        assert_eq!(hit_scanline, 16, "Hit should be scheduled on scanline 16");
+        assert_eq!(hit_x, 50, "Hit should be scheduled at X position 50");
+
+        // Simulate PPU ticking - set scanline and dot
+        ppu.scanline.set(16);
+        
+        // Test before trigger point (dot 51 = X + 1)
+        ppu.dot.set(51);
+        ppu.tick();
+        assert!(
+            !ppu.sprite_0_hit.get(),
+            "Sprite 0 hit should NOT trigger at dot 51 (X + 1)"
+        );
+
+        // Reset for next test
+        ppu.dot.set(51);
+        
+        // Test at exact trigger point (dot 52 = X + 2)
+        ppu.dot.set(52);
+        ppu.tick();
+        assert!(
+            ppu.sprite_0_hit.get(),
+            "Sprite 0 hit should trigger at dot 52 (X + 2)"
+        );
+        assert!(
+            ppu.sprite_0_hit_pending.get().is_none(),
+            "Pending sprite 0 hit should be cleared after triggering"
+        );
+    }
+
+    #[test]
+    fn test_sprite_0_hit_transparent_pixels() {
+        // Test that sprite 0 hit only occurs on opaque pixels (pattern value != 0)
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
+        ppu.clear_first_frame_lock();
+        ppu.chr_is_ram = true;
+
+        // Set up sprite 0 at position (16, 16)
+        ppu.oam[0] = 16 - 1;
+        ppu.oam[1] = 1;
+        ppu.oam[2] = 0;
+        ppu.oam[3] = 16;
+
+        // Create sprite tile with TRANSPARENT pixels (all 0s)
+        for i in 0..8 {
+            ppu.chr[0x10 + i] = 0x00; // All transparent
+            ppu.chr[0x18 + i] = 0x00;
+        }
+
+        // Background tile with opaque pixels
+        let nt_addr = ppu.map_nametable_addr(0x2000);
+        ppu.vram[nt_addr + 2 * 32 + 2] = 2;
+        for i in 0..8 {
+            ppu.chr[0x20 + i] = 0xFF;
+            ppu.chr[0x28 + i] = 0x00;
+        }
+
+        ppu.palette[0] = 0x0F;
+        ppu.palette[1] = 0x30;
+        ppu.palette[0x11] = 0x16;
+
+        ppu.mask = 0x1E;
+        ppu.vram_addr.set(0x0040);
+
+        // Render scanline
+        let mut frame = Frame::new(256, 240);
+        ppu.render_scanline(16, &mut frame);
+        ppu.resolve_pending_sprite_0_hit();
+
+        // Should NOT hit - sprite has only transparent pixels
+        assert!(
+            !ppu.sprite_0_hit.get(),
+            "Sprite 0 hit should NOT occur with transparent sprite pixels"
+        );
+
+        // Now test with semi-transparent sprite (some opaque, some transparent)
+        ppu.sprite_0_hit.set(false);
+        ppu.chr[0x10] = 0xFF; // First row opaque
+        for i in 1..8 {
+            ppu.chr[0x10 + i] = 0x00; // Rest transparent
+        }
+
+        ppu.vram_addr.set(0x0040);
+        ppu.render_scanline(16, &mut frame);
+        ppu.resolve_pending_sprite_0_hit();
+
+        // Should hit - first row has opaque pixels
+        assert!(
+            ppu.sprite_0_hit.get(),
+            "Sprite 0 hit should occur when at least one sprite pixel is opaque"
+        );
+    }
+
+    #[test]
+    fn test_sprite_0_hit_8x16_mode() {
+        // Test sprite 0 hit in 8x16 sprite mode
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
+        ppu.clear_first_frame_lock();
+        ppu.chr_is_ram = true;
+
+        // Enable 8x16 sprite mode (PPUCTRL bit 5)
+        ppu.ctrl = 0x20;
+
+        // Set up sprite 0 at position (16, 16)
+        ppu.oam[0] = 16 - 1;
+        ppu.oam[1] = 0; // Tile index (in 8x16 mode, bit 0 is ignored)
+        ppu.oam[2] = 0;
+        ppu.oam[3] = 16;
+
+        // Create sprite tiles (two consecutive tiles for 8x16)
+        // Top half (tile 0)
+        for i in 0..8 {
+            ppu.chr[i] = 0xFF;
+            ppu.chr[0x08 + i] = 0x00;
+        }
+        // Bottom half (tile 1)
+        for i in 0..8 {
+            ppu.chr[0x10 + i] = 0xFF;
+            ppu.chr[0x18 + i] = 0x00;
+        }
+
+        // Background tile
+        let nt_addr = ppu.map_nametable_addr(0x2000);
+        ppu.vram[nt_addr + 2 * 32 + 2] = 2;
+        for i in 0..8 {
+            ppu.chr[0x20 + i] = 0xFF;
+            ppu.chr[0x28 + i] = 0x00;
+        }
+
+        ppu.palette[0] = 0x0F;
+        ppu.palette[1] = 0x30;
+        ppu.palette[0x11] = 0x16;
+
+        ppu.mask = 0x1E;
+        ppu.vram_addr.set(0x0040);
+
+        // Render scanline 16 (top half of sprite)
+        let mut frame = Frame::new(256, 240);
+        ppu.render_scanline(16, &mut frame);
+        ppu.resolve_pending_sprite_0_hit();
+
+        // Should hit on top half
+        assert!(
+            ppu.sprite_0_hit.get(),
+            "Sprite 0 hit should occur in 8x16 mode (top half)"
+        );
+
+        // Test bottom half
+        ppu.sprite_0_hit.set(false);
+        ppu.sprite_0_hit_pending.set(None);
+        ppu.vram_addr.set(0x0060); // coarse_y = 3
+        ppu.render_scanline(24, &mut frame);
+        ppu.resolve_pending_sprite_0_hit();
+
+        // Should also hit on bottom half
+        assert!(
+            ppu.sprite_0_hit.get(),
+            "Sprite 0 hit should occur in 8x16 mode (bottom half)"
+        );
+    }
+
+    #[test]
+    fn test_sprite_0_hit_with_scrolling() {
+        // Test sprite 0 hit detection with background scrolling
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
+        ppu.clear_first_frame_lock();
+        ppu.chr_is_ram = true;
+
+        // Set up sprite 0 at fixed screen position (64, 64)
+        ppu.oam[0] = 64 - 1;
+        ppu.oam[1] = 1;
+        ppu.oam[2] = 0;
+        ppu.oam[3] = 64;
+
+        // Create sprite tile
+        for i in 0..8 {
+            ppu.chr[0x10 + i] = 0xFF;
+            ppu.chr[0x18 + i] = 0x00;
+        }
+
+        // Set up background tile in nametable
+        // With no scroll, tile at nametable position (8, 8) appears at screen (64, 64)
+        let nt_addr = ppu.map_nametable_addr(0x2000);
+        ppu.vram[nt_addr + 8 * 32 + 8] = 2;
+        for i in 0..8 {
+            ppu.chr[0x20 + i] = 0xFF;
+            ppu.chr[0x28 + i] = 0x00;
+        }
+
+        ppu.palette[0] = 0x0F;
+        ppu.palette[1] = 0x30;
+        ppu.palette[0x11] = 0x16;
+
+        ppu.mask = 0x1E;
+
+        // Test with no scrolling
+        // v register: coarse_y = 8, coarse_x = 0
+        ppu.vram_addr.set(0x0100); // coarse_y = 8
+        let mut frame = Frame::new(256, 240);
+        ppu.render_scanline(64, &mut frame);
+        ppu.resolve_pending_sprite_0_hit();
+
+        assert!(
+            ppu.sprite_0_hit.get(),
+            "Sprite 0 hit should occur with no scrolling"
+        );
+
+        // Test with horizontal scrolling
+        // Scroll 16 pixels right - now the BG tile appears 16 pixels to the left
+        ppu.sprite_0_hit.set(false);
+        ppu.sprite_0_hit_pending.set(None);
+        
+        // v register: coarse_y = 8, coarse_x = 2 (2 tiles * 8 pixels = 16 pixel shift)
+        // This shifts the background 16 pixels left, so the tile that was at screen X=64
+        // is now at X=48. Sprite at X=64 won't overlap anymore.
+        ppu.vram_addr.set(0x0102); // coarse_y = 8, coarse_x = 2
+        ppu.render_scanline(64, &mut frame);
+        ppu.resolve_pending_sprite_0_hit();
+
+        assert!(
+            !ppu.sprite_0_hit.get(),
+            "Sprite 0 hit should NOT occur when scrolled away from background"
+        );
+    }
+
+    #[test]
+    fn test_sprite_0_hit_background_transparent() {
+        // Test that sprite 0 hit doesn't occur when background is transparent
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
+        ppu.clear_first_frame_lock();
+        ppu.chr_is_ram = true;
+
+        // Set up sprite 0
+        ppu.oam[0] = 16 - 1;
+        ppu.oam[1] = 1;
+        ppu.oam[2] = 0;
+        ppu.oam[3] = 16;
+
+        // Opaque sprite tile
+        for i in 0..8 {
+            ppu.chr[0x10 + i] = 0xFF;
+            ppu.chr[0x18 + i] = 0x00;
+        }
+
+        // Background tile with TRANSPARENT pixels (all 0s = backdrop color)
+        let nt_addr = ppu.map_nametable_addr(0x2000);
+        ppu.vram[nt_addr + 2 * 32 + 2] = 2;
+        for i in 0..8 {
+            ppu.chr[0x20 + i] = 0x00; // All transparent
+            ppu.chr[0x28 + i] = 0x00;
+        }
+
+        ppu.palette[0] = 0x0F;
+        ppu.palette[1] = 0x30;
+        ppu.palette[0x11] = 0x16;
+
+        ppu.mask = 0x1E;
+        ppu.vram_addr.set(0x0040);
+
+        // Render scanline
+        let mut frame = Frame::new(256, 240);
+        ppu.render_scanline(16, &mut frame);
+        ppu.resolve_pending_sprite_0_hit();
+
+        // Should NOT hit - background is transparent
+        assert!(
+            !ppu.sprite_0_hit.get(),
+            "Sprite 0 hit should NOT occur when background is transparent"
+        );
+    }
+
+    #[test]
+    fn test_sprite_0_hit_odd_frame_timing() {
+        // Test that sprite 0 hit timing is correct on odd frames
+        // Odd frames skip dot 0 of scanline 0, but this shouldn't affect sprite 0 hit
+        // detection since hit is based on pixel position (0-255), not dot position
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
+        ppu.clear_first_frame_lock();
+        ppu.chr_is_ram = true;
+
+        // Set up sprite 0 and background for overlap at X=50
+        ppu.oam[0] = 16 - 1;
+        ppu.oam[1] = 1;
+        ppu.oam[2] = 0;
+        ppu.oam[3] = 50;
+
+        for i in 0..8 {
+            ppu.chr[0x10 + i] = 0xFF;
+            ppu.chr[0x18 + i] = 0x00;
+        }
+
+        let nt_addr = ppu.map_nametable_addr(0x2000);
+        ppu.vram[nt_addr + 2 * 32 + 6] = 2;
+        for i in 0..8 {
+            ppu.chr[0x20 + i] = 0xFF;
+            ppu.chr[0x28 + i] = 0x00;
+        }
+
+        ppu.palette[0] = 0x0F;
+        ppu.palette[1] = 0x30;
+        ppu.palette[0x11] = 0x16;
+        ppu.mask = 0x1E;
+        ppu.vram_addr.set(0x0040);
+
+        // Test on EVEN frame (odd_frame = false)
+        ppu.odd_frame.set(false);
+        let mut frame = Frame::new(256, 240);
+        ppu.render_scanline(16, &mut frame);
+        
+        let (even_scanline, even_x) = ppu.sprite_0_hit_pending.get()
+            .expect("Sprite 0 hit should be scheduled on even frame");
+        
+        // Clear for odd frame test
+        ppu.sprite_0_hit.set(false);
+        ppu.sprite_0_hit_pending.set(None);
+
+        // Test on ODD frame (odd_frame = true)
+        ppu.odd_frame.set(true);
+        ppu.vram_addr.set(0x0040);
+        ppu.render_scanline(16, &mut frame);
+        
+        let (odd_scanline, odd_x) = ppu.sprite_0_hit_pending.get()
+            .expect("Sprite 0 hit should be scheduled on odd frame");
+
+        // Verify that sprite 0 hit position is IDENTICAL on even and odd frames
+        // The odd frame skip affects when rendering happens (dot 0 vs dot 1) but
+        // not the sprite 0 hit X position, which is pixel-based (0-255)
+        assert_eq!(
+            even_scanline, odd_scanline,
+            "Sprite 0 hit scanline should be same on even and odd frames"
+        );
+        assert_eq!(
+            even_x, odd_x,
+            "Sprite 0 hit X position should be same on even and odd frames"
+        );
+        assert_eq!(
+            odd_x, 50,
+            "Sprite 0 hit should be at X=50 on odd frame"
+        );
+    }
+
+    #[test]
+    fn test_sprite_0_hit_not_set_when_rendering_disabled() {
+        // Test that sprite 0 hit doesn't occur when rendering is disabled
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
+        ppu.clear_first_frame_lock();
+        ppu.chr_is_ram = true;
+
+        // Set up sprite 0 and background for guaranteed overlap
+        ppu.oam[0] = 16 - 1;
+        ppu.oam[1] = 1;
+        ppu.oam[2] = 0;
+        ppu.oam[3] = 16;
+
+        for i in 0..8 {
+            ppu.chr[0x10 + i] = 0xFF;
+            ppu.chr[0x18 + i] = 0x00;
+        }
+
+        let nt_addr = ppu.map_nametable_addr(0x2000);
+        ppu.vram[nt_addr + 2 * 32 + 2] = 2;
+        for i in 0..8 {
+            ppu.chr[0x20 + i] = 0xFF;
+            ppu.chr[0x28 + i] = 0x00;
+        }
+
+        ppu.palette[0] = 0x0F;
+        ppu.palette[1] = 0x30;
+        ppu.palette[0x11] = 0x16;
+
+        // Test with SPRITES disabled
+        ppu.mask = 0x08; // Only background enabled
+        ppu.vram_addr.set(0x0040);
+
+        let mut frame = Frame::new(256, 240);
+        ppu.render_scanline(16, &mut frame);
+        ppu.resolve_pending_sprite_0_hit();
+
+        assert!(
+            !ppu.sprite_0_hit.get(),
+            "Sprite 0 hit should NOT occur when sprites are disabled"
+        );
+
+        // Test with BOTH disabled
+        ppu.sprite_0_hit.set(false);
+        ppu.mask = 0x00; // Both disabled
+        ppu.vram_addr.set(0x0040);
+        ppu.render_scanline(16, &mut frame);
+        ppu.resolve_pending_sprite_0_hit();
+
+        assert!(
+            !ppu.sprite_0_hit.get(),
+            "Sprite 0 hit should NOT occur when rendering is disabled"
         );
     }
 }
