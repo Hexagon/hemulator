@@ -132,11 +132,12 @@ impl Timer {
         // Update TIMA if timer is enabled
         if self.tac & 0x04 != 0 {
             // Get the period based on clock select
+            // Game Boy CPU frequency: 4.194304 MHz (4,194,304 Hz)
             let period = match self.tac & 0x03 {
-                0 => 1024, // 4096 Hz
-                1 => 16,   // 262144 Hz
-                2 => 64,   // 65536 Hz
-                3 => 256,  // 16384 Hz
+                0 => 1024, // 4096 Hz (4,194,304 / 1024 = 4096 Hz)
+                1 => 16,   // 262144 Hz (4,194,304 / 16 = 262,144 Hz)
+                2 => 64,   // 65536 Hz (4,194,304 / 64 = 65,536 Hz)
+                3 => 256,  // 16384 Hz (4,194,304 / 256 = 16,384 Hz)
                 _ => unreachable!(),
             };
 

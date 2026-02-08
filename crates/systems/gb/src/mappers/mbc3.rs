@@ -44,6 +44,8 @@ pub struct Mbc3 {
     rtc_dl_latched: u8,
     rtc_dh_latched: u8,
     // RTC internal state
+    // TODO: Improve RTC accuracy - currently ticks at ~60 Hz (frame rate) instead of proper 1 Hz
+    // See TODO.md for details on implementing cycle-accurate RTC timing
     rtc_ticks: u32, // Sub-second ticks (incremented each frame, ~60 Hz)
 }
 
@@ -253,6 +255,15 @@ impl Mbc3 {
 
     /// Tick the RTC - should be called once per frame (~60 Hz)
     /// This increments the RTC when not halted
+    ///
+    /// # Hardware Accuracy Note
+    ///
+    /// The real MBC3 RTC is driven by a 32.768 kHz crystal and increments at exactly 1 Hz.
+    /// This implementation uses the frame rate (~59.73 Hz) as an approximation, which causes
+    /// slight drift over time. For proper accuracy, this should use cycle-accurate timing.
+    ///
+    /// Additionally, RTC state is not persisted across emulator sessions. Games like Pokemon
+    /// Gold/Silver/Crystal expect RTC to continue running even when powered off.
     pub fn tick(&mut self) {
         // Check if RTC is halted (bit 6 of rtc_dh)
         if (self.rtc_dh & 0x40) != 0 {

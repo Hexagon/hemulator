@@ -239,7 +239,8 @@ pub struct Ppu {
     stat_interrupt_line: bool,
 }
 
-// LCDC bits
+// LCDC (LCD Control) register bit flags
+// Reference: https://gbdev.io/pandocs/LCDC.html
 const LCDC_ENABLE: u8 = 0x80;
 #[allow(dead_code)]
 const LCDC_WIN_TILEMAP: u8 = 0x40;
@@ -588,6 +589,15 @@ impl Ppu {
         frame
     }
 
+    /// Calculate tile address using signed tile indexing mode
+    ///
+    /// When LCDC bit 4 is clear, tile indices are interpreted as signed bytes (-128 to +127).
+    /// The base address is $9000, and the index is added as a signed offset.
+    /// This allows the tile data to span from $8800 to $97FF.
+    ///
+    /// Example: tile_index 0 -> $9000, tile_index 1 -> $9010, tile_index 255 (-1) -> $8FF0
+    ///
+    /// Reference: https://gbdev.io/pandocs/Tile_Data.html#lcdc4--bg-and-window-tile-data-area
     fn calculate_signed_tile_address(&self, base: u16, tile_index: u8) -> u16 {
         // In signed mode, tile_index is treated as signed -128 to 127
         // Base is at $8800, so index 0 would be at $9000 (base + 128 * 16)
@@ -1061,12 +1071,13 @@ impl Ppu {
                         } else {
                             self.obp0
                         };
+                        // Map 2-bit color to grayscale using OBP0/OBP1 palette
                         let palette_color = (palette >> (color_index * 2)) & 0x03;
                         match palette_color {
-                            0 => 0xFFFFFFFF, // White (transparent, but palette maps it)
+                            0 => 0xFFFFFFFF, // White (lightest) - ARGB8888 format: 0xAARRGGBB
                             1 => 0xFFAAAAAA, // Light gray
                             2 => 0xFF555555, // Dark gray
-                            3 => 0xFF000000, // Black
+                            3 => 0xFF000000, // Black (darkest)
                             _ => unreachable!(),
                         }
                     };

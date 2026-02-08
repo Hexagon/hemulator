@@ -251,8 +251,8 @@ See [User Manual](https://hemulator.56k.guru/user/systems.html#game-boy--game-bo
 - IR-based features (Pokemon Mystery Gift, etc.) won't communicate with external devices
 
 **Mapper-Specific Limitations**:
-- **MBC3 RTC**: Ticks at 60 Hz (not hardware-accurate 32768 Hz crystal-driven). RTC state not persisted across power cycles.
-- **HuC1 IR**: Infrared sensor stubbed - returns fixed 0xC0 value (no signal). Rarely used (<1% of games).
+- **MBC3 RTC**: Ticks at ~60 Hz (frame rate) instead of hardware-accurate 1 Hz. Time drifts slightly from real time. Day counter overflow and carry flag implemented correctly. RTC state not persisted across emulator sessions. See TODO.md for improvement plans.
+- **HuC1 IR**: Infrared sensor stubbed - returns fixed 0xC0 value (no signal). Rarely used (<1% of games). IR mode register writes are silently ignored.
 
 **Unimplemented Mappers** (rare, <3% of games combined):
 - MBC6 (Game Boy Camera only)
