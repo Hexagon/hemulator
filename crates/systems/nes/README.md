@@ -91,8 +91,8 @@ The 2C02 PPU implements:
     - **8x16 mode**: Works correctly for both top and bottom sprite halves
     - **Scrolling**: Accounts for background scroll position
     - **Odd frame timing**: Pixel-based detection unaffected by odd frame skip (dot 0 of scanline 0)
-    - **Flag lifetime**: Cleared at pre-render scanline (dot 1) and VBlank start (compatibility)
-  - Sprite overflow detection (>8 sprites per scanline)
+    - **Flag lifetime**: Set during rendering (scanlines 0-239), cleared ONLY at pre-render scanline (dot 1)
+    - **VBlank persistence**: Flag persists through VBlank for games like Battletoads to poll during NMI
   - 8-sprite-per-scanline hardware limit
   - Correct sprite priority (front-to-back buffer fill)
   - **Software Renderer**: CPU-based tile/sprite rendering (default)
