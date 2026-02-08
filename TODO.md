@@ -384,22 +384,32 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - All flag names are pre-defined, so the default case is truly unreachable
   - Impact: Better code clarity and potential compiler optimizations
 
-#### NES APU - Missing Features
-- [ ] **Sweep Unit**: Implement pulse channel sweep units - `crates/core/src/apu/rp2a03.rs:52,78`, `crates/core/src/apu/rp2a07.rs:53,79`
-  - Current: Sweep unit writes are silently ignored (registers $4001 and $4005)
-  - Needed: Implement sweep period, shift count, negate flag, and timer
-  - Impact: Audio pitch effects won't work correctly (e.g., portamento, pitch bends)
-  - Note: Affects games using dynamic pitch effects like Super Mario Bros. coin sound
-- [ ] **DMC Channel**: Implement Delta Modulation Channel - `crates/core/src/apu/rp2a03.rs:146`, `crates/core/src/apu/rp2a07.rs:147`
-  - Current: DMC enable bit in $4015 is ignored
-  - Needed: Full DMC channel implementation (sample playback, DMA, IRQ)
-  - Impact: Missing drum/sample sounds in many games
-  - Note: DMC is used extensively for percussion and voice samples
-- [ ] **Frame Counter**: Implement APU frame counter - `crates/core/src/apu/rp2a03.rs:149`, `crates/core/src/apu/rp2a07.rs:150`
-  - Current: Frame counter register $4017 writes are ignored
-  - Needed: 4-step and 5-step sequencer modes, IRQ generation
-  - Impact: Envelope and length counter timing may be slightly off
-  - Note: Currently using simplified timing; full implementation needed for cycle-accurate audio
+#### NES APU - Completed
+- [x] **Sweep Unit**: Implement pulse channel sweep units - `crates/systems/nes/src/apu.rs:56-151`
+  - **FIXED**: Fully implemented NES-specific sweep units for both pulse channels
+  - Sweep period, shift count, negate flag, and timer all working
+  - Pulse 1 uses one's complement negation, Pulse 2 uses two's complement (hardware-accurate)
+  - Proper muting when frequency is too low (<8) or too high (>0x7FF)
+  - 10 comprehensive tests passing (sweep_register_write, sweep_ones_complement_vs_twos_complement, etc.)
+  - Impact: Audio pitch effects now work correctly (portamento, pitch bends)
+  - Reference: https://www.nesdev.org/wiki/APU_Sweep
+- [x] **DMC Channel**: Implement Delta Modulation Channel - `crates/core/src/apu/dmc.rs`, `crates/systems/nes/src/apu.rs:194,417-446`
+  - **FIXED**: Full DMC channel implementation with sample playback, DMA, and IRQ
+  - 16 different sample rates supported (NTSC and PAL tables)
+  - Loop support and IRQ generation on sample completion
+  - DMA implementation in `crates/systems/nes/src/lib.rs:723-727` for memory reads
+  - Proper integration with NES mixer (included in non-linear mixing formula)
+  - 3 comprehensive tests passing (dmc_basic_operation, dmc_memory_read_request, dmc_irq_generation)
+  - Impact: Drum/sample sounds now work in all games
+  - Reference: https://www.nesdev.org/wiki/APU_DMC
+- [x] **Frame Counter**: Implement APU frame counter - `crates/systems/nes/src/apu.rs:200-203,477-510,564-587,617-735`
+  - **FIXED**: Full frame counter implementation with 4-step and 5-step modes
+  - Proper envelope clocking at quarter-frame rate (~240 Hz NTSC, ~200 Hz PAL)
+  - Proper length counter and sweep unit clocking at half-frame rate (~120 Hz NTSC, ~100 Hz PAL)
+  - IRQ generation in 4-step mode with IRQ inhibit flag support
+  - Cycle-accurate $4017 write handling (immediate clock in 5-step mode)
+  - Impact: Envelope and length counter timing now hardware-accurate
+  - Reference: https://www.nesdev.org/wiki/APU_Frame_Counter
 
 #### NES Mappers
 - [ ] **MMC5 PCM Audio**: Implement MMC5 PCM playback - `crates/systems/nes/src/mappers/mmc5.rs:41`
