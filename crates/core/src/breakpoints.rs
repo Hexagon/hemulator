@@ -172,6 +172,7 @@ impl Default for BreakpointManager {
 /// - `add_read_breakpoint(address: u32)` - Add a read breakpoint
 /// - `add_write_breakpoint(address: u32)` - Add a write breakpoint
 /// - `remove_breakpoint(address: u32)` - Remove an execution breakpoint
+/// - `remove_breakpoint_by_type(address: u32, bp_type: BreakpointType)` - Remove breakpoint of any type
 /// - `clear_breakpoints()` - Clear all breakpoints
 /// - `get_breakpoints() -> Vec<u32>` - Get all execution breakpoint addresses
 ///
@@ -204,6 +205,18 @@ macro_rules! impl_breakpoint_methods {
         /// Remove an execution breakpoint
         pub fn remove_breakpoint(&mut self, address: u32) {
             self.breakpoint_manager.remove_execute(address);
+        }
+
+        /// Remove a breakpoint of any type
+        pub fn remove_breakpoint_by_type(
+            &mut self,
+            address: u32,
+            bp_type: $crate::breakpoints::BreakpointType,
+        ) -> bool {
+            self.breakpoint_manager.remove(&$crate::breakpoints::Breakpoint {
+                address,
+                breakpoint_type: bp_type,
+            })
         }
 
         /// Clear all breakpoints
