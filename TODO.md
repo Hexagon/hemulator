@@ -291,9 +291,9 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Code comment: "duplicated to avoid rewriting audio generation"
   - Impact: Unnecessary memory duplication; maintenance burden
   - Solution: Unify frame counter state or document rationale for separation
-- [x] **Duplicate Variable Extraction in PPU**: Remove redundant scroll variable extraction - `crates/systems/nes/src/ppu.rs:1032-1036,1048-1050`
-  - **FIXED**: Removed duplicate variable extraction lines 1048-1052
-  - Variables `coarse_x`, `coarse_y`, `nt_x`, `nt_y`, `fine_y` now extracted only once (lines 1032-1036)
+- [x] **Duplicate Variable Extraction in PPU**: Remove redundant scroll variable extraction - `crates/systems/nes/src/ppu.rs`
+  - **FIXED**: Removed duplicate scroll variable extraction in the NES PPU scroll calculation code
+  - Variables `coarse_x`, `coarse_y`, `nt_x`, `nt_y`, `fine_y` are now extracted only once
   - Impact: Cleaner code without redundant calculations
 - [x] **PC Histogram Allocation**: Only allocate when instruction tracing enabled - `crates/systems/nes/src/lib.rs:589`
   - **FIXED**: PC histogram now only allocated when `instruction_tracer.is_enabled()` returns true
