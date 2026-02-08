@@ -73,7 +73,8 @@ impl InstructionTracer {
         }
         // Update capacity hint
         self.history.shrink_to_fit();
-        self.history.reserve(max_history.saturating_sub(self.history.len()));
+        self.history
+            .reserve(max_history.saturating_sub(self.history.len()));
     }
 
     /// Get the maximum history size
