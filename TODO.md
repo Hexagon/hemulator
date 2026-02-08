@@ -273,10 +273,11 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Current: Index calculation and palette lookup per pixel (23,040 times/frame)
   - Needed: Precompute RGB palette array (8 palettes × 4 colors = 32 entries)
   - Impact: Reduced arithmetic in tight pixel loop
-- [ ] **Tight Loop Division Operations**: Replace division with bit shifts - `crates/systems/gb/src/ppu.rs:636-638`
-  - Current: `x / 8` division operation in per-pixel loop
-  - Needed: Replace with `x >> 3` bit shift (equivalent for power-of-2)
-  - Impact: Minor speedup in hot path
+- [x] **Tight Loop Division Operations**: Replace division with bit shifts - `crates/systems/gb/src/ppu.rs:636-638`
+  - **FIXED**: Replaced all division and modulo operations by 8 with bit operations
+  - `x / 8` → `x >> 3` (right shift by 3)
+  - `x % 8` → `x & 7` (bitwise AND with 7)
+  - Impact: Minor performance improvement in tight pixel rendering loops
 
 #### Game Boy / Game Boy Color - Documentation
 

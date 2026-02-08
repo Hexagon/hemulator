@@ -639,13 +639,13 @@ impl Ppu {
             };
 
             let y = screen_y.wrapping_add(scanline.scy);
-            let tile_y = ((y / 8) & 31) as u16;
-            let pixel_y = (y % 8) as u16;
+            let tile_y = ((y >> 3) & 31) as u16; // Divide by 8 using bit shift
+            let pixel_y = (y & 7) as u16; // Modulo 8 using bitwise AND
 
             for screen_x in 0u8..160 {
                 let x = screen_x.wrapping_add(scanline.scx);
-                let tile_x = ((x / 8) & 31) as u16;
-                let pixel_x = (x % 8) as u16;
+                let tile_x = ((x >> 3) & 31) as u16; // Divide by 8 using bit shift
+                let pixel_x = (x & 7) as u16; // Modulo 8 using bitwise AND
 
                 // Get tile index from tilemap (always from VRAM bank 0)
                 let tilemap_addr = tilemap_base + (tile_y * 32) + tile_x;
@@ -773,8 +773,8 @@ impl Ppu {
             // Use window internal line counter for tile row calculation
             // This correctly handles cases where WY changes mid-frame
             let win_y = window_line;
-            let tile_y = (win_y / 8) as u16;
-            let pixel_y = (win_y % 8) as u16;
+            let tile_y = (win_y >> 3) as u16; // Divide by 8 using bit shift
+            let pixel_y = (win_y & 7) as u16; // Modulo 8 using bitwise AND
 
             // Ensure tile_y is within bounds (0-31) to prevent out-of-bounds tilemap access
             if tile_y >= 32 {
@@ -786,14 +786,14 @@ impl Ppu {
 
             for screen_x in start_x..160 {
                 let win_x = screen_x - start_x;
-                let tile_x = (win_x / 8) as u16;
+                let tile_x = (win_x >> 3) as u16; // Divide by 8 using bit shift
 
                 // Ensure tile_x is within bounds (0-31)
                 if tile_x >= 32 {
                     continue;
                 }
 
-                let pixel_x = (win_x % 8) as u16;
+                let pixel_x = (win_x & 7) as u16; // Modulo 8 using bitwise AND
 
                 // Get tile index from tilemap (always from VRAM bank 0)
                 let tilemap_addr = tilemap_base + (tile_y * 32) + tile_x;
@@ -981,7 +981,7 @@ impl Ppu {
                 };
 
                 let tile_addr = (tile as u16) * 16;
-                let row_offset = (pixel_y % 8) * 2;
+                let row_offset = (pixel_y & 7) * 2; // Modulo 8 using bitwise AND
 
                 // Ensure we don't exceed VRAM bounds
                 if (tile_addr + row_offset as u16 + 1) as usize >= 0x2000 {
