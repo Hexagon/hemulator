@@ -146,13 +146,6 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Impact: Debugging mapper-related issues requires manual memory inspection
   - Use case: Investigating MMC3 IRQ glitches, verifying bank switching behavior
 
-#### SG-1000
-- [ ] **Test ROM**: Create basic test ROM for smoke testing - `test_roms/sg1000/`
-  - Current: No test ROM exists (README mentions z80asm/SDCC for creating test ROMs)
-  - Needed: Assembly-based test ROM demonstrating VDP and PSG functionality
-  - Follow pattern from other systems (test_roms/README.md)
-  - Impact: No automated verification of ROM loading and execution
-
 #### PC/DOS - Hardware Accuracy
 - [ ] **INT 21h DOS API**: Expand file I/O and DOS functions - `crates/systems/pc/src/cpu.rs`
   - Current: Character I/O works, file operations are stubs
@@ -325,6 +318,30 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Impact: Code clarity and optimization
   - Solution: Replace with `unreachable!()` macro
 
+#### NES APU - Missing Features
+- [ ] **Sweep Unit**: Implement pulse channel sweep units - `crates/core/src/apu/rp2a03.rs:52,78`, `crates/core/src/apu/rp2a07.rs:53,79`
+  - Current: Sweep unit writes are silently ignored (registers $4001 and $4005)
+  - Needed: Implement sweep period, shift count, negate flag, and timer
+  - Impact: Audio pitch effects won't work correctly (e.g., portamento, pitch bends)
+  - Note: Affects games using dynamic pitch effects like Super Mario Bros. coin sound
+- [ ] **DMC Channel**: Implement Delta Modulation Channel - `crates/core/src/apu/rp2a03.rs:146`, `crates/core/src/apu/rp2a07.rs:147`
+  - Current: DMC enable bit in $4015 is ignored
+  - Needed: Full DMC channel implementation (sample playback, DMA, IRQ)
+  - Impact: Missing drum/sample sounds in many games
+  - Note: DMC is used extensively for percussion and voice samples
+- [ ] **Frame Counter**: Implement APU frame counter - `crates/core/src/apu/rp2a03.rs:149`, `crates/core/src/apu/rp2a07.rs:150`
+  - Current: Frame counter register $4017 writes are ignored
+  - Needed: 4-step and 5-step sequencer modes, IRQ generation
+  - Impact: Envelope and length counter timing may be slightly off
+  - Note: Currently using simplified timing; full implementation needed for cycle-accurate audio
+
+#### NES Mappers
+- [ ] **MMC5 PCM Audio**: Implement MMC5 PCM playback - `crates/systems/nes/src/mappers/mmc5.rs:41`
+  - Current: MMC5 mapper implemented but PCM audio features not available
+  - Needed: PCM sample playback and mixing with APU channels
+  - Impact: Missing audio features in MMC5 games (e.g., Castlevania III)
+  - Note: Advanced feature, low priority as basic mapper functionality works
+
 #### SNES - Enhancement Chips
 - [ ] **DSP-1 Full Hardware Accuracy**: Implement Parameter command and shared projection state - `crates/systems/snes/src/coprocessors/dsp1.rs`
   - Current: Simplified implementations of Attitude, Target, Rotate commands
@@ -332,6 +349,28 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Impact: Current implementation sufficient for basic compatibility; full accuracy needed for advanced DSP-1 features
   - Note: Target and Attitude commands use simplified transformations without shared state
   - Reference: bsnes/sfc/coprocessor/dsp1/dsp1emu.cpp (parameter, target, attitude functions)
+
+#### SNES - Audio
+- [ ] **SPC700 DSP Audio Generation**: Implement audio output - `crates/frontend/gui/src/main.rs:600`
+  - Current: Returns silence (vec![0; count]) instead of actual audio
+  - Needed: Wire up SPC700 DSP audio generation to frontend
+  - Impact: SNES games have no audio
+  - Note: DSP engine is implemented in core, needs integration with frontend audio system
+
+#### SNES - I/O
+- [ ] **JOY3/JOY4 Controller Ports**: Implement multitap support - `crates/systems/snes/src/bus.rs:1108-1111`
+  - Current: Registers $421C-$421F (JOY3L/H, JOY4L/H) return 0
+  - Needed: Full multitap implementation for 3-4 player games
+  - Impact: 3-4 player games cannot use additional controllers
+  - Note: Low priority - most games use only 2 controllers
+
+#### SNES - PPU
+- [ ] **Unused Helper Methods**: Refactor or document dead code - `crates/systems/snes/src/ppu.rs:2301,2329`
+  - Current: `parse_tilemap_entry()` and `calculate_16x16_tile_info()` marked #[allow(dead_code)]
+  - Issue: Helper methods created but never used in rendering functions
+  - Impact: Code maintainability and potential duplication
+  - Solution: Either use these helpers in rendering code or remove if truly not needed
+  - Note: Methods appear to be refactoring opportunities to reduce code duplication
 
 #### SNES
 - [ ] **Upload Protocol Test**: Investigate SPC700 index echoing issue - `crates/systems/snes/src/lib.rs:832`, `crates/systems/snes/src/bus.rs:1605`
@@ -451,6 +490,11 @@ This file tracks unimplemented features, stubs, and simplified implementations a
 
 #### Game Boy / Game Boy Color
 
+- [ ] **Game Boy Color Speed Switching**: Implement double-speed mode - `crates/core/src/cpu_lr35902.rs:27`
+  - Current: Returns false for speed switching query (DMG mode)
+  - Needed: Implement CGB double-speed mode (KEY1 register)
+  - Impact: Some GBC games may run at wrong speed or not work at all
+  - Note: DMG games work correctly; only affects Game Boy Color titles
 - [ ] **MBC3 RTC Tick Frequency**: Improve RTC accuracy from ~60 Hz to proper 1 Hz precision - `crates/systems/gb/src/mappers/mbc3.rs:47,254-300`
   - Current: RTC incremented at ~60 Hz frame rate instead of 1 Hz
   - Issue: `rtc_ticks` counter uses frame rate (60 ticks = 1 second approximation)
@@ -467,6 +511,20 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Needed: Add comment explaining IR communication not emulated
   - Impact: Affects <1% of games (Pocket Bomberman, Tamagotchi series)
   - Note: IR mode register write is silently ignored (line 99-100)
+
+#### CHIP-8
+- [ ] **Audio Beep Tone**: Implement sound timer beep - `crates/frontend/gui/src/main.rs:602`
+  - Current: Returns silence (vec![0; count]) instead of beep tone
+  - Needed: Generate simple beep tone when sound timer is non-zero
+  - Impact: CHIP-8/Super-CHIP/XO-CHIP games have no audio feedback
+  - Note: CHIP-8 has only one audio feature - a simple beep tone
+
+#### GUI / Frontend
+- [ ] **Mouse Button Support**: Implement mouse input handling - `crates/frontend/gui/src/input_mapper.rs:51`
+  - Current: Mouse button events are ignored with a TODO comment
+  - Needed: Map mouse buttons to emulator input system
+  - Impact: Cannot use mouse for light gun games or point-and-click interfaces
+  - Note: Low priority - most systems don't use mouse input
 
 #### SG-1000
 - [ ] **ROM Banking Support**: Implement memory banking for larger cartridges - `crates/systems/sg1000/src/bus.rs`
