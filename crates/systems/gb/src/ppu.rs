@@ -914,7 +914,8 @@ impl Ppu {
                 &self.oam
             };
             // Collect all sprites that intersect this scanline
-            let mut sprites_on_line: Vec<(u8, u8)> = Vec::new();
+            // Store: (oam_x, x_pos, oam_index)
+            let mut sprites_on_line: Vec<(u8, u8, u8)> = Vec::new();
 
             for sprite_idx in 0u8..40 {
                 let oam_addr = (sprite_idx as usize) * 4;
@@ -938,14 +939,14 @@ impl Ppu {
                 {
                     // Sprite intersects this scanline, store X position for sorting
                     let x_pos = oam_x.wrapping_sub(8);
-                    sprites_on_line.push((x_pos, sprite_idx));
+                    sprites_on_line.push((oam_x, x_pos, sprite_idx));
                 }
             }
 
             // Hardware-accurate sprite selection:
             // Both DMG and CGB select the first 10 sprites in OAM order that intersect the scanline
             // Sort by OAM index only for selection
-            sprites_on_line.sort_by_key(|&(_x, oam_idx)| oam_idx);
+            sprites_on_line.sort_by_key(|&(_oam_x, _x_pos, oam_idx)| oam_idx);
 
             // TODO: Restore hardware-accurate 10-sprite limit for DMG once timing is improved.
             // Compatibility: some DMG games drop sprites with the strict limit under
@@ -957,14 +958,14 @@ impl Ppu {
             // - DMG: Lower X coordinate has higher priority, OAM order as tiebreaker
             // - CGB: Lower OAM index has higher priority (X coordinate irrelevant)
             if !self.cgb_mode {
-                // DMG: Re-sort selected sprites by X coordinate, then OAM order for rendering priority
-                sprites_on_line.sort_by_key(|&(x, oam_idx)| (x, oam_idx));
+                // DMG: Re-sort selected sprites by OAM X coordinate, then OAM order for rendering priority
+                sprites_on_line.sort_by_key(|&(oam_x, _x_pos, oam_idx)| (oam_x, oam_idx));
             }
             // CGB: Already sorted by OAM order, which is the rendering priority
 
             // Render sprites in reverse order so lower priority sprites are drawn first
             // (higher priority sprites will overwrite their pixels)
-            for &(x_pos, sprite_idx) in sprites_on_line.iter().rev() {
+            for &(_oam_x, x_pos, sprite_idx) in sprites_on_line.iter().rev() {
                 let oam_addr = (sprite_idx as usize) * 4;
                 let oam_y = oam[oam_addr];
                 let tile_index = oam[oam_addr + 2];
@@ -1200,6 +1201,7 @@ impl Ppu {
 
         (vblank_started, stat_interrupt, hblank_entered)
     }
+
 
     /// Update the PPU mode bits in STAT register and check for STAT interrupt
     ///

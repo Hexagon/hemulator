@@ -1119,6 +1119,7 @@ fn get_colecovision_controller_state(
 struct StreamSource {
     rx: Receiver<i16>,
     sample_rate: u32,
+    channels: u16,
 }
 
 impl Iterator for StreamSource {
@@ -1136,7 +1137,7 @@ impl Source for StreamSource {
     }
 
     fn channels(&self) -> u16 {
-        1
+        self.channels
     }
 
     fn sample_rate(&self) -> u32 {
@@ -3498,6 +3499,7 @@ fn main() {
         StreamSource {
             rx: audio_rx,
             sample_rate: 44100,
+            channels: 2,
         }
         .convert_samples(),
     ) {
@@ -3530,6 +3532,7 @@ fn main() {
 
     // Audio sample rate
     const SAMPLE_RATE: usize = 44100;
+    let mut audio_sample_remainder: f64 = 0.0;
 
     // Load saves for current ROM if available
     let mut _game_saves = if let Some(ref hash) = rom_hash {
@@ -6444,6 +6447,16 @@ fn main() {
                         }
                     }
                 }
+                DebugAction::SetGbAudioChannels(mask) => {
+                    if rom_loaded {
+                        if let EmulatorSystem::GameBoy(sys) = &mut sys {
+                            sys.set_audio_channel_mask(mask);
+                            egui_app
+                                .status_bar
+                                .set_message("Updated GB audio channels".to_string());
+                        }
+                    }
+                }
                 DebugAction::AddBreakpoint(address, bp_type) => {
                     if rom_loaded {
                         match &mut sys {
@@ -6673,10 +6686,23 @@ fn main() {
                         total_cycles += 1; // This is a placeholder - actual cycle count would depend on system
 
                         // Handle audio for each stepped frame
-                        let samples_per_frame = (SAMPLE_RATE as f64 / frame_rate) as usize;
+                        let samples_per_frame_f = (SAMPLE_RATE as f64 / frame_rate)
+                            + audio_sample_remainder;
+                        let samples_per_frame = samples_per_frame_f.floor() as usize;
+                        audio_sample_remainder = samples_per_frame_f - samples_per_frame as f64;
                         let audio_samples = sys.get_audio_samples(samples_per_frame);
-                        for sample in audio_samples {
-                            let _ = audio_tx.try_send(sample);
+                        let expected_mono = samples_per_frame;
+                        let expected_stereo = samples_per_frame * 2;
+                        if audio_samples.len() == expected_stereo {
+                            for sample in audio_samples {
+                                let _ = audio_tx.try_send(sample);
+                            }
+                        } else {
+                            for i in 0..expected_mono {
+                                let sample = audio_samples.get(i).copied().unwrap_or(0);
+                                let _ = audio_tx.try_send(sample);
+                                let _ = audio_tx.try_send(sample);
+                            }
                         }
                     }
                     Err(e) => {

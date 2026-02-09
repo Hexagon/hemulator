@@ -305,6 +305,7 @@ pub enum DebugAction {
     StopTrace,          // Stop instruction tracing and dump to file
     AddBreakpoint(u32, emu_core::breakpoints::BreakpointType), // Add breakpoint (address, type)
     RemoveBreakpoint(u32, emu_core::breakpoints::BreakpointType), // Remove breakpoint
+    SetGbAudioChannels([bool; 4]), // Pulse1, Pulse2, Wave, Noise
 }
 
 pub struct TabManager {
@@ -337,6 +338,7 @@ pub struct TabManager {
     pub breakpoint_address_input: String,
     pub breakpoint_type_selected: usize, // 0=Execute, 1=Read, 2=Write
     pub show_breakpoint_panel: bool,
+    pub gb_audio_channels: [bool; 4], // Pulse1, Pulse2, Wave, Noise
 }
 
 impl TabManager {
@@ -366,6 +368,7 @@ impl TabManager {
             breakpoint_address_input: String::new(),
             breakpoint_type_selected: 0,
             show_breakpoint_panel: false,
+            gb_audio_channels: [true, true, true, true],
         }
     }
 
@@ -1057,6 +1060,33 @@ impl TabManager {
 
             ui.add_space(5.0);
             ui.separator();
+
+            if state.system_type == "Game Boy" {
+                ui.add_space(5.0);
+                egui::CollapsingHeader::new("🔊 Audio Channels")
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        let mut changed = false;
+                        changed |= ui
+                            .checkbox(&mut self.gb_audio_channels[0], "Pulse 1")
+                            .changed();
+                        changed |= ui
+                            .checkbox(&mut self.gb_audio_channels[1], "Pulse 2")
+                            .changed();
+                        changed |= ui
+                            .checkbox(&mut self.gb_audio_channels[2], "Wave")
+                            .changed();
+                        changed |= ui
+                            .checkbox(&mut self.gb_audio_channels[3], "Noise")
+                            .changed();
+
+                        if changed {
+                            self.pending_debug_action = Some(DebugAction::SetGbAudioChannels(
+                                self.gb_audio_channels,
+                            ));
+                        }
+                    });
+            }
 
             // Breakpoint Management Panel (collapsible)
             egui::CollapsingHeader::new("🎯 Breakpoints")

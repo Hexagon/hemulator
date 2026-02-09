@@ -49,8 +49,12 @@ pub struct CpuLr35902<M: MemoryLr35902> {
     pub pc: u16,
     /// Interrupt Master Enable flag
     pub ime: bool,
+    /// IME enable pending (EI enables after next instruction)
+    ime_enable_pending: bool,
     /// Halted state
     pub halted: bool,
+    /// HALT bug flag (next opcode fetch does not increment PC)
+    halt_bug: bool,
     /// Stopped state (for STOP instruction)
     pub stopped: bool,
     /// Total cycles executed
@@ -80,7 +84,9 @@ impl<M: MemoryLr35902> CpuLr35902<M> {
             sp: 0,
             pc: 0,
             ime: false,
+            ime_enable_pending: false,
             halted: false,
+            halt_bug: false,
             stopped: false,
             cycles: 0,
             memory,
@@ -107,7 +113,9 @@ impl<M: MemoryLr35902> CpuLr35902<M> {
         self.sp = 0xFFFE;
         self.pc = 0x100; // Game Boy entry point after boot ROM
         self.ime = false;
+        self.ime_enable_pending = false;
         self.halted = false;
+        self.halt_bug = false;
         self.stopped = false;
         self.cycles = 0;
     }
@@ -125,7 +133,14 @@ impl<M: MemoryLr35902> CpuLr35902<M> {
         }
 
         let opcode = self.read_pc();
-        self.execute(opcode)
+        let cycles = self.execute(opcode);
+
+        if self.ime_enable_pending {
+            self.ime = true;
+            self.ime_enable_pending = false;
+        }
+
+        cycles
     }
 
     /// Check for pending interrupts and handle them if enabled
@@ -193,6 +208,11 @@ impl<M: MemoryLr35902> CpuLr35902<M> {
     }
 
     fn read_pc(&mut self) -> u8 {
+        if self.halt_bug {
+            self.halt_bug = false;
+            return self.memory.read(self.pc);
+        }
+
         let val = self.memory.read(self.pc);
         self.pc = self.pc.wrapping_add(1);
         val
@@ -783,7 +803,17 @@ impl<M: MemoryLr35902> CpuLr35902<M> {
                 }
             }
             0x76 => {
-                self.halted = true;
+                let ie = self.memory.read(0xFFFF);
+                let if_reg = self.memory.read(0xFF0F);
+                let pending = ie & if_reg;
+
+                if !self.ime && pending != 0 {
+                    // HALT bug: CPU doesn't halt, and next opcode fetch doesn't increment PC.
+                    self.halt_bug = true;
+                    self.halted = false;
+                } else {
+                    self.halted = true;
+                }
                 4
             }
 
@@ -1145,10 +1175,11 @@ impl<M: MemoryLr35902> CpuLr35902<M> {
             // DI / EI
             0xF3 => {
                 self.ime = false;
+                self.ime_enable_pending = false;
                 4
             }
             0xFB => {
-                self.ime = true;
+                self.ime_enable_pending = true;
                 4
             }
 
@@ -1524,9 +1555,13 @@ mod tests {
         cpu.pc = 0;
         cpu.memory.0[0] = 0xFB; // EI
         cpu.step();
+        assert!(!cpu.ime);
+
+        cpu.memory.0[1] = 0x00; // NOP
+        cpu.step();
         assert!(cpu.ime);
 
-        cpu.memory.0[1] = 0xF3; // DI
+        cpu.memory.0[2] = 0xF3; // DI
         cpu.step();
         assert!(!cpu.ime);
     }

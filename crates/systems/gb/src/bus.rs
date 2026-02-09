@@ -184,8 +184,10 @@ pub struct GbBus {
     oam_dma_active: bool,
     /// OAM DMA source base address
     oam_dma_source: u16,
-    /// Remaining OAM DMA cycles
-    oam_dma_cycles: i32,
+    /// Next OAM DMA byte index
+    oam_dma_index: u16,
+    /// OAM DMA cycle accumulator
+    oam_dma_cycle_accum: u32,
 }
 
 impl GbBus {
@@ -222,7 +224,8 @@ impl GbBus {
             gdma_pending: false,
             oam_dma_active: false,
             oam_dma_source: 0,
-            oam_dma_cycles: 0,
+            oam_dma_index: 0,
+            oam_dma_cycle_accum: 0,
         }
     }
 
@@ -234,19 +237,27 @@ impl GbBus {
             return;
         }
 
-        self.oam_dma_cycles -= cycles as i32;
-        if self.oam_dma_cycles > 0 {
+        self.oam_dma_cycle_accum += cycles;
+        let source_base = self.oam_dma_source;
+
+        while self.oam_dma_cycle_accum >= 4 && self.oam_dma_index < 0xA0 {
+            self.oam_dma_cycle_accum -= 4;
+            let addr = source_base.wrapping_add(self.oam_dma_index);
+            let byte = if (0xFE00..=0xFE9F).contains(&addr) {
+                self.ppu.read_oam(addr - 0xFE00)
+            } else {
+                self.read(addr)
+            };
+            self.ppu.write_oam(self.oam_dma_index, byte);
+            self.oam_dma_index += 1;
+        }
+
+        if self.oam_dma_index < 0xA0 {
             return;
         }
 
-        let source_base = self.oam_dma_source;
-        for i in 0..0xA0u16 {
-            let byte = self.read(source_base.wrapping_add(i));
-            self.ppu.write_oam(i, byte);
-        }
-
         self.oam_dma_active = false;
-        self.oam_dma_cycles = 0;
+        self.oam_dma_cycle_accum = 0;
     }
 
     /// Returns true if an OAM DMA transfer is in progress
@@ -671,7 +682,13 @@ impl MemoryLr35902 for GbBus {
                 self.wram[offset]
             }
             // OAM (Object Attribute Memory) - delegate to PPU
-            0xFE00..=0xFE9F => self.ppu.read_oam(addr - 0xFE00),
+            0xFE00..=0xFE9F => {
+                if self.oam_dma_active {
+                    0xFF
+                } else {
+                    self.ppu.read_oam(addr - 0xFE00)
+                }
+            }
             // Not usable
             0xFEA0..=0xFEFF => 0xFF,
             // I/O Registers
@@ -792,7 +809,11 @@ impl MemoryLr35902 for GbBus {
                 self.wram[offset] = val;
             }
             // OAM - delegate to PPU
-            0xFE00..=0xFE9F => self.ppu.write_oam(addr - 0xFE00, val),
+            0xFE00..=0xFE9F => {
+                if !self.oam_dma_active {
+                    self.ppu.write_oam(addr - 0xFE00, val);
+                }
+            }
             // Not usable
             0xFEA0..=0xFEFF => {}
             // I/O Registers
@@ -827,8 +848,9 @@ impl MemoryLr35902 for GbBus {
                     0xFF46 => {
                         // OAM DMA: Copy 160 bytes from XX00-XX9F to OAM
                         self.oam_dma_source = (val as u16) << 8;
-                        self.oam_dma_cycles = 640;
                         self.oam_dma_active = true;
+                        self.oam_dma_index = 0;
+                        self.oam_dma_cycle_accum = 0;
                     }
                     0xFF47 => self.ppu.bgp = val,
                     0xFF48 => self.ppu.obp0 = val,
