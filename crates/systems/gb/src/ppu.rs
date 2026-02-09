@@ -153,6 +153,12 @@ struct ScanlineState {
     wx: u8,
     /// LCD Control register for this scanline
     lcdc: u8,
+    /// BG Palette (DMG) for this scanline
+    bgp: u8,
+    /// OBJ Palette 0 (DMG) for this scanline
+    obp0: u8,
+    /// OBJ Palette 1 (DMG) for this scanline
+    obp1: u8,
 }
 
 impl Default for ScanlineState {
@@ -163,6 +169,9 @@ impl Default for ScanlineState {
             wy: 0,
             wx: 0,
             lcdc: 0x91,
+            bgp: 0xFC,
+            obp0: 0xE4,
+            obp1: 0xE4,
         }
     }
 }
@@ -220,6 +229,8 @@ pub struct Ppu {
     /// Per-scanline register states (144 scanlines for the visible screen)
     /// Captures register values at the start of each scanline to support scanline split effects
     scanline_states: [ScanlineState; 144],
+    /// Per-scanline OAM snapshot for sprite stability
+    oam_scanlines: [[u8; 0xA0]; 144],
     /// Flag indicating whether scanline states have been captured this frame
     /// Used to avoid O(n²) iteration in get_scanline_state()
     scanline_states_captured: bool,
@@ -280,6 +291,7 @@ impl Ppu {
             obj_palette_data: [0; 64],
             cgb_mode: false,
             scanline_states: [ScanlineState::default(); 144],
+            oam_scanlines: [[0; 0xA0]; 144],
             scanline_states_captured: false,
             window_line_counter: 0,
             stat_interrupt_line: false,
@@ -616,6 +628,9 @@ impl Ppu {
                 wy: self.wy,
                 wx: self.wx,
                 lcdc: self.lcdc,
+                bgp: self.bgp,
+                obp0: self.obp0,
+                obp1: self.obp1,
             }
         }
     }
@@ -719,7 +734,7 @@ impl Ppu {
                     self.cgb_color_to_rgb(color_low, color_high)
                 } else {
                     // DMG mode: use monochrome palette
-                    let palette_color = (self.bgp >> (color_index * 2)) & 0x03;
+                    let palette_color = (scanline.bgp >> (color_index * 2)) & 0x03;
                     match palette_color {
                         0 => 0xFFFFFFFF, // White (lightest) - ARGB8888 format: 0xAARRGGBB
                         1 => 0xFFAAAAAA, // Light gray (2/3 brightness)
@@ -864,7 +879,7 @@ impl Ppu {
                     self.cgb_color_to_rgb(color_low, color_high)
                 } else {
                     // DMG mode: use monochrome palette
-                    let palette_color = (self.bgp >> (color_index * 2)) & 0x03;
+                    let palette_color = (scanline.bgp >> (color_index * 2)) & 0x03;
                     match palette_color {
                         0 => 0xFFFFFFFF, // White (lightest) - ARGB8888 format: 0xAARRGGBB
                         1 => 0xFFAAAAAA, // Light gray (2/3 brightness)
@@ -892,13 +907,19 @@ impl Ppu {
 
         // Process sprites scanline by scanline to enforce 10-sprite limit
         for screen_y in 0u8..144 {
+            let scanline = self.get_scanline_state(screen_y);
+            let oam = if self.scanline_states_captured {
+                &self.oam_scanlines[screen_y as usize]
+            } else {
+                &self.oam
+            };
             // Collect all sprites that intersect this scanline
             let mut sprites_on_line: Vec<(u8, u8)> = Vec::new();
 
             for sprite_idx in 0u8..40 {
                 let oam_addr = (sprite_idx as usize) * 4;
-                let oam_y = self.oam[oam_addr];
-                let oam_x = self.oam[oam_addr + 1];
+                let oam_y = oam[oam_addr];
+                let oam_x = oam[oam_addr + 1];
 
                 // OAM Y/X are offset by 16/8 respectively
                 // Sprites are visible when: 0 < Y < 160 and 0 < X < 168
@@ -926,8 +947,11 @@ impl Ppu {
             // Sort by OAM index only for selection
             sprites_on_line.sort_by_key(|&(_x, oam_idx)| oam_idx);
 
-            // Take only first 10 sprites (hardware limit)
-            sprites_on_line.truncate(10);
+            // TODO: Restore hardware-accurate 10-sprite limit for DMG once timing is improved.
+            // Compatibility: some DMG games drop sprites with the strict limit under
+            // frame-based timing; relax to reduce flicker.
+            let max_sprites = if self.cgb_mode { 10 } else { 40 };
+            sprites_on_line.truncate(max_sprites);
 
             // Hardware-accurate sprite rendering priority:
             // - DMG: Lower X coordinate has higher priority, OAM order as tiebreaker
@@ -942,9 +966,9 @@ impl Ppu {
             // (higher priority sprites will overwrite their pixels)
             for &(x_pos, sprite_idx) in sprites_on_line.iter().rev() {
                 let oam_addr = (sprite_idx as usize) * 4;
-                let oam_y = self.oam[oam_addr];
-                let tile_index = self.oam[oam_addr + 2];
-                let flags = self.oam[oam_addr + 3];
+                let oam_y = oam[oam_addr];
+                let tile_index = oam[oam_addr + 2];
+                let flags = oam[oam_addr + 3];
 
                 // OAM flags interpretation differs between DMG and CGB
                 // Bit 7: BG/Window priority
@@ -1066,9 +1090,9 @@ impl Ppu {
                     } else {
                         // DMG mode: use monochrome palettes
                         let palette = if dmg_palette_num == 1 {
-                            self.obp1
+                            scanline.obp1
                         } else {
-                            self.obp0
+                            scanline.obp0
                         };
                         // Map 2-bit color to grayscale using OBP0/OBP1 palette
                         let palette_color = (palette >> (color_index * 2)) & 0x03;
@@ -1138,7 +1162,11 @@ impl Ppu {
                     wy: self.wy,
                     wx: self.wx,
                     lcdc: self.lcdc,
+                    bgp: self.bgp,
+                    obp0: self.obp0,
+                    obp1: self.obp1,
                 };
+                self.oam_scanlines[self.ly as usize] = self.oam;
                 self.scanline_states_captured = true;
             }
 

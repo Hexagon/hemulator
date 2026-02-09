@@ -180,6 +180,12 @@ pub struct GbBus {
     hdma_dest: u16,
     /// GDMA pending flag (deferred execution to avoid nested read/write)
     gdma_pending: bool,
+    /// OAM DMA active flag
+    oam_dma_active: bool,
+    /// OAM DMA source base address
+    oam_dma_source: u16,
+    /// Remaining OAM DMA cycles
+    oam_dma_cycles: i32,
 }
 
 impl GbBus {
@@ -214,7 +220,38 @@ impl GbBus {
             hdma_source: 0,
             hdma_dest: 0,
             gdma_pending: false,
+            oam_dma_active: false,
+            oam_dma_source: 0,
+            oam_dma_cycles: 0,
         }
+    }
+
+    /// Step OAM DMA transfer
+    ///
+    /// OAM DMA takes 160 bytes * 4 cycles = 640 cycles.
+    pub fn step_oam_dma(&mut self, cycles: u32) {
+        if !self.oam_dma_active {
+            return;
+        }
+
+        self.oam_dma_cycles -= cycles as i32;
+        if self.oam_dma_cycles > 0 {
+            return;
+        }
+
+        let source_base = self.oam_dma_source;
+        for i in 0..0xA0u16 {
+            let byte = self.read(source_base.wrapping_add(i));
+            self.ppu.write_oam(i, byte);
+        }
+
+        self.oam_dma_active = false;
+        self.oam_dma_cycles = 0;
+    }
+
+    /// Returns true if an OAM DMA transfer is in progress
+    pub fn oam_dma_active(&self) -> bool {
+        self.oam_dma_active
     }
 
     /// Set joypad button state
@@ -789,12 +826,9 @@ impl MemoryLr35902 for GbBus {
                     0xFF45 => self.ppu.lyc = val,
                     0xFF46 => {
                         // OAM DMA: Copy 160 bytes from XX00-XX9F to OAM
-                        let source_base = (val as u16) << 8;
-
-                        for i in 0..0xA0u16 {
-                            let byte = self.read(source_base + i);
-                            self.ppu.write_oam(i, byte);
-                        }
+                        self.oam_dma_source = (val as u16) << 8;
+                        self.oam_dma_cycles = 640;
+                        self.oam_dma_active = true;
                     }
                     0xFF47 => self.ppu.bgp = val,
                     0xFF48 => self.ppu.obp0 = val,

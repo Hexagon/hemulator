@@ -495,6 +495,9 @@ impl System for GbSystem {
                 self.cpu.memory.request_interrupt(0x04);
             }
 
+            // Step OAM DMA transfer
+            self.cpu.memory.step_oam_dma(cpu_cycles);
+
             // Step PPU and handle VBlank, STAT interrupts, and HDMA
             let (vblank_started, stat_interrupt, hblank_entered) =
                 self.cpu.memory.ppu.step(cpu_cycles);

@@ -83,6 +83,12 @@ This file tracks unimplemented features, stubs, and simplified implementations a
 
 ### Medium
 
+#### Game Boy (DMG)
+- [ ] **Sprite Per-Scanline Limit**: Restore hardware-accurate 10-sprite limit for DMG - `crates/systems/gb/src/ppu.rs`
+  - Current: DMG limit relaxed to 40 sprites per scanline for compatibility
+  - Needed: Accurate OAM selection (10 sprites) with proper timing so games don't flicker
+  - Impact: Fixes sprite flicker hacks while keeping correct hardware behavior
+
 #### Debugger/Tracing System
 
 - [x] **Read/Write Breakpoint Support**: Add memory access breakpoints to CLI - `crates/core/src/breakpoints.rs`, `crates/frontend/gui/src/main.rs`
