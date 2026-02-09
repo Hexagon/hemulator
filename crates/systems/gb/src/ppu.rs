@@ -1102,6 +1102,18 @@ impl Ppu {
     ///
     /// Returns (vblank_started, stat_interrupt, hblank_entered)
     pub fn step(&mut self, cycles: u32) -> (bool, bool, bool) {
+        // When LCD is disabled, LY stays at 0 and no timing progresses.
+        if (self.lcdc & LCDC_ENABLE) == 0 {
+            self.ly = 0;
+            self.cycle_counter = 0;
+            self.prev_mode = 0;
+            self.stat &= !0x03;
+            self.stat_interrupt_line = false;
+            self.scanline_states_captured = false;
+            self.window_line_counter = 0;
+            return (false, false, false);
+        }
+
         // Accumulate cycles
         self.cycle_counter += cycles;
 
