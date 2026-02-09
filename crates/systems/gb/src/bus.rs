@@ -679,7 +679,13 @@ impl MemoryLr35902 for GbBus {
                 0xFF4B => self.ppu.wx,
                 0xFF4D => self.read_key1(), // KEY1 - Speed switch (CGB only)
                 // CGB registers
-                0xFF4F => self.ppu.get_vram_bank(), // VBK - VRAM bank
+                0xFF4F => {
+                    if self.cgb_mode {
+                        self.ppu.get_vram_bank()
+                    } else {
+                        0xFF
+                    }
+                } // VBK - VRAM bank
                 // HDMA registers (CGB only)
                 0xFF51 => self.hdma1,
                 0xFF52 => self.hdma2,
@@ -775,7 +781,7 @@ impl MemoryLr35902 for GbBus {
                     0xFF10..=0xFF26 => self.apu.write_register(addr, val),
                     0xFF30..=0xFF3F => self.apu.write_register(addr, val),
                     // PPU registers
-                    0xFF40 => self.ppu.lcdc = val,
+                    0xFF40 => self.ppu.write_lcdc(val),
                     0xFF41 => self.ppu.stat = val,
                     0xFF42 => self.ppu.scy = val,
                     0xFF43 => self.ppu.scx = val,
@@ -797,7 +803,11 @@ impl MemoryLr35902 for GbBus {
                     0xFF4B => self.ppu.wx = val,
                     0xFF4D => self.write_key1(val), // KEY1 - Speed switch (CGB only)
                     // CGB registers
-                    0xFF4F => self.ppu.set_vram_bank(val), // VBK - VRAM bank
+                    0xFF4F => {
+                        if self.cgb_mode {
+                            self.ppu.set_vram_bank(val);
+                        }
+                    } // VBK - VRAM bank
                     // HDMA registers (CGB only)
                     0xFF51 => self.hdma1 = val,
                     0xFF52 => self.hdma2 = val & 0xF0, // Lower 4 bits are ignored

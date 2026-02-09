@@ -187,7 +187,7 @@ impl SnesBus {
     const HBLANK_CYCLES: u32 = 40; // Approximate CPU cycles during H-blank (~40-60 depending on HDMA)
     pub fn new() -> Self {
         log(LogCategory::Bus, LogLevel::Info, || {
-            "SNES Bus: Initializing with hardware-accurate SPC700 APU".to_string()
+            "SNES Bus: Initializing with stub APU (audio disabled)".to_string()
         });
 
         Self {
@@ -214,7 +214,7 @@ impl SnesBus {
             apu_transfer_counter: 0,
             apu_state: ApuState::BootReady, // Start in BootReady state with $BBAA signature
             apu_session_id: 0,
-            spc700: Some(RefCell::new(Spc700::new())), // Use hardware-accurate SPC700 APU by default
+            spc700: None,
             spc700_pending_cycles: Cell::new(0),
             spc700_cycle_accumulator: Cell::new(0),
 
@@ -904,8 +904,6 @@ impl Memory65c816 for SnesBus {
                             self.apu_out_ports[port_idx]
                         };
 
-                        // Hot path optimization: Remove debug logging from APU port reads
-                        // APU ports are accessed frequently and logging here is a major performance bottleneck
                         val
                     }
                     // Hardware registers (PPU: $2100-$213F, excluding APU ports above)

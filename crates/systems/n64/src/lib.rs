@@ -299,6 +299,19 @@ impl System for N64System {
                 let cycles = self.cpu.step();
                 self.current_cycles += cycles;
 
+                // DIAGNOSTIC: Print PC every 100000 cycles to find stuck loops
+                static mut DIAG_COUNTER: u32 = 0;
+                unsafe {
+                    DIAG_COUNTER += 1;
+                    if DIAG_COUNTER % 100000 == 0 {
+                        let cpu = &self.cpu.cpu;
+                        eprintln!(
+                            "[DIAG] count={} PC=0x{:08X} t0=0x{:016X} t1=0x{:016X} at=0x{:016X} v0=0x{:016X} a0=0x{:016X}",
+                            DIAG_COUNTER, pc_before, cpu.gpr[8], cpu.gpr[9], cpu.gpr[1], cpu.gpr[2], cpu.gpr[4]
+                        );
+                    }
+                }
+
                 // Record instruction in tracer if enabled
                 if self.instruction_tracer.is_enabled() {
                     if let Some(instruction) = self.disassemble_instruction(pc_before) {
@@ -313,19 +326,10 @@ impl System for N64System {
             let bus = self.cpu.bus();
             let pending = bus.mi().get_pending_interrupts();
             if pending != 0 {
-                // Map MI interrupt bits to MIPS interrupt lines
-                // SP (bit 0) -> IP2 (interrupt 2)
-                if pending & crate::mi::MI_INTR_SP != 0 {
-                    self.cpu.cpu.set_interrupt(2);
-                }
-                // VI (bit 3) -> IP3 (interrupt 3)
-                if pending & crate::mi::MI_INTR_VI != 0 {
-                    self.cpu.cpu.set_interrupt(3);
-                }
-                // DP (bit 5) -> IP5 (interrupt 5)
-                if pending & crate::mi::MI_INTR_DP != 0 {
-                    self.cpu.cpu.set_interrupt(5);
-                }
+                // On real N64, ALL MI interrupts are OR'd and routed to CPU IP2
+                // (interrupt line 2). Individual MI interrupt bits are distinguished
+                // by reading MI_INTR_REG, not by separate CPU interrupt lines.
+                self.cpu.cpu.set_interrupt(2);
             }
 
             // Update VI scanline and check for interrupt

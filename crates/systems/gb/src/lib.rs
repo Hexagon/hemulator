@@ -154,7 +154,8 @@
 //! ```
 
 use emu_core::debug::Debugger;
-use emu_core::{cpu_lr35902::CpuLr35902, types::Frame, MountPointInfo, System};
+use emu_core::logging::{log, LogCategory, LogLevel};
+use emu_core::{cpu_lr35902::CpuLr35902, cpu_lr35902::MemoryLr35902, types::Frame, MountPointInfo, System};
 
 mod apu;
 mod boot_rom;
@@ -207,6 +208,8 @@ pub struct GbSystem {
     instruction_tracer: emu_core::instruction_tracer::InstructionTracer,
     /// Breakpoint manager for debugging
     breakpoint_manager: emu_core::breakpoints::BreakpointManager,
+    /// One-shot log for PC=0x0038 hangs
+    pc_0038_logged: bool,
 }
 
 impl Default for GbSystem {
@@ -229,6 +232,7 @@ impl GbSystem {
             renderer: Box::new(SoftwarePpuRenderer::new()),
             instruction_tracer: emu_core::instruction_tracer::InstructionTracer::new(),
             breakpoint_manager: emu_core::breakpoints::BreakpointManager::new(),
+            pc_0038_logged: false,
         }
     }
 
@@ -417,6 +421,7 @@ impl System for GbSystem {
     fn reset(&mut self) {
         self.cpu.reset();
         self.total_cycles = 0;
+        self.pc_0038_logged = false;
 
         // Apply post-boot hardware state
         // This skips the boot ROM animation but initializes hardware correctly
@@ -443,6 +448,35 @@ impl System for GbSystem {
             let cpu_cycles = self.cpu.step();
             cycles += cpu_cycles;
             self.total_cycles += cpu_cycles as u64;
+
+            if !self.pc_0038_logged && self.cpu.pc == 0x0038 {
+                self.pc_0038_logged = true;
+                let ie = self.cpu.memory.read(0xFFFF);
+                let if_reg = self.cpu.memory.read(0xFF0F);
+                let sp = self.cpu.sp;
+                let s0 = self.cpu.memory.read(sp);
+                let s1 = self.cpu.memory.read(sp.wrapping_add(1));
+                let s2 = self.cpu.memory.read(sp.wrapping_add(2));
+                let s3 = self.cpu.memory.read(sp.wrapping_add(3));
+                log(LogCategory::CPU, LogLevel::Error, || {
+                    format!(
+                        "GB: PC hit $0038 (pc_before=${:04X}) A=${:02X} F=${:02X} BC=${:04X} DE=${:04X} HL=${:04X} SP=${:04X} IE=${:02X} IF=${:02X} STACK=[{:02X} {:02X} {:02X} {:02X}]",
+                        pc_before,
+                        self.cpu.a,
+                        self.cpu.f,
+                        ((self.cpu.b as u16) << 8) | self.cpu.c as u16,
+                        ((self.cpu.d as u16) << 8) | self.cpu.e as u16,
+                        ((self.cpu.h as u16) << 8) | self.cpu.l as u16,
+                        sp,
+                        ie,
+                        if_reg,
+                        s0,
+                        s1,
+                        s2,
+                        s3
+                    )
+                });
+            }
 
             // Record instruction if tracing is enabled
             if self.instruction_tracer.is_enabled() {

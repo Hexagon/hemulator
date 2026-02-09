@@ -346,9 +346,10 @@ impl Ppu {
 
     /// Read from VRAM (0x8000-0x9FFF)
     ///
-    /// # Hardware Accuracy
-    /// VRAM is inaccessible during PPU Mode 3 (Pixel Transfer).
-    /// Reads return 0xFF during Mode 3 to match hardware behavior.
+    /// # Timing Note
+    /// This emulator uses a frame-based timing model, so strict Mode 3 VRAM
+    /// access restrictions would drop valid writes for some games. We allow
+    /// VRAM access during Mode 3 for better compatibility.
     pub fn read_vram(&self, addr: u16) -> u8 {
         // Check if LCD is enabled
         if (self.lcdc & LCDC_ENABLE) == 0 {
@@ -361,16 +362,8 @@ impl Ppu {
             };
         }
 
-        // Get current PPU mode from STAT register (bits 0-1)
-        let mode = self.stat & 0x03;
-
-        // VRAM is inaccessible during Mode 3 (Pixel Transfer)
-        if mode == 3 {
-            return 0xFF;
-        }
-
         let offset = (addr & 0x1FFF) as usize;
-        if self.vram_bank == 0 {
+        if !self.cgb_mode || self.vram_bank == 0 {
             self.vram_bank0[offset]
         } else {
             self.vram_bank1[offset]
@@ -379,9 +372,10 @@ impl Ppu {
 
     /// Write to VRAM (0x8000-0x9FFF)
     ///
-    /// # Hardware Accuracy
-    /// VRAM is inaccessible during PPU Mode 3 (Pixel Transfer).
-    /// Writes are ignored during Mode 3 to match hardware behavior.
+    /// # Timing Note
+    /// This emulator uses a frame-based timing model, so strict Mode 3 VRAM
+    /// access restrictions would drop valid writes for some games. We allow
+    /// VRAM access during Mode 3 for better compatibility.
     pub fn write_vram(&mut self, addr: u16, val: u8) {
         // Check if LCD is enabled
         if (self.lcdc & LCDC_ENABLE) == 0 {
@@ -395,16 +389,8 @@ impl Ppu {
             return;
         }
 
-        // Get current PPU mode from STAT register (bits 0-1)
-        let mode = self.stat & 0x03;
-
-        // VRAM is inaccessible during Mode 3 (Pixel Transfer)
-        if mode == 3 {
-            return; // Write ignored
-        }
-
         let offset = (addr & 0x1FFF) as usize;
-        if self.vram_bank == 0 {
+        if !self.cgb_mode || self.vram_bank == 0 {
             self.vram_bank0[offset] = val;
         } else {
             self.vram_bank1[offset] = val;
@@ -417,6 +403,33 @@ impl Ppu {
         self.vram_bank = val & 0x01;
     }
 
+    /// Write LCDC (0xFF40) with LCD on/off side effects
+    pub fn write_lcdc(&mut self, val: u8) {
+        let old = self.lcdc;
+        self.lcdc = val;
+
+        let was_enabled = (old & LCDC_ENABLE) != 0;
+        let now_enabled = (val & LCDC_ENABLE) != 0;
+
+        if was_enabled && !now_enabled {
+            // LCD turned off: reset LY and mode timing state
+            self.ly = 0;
+            self.cycle_counter = 0;
+            self.prev_mode = 0;
+            self.stat &= !0x03;
+            self.stat_interrupt_line = false;
+            self.scanline_states_captured = false;
+            self.window_line_counter = 0;
+        } else if !was_enabled && now_enabled {
+            // LCD turned on: restart timing from LY=0
+            self.ly = 0;
+            self.cycle_counter = 0;
+            self.prev_mode = 0;
+            self.scanline_states_captured = false;
+            self.window_line_counter = 0;
+        }
+    }
+
     /// Get VRAM bank
     pub fn get_vram_bank(&self) -> u8 {
         self.vram_bank | 0xFE // Bits 1-7 return 1
@@ -424,9 +437,10 @@ impl Ppu {
 
     /// Read from OAM (0xFE00-0xFE9F)
     ///
-    /// # Hardware Accuracy
-    /// OAM is inaccessible during PPU Mode 2 (OAM Search) and Mode 3 (Pixel Transfer).
-    /// Reads return 0xFF during these modes to match hardware behavior.
+    /// # Timing Note
+    /// This emulator uses a frame-based timing model, so strict Mode 2/3 OAM
+    /// access restrictions can drop valid writes. We allow OAM access during
+    /// these modes for better compatibility.
     pub fn read_oam(&self, addr: u16) -> u8 {
         if addr >= 0xA0 {
             return 0xFF; // Out of bounds
@@ -438,22 +452,15 @@ impl Ppu {
             return self.oam[addr as usize];
         }
 
-        // Get current PPU mode from STAT register (bits 0-1)
-        let mode = self.stat & 0x03;
-
-        // OAM is inaccessible during Mode 2 (OAM Search) and Mode 3 (Pixel Transfer)
-        if mode == 2 || mode == 3 {
-            return 0xFF;
-        }
-
         self.oam[addr as usize]
     }
 
     /// Write to OAM (0xFE00-0xFE9F)
     ///
-    /// # Hardware Accuracy
-    /// OAM is inaccessible during PPU Mode 2 (OAM Search) and Mode 3 (Pixel Transfer).
-    /// Writes are ignored during these modes to match hardware behavior.
+    /// # Timing Note
+    /// This emulator uses a frame-based timing model, so strict Mode 2/3 OAM
+    /// access restrictions can drop valid writes. We allow OAM access during
+    /// these modes for better compatibility.
     pub fn write_oam(&mut self, addr: u16, val: u8) {
         if addr >= 0xA0 {
             return; // Out of bounds
@@ -464,14 +471,6 @@ impl Ppu {
             // LCD is off, OAM is always accessible
             self.oam[addr as usize] = val;
             return;
-        }
-
-        // Get current PPU mode from STAT register (bits 0-1)
-        let mode = self.stat & 0x03;
-
-        // OAM is inaccessible during Mode 2 (OAM Search) and Mode 3 (Pixel Transfer)
-        if mode == 2 || mode == 3 {
-            return; // Write ignored
         }
 
         self.oam[addr as usize] = val;
@@ -1357,20 +1356,13 @@ mod tests {
             "VRAM should be accessible in Mode 2"
         );
 
-        // Mode 3 (Pixel Transfer) - VRAM inaccessible
+        // Mode 3 (Pixel Transfer) - VRAM still accessible in frame-based model
         ppu.stat = 0x03;
-        ppu.write_vram(0x1003, 0x45); // This write should be ignored
+        ppu.write_vram(0x1003, 0x45);
         assert_eq!(
             ppu.read_vram(0x1003),
-            0xFF,
-            "VRAM reads should return 0xFF in Mode 3"
-        );
-        // Verify the write was actually ignored
-        ppu.stat = 0x00; // Switch to Mode 0 to check
-        assert_eq!(
-            ppu.read_vram(0x1003),
-            0x00,
-            "VRAM write should be ignored in Mode 3"
+            0x45,
+            "VRAM writes should be allowed in Mode 3 for compatibility"
         );
 
         // LCD disabled - VRAM always accessible
@@ -1414,36 +1406,22 @@ mod tests {
             "OAM should be accessible in Mode 1"
         );
 
-        // Mode 2 (OAM Search) - OAM inaccessible
+        // Mode 2 (OAM Search) - OAM still accessible in frame-based model
         ppu.stat = 0x02;
-        ppu.write_oam(0x12, 0x44); // This write should be ignored
+        ppu.write_oam(0x12, 0x44);
         assert_eq!(
             ppu.read_oam(0x12),
-            0xFF,
-            "OAM reads should return 0xFF in Mode 2"
-        );
-        // Verify the write was actually ignored
-        ppu.stat = 0x00; // Switch to Mode 0 to check
-        assert_eq!(
-            ppu.read_oam(0x12),
-            0x00,
-            "OAM write should be ignored in Mode 2"
+            0x44,
+            "OAM writes should be allowed in Mode 2 for compatibility"
         );
 
-        // Mode 3 (Pixel Transfer) - OAM inaccessible
+        // Mode 3 (Pixel Transfer) - OAM still accessible in frame-based model
         ppu.stat = 0x03;
-        ppu.write_oam(0x13, 0x45); // This write should be ignored
+        ppu.write_oam(0x13, 0x45);
         assert_eq!(
             ppu.read_oam(0x13),
-            0xFF,
-            "OAM reads should return 0xFF in Mode 3"
-        );
-        // Verify the write was actually ignored
-        ppu.stat = 0x00; // Switch to Mode 0 to check
-        assert_eq!(
-            ppu.read_oam(0x13),
-            0x00,
-            "OAM write should be ignored in Mode 3"
+            0x45,
+            "OAM writes should be allowed in Mode 3 for compatibility"
         );
 
         // LCD disabled - OAM always accessible

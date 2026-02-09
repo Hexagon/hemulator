@@ -60,8 +60,15 @@ impl Mbc1 {
         let bank = (self.rom_bank & 0x1F) as usize;
         // Bank 0 is not selectable, map to bank 1
         let bank = if bank == 0 { 1 } else { bank };
-        // Combine with upper bits
-        let bank = bank | ((self.ram_bank as usize) << 5);
+
+        let bank = if self.banking_mode == 0 {
+            // ROM banking mode: upper bits select high ROM banks
+            bank | ((self.ram_bank as usize) << 5)
+        } else {
+            // RAM banking mode: upper bits select RAM bank only
+            bank
+        };
+
         bank % self.rom_bank_count()
     }
 
@@ -240,6 +247,10 @@ mod tests {
 
         mbc.write_rom(0x4000, 2);
         assert_eq!(mbc.read_rom(0x0000), 64); // Bank 64 (upper bits = 2)
+
+        // Upper bank should ignore upper bits in RAM banking mode
+        mbc.write_rom(0x2000, 1);
+        assert_eq!(mbc.read_rom(0x4000), 1);
     }
 
     #[test]

@@ -517,6 +517,11 @@ impl Spc700 {
         }
     }
 
+    /// Get the current SPC700 CPU program counter (for debugging)
+    pub fn cpu_pc(&self) -> u16 {
+        self.cpu.pc
+    }
+
     /// Execute CPU for a number of cycles
     pub fn run_cycles(&mut self, cycles: u32) {
         // Track statistics
