@@ -321,40 +321,54 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Current: Full screen rerender every frame with per-character pixel loops
   - Needed: Track dirty regions, cache character glyphs, skip unchanged areas
   - Impact: High CPU usage for text mode rendering; inefficient for large text updates
-- [ ] **Disk Logging Performance**: Move environment variable check outside hot path - `crates/systems/pc/src/disk.rs:82,103,127`
-  - Current: `std::env::var("EMU_LOG_BUS")` called on every disk read/write
-  - Needed: Use static log level initialized once at startup
-  - Impact: Unnecessary overhead on every disk operation
+- [x] **Disk Logging Performance**: Move environment variable check outside hot path - `crates/systems/pc/src/disk.rs:82,103,127`
+  - **FIXED**: Used `OnceLock` to cache `EMU_LOG_BUS` environment variable check
+  - Moved `std::env::var("EMU_LOG_BUS")` check from hot path (every disk read/write) to static initialization
+  - Created `is_bus_logging_enabled()` helper function that checks once and caches result
+  - Impact: Eliminated repeated env::var() calls on every disk operation
 - [ ] **Font Data Pre-rendering**: Pre-bake font glyphs to pixel patterns - `crates/systems/pc/src/font.rs`
   - Current: Font arrays stored as `[u8]` requiring pixel extraction on every render
   - Needed: Pre-computed pixel patterns for common resolutions/zoom levels
   - Impact: Faster character rendering, reduced CPU overhead
-- [ ] **Keyboard Buffer Implementation**: Use fixed ring buffer instead of VecDeque - `crates/systems/pc/src/keyboard.rs:11`
-  - Current: VecDeque with allocation overhead
-  - Needed: Fixed 16-byte ring buffer matching hardware
-  - Impact: Reduced allocations, better cache locality
+- [x] **Keyboard Buffer Implementation**: Use fixed ring buffer instead of VecDeque - `crates/systems/pc/src/keyboard.rs:11`
+  - **FIXED**: Replaced VecDeque with fixed 16-byte ring buffer
+  - Implemented custom `RingBuffer` struct with fixed [u8; 16] array
+  - Eliminates heap allocations on push/pop operations
+  - Matches hardware behavior (16-byte buffer limit)
+  - Impact: Better cache locality, reduced allocator pressure, hardware-accurate behavior
 
-#### PC/DOS - Documentation
-- [ ] **Magic Number Documentation**: Add comments for hardcoded values - `crates/systems/pc/src/cpu.rs`, `crates/systems/pc/src/bus.rs`
-  - 0xB8000 (video memory) - used without comment (cpu.rs:526)
-  - 0x400 (BIOS Data Area) - offset hardcoded in multiple places (cpu.rs:103-110)
-  - Port addresses: 0x40-0x43 (PIT), 0x60/0x64 (keyboard), 0x3C0-0x3C9 (VGA) - mostly uncommented
-  - Boot sector signature 0xAA55 - no reference to standard (bus.rs:395)
-  - Impact: Makes code harder to understand and maintain
-- [ ] **INT 10h Documentation**: Add high-level function overview - `crates/systems/pc/src/cpu.rs:412+`
-  - Current: ~1000+ lines with no module-level description
-  - Needed: Summary of supported video BIOS functions and modes
-  - Impact: Hard to understand what's implemented without reading all code
-- [ ] **I/O Port Documentation**: Document port ranges in io_read/io_write - `crates/systems/pc/src/bus.rs:694-1000`
-  - Current: 300+ lines with scattered port documentation
-  - Needed: Port map table at top of each function
-  - Impact: Difficult to find which ports are implemented
-- [ ] **Hardware Reference Citations**: Add IBM PC Technical Reference links
-  - No references to IBM PC documentation
-  - No 8086 CPU instruction set references
-  - No VGA BIOS Programmer's Reference notes
-  - No BIOS INT specification documents
-  - Impact: Hard to verify hardware accuracy without original documentation
+#### PC/DOS - Documentation (Completed)
+- [x] **Magic Number Documentation**: Add comments for hardcoded values - `crates/systems/pc/src/cpu.rs`, `crates/systems/pc/src/bus.rs`
+  - **FIXED**: Added comprehensive documentation for BIOS Data Area constants
+  - Created `VIDEO_BUFFER_ADDR`, `BDA_ACTIVE_PAGE_ADDR`, `BDA_CURSOR_POS_BASE` constants with detailed comments
+  - Added references to IBM PC Technical Reference Manual for BDA layout
+  - Boot sector signature (0xAA55) already well-documented in bus.rs:402
+  - Impact: Improved code maintainability and clarity
+- [x] **INT 10h Documentation**: Add high-level function overview - `crates/systems/pc/src/cpu.rs:412+`
+  - **FIXED**: Added comprehensive 35-line documentation block to `handle_int10h()`
+  - Documents all supported subfunctions (0x00-0x1B) with descriptions
+  - Includes references to IBM PC BIOS Interface Technical Reference, VGA BIOS Programmer's Reference, Ralf Brown's Interrupt List
+  - Impact: Much easier to understand INT 10h implementation
+- [x] **I/O Port Documentation**: Document port ranges in io_read/io_write - `crates/systems/pc/src/bus.rs:694-1000`
+  - **FIXED**: Added comprehensive I/O port map at top of `io_read()` function
+  - Documented all major hardware: PIT (0x40-0x43, 0x61), Keyboard (0x60, 0x64), A20 (0x92), VGA (0x3B4-0x3DA)
+  - Included hardware references: Intel 8253/8254, Intel 8042, IBM VGA Technical Reference
+  - Impact: Easy to navigate and understand I/O port implementation
+- [x] **Hardware Reference Citations**: Add IBM PC Technical Reference links
+  - **FIXED**: Added references throughout bus.rs and cpu.rs
+  - Intel 8253/8254 Programmable Interval Timer Datasheet
+  - Intel 8042 Keyboard Controller Datasheet
+  - IBM VGA Technical Reference Manual
+  - IBM PC/XT Technical Reference Manual
+  - Impact: Can now verify hardware accuracy against original documentation
+- [x] **VGA Register Documentation**: Document VGA register bit layouts - `crates/systems/pc/src/bus.rs`
+  - **FIXED**: Added detailed bit-level documentation for all VGA register arrays
+  - CRTC registers (25): Horizontal/vertical timing, cursor, scrolling, split screen
+  - Sequencer registers (5): Reset, clocking, map mask, character map, memory mode
+  - Graphics Controller registers (9): Set/Reset, enable, color compare, rotate, read/write modes
+  - Attribute Controller registers (21): Palette, mode control, overscan, plane enable
+  - DAC: Pixel mask, read/write indices, color data, state machine behavior
+  - Impact: Significantly improved maintainability and understanding of VGA implementation
 
 ### Low
 
@@ -461,11 +475,13 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - **FIXED**: PC histogram now only allocated when `instruction_tracer.is_enabled()` returns true
   - Eliminates ~60KB/sec allocation overhead when tracing is disabled
   - Impact: Reduced memory allocation overhead in normal operation
-- [ ] **Sprite Evaluation Optimization**: Early exit sprite iteration at 8-sprite limit - `crates/systems/nes/src/ppu.rs:1230-1314`
-  - Current: Sprite evaluation iterates all 64 sprites per scanline even when only 8 rendered
-  - Issue: Early break at `sprites_on_scanline > 8` happens too late in loop
-  - Impact: Wastes CPU cycles checking sprites 9-64 when sprite limit already reached
-  - Solution: Break immediately when 8 sprites collected (preserve overflow detection logic)
+- [x] **Sprite Evaluation Optimization**: Early exit sprite iteration at 8-sprite limit - `crates/systems/nes/src/ppu.rs:1230-1314`
+  - **FIXED**: Changed logic to break immediately after finding 8 sprites on scanline
+  - Previous: Checked all 64 sprites even after finding 8, then broke when attempting to process 9th
+  - New: Breaks as soon as 8 sprites are found, avoiding unnecessary checks of remaining sprites
+  - Changed from `if sprites_on_scanline > 8 { break }` after increment to `if sprites_on_scanline >= 8 { break }` before increment
+  - Impact: Reduced CPU cycles spent on sprite evaluation when 8+ sprites are on a scanline
+  - Note: Sprite overflow flag is still correctly set by `evaluate_sprites_for_scanline()` function
 - [ ] **RefCell Borrow & Callback Overhead in Rendering**: Batch CHR callbacks to reduce overhead - `crates/systems/nes/src/ppu.rs:1103-1106`
   - Current: `chr_read_callback.borrow_mut()` is performed for each callback invocation; when using `chr_fetch_fast()`, callbacks are invoked explicitly per tile/sprite rather than per individual CHR fetch
   - Impact: Repeated `RefCell` borrows and callback calls in the render hot path add overhead across a scanline/frame
