@@ -251,11 +251,11 @@ pub struct Ppu {
     frame: Frame,
 
     /// Internal affine reference point latches for BG2
-    bg2_ref_x: i32,
-    bg2_ref_y: i32,
+    pub bg2_ref_x: i32,
+    pub bg2_ref_y: i32,
     /// Internal affine reference point latches for BG3
-    bg3_ref_x: i32,
-    bg3_ref_y: i32,
+    pub bg3_ref_x: i32,
+    pub bg3_ref_y: i32,
 
     /// Scanline buffers for compositing
     /// Each BG layer's pixel output for current scanline

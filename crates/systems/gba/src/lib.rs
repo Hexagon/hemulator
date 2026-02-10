@@ -712,17 +712,196 @@ impl System for GbaSystem {
     }
 
     fn save_state(&self) -> Value {
-        // TODO: Full state serialization (CPU regs, all memory, I/O, PPU state)
+        use base64::{engine::general_purpose::STANDARD, Engine};
+
+        // Get CPU state
+        let cpu_state = self.cpu.get_state();
+
         serde_json::json!({
             "system": "gba",
             "version": 1,
             "total_cycles": self.total_cycles,
             "scanline": self.scanline,
+            "scanline_cycles": self.scanline_cycles,
+            "cpu": {
+                "gpr": cpu_state.gpr,
+                "cpsr": cpu_state.cpsr,
+                "fiq_r8_r12": cpu_state.fiq_r8_r12,
+                "usr_r8_r12": cpu_state.usr_r8_r12,
+                "fiq_r13_r14": cpu_state.fiq_r13_r14,
+                "irq_r13_r14": cpu_state.irq_r13_r14,
+                "svc_r13_r14": cpu_state.svc_r13_r14,
+                "abt_r13_r14": cpu_state.abt_r13_r14,
+                "und_r13_r14": cpu_state.und_r13_r14,
+                "usr_r13_r14": cpu_state.usr_r13_r14,
+                "spsr_fiq": cpu_state.spsr_fiq,
+                "spsr_irq": cpu_state.spsr_irq,
+                "spsr_svc": cpu_state.spsr_svc,
+                "spsr_abt": cpu_state.spsr_abt,
+                "spsr_und": cpu_state.spsr_und,
+                "pipeline_flushed": cpu_state.pipeline_flushed,
+                "halted": cpu_state.halted,
+                "cycles": cpu_state.cycles,
+            },
+            "memory": {
+                "ewram": STANDARD.encode(&self.cpu.memory.ewram),
+                "iwram": STANDARD.encode(&self.cpu.memory.iwram),
+                "io": STANDARD.encode(&self.cpu.memory.io),
+                "palette": STANDARD.encode(&self.cpu.memory.palette),
+                "vram": STANDARD.encode(&self.cpu.memory.vram),
+                "oam": STANDARD.encode(&self.cpu.memory.oam),
+                "sram": STANDARD.encode(&self.cpu.memory.sram),
+            },
+            "interrupts": {
+                "ime": self.cpu.memory.ime,
+                "ie": self.cpu.memory.ie,
+                "if_flags": self.cpu.memory.if_flags,
+            },
+            "ppu": {
+                "bg2_ref_x": self.ppu.bg2_ref_x,
+                "bg2_ref_y": self.ppu.bg2_ref_y,
+                "bg3_ref_x": self.ppu.bg3_ref_x,
+                "bg3_ref_y": self.ppu.bg3_ref_y,
+            }
         })
     }
 
-    fn load_state(&mut self, _v: &Value) -> Result<(), serde_json::Error> {
-        // TODO: Full state deserialization
+    fn load_state(&mut self, v: &Value) -> Result<(), serde_json::Error> {
+        use base64::{engine::general_purpose::STANDARD, Engine};
+
+        // Validate version
+        if v["version"].as_u64() != Some(1) {
+            return Err(serde_json::Error::io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Invalid save state version",
+            )));
+        }
+
+        // Restore basic state
+        self.total_cycles = v["total_cycles"].as_u64().unwrap_or(0);
+        self.scanline = v["scanline"].as_u64().unwrap_or(0) as u32;
+        self.scanline_cycles = v["scanline_cycles"].as_u64().unwrap_or(0);
+
+        // Restore CPU state
+        let cpu_json = &v["cpu"];
+        let mut cpu_state = emu_core::cpu_arm7tdmi::CpuState {
+            gpr: [0; 16],
+            cpsr: cpu_json["cpsr"].as_u64().unwrap_or(0) as u32,
+            fiq_r8_r12: [0; 5],
+            usr_r8_r12: [0; 5],
+            fiq_r13_r14: [0; 2],
+            irq_r13_r14: [0; 2],
+            svc_r13_r14: [0; 2],
+            abt_r13_r14: [0; 2],
+            und_r13_r14: [0; 2],
+            usr_r13_r14: [0; 2],
+            spsr_fiq: cpu_json["spsr_fiq"].as_u64().unwrap_or(0) as u32,
+            spsr_irq: cpu_json["spsr_irq"].as_u64().unwrap_or(0) as u32,
+            spsr_svc: cpu_json["spsr_svc"].as_u64().unwrap_or(0) as u32,
+            spsr_abt: cpu_json["spsr_abt"].as_u64().unwrap_or(0) as u32,
+            spsr_und: cpu_json["spsr_und"].as_u64().unwrap_or(0) as u32,
+            pipeline_flushed: cpu_json["pipeline_flushed"].as_bool().unwrap_or(false),
+            halted: cpu_json["halted"].as_bool().unwrap_or(false),
+            cycles: cpu_json["cycles"].as_u64().unwrap_or(0),
+        };
+
+        // Restore GPRs
+        if let Some(gpr_arr) = cpu_json["gpr"].as_array() {
+            for (i, val) in gpr_arr.iter().enumerate() {
+                if i < 16 {
+                    cpu_state.gpr[i] = val.as_u64().unwrap_or(0) as u32;
+                }
+            }
+        }
+
+        // Restore banked registers (similar pattern for all)
+        macro_rules! restore_banked {
+            ($field:ident, $size:expr) => {
+                if let Some(arr) = cpu_json[stringify!($field)].as_array() {
+                    for (i, val) in arr.iter().enumerate() {
+                        if i < $size {
+                            cpu_state.$field[i] = val.as_u64().unwrap_or(0) as u32;
+                        }
+                    }
+                }
+            };
+        }
+
+        restore_banked!(fiq_r8_r12, 5);
+        restore_banked!(usr_r8_r12, 5);
+        restore_banked!(fiq_r13_r14, 2);
+        restore_banked!(irq_r13_r14, 2);
+        restore_banked!(svc_r13_r14, 2);
+        restore_banked!(abt_r13_r14, 2);
+        restore_banked!(und_r13_r14, 2);
+        restore_banked!(usr_r13_r14, 2);
+
+        self.cpu.set_state(&cpu_state);
+
+        // Restore memory
+        let mem_json = &v["memory"];
+        if let Some(ewram_str) = mem_json["ewram"].as_str() {
+            if let Ok(data) = STANDARD.decode(ewram_str) {
+                let len = data.len().min(self.cpu.memory.ewram.len());
+                self.cpu.memory.ewram[..len].copy_from_slice(&data[..len]);
+            }
+        }
+
+        if let Some(iwram_str) = mem_json["iwram"].as_str() {
+            if let Ok(data) = STANDARD.decode(iwram_str) {
+                let len = data.len().min(self.cpu.memory.iwram.len());
+                self.cpu.memory.iwram[..len].copy_from_slice(&data[..len]);
+            }
+        }
+
+        if let Some(io_str) = mem_json["io"].as_str() {
+            if let Ok(data) = STANDARD.decode(io_str) {
+                let len = data.len().min(self.cpu.memory.io.len());
+                self.cpu.memory.io[..len].copy_from_slice(&data[..len]);
+            }
+        }
+
+        if let Some(palette_str) = mem_json["palette"].as_str() {
+            if let Ok(data) = STANDARD.decode(palette_str) {
+                let len = data.len().min(self.cpu.memory.palette.len());
+                self.cpu.memory.palette[..len].copy_from_slice(&data[..len]);
+            }
+        }
+
+        if let Some(vram_str) = mem_json["vram"].as_str() {
+            if let Ok(data) = STANDARD.decode(vram_str) {
+                let len = data.len().min(self.cpu.memory.vram.len());
+                self.cpu.memory.vram[..len].copy_from_slice(&data[..len]);
+            }
+        }
+
+        if let Some(oam_str) = mem_json["oam"].as_str() {
+            if let Ok(data) = STANDARD.decode(oam_str) {
+                let len = data.len().min(self.cpu.memory.oam.len());
+                self.cpu.memory.oam[..len].copy_from_slice(&data[..len]);
+            }
+        }
+
+        if let Some(sram_str) = mem_json["sram"].as_str() {
+            if let Ok(data) = STANDARD.decode(sram_str) {
+                let len = data.len().min(self.cpu.memory.sram.len());
+                self.cpu.memory.sram[..len].copy_from_slice(&data[..len]);
+            }
+        }
+
+        // Restore interrupts
+        let int_json = &v["interrupts"];
+        self.cpu.memory.ime = int_json["ime"].as_bool().unwrap_or(false);
+        self.cpu.memory.ie = int_json["ie"].as_u64().unwrap_or(0) as u16;
+        self.cpu.memory.if_flags = int_json["if_flags"].as_u64().unwrap_or(0) as u16;
+
+        // Restore PPU state
+        let ppu_json = &v["ppu"];
+        self.ppu.bg2_ref_x = ppu_json["bg2_ref_x"].as_i64().unwrap_or(0) as i32;
+        self.ppu.bg2_ref_y = ppu_json["bg2_ref_y"].as_i64().unwrap_or(0) as i32;
+        self.ppu.bg3_ref_x = ppu_json["bg3_ref_x"].as_i64().unwrap_or(0) as i32;
+        self.ppu.bg3_ref_y = ppu_json["bg3_ref_y"].as_i64().unwrap_or(0) as i32;
+
         Ok(())
     }
 

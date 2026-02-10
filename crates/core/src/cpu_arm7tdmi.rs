@@ -50,6 +50,33 @@
 use crate::logging::{log, LogCategory, LogLevel};
 
 // =============================================================================
+// Data structures
+// =============================================================================
+
+/// Complete CPU state for save state serialization
+#[derive(Debug, Clone)]
+pub struct CpuState {
+    pub gpr: [u32; 16],
+    pub cpsr: u32,
+    pub fiq_r8_r12: [u32; 5],
+    pub usr_r8_r12: [u32; 5],
+    pub fiq_r13_r14: [u32; 2],
+    pub irq_r13_r14: [u32; 2],
+    pub svc_r13_r14: [u32; 2],
+    pub abt_r13_r14: [u32; 2],
+    pub und_r13_r14: [u32; 2],
+    pub usr_r13_r14: [u32; 2],
+    pub spsr_fiq: u32,
+    pub spsr_irq: u32,
+    pub spsr_svc: u32,
+    pub spsr_abt: u32,
+    pub spsr_und: u32,
+    pub pipeline_flushed: bool,
+    pub halted: bool,
+    pub cycles: u64,
+}
+
+// =============================================================================
 // Constants
 // =============================================================================
 
@@ -326,6 +353,56 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
             ProcessorMode::Undefined => self.und_r13_r14[0] = sp,
             ProcessorMode::User | ProcessorMode::System => self.usr_r13_r14[0] = sp,
         }
+    }
+
+    // =========================================================================
+    // Save state serialization helpers
+    // =========================================================================
+
+    /// Get all CPU state for serialization (all registers, flags, modes)
+    pub fn get_state(&self) -> CpuState {
+        CpuState {
+            gpr: self.gpr,
+            cpsr: self.cpsr,
+            fiq_r8_r12: self.fiq_r8_r12,
+            usr_r8_r12: self.usr_r8_r12,
+            fiq_r13_r14: self.fiq_r13_r14,
+            irq_r13_r14: self.irq_r13_r14,
+            svc_r13_r14: self.svc_r13_r14,
+            abt_r13_r14: self.abt_r13_r14,
+            und_r13_r14: self.und_r13_r14,
+            usr_r13_r14: self.usr_r13_r14,
+            spsr_fiq: self.spsr_fiq,
+            spsr_irq: self.spsr_irq,
+            spsr_svc: self.spsr_svc,
+            spsr_abt: self.spsr_abt,
+            spsr_und: self.spsr_und,
+            pipeline_flushed: self.pipeline_flushed,
+            halted: self.halted,
+            cycles: self.cycles,
+        }
+    }
+
+    /// Restore CPU state from serialization
+    pub fn set_state(&mut self, state: &CpuState) {
+        self.gpr = state.gpr;
+        self.cpsr = state.cpsr;
+        self.fiq_r8_r12 = state.fiq_r8_r12;
+        self.usr_r8_r12 = state.usr_r8_r12;
+        self.fiq_r13_r14 = state.fiq_r13_r14;
+        self.irq_r13_r14 = state.irq_r13_r14;
+        self.svc_r13_r14 = state.svc_r13_r14;
+        self.abt_r13_r14 = state.abt_r13_r14;
+        self.und_r13_r14 = state.und_r13_r14;
+        self.usr_r13_r14 = state.usr_r13_r14;
+        self.spsr_fiq = state.spsr_fiq;
+        self.spsr_irq = state.spsr_irq;
+        self.spsr_svc = state.spsr_svc;
+        self.spsr_abt = state.spsr_abt;
+        self.spsr_und = state.spsr_und;
+        self.pipeline_flushed = state.pipeline_flushed;
+        self.halted = state.halted;
+        self.cycles = state.cycles;
     }
 
     /// Set PC and flush the pipeline
