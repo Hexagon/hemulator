@@ -409,4 +409,77 @@ mod tests {
         // Should have cartridge header info
         assert!(system.cartridge_header().is_some());
     }
+
+    #[test]
+    fn test_gba_tile_viewer_data() {
+        let mut system = GbaSystem::default();
+        let rom = create_test_rom();
+        let _ = system.mount("Cartridge", &rom);
+
+        // Get tile viewer data
+        let data = system.get_tile_viewer_data();
+
+        // Check that all memory regions are present
+        assert_eq!(data.vram.len(), 96 * 1024); // 96KB VRAM
+        assert_eq!(data.palette_ram.len(), 1024); // 1KB palette RAM
+        assert_eq!(data.oam.len(), 1024); // 1KB OAM
+        assert_eq!(data.master_palette.len(), 512); // 512 colors converted to RGBA
+
+        // Check that registers are accessible
+        let _dispcnt = data.dispcnt;
+        let _bg0cnt = data.bg0cnt;
+        let _bldcnt = data.bldcnt;
+    }
+
+    #[test]
+    fn test_gba_palette_conversion() {
+        let system = GbaSystem::default();
+        let data = system.get_tile_viewer_data();
+
+        // Each palette entry should be valid RGBA (with alpha = 0xFF)
+        for &color in &data.master_palette {
+            let alpha = (color >> 24) & 0xFF;
+            assert_eq!(alpha, 0xFF, "Alpha channel should be 0xFF");
+        }
+    }
+
+    #[test]
+    fn test_gba_execution_history() {
+        use emu_core::debug::Debugger;
+
+        let system = GbaSystem::default();
+
+        // Should initially not have execution history (disabled by default)
+        assert!(!system.has_execution_history());
+
+        // Should return empty history when disabled
+        let history = system.get_execution_history();
+        assert_eq!(history.len(), 0);
+    }
+
+    #[test]
+    fn test_gba_rom_size() {
+        let mut system = GbaSystem::default();
+        let rom = create_test_rom();
+        let _ = system.mount("Cartridge", &rom);
+
+        assert_eq!(system.rom_size(), rom.len());
+    }
+
+    #[test]
+    fn test_gba_debugger_no_rom() {
+        let system = GbaSystem::default();
+
+        // Should still be able to get tile viewer data with no ROM
+        let data = system.get_tile_viewer_data();
+        assert_eq!(data.vram.len(), 96 * 1024);
+
+        // Should be able to get CPU state with no ROM
+        let state = system.get_cpu_state();
+        assert!(state.registers.iter().any(|r| r.name == "PC"));
+
+        // Should be able to get memory regions with no ROM
+        let regions = system.get_memory_regions();
+        assert!(regions.len() >= 9);
+    }
 }
