@@ -186,10 +186,10 @@ const OBJ_SIZES: [[(u32, u32); 4]; 3] = [
 
 /// Text BG screen size: [size_bits] -> (width_tiles, height_tiles)
 const TEXT_BG_SIZES: [(u32, u32); 4] = [
-    (32, 32),  // 256x256
-    (64, 32),  // 512x256
-    (32, 64),  // 256x512
-    (64, 64),  // 512x512
+    (32, 32), // 256x256
+    (64, 32), // 512x256
+    (32, 64), // 256x512
+    (64, 64), // 512x512
 ];
 
 /// Affine BG screen size: [size_bits] -> side_length_tiles
@@ -218,8 +218,8 @@ enum PixelLayer {
 /// A pixel with its priority and source layer.
 #[derive(Clone, Copy)]
 struct LayerPixel {
-    color: u16,      // 15-bit GBA color (xBBBBBGGGGGRRRRR)
-    priority: u8,    // 0 (highest) - 3 (lowest)
+    color: u16,   // 15-bit GBA color (xBBBBBGGGGGRRRRR)
+    priority: u8, // 0 (highest) - 3 (lowest)
     layer: PixelLayer,
     is_transparent: bool,
     /// OBJ semi-transparent flag (forces alpha blend when set)
@@ -452,14 +452,7 @@ impl Ppu {
     // Text background rendering (Modes 0, 1)
     // =========================================================================
 
-    fn render_text_bg(
-        &mut self,
-        bg_idx: usize,
-        line: u32,
-        io: &[u8],
-        palette: &[u8],
-        vram: &[u8],
-    ) {
+    fn render_text_bg(&mut self, bg_idx: usize, line: u32, io: &[u8], palette: &[u8], vram: &[u8]) {
         let bgcnt = read_io_u16(io, BG0CNT + bg_idx * 2);
         let priority = (bgcnt & BGCNT_PRIORITY_MASK) as u8;
         let tile_base = ((bgcnt & BGCNT_TILE_BASE_MASK) as usize >> 2) * 0x4000;
@@ -494,21 +487,16 @@ impl Ppu {
 
             // Calculate screen block offset for > 32x32 maps
             let screen_block = match (map_w, map_h) {
-                (64, 64) => {
-                    (tile_row / 32) * 2 + tile_col / 32
-                }
-                (64, 32) => {
-                    tile_col / 32
-                }
-                (32, 64) => {
-                    tile_row / 32
-                }
+                (64, 64) => (tile_row / 32) * 2 + tile_col / 32,
+                (64, 32) => tile_col / 32,
+                (32, 64) => tile_row / 32,
                 _ => 0,
             };
             let local_col = tile_col & 31;
             let local_row = tile_row & 31;
 
-            let map_entry_addr = map_base + (screen_block as usize * 0x800)
+            let map_entry_addr = map_base
+                + (screen_block as usize * 0x800)
                 + (local_row as usize * 32 + local_col as usize) * 2;
 
             if map_entry_addr + 1 >= vram.len() {
@@ -613,18 +601,23 @@ impl Ppu {
             (self.bg3_ref_x, self.bg3_ref_y)
         };
 
-        // Get affine parameters (PA, PB are per-pixel increments)
+        // Get affine parameters (PA, PB, PC for horizontal increments)
+        // Affine matrix: [PA PB]   where PA/PB affect X coordinate
+        //                [PC PD]   and   PC/PD affect Y coordinate
         let pa_offset = if bg_idx == 2 { BG2PA } else { BG3PA };
-        let pa = read_io_i16(io, pa_offset) as i32;
-        let pb = read_io_i16(io, pa_offset + 2) as i32;
+        let pa = read_io_i16(io, pa_offset) as i32; // X increment per screen X
+        let pc = read_io_i16(io, pa_offset + 4) as i32; // Y increment per screen X
 
         // Affine BGs are always 8bpp with a single 256-color palette
         for x in 0..SCREEN_WIDTH {
             // Calculate source coordinates using affine matrix
-            // ref_x/ref_y are 28-bit signed fixed point (8.8 shifted left by 8 more)
-            // pa/pb are 16-bit signed fixed point (8.8)
+            // For a horizontal scanline at screen position (x, 0):
+            // src_x = ref_x + pa * x + pb * 0 = ref_x + pa * x
+            // src_y = ref_y + pc * x + pd * 0 = ref_y + pc * x
+            // ref_x/ref_y are 28-bit signed fixed point (20.8)
+            // pa/pb/pc/pd are 16-bit signed fixed point (8.8)
             let src_x = ref_x + pa * x as i32;
-            let src_y = ref_y + pb * x as i32;
+            let src_y = ref_y + pc * x as i32;
 
             // Convert from 8.8 fixed point to integer
             let tex_x = src_x >> 8;
@@ -753,13 +746,7 @@ impl Ppu {
         }
     }
 
-    fn render_bitmap_mode5(
-        &mut self,
-        line: u32,
-        dispcnt: u16,
-        io: &[u8],
-        vram: &[u8],
-    ) {
+    fn render_bitmap_mode5(&mut self, line: u32, dispcnt: u16, io: &[u8], vram: &[u8]) {
         let bgcnt = read_io_u16(io, BG0CNT + 2 * 2);
         let priority = (bgcnt & BGCNT_PRIORITY_MASK) as u8;
         let page = if dispcnt & DISPCNT_FRAME_SELECT != 0 {
@@ -817,8 +804,8 @@ impl Ppu {
                 continue;
             }
 
-            let is_affine = obj_mode == OBJ_ATTR0_MODE_AFFINE
-                || obj_mode == OBJ_ATTR0_MODE_AFFINE_DOUBLE;
+            let is_affine =
+                obj_mode == OBJ_ATTR0_MODE_AFFINE || obj_mode == OBJ_ATTR0_MODE_AFFINE_DOUBLE;
             let double_size = obj_mode == OBJ_ATTR0_MODE_AFFINE_DOUBLE;
 
             let gfx_mode = attr0 & OBJ_ATTR0_GFX_MODE_MASK;
@@ -875,8 +862,7 @@ impl Ppu {
 
                 // For non-affine: apply flips and compute texture coordinates
                 let (tex_x, tex_y) = if is_affine {
-                    let affine_idx =
-                        ((attr1 & OBJ_ATTR1_AFFINE_IDX_MASK) >> 9) as usize;
+                    let affine_idx = ((attr1 & OBJ_ATTR1_AFFINE_IDX_MASK) >> 9) as usize;
                     let pa_offset = affine_idx * 32 + 6;
                     let pb_offset = affine_idx * 32 + 14;
                     let pc_offset = affine_idx * 32 + 22;
@@ -913,11 +899,7 @@ impl Ppu {
                     let tex_x = tex_x + cx;
                     let tex_y = tex_y + cy;
 
-                    if tex_x < 0
-                        || tex_y < 0
-                        || tex_x >= obj_w as i32
-                        || tex_y >= obj_h as i32
-                    {
+                    if tex_x < 0 || tex_y < 0 || tex_x >= obj_w as i32 || tex_y >= obj_h as i32 {
                         continue;
                     }
                     (tex_x as u32, tex_y as u32)
@@ -1027,13 +1009,7 @@ impl Ppu {
     // Layer compositing with priority, windowing, and blending
     // =========================================================================
 
-    fn composite_scanline(
-        &mut self,
-        line: u32,
-        dispcnt: u16,
-        io: &[u8],
-        palette: &[u8],
-    ) {
+    fn composite_scanline(&mut self, line: u32, dispcnt: u16, io: &[u8], palette: &[u8]) {
         let bldcnt = read_io_u16(io, BLDCNT);
         let blend_mode = (bldcnt & BLDCNT_MODE_MASK) >> 6;
 
@@ -1042,9 +1018,8 @@ impl Ppu {
         let evy = (read_io_u16(io, BLDY) & 0x1F).min(16) as u32;
 
         // Window state
-        let use_windows = dispcnt
-            & (DISPCNT_WIN0_ENABLE | DISPCNT_WIN1_ENABLE | DISPCNT_OBJ_WIN_ENABLE)
-            != 0;
+        let use_windows =
+            dispcnt & (DISPCNT_WIN0_ENABLE | DISPCNT_WIN1_ENABLE | DISPCNT_OBJ_WIN_ENABLE) != 0;
 
         let win0_enabled = dispcnt & DISPCNT_WIN0_ENABLE != 0;
         let win1_enabled = dispcnt & DISPCNT_WIN1_ENABLE != 0;
@@ -1087,8 +1062,7 @@ impl Ppu {
             let blend_enabled = win_flags & (1 << 5) != 0;
 
             // Find top two pixels by priority
-            let (top, second) =
-                self.find_top_pixels(x, dispcnt, win_flags, backdrop_color);
+            let (top, second) = self.find_top_pixels(x, dispcnt, win_flags, backdrop_color);
 
             // Apply color effects
             let final_color = if blend_enabled {

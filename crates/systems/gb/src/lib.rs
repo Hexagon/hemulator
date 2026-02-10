@@ -155,7 +155,9 @@
 
 use emu_core::debug::Debugger;
 use emu_core::logging::{log, LogCategory, LogLevel};
-use emu_core::{cpu_lr35902::CpuLr35902, cpu_lr35902::MemoryLr35902, types::Frame, MountPointInfo, System};
+use emu_core::{
+    cpu_lr35902::CpuLr35902, cpu_lr35902::MemoryLr35902, types::Frame, MountPointInfo, System,
+};
 
 mod apu;
 mod boot_rom;

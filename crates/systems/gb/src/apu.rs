@@ -482,7 +482,8 @@ impl GbApu {
 
                 if trigger {
                     self.pulse1.enabled = true;
-                    self.pulse1.set_timer(gb_square_timer(self.pulse1_frequency));
+                    self.pulse1
+                        .set_timer(gb_square_timer(self.pulse1_frequency));
                     self.pulse1_envelope.trigger();
                     self.pulse1_sweep.trigger(self.pulse1_frequency);
 
@@ -529,7 +530,8 @@ impl GbApu {
 
                 if trigger {
                     self.pulse2.enabled = true;
-                    self.pulse2.set_timer(gb_square_timer(self.pulse2_frequency));
+                    self.pulse2
+                        .set_timer(gb_square_timer(self.pulse2_frequency));
                     self.pulse2_envelope.trigger();
 
                     if self.pulse2_length.value() == 0 {
@@ -899,7 +901,12 @@ fn gb_noise_period_index(val: u8) -> u8 {
     best_idx
 }
 
-fn apply_filters(input: f32, prev_input: &mut f32, prev_output: &mut f32, lp_prev: &mut f32) -> i16 {
+fn apply_filters(
+    input: f32,
+    prev_input: &mut f32,
+    prev_output: &mut f32,
+    lp_prev: &mut f32,
+) -> i16 {
     // DC-blocking high-pass filter
     let y = input - *prev_input + (0.995 * *prev_output);
     *prev_input = input;

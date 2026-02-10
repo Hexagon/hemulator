@@ -426,8 +426,7 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
             ProcessorMode::Fiq => {
                 self.fiq_r13_r14 = [self.gpr[13], self.gpr[14]];
                 // Also save FIQ's R8-R12
-                self.fiq_r8_r12
-                    .copy_from_slice(&self.gpr[8..13]);
+                self.fiq_r8_r12.copy_from_slice(&self.gpr[8..13]);
             }
             ProcessorMode::Irq => {
                 self.irq_r13_r14 = [self.gpr[13], self.gpr[14]];
@@ -595,7 +594,7 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
             }
             0x08 => {
                 // Sqrt (unsigned)
-                let n = self.gpr[0] as u32;
+                let n = self.gpr[0];
                 let r = (n as f64).sqrt() as u32;
                 self.gpr[0] = r;
                 true
@@ -712,7 +711,8 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
                 if clear_existing {
                     // Clear the BIOS IF flags for the requested interrupts
                     let current = self.memory.read_word(bios_if_addr);
-                    self.memory.write_word(bios_if_addr, current & !(wait_flags as u32));
+                    self.memory
+                        .write_word(bios_if_addr, current & !(wait_flags as u32));
                 }
 
                 // Check if the requested interrupt is already pending in BIOS flags
@@ -720,7 +720,8 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
                 if bios_flags & wait_flags != 0 {
                     // Clear the matched flags and return immediately
                     let current = self.memory.read_word(bios_if_addr);
-                    self.memory.write_word(bios_if_addr, current & !(wait_flags as u32));
+                    self.memory
+                        .write_word(bios_if_addr, current & !(wait_flags as u32));
                     return true;
                 }
 
@@ -798,13 +799,19 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
                 // HuffUnComp - Huffman decompression
                 // Complex to implement fully; for now log and return
                 log(LogCategory::Stubs, LogLevel::Warn, || {
-                    format!("SWI 0x13 HuffUnComp: stub (src={:08X}, dst={:08X})", self.gpr[0], self.gpr[1])
+                    format!(
+                        "SWI 0x13 HuffUnComp: stub (src={:08X}, dst={:08X})",
+                        self.gpr[0], self.gpr[1]
+                    )
                 });
                 true
             }
             _ => {
                 log(LogCategory::Stubs, LogLevel::Warn, || {
-                    format!("Unhandled BIOS SWI 0x{:02X} at PC={:08X}", imm, self.gpr[15])
+                    format!(
+                        "Unhandled BIOS SWI 0x{:02X} at PC={:08X}",
+                        imm, self.gpr[15]
+                    )
                 });
                 false
             }
@@ -1001,8 +1008,8 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
     fn bios_bg_affine_set(&mut self, mut src: u32, mut dst: u32, count: u32) {
         for _ in 0..count {
             // Source: 20 bytes per entry
-            let orig_cx = self.memory.read_word(src) as i32;      // Original center X (8.8 fixed)
-            let orig_cy = self.memory.read_word(src + 4) as i32;  // Original center Y (8.8 fixed)
+            let orig_cx = self.memory.read_word(src) as i32; // Original center X (8.8 fixed)
+            let orig_cy = self.memory.read_word(src + 4) as i32; // Original center Y (8.8 fixed)
             let disp_cx = self.memory.read_halfword(src + 8) as i16 as i32; // Display center X
             let disp_cy = self.memory.read_halfword(src + 10) as i16 as i32; // Display center Y
             let sx = self.memory.read_halfword(src + 12) as i16 as f64 / 256.0; // Scale X (8.8)
@@ -1148,7 +1155,9 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
     fn check_interrupts(&mut self) -> bool {
         // Check IRQ: must be enabled (I flag clear) and pending from hardware
         if self.cpsr & FLAG_I == 0 && self.memory.irq_pending() {
-            log(LogCategory::Interrupts, LogLevel::Debug, || "ARM7: IRQ taken".to_string());
+            log(LogCategory::Interrupts, LogLevel::Debug, || {
+                "ARM7: IRQ taken".to_string()
+            });
             self.handle_irq();
             return true;
         }
@@ -1167,7 +1176,13 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
     /// - ASR (Arithmetic Shift Right)
     /// - ROR (Rotate Right)
     /// - RRX (Rotate Right Extended, shift amount = 0 with ROR)
-    fn barrel_shift(&self, value: u32, shift_type: u32, amount: u32, carry_in: bool) -> (u32, bool) {
+    fn barrel_shift(
+        &self,
+        value: u32,
+        shift_type: u32,
+        amount: u32,
+        carry_in: bool,
+    ) -> (u32, bool) {
         match shift_type {
             0b00 => {
                 // LSL
@@ -1316,11 +1331,9 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
         let pc = self.gpr[15];
         let instr = self.memory.read_word(pc & !3); // Force word-aligned
 
-        log(
-            LogCategory::CPU,
-            LogLevel::Trace,
-            || format!("ARM: PC={:08X} instr={:08X}", pc, instr),
-        );
+        log(LogCategory::CPU, LogLevel::Trace, || {
+            format!("ARM: PC={:08X} instr={:08X}", pc, instr)
+        });
 
         // Advance PC past this instruction (pipeline)
         self.gpr[15] = pc.wrapping_add(4);
@@ -1359,18 +1372,14 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
 
             // Halfword data transfer (register offset)
             (0b000, bits)
-                if bits & 0b1001 == 0b1001
-                    && bits & 0b0110 != 0
-                    && bits_27_20 & 0xE4 == 0x00 =>
+                if bits & 0b1001 == 0b1001 && bits & 0b0110 != 0 && bits_27_20 & 0xE4 == 0x00 =>
             {
                 self.arm_halfword_transfer(instr);
             }
 
             // Halfword data transfer (immediate offset)
             (0b000, bits)
-                if bits & 0b1001 == 0b1001
-                    && bits & 0b0110 != 0
-                    && bits_27_20 & 0xE4 == 0x04 =>
+                if bits & 0b1001 == 0b1001 && bits & 0b0110 != 0 && bits_27_20 & 0xE4 == 0x04 =>
             {
                 self.arm_halfword_transfer(instr);
             }
@@ -1419,14 +1428,9 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
 
             _ => {
                 // Undefined instruction
-                log(
-                    LogCategory::CPU,
-                    LogLevel::Warn,
-                    || format!(
-                        "ARM: Undefined instruction {:08X} at PC={:08X}",
-                        instr, pc
-                    ),
-                );
+                log(LogCategory::CPU, LogLevel::Warn, || {
+                    format!("ARM: Undefined instruction {:08X} at PC={:08X}", instr, pc)
+                });
                 self.handle_undefined();
                 self.cycles += 1;
             }
@@ -1571,8 +1575,7 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
             if set_flags {
                 // MOVS/SUBS with Rd=PC: restore CPSR from SPSR (exception return)
                 let spsr = self.get_spsr();
-                let new_mode =
-                    ProcessorMode::from_bits(spsr).unwrap_or(ProcessorMode::System);
+                let new_mode = ProcessorMode::from_bits(spsr).unwrap_or(ProcessorMode::System);
                 self.switch_mode(new_mode);
                 self.cpsr = spsr;
             }
@@ -1841,11 +1844,9 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
                     self.memory.read_halfword(addr & !1) as i16 as i32 as u32
                 }
                 _ => {
-                    log(
-                        LogCategory::CPU,
-                        LogLevel::Warn,
-                        || format!("ARM: Invalid halfword transfer op={}", op),
-                    );
+                    log(LogCategory::CPU, LogLevel::Warn, || {
+                        format!("ARM: Invalid halfword transfer op={}", op)
+                    });
                     0
                 }
             };
@@ -2001,11 +2002,7 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
         let use_spsr = instr & (1 << 22) != 0;
         let rd = ((instr >> 12) & 0xF) as usize;
 
-        self.gpr[rd] = if use_spsr {
-            self.get_spsr()
-        } else {
-            self.cpsr
-        };
+        self.gpr[rd] = if use_spsr { self.get_spsr() } else { self.cpsr };
 
         self.cycles += 1;
     }
@@ -2073,11 +2070,9 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
         let pc = self.gpr[15];
         let instr = self.memory.read_halfword(pc & !1) as u32;
 
-        log(
-            LogCategory::CPU,
-            LogLevel::Trace,
-            || format!("THUMB: PC={:08X} instr={:04X}", pc, instr),
-        );
+        log(LogCategory::CPU, LogLevel::Trace, || {
+            format!("THUMB: PC={:08X} instr={:04X}", pc, instr)
+        });
 
         // Advance PC
         self.gpr[15] = pc.wrapping_add(2);
@@ -2138,11 +2133,12 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
                     // Format 14: Push/Pop registers
                     self.thumb_push_pop(instr);
                 } else {
-                    log(
-                        LogCategory::CPU,
-                        LogLevel::Warn,
-                        || format!("THUMB: Undefined instruction {:04X} at PC={:08X}", instr, pc),
-                    );
+                    log(LogCategory::CPU, LogLevel::Warn, || {
+                        format!(
+                            "THUMB: Undefined instruction {:04X} at PC={:08X}",
+                            instr, pc
+                        )
+                    });
                     self.handle_undefined();
                     self.cycles += 1;
                 }
@@ -2162,11 +2158,12 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
                     // Format 16: Conditional branch
                     self.thumb_conditional_branch(instr);
                 } else {
-                    log(
-                        LogCategory::CPU,
-                        LogLevel::Warn,
-                        || format!("THUMB: Undefined instruction {:04X} at PC={:08X}", instr, pc),
-                    );
+                    log(LogCategory::CPU, LogLevel::Warn, || {
+                        format!(
+                            "THUMB: Undefined instruction {:04X} at PC={:08X}",
+                            instr, pc
+                        )
+                    });
                     self.handle_undefined();
                     self.cycles += 1;
                 }
@@ -2871,7 +2868,15 @@ mod tests {
             | op2
     }
 
-    fn arm_encode_imm(cond: u32, opcode: u32, s: bool, rn: u32, rd: u32, rotate: u32, imm: u32) -> u32 {
+    fn arm_encode_imm(
+        cond: u32,
+        opcode: u32,
+        s: bool,
+        rn: u32,
+        rd: u32,
+        rotate: u32,
+        imm: u32,
+    ) -> u32 {
         (cond << 28)
             | (0b001 << 25)
             | (opcode << 21)
@@ -2955,7 +2960,7 @@ mod tests {
     fn test_arm_adds_overflow() {
         let mut cpu = make_cpu();
         cpu.gpr[1] = 0x7FFFFFFF; // Max positive i32
-        // ADDS R0, R1, #1
+                                 // ADDS R0, R1, #1
         let instr = arm_encode_imm(COND_AL, 0x4, true, 1, 0, 0, 1);
         cpu.memory.write_word_at(0, instr);
         cpu.step();
@@ -3041,7 +3046,7 @@ mod tests {
     fn test_arm_bx_to_thumb() {
         let mut cpu = make_cpu();
         cpu.gpr[0] = 0x101; // Bit 0 set = switch to Thumb
-        // BX R0: 0xE12FFF10
+                            // BX R0: 0xE12FFF10
         let instr: u32 = 0xE12FFF10;
         cpu.memory.write_word_at(0, instr);
         cpu.step();

@@ -1202,7 +1202,6 @@ impl Ppu {
         (vblank_started, stat_interrupt, hblank_entered)
     }
 
-
     /// Update the PPU mode bits in STAT register and check for STAT interrupt
     ///
     /// The mode is determined by:

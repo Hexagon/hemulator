@@ -111,12 +111,7 @@ const SRC_ADDR_MASK: [u32; NUM_CHANNELS] = [0x07FF_FFFF, 0x0FFF_FFFF, 0x0FFF_FFF
 
 /// Destination address masks per channel
 /// DMA0-2: 27-bit (internal only), DMA3: 28-bit
-const DST_ADDR_MASK: [u32; NUM_CHANNELS] = [
-    0x07FF_FFFF,
-    0x07FF_FFFF,
-    0x07FF_FFFF,
-    0x0FFF_FFFF,
-];
+const DST_ADDR_MASK: [u32; NUM_CHANNELS] = [0x07FF_FFFF, 0x07FF_FFFF, 0x07FF_FFFF, 0x0FFF_FFFF];
 
 /// A single DMA channel's state
 #[derive(Debug, Clone)]
@@ -186,9 +181,7 @@ impl DmaChannel {
 
     /// Get destination address control mode
     fn dest_control(&self) -> AddrControl {
-        AddrControl::from_bits(
-            ((self.control & CTRL_DEST_ADDR_MASK) >> CTRL_DEST_ADDR_SHIFT) as u8,
-        )
+        AddrControl::from_bits(((self.control & CTRL_DEST_ADDR_MASK) >> CTRL_DEST_ADDR_SHIFT) as u8)
     }
 
     /// Get source address control mode
@@ -335,9 +328,9 @@ impl Dma {
     /// need to run. Called after writes to DMA control registers to trigger
     /// immediate transfers.
     pub fn has_pending_immediate(&self) -> bool {
-        self.channels.iter().any(|ch| {
-            ch.active && ch.enabled() && ch.start_timing() == DmaStartTiming::Immediate
-        })
+        self.channels
+            .iter()
+            .any(|ch| ch.active && ch.enabled() && ch.start_timing() == DmaStartTiming::Immediate)
     }
 
     /// Trigger DMA channels for a specific timing event.
@@ -839,8 +832,7 @@ mod tests {
         dma.channels[0].dst_addr = 0x200;
         dma.channels[0].word_count = 4;
         // Src decrement, 16-bit
-        dma.channels[0].control =
-            CTRL_ENABLE | (1 << CTRL_SRC_ADDR_SHIFT); // src = decrement
+        dma.channels[0].control = CTRL_ENABLE | (1 << CTRL_SRC_ADDR_SHIFT); // src = decrement
         dma.channels[0].active = true;
 
         dma.execute_pending(
@@ -865,8 +857,7 @@ mod tests {
         dma.channels[0].dst_addr = 0x200;
         dma.channels[0].word_count = 3;
         // Dst fixed (mode 2), 16-bit
-        dma.channels[0].control =
-            CTRL_ENABLE | (2 << CTRL_DEST_ADDR_SHIFT); // dest = fixed
+        dma.channels[0].control = CTRL_ENABLE | (2 << CTRL_DEST_ADDR_SHIFT); // dest = fixed
         dma.channels[0].active = true;
 
         dma.execute_pending(
@@ -891,8 +882,7 @@ mod tests {
         dma.channels[0].dst_addr = 0x200;
         dma.channels[0].word_count = 2;
         dma.channels[0].word_count_reg = 2;
-        dma.channels[0].control = CTRL_ENABLE | CTRL_REPEAT
-            | (1 << CTRL_START_TIMING_SHIFT); // VBlank timing
+        dma.channels[0].control = CTRL_ENABLE | CTRL_REPEAT | (1 << CTRL_START_TIMING_SHIFT); // VBlank timing
         dma.channels[0].active = true;
 
         let (_, _) = dma.execute_pending(|_| 0, |_| 0, |_, _| {}, |_, _| {});
@@ -908,8 +898,7 @@ mod tests {
         let mut dma = Dma::new();
 
         // Setup DMA0 with VBlank timing
-        dma.channels[0].control = CTRL_ENABLE
-            | (1 << CTRL_START_TIMING_SHIFT); // VBlank
+        dma.channels[0].control = CTRL_ENABLE | (1 << CTRL_START_TIMING_SHIFT); // VBlank
         dma.channels[0].word_count_reg = 4;
         dma.channels[0].src_addr = 0x100;
         dma.channels[0].dst_addr = 0x200;
@@ -925,8 +914,7 @@ mod tests {
         let mut dma = Dma::new();
 
         // Setup DMA2 with HBlank timing
-        dma.channels[2].control = CTRL_ENABLE
-            | (2 << CTRL_START_TIMING_SHIFT); // HBlank
+        dma.channels[2].control = CTRL_ENABLE | (2 << CTRL_START_TIMING_SHIFT); // HBlank
         dma.channels[2].word_count = 4;
 
         dma.notify_timing(DmaStartTiming::HBlank);
@@ -1053,12 +1041,7 @@ mod tests {
         dma.channels[0].active = true;
 
         // First transfer
-        dma.execute_pending(
-            |_| 0,
-            |_| 0,
-            |addr, _| write_addrs.push(addr),
-            |_, _| {},
-        );
+        dma.execute_pending(|_| 0, |_| 0, |addr, _| write_addrs.push(addr), |_, _| {});
 
         // Dest should have incremented
         assert_eq!(write_addrs, vec![0x200, 0x202]);

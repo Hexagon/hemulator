@@ -166,7 +166,7 @@ impl Dsp1 {
         match command {
             Dsp1Command::Multiply => 4,           // 1x 32-bit result
             Dsp1Command::MultiplyAccumulate => 4, // 1x 32-bit result
-            Dsp1Command::Parameter => 0,           // No direct output
+            Dsp1Command::Parameter => 0,          // No direct output
             Dsp1Command::Inverse => 2,            // 1x 16-bit result
             Dsp1Command::Attitude => 8,           // 4x 16-bit sin/cos values (simplified)
             Dsp1Command::Gyrate => 4,             // 2x 16-bit coordinates

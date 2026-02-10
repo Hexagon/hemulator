@@ -1082,9 +1082,8 @@ impl TabManager {
                             .changed();
 
                         if changed {
-                            self.pending_debug_action = Some(DebugAction::SetGbAudioChannels(
-                                self.gb_audio_channels,
-                            ));
+                            self.pending_debug_action =
+                                Some(DebugAction::SetGbAudioChannels(self.gb_audio_channels));
                         }
                     });
             }

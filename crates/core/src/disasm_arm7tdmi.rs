@@ -4,8 +4,7 @@
 
 /// Condition code suffix strings
 const COND_NAMES: [&str; 16] = [
-    "EQ", "NE", "CS", "CC", "MI", "PL", "VS", "VC", "HI", "LS", "GE", "LT", "GT", "LE", "",
-    "NV",
+    "EQ", "NE", "CS", "CC", "MI", "PL", "VS", "VC", "HI", "LS", "GE", "LT", "GT", "LE", "", "NV",
 ];
 
 /// Data processing opcode names
@@ -19,8 +18,8 @@ const SHIFT_NAMES: [&str; 4] = ["LSL", "LSR", "ASR", "ROR"];
 
 /// Register names
 const REG_NAMES: [&str; 16] = [
-    "R0", "R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8", "R9", "R10", "R11", "R12", "SP",
-    "LR", "PC",
+    "R0", "R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8", "R9", "R10", "R11", "R12", "SP", "LR",
+    "PC",
 ];
 
 /// Disassemble a single ARM (32-bit) instruction.
@@ -79,11 +78,7 @@ pub fn disassemble_arm(instr: u32, pc: u32) -> String {
         } else {
             return format!(
                 "MUL{}{} {}, {}, {}",
-                cond_str,
-                s,
-                REG_NAMES[rd as usize],
-                REG_NAMES[rm as usize],
-                REG_NAMES[rs as usize]
+                cond_str, s, REG_NAMES[rd as usize], REG_NAMES[rm as usize], REG_NAMES[rs as usize]
             );
         }
     }
@@ -172,19 +167,13 @@ pub fn disassemble_arm(instr: u32, pc: u32) -> String {
             let rm = instr & 0xF;
             return format!(
                 "MSR{} {}_{}, {}",
-                cond_str,
-                psr,
-                fields,
-                REG_NAMES[rm as usize]
+                cond_str, psr, fields, REG_NAMES[rm as usize]
             );
         }
     }
 
     // Halfword/Signed data transfer
-    if (bits_7_4 & 0b1001) == 0b1001
-        && (bits_7_4 & 0b0110) != 0
-        && (instr >> 26) & 0x3 == 0
-    {
+    if (bits_7_4 & 0b1001) == 0b1001 && (bits_7_4 & 0b0110) != 0 && (instr >> 26) & 0x3 == 0 {
         let pre = instr & (1 << 24) != 0;
         let up = instr & (1 << 23) != 0;
         let imm_offset = instr & (1 << 22) != 0;
@@ -211,32 +200,19 @@ pub fn disassemble_arm(instr: u32, pc: u32) -> String {
             }
         } else {
             let rm = instr & 0xF;
-            format!(
-                ", {}{}",
-                if up { "" } else { "-" },
-                REG_NAMES[rm as usize]
-            )
+            format!(", {}{}", if up { "" } else { "-" }, REG_NAMES[rm as usize])
         };
 
         let wb = if write_back && pre { "!" } else { "" };
         if pre {
             return format!(
                 "{}{} {}, [{}{}]{}",
-                name,
-                cond_str,
-                REG_NAMES[rd as usize],
-                REG_NAMES[rn as usize],
-                offset_str,
-                wb
+                name, cond_str, REG_NAMES[rd as usize], REG_NAMES[rn as usize], offset_str, wb
             );
         } else {
             return format!(
                 "{}{} {}, [{}]{}",
-                name,
-                cond_str,
-                REG_NAMES[rd as usize],
-                REG_NAMES[rn as usize],
-                offset_str
+                name, cond_str, REG_NAMES[rd as usize], REG_NAMES[rn as usize], offset_str
             );
         }
     }
@@ -256,31 +232,19 @@ pub fn disassemble_arm(instr: u32, pc: u32) -> String {
         if (0x8..=0xB).contains(&opcode) {
             return format!(
                 "{}{} {}, {}",
-                name,
-                cond_str,
-                REG_NAMES[rn as usize],
-                op2_str
+                name, cond_str, REG_NAMES[rn as usize], op2_str
             );
         }
         // MOV, MVN don't use Rn
         if opcode == 0xD || opcode == 0xF {
             return format!(
                 "{}{}{} {}, {}",
-                name,
-                cond_str,
-                s,
-                REG_NAMES[rd as usize],
-                op2_str
+                name, cond_str, s, REG_NAMES[rd as usize], op2_str
             );
         }
         return format!(
             "{}{}{} {}, {}, {}",
-            name,
-            cond_str,
-            s,
-            REG_NAMES[rd as usize],
-            REG_NAMES[rn as usize],
-            op2_str
+            name, cond_str, s, REG_NAMES[rd as usize], REG_NAMES[rn as usize], op2_str
         );
     }
 
@@ -319,10 +283,7 @@ pub fn disassemble_arm(instr: u32, pc: u32) -> String {
             } else {
                 format!(
                     ", {}{}, {} #{}",
-                    sign,
-                    REG_NAMES[rm as usize],
-                    SHIFT_NAMES[shift_type as usize],
-                    shift_amount
+                    sign, REG_NAMES[rm as usize], SHIFT_NAMES[shift_type as usize], shift_amount
                 )
             }
         };
@@ -331,19 +292,12 @@ pub fn disassemble_arm(instr: u32, pc: u32) -> String {
         if pre {
             return format!(
                 "{} {}, [{}{}]{}",
-                name,
-                REG_NAMES[rd as usize],
-                REG_NAMES[rn as usize],
-                offset_str,
-                wb
+                name, REG_NAMES[rd as usize], REG_NAMES[rn as usize], offset_str, wb
             );
         } else {
             return format!(
                 "{} {}, [{}]{}",
-                name,
-                REG_NAMES[rd as usize],
-                REG_NAMES[rn as usize],
-                offset_str
+                name, REG_NAMES[rd as usize], REG_NAMES[rn as usize], offset_str
             );
         }
     }
@@ -377,11 +331,7 @@ pub fn disassemble_arm(instr: u32, pc: u32) -> String {
         let s = if psr { "^" } else { "" };
         return format!(
             "{} {}{}, {{{}}}{}",
-            name,
-            REG_NAMES[rn as usize],
-            wb,
-            regs,
-            s
+            name, REG_NAMES[rn as usize], wb, regs, s
         );
     }
 
@@ -422,10 +372,7 @@ pub fn disassemble_thumb(instr: u16, pc: u32) -> String {
         } else {
             return format!(
                 "{} {}, {}, {}",
-                name,
-                REG_NAMES[rd as usize],
-                REG_NAMES[rs as usize],
-                REG_NAMES[rn_imm as usize]
+                name, REG_NAMES[rd as usize], REG_NAMES[rs as usize], REG_NAMES[rn_imm as usize]
             );
         }
     }
@@ -483,24 +430,9 @@ pub fn disassemble_thumb(instr: u16, pc: u32) -> String {
         let rs = ((h2 << 3) | ((instr >> 3) & 0x7)) & 0xF;
         let rd = ((h1 << 3) | (instr & 0x7)) & 0xF;
         match op {
-            0 => {
-                return format!(
-                    "ADD {}, {}",
-                    REG_NAMES[rd as usize], REG_NAMES[rs as usize]
-                )
-            }
-            1 => {
-                return format!(
-                    "CMP {}, {}",
-                    REG_NAMES[rd as usize], REG_NAMES[rs as usize]
-                )
-            }
-            2 => {
-                return format!(
-                    "MOV {}, {}",
-                    REG_NAMES[rd as usize], REG_NAMES[rs as usize]
-                )
-            }
+            0 => return format!("ADD {}, {}", REG_NAMES[rd as usize], REG_NAMES[rs as usize]),
+            1 => return format!("CMP {}, {}", REG_NAMES[rd as usize], REG_NAMES[rs as usize]),
+            2 => return format!("MOV {}, {}", REG_NAMES[rd as usize], REG_NAMES[rs as usize]),
             3 => return format!("BX {}", REG_NAMES[rs as usize]),
             _ => unreachable!(),
         }
@@ -532,10 +464,7 @@ pub fn disassemble_thumb(instr: u16, pc: u32) -> String {
         };
         return format!(
             "{} {}, [{}, {}]",
-            name,
-            REG_NAMES[rd as usize],
-            REG_NAMES[rb as usize],
-            REG_NAMES[ro as usize]
+            name, REG_NAMES[rd as usize], REG_NAMES[rb as usize], REG_NAMES[ro as usize]
         );
     }
 
@@ -554,10 +483,7 @@ pub fn disassemble_thumb(instr: u16, pc: u32) -> String {
         };
         return format!(
             "{} {}, [{}, {}]",
-            name,
-            REG_NAMES[rd as usize],
-            REG_NAMES[rb as usize],
-            REG_NAMES[ro as usize]
+            name, REG_NAMES[rd as usize], REG_NAMES[rb as usize], REG_NAMES[ro as usize]
         );
     }
 
@@ -577,10 +503,7 @@ pub fn disassemble_thumb(instr: u16, pc: u32) -> String {
         let actual_offset = if byte { offset } else { offset << 2 };
         return format!(
             "{} {}, [{}, #0x{:X}]",
-            name,
-            REG_NAMES[rd as usize],
-            REG_NAMES[rb as usize],
-            actual_offset
+            name, REG_NAMES[rd as usize], REG_NAMES[rb as usize], actual_offset
         );
     }
 
@@ -593,10 +516,7 @@ pub fn disassemble_thumb(instr: u16, pc: u32) -> String {
         let name = if is_load { "LDRH" } else { "STRH" };
         return format!(
             "{} {}, [{}, #0x{:X}]",
-            name,
-            REG_NAMES[rd as usize],
-            REG_NAMES[rb as usize],
-            offset
+            name, REG_NAMES[rd as usize], REG_NAMES[rb as usize], offset
         );
     }
 
@@ -716,9 +636,7 @@ fn format_shifter_operand(instr: u32) -> String {
             let rs = (instr >> 8) & 0xF;
             format!(
                 "{}, {} {}",
-                REG_NAMES[rm as usize],
-                SHIFT_NAMES[shift_type as usize],
-                REG_NAMES[rs as usize]
+                REG_NAMES[rm as usize], SHIFT_NAMES[shift_type as usize], REG_NAMES[rs as usize]
             )
         } else {
             let amount = (instr >> 7) & 0x1F;
@@ -730,9 +648,7 @@ fn format_shifter_operand(instr: u32) -> String {
                 let actual_amount = if amount == 0 { 32 } else { amount };
                 format!(
                     "{}, {} #{}",
-                    REG_NAMES[rm as usize],
-                    SHIFT_NAMES[shift_type as usize],
-                    actual_amount
+                    REG_NAMES[rm as usize], SHIFT_NAMES[shift_type as usize], actual_amount
                 )
             }
         }
