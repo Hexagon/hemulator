@@ -4067,7 +4067,7 @@ fn main() {
                         let cart_data = egui_ui::CartridgeData {
                             system_name: "GBA".to_string(),
                             crc32: 0, // TODO: Calculate CRC32 if needed
-                            rom_size: s.cpu.memory.rom.len(),
+                            rom_size: s.rom_size(),
                             nes_mapper: None,
                             nes_submapper: None,
                             nes_mapper_name: None,
@@ -4080,7 +4080,10 @@ fn main() {
                             nes_header_mirroring: None,
                             nes_db_mapper_override: false,
                             nes_db_mirroring_override: false,
-                            nes_board_name: Some(format!("{} - {}", header.title, header.game_code)),
+                            nes_board_name: Some(format!(
+                                "{} - {}",
+                                header.title, header.game_code
+                            )),
                             snes_has_smc_header: None,
                             snes_mapping_mode: None,
                             snes_chip_type: None,

@@ -115,7 +115,7 @@ pub struct GbaTileData {
     pub oam: Vec<u8>,
     /// Master palette converted to RGBA for display
     pub master_palette: Vec<u32>,
-    
+
     // PPU state registers
     /// DISPCNT - Display Control
     pub dispcnt: u16,

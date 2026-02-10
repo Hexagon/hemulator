@@ -493,7 +493,7 @@ pub struct TileViewerData {
     pub oam: Vec<u8>,
     /// Converted master palette for display (512 colors as RGBA)
     pub master_palette: Vec<u32>,
-    
+
     // PPU state registers
     /// DISPCNT - Display Control
     pub dispcnt: u16,
@@ -570,6 +570,11 @@ impl GbaSystem {
         self.header.as_ref()
     }
 
+    /// Get the loaded ROM size in bytes
+    pub fn rom_size(&self) -> usize {
+        self.cpu.memory.rom.len()
+    }
+
     /// Get tile viewer data for debugging PPU graphics.
     ///
     /// Provides VRAM, palette RAM, OAM, and PPU state for the inspector.
@@ -577,10 +582,7 @@ impl GbaSystem {
         // Helper to read 16-bit I/O register
         let read_io_u16 = |offset: usize| -> u16 {
             if offset + 1 < self.cpu.memory.io.len() {
-                u16::from_le_bytes([
-                    self.cpu.memory.io[offset],
-                    self.cpu.memory.io[offset + 1],
-                ])
+                u16::from_le_bytes([self.cpu.memory.io[offset], self.cpu.memory.io[offset + 1]])
             } else {
                 0
             }
