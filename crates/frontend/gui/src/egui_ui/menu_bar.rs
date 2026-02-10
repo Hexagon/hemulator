@@ -137,6 +137,11 @@ impl MenuBar {
                         ui.close();
                     }
 
+                    if ui.button("GBA").on_hover_text("Game Boy Advance").clicked() {
+                        self.pending_action = Some(MenuAction::NewProjectSystem("GBA".to_string()));
+                        ui.close();
+                    }
+
                     if ui
                         .button("Atari 2600")
                         .on_hover_text("Atari 2600")

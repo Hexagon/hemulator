@@ -25,6 +25,7 @@
 //! - https://problemkaputt.de/fullsnes.htm#snesextdspdsp1dsp1adsp1b
 
 use super::{ChipType, EnhancementChip};
+use emu_core::logging::{log, LogCategory, LogLevel};
 use serde::{Deserialize, Serialize};
 use std::f64::consts::PI;
 
@@ -36,6 +37,8 @@ enum Dsp1Command {
     Multiply = 0x00,
     /// Multiply and accumulate
     MultiplyAccumulate = 0x01,
+    /// Parameter setup (projection/camera state)
+    Parameter = 0x02,
     /// Inverse (1/x)
     Inverse = 0x04,
     /// Attitude (rotation/scaling)
@@ -112,6 +115,8 @@ pub struct Dsp1 {
     expected_params: usize,
     /// Number of output bytes for current command
     output_size: usize,
+    /// Cached parameter words for projection/target operations
+    param_words: [i16; 16],
 }
 
 impl Default for Dsp1 {
@@ -125,6 +130,7 @@ impl Default for Dsp1 {
             output_pos: 0,
             expected_params: 0,
             output_size: 0,
+            param_words: [0; 16],
         }
     }
 }
@@ -140,6 +146,7 @@ impl Dsp1 {
         match command {
             Dsp1Command::Multiply => 4,           // 2x 16-bit values
             Dsp1Command::MultiplyAccumulate => 4, // 2x 16-bit values
+            Dsp1Command::Parameter => 32,         // 16x 16-bit parameters
             Dsp1Command::Inverse => 2,            // 1x 16-bit value
             Dsp1Command::Attitude => 8,           // 4x 16-bit angles
             Dsp1Command::Gyrate => 6,             // 3x 16-bit values
@@ -159,6 +166,7 @@ impl Dsp1 {
         match command {
             Dsp1Command::Multiply => 4,           // 1x 32-bit result
             Dsp1Command::MultiplyAccumulate => 4, // 1x 32-bit result
+            Dsp1Command::Parameter => 0,          // No direct output
             Dsp1Command::Inverse => 2,            // 1x 16-bit result
             Dsp1Command::Attitude => 8,           // 4x 16-bit sin/cos values (simplified)
             Dsp1Command::Gyrate => 4,             // 2x 16-bit coordinates
@@ -217,6 +225,12 @@ impl Dsp1 {
                 let a = self.read_s16(0) as i32;
                 let b = self.read_s16(2) as i32;
                 self.write_s32(0, a * b);
+            }
+            Dsp1Command::Parameter => {
+                // Cache 16 parameter words for projection-related commands.
+                for i in 0..16 {
+                    self.param_words[i] = self.read_s16(i * 2);
+                }
             }
             Dsp1Command::Inverse => {
                 let value = self.read_s16(0);
@@ -398,10 +412,21 @@ impl Dsp1 {
                 self.input_pos = 0;
                 self.output_pos = 0;
 
+                log(LogCategory::Bus, LogLevel::Debug, || {
+                    format!(
+                        "DSP-1: cmd=0x{:02X} params={} output={} state=WaitingForCommand",
+                        value, self.expected_params, self.output_size
+                    )
+                });
+
                 if self.expected_params == 0 {
                     // No parameters needed, execute immediately
                     self.execute_command();
-                    self.state = Dsp1State::WritingOutput;
+                    if self.output_size == 0 {
+                        self.state = Dsp1State::WaitingForCommand;
+                    } else {
+                        self.state = Dsp1State::WritingOutput;
+                    }
                 } else {
                     self.state = Dsp1State::ReadingParameters;
                 }
@@ -415,7 +440,24 @@ impl Dsp1 {
                     if self.input_pos >= self.expected_params {
                         // All parameters received, execute command
                         self.execute_command();
-                        self.state = Dsp1State::WritingOutput;
+                        if self.output_size == 0 {
+                            self.state = Dsp1State::WaitingForCommand;
+                        } else {
+                            self.state = Dsp1State::WritingOutput;
+                        }
+
+                        log(LogCategory::Bus, LogLevel::Debug, || {
+                            format!(
+                                "DSP-1: cmd=0x{:02X} params done, output={}, next_state={}",
+                                self.command,
+                                self.output_size,
+                                if self.output_size == 0 {
+                                    "WaitingForCommand"
+                                } else {
+                                    "WritingOutput"
+                                }
+                            )
+                        });
                     }
                 }
             }
@@ -497,6 +539,7 @@ impl EnhancementChip for Dsp1 {
         self.output_pos = 0;
         self.expected_params = 0;
         self.output_size = 0;
+        self.param_words = [0; 16];
     }
 
     fn chip_type(&self) -> ChipType {

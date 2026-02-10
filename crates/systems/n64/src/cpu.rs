@@ -12,7 +12,7 @@ use emu_core::logging::{log, LogCategory, LogLevel};
 /// - Bit 11 (IM3): 1 = Allow interrupt line 3 (VI interrupt)
 /// - Bits 28-29 (CU0, CU1): 1 = Coprocessors enabled
 #[allow(dead_code)] // Used in tests
-pub const CP0_STATUS_COMMERCIAL_BOOT: u64 = 0x34000801; // 0x34000000 | 0x01 (IE) | 0x800 (IM3)
+pub const CP0_STATUS_COMMERCIAL_BOOT: u64 = 0x34000000; // CU0, CU1 enabled; IE=0 (game enables interrupts after installing handler)
 
 /// CP0_CONFIG register value for commercial ROM boot
 /// Standard configuration used by IPL3 bootloader

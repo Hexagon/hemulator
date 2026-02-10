@@ -55,6 +55,44 @@ This file tracks unimplemented features, stubs, and simplified implementations a
 
 ### High
 
+#### NES (Nintendo Entertainment System)
+- [ ] **Mapper 1 (MMC1) Game Compatibility Issues**: Debug and fix Mapper 1 games that hang or don't display - `crates/systems/nes/src/mappers/mmc1.rs`
+  - Current: Comprehensive MMC1 implementation with 11 passing tests, but some games hang or show gray screen
+  - Reported issues: #307 (Rad Racer hangs), #324 (Mike Tyson's Punch-Out gray screen), #363 (Rad Racer rendering)
+  - Possible causes: Consecutive write filtering (line 126), bank switching edge cases, or integration with NES bus
+  - Needed: Test with actual Mapper 1 ROMs, enable debug logging, compare with known-good emulator
+  - Impact: Affects ~30% of NES library including Zelda, Mega Man, Final Fantasy, Metroid
+  - Note: Implementation appears correct based on code review, issue may be in edge cases or timing
+
+#### GBA (Game Boy Advance)
+- [ ] **Audio (APU)**: Implement APU audio - `crates/systems/gba/src/lib.rs`
+  - Current: CPU/PPU/DMA/timers/debugger/save states implemented; audio missing
+  - Needed: APU channels, mixer, and audio output
+  - Impact: No sound support
+- [x] **Save States**: Implement save state serialization - `crates/systems/gba/src/lib.rs:714-905`
+  - **FIXED**: Full save state serialization/deserialization implemented
+  - CPU state: All 16 GPRs, CPSR, all banked registers (FIQ/IRQ/SVC/ABT/UND/USR), all SPSRs
+  - Memory state: EWRAM, IWRAM, I/O registers, Palette RAM, VRAM, OAM, SRAM (base64 encoded)
+  - PPU state: Affine reference points for BG2/BG3
+  - Interrupt state: IME, IE, IF flags
+  - Impact: Full save/load support for GBA games
+- [x] **Exception Handlers**: Implement missing CPU exception handlers - `crates/core/src/cpu_arm7tdmi.rs:1338-1371`
+  - **FIXED**: FIQ, Prefetch Abort, and Data Abort handlers implemented
+  - FIQ: Fast interrupt handler with proper mode switch and flag disable
+  - Prefetch Abort: Handles instruction fetch failures (LR = failed_addr + 4)
+  - Data Abort: Handles memory access faults (LR = faulting_addr + 8)
+  - All exception handlers properly save CPSR, switch modes, and jump to vectors
+  - Added comprehensive tests for exception handlers and register banking
+  - Impact: Complete ARM7TDMI exception handling support
+- [x] **BIOS SWI HuffUnComp**: Implement Huffman decompression - `crates/core/src/cpu_arm7tdmi.rs:1125-1232`
+  - **FIXED**: Full Huffman decompression (SWI 0x13) implemented
+  - Supports 4-bit and 8-bit data widths
+  - Binary tree traversal: 0 bit = left child, 1 bit = right child
+  - Tree format: Internal nodes (bit 7=1) with offset, leaf nodes (bit 7=0) with data
+  - Proper header parsing: compression type, decompressed size, tree structure
+  - Impact: Games using Huffman compression can now decompress assets correctly
+  - Reference: GBATEK BIOS Decompression Functions
+
 #### NES (Nintendo Entertainment System) - Completed
 - [x] **APU Non-Linear Mixing**: Implement hardware-accurate mixer impedance curves - `crates/systems/nes/src/apu.rs:609-880`
   - **FIXED**: Implemented hardware-accurate non-linear mixing formulas
@@ -82,6 +120,25 @@ This file tracks unimplemented features, stubs, and simplified implementations a
 
 
 ### Medium
+
+#### Atari 2600
+- [ ] **TIA Rendering and HMOVE Timing**: Fix horizontal positioning and rendering issues - `crates/systems/atari2600/src/tia.rs`
+  - Current: Multiple rendering and control issues reported in #305
+  - Issues: Background compressed/duplicated horizontally, player sprite not moveable sideways, ball movement glitches
+  - Root causes: HMOVE timing incorrect, playfield mirroring/repeat logic wrong, sprite positioning broken
+  - Needed: 
+    - Fix HMOVE strobe timing during horizontal blank
+    - Correct playfield rendering (PF0/PF1/PF2 pattern handling)
+    - Fix player/missile/ball horizontal position counters
+    - Implement proper HMP0/HMP1 register application
+  - Impact: System is currently mostly non-functional for gameplay
+  - Reference: ATARI_2600_REVIEW_SUMMARY.md, Stella Programmer's Guide, TIA Hardware Manual
+
+#### Game Boy (DMG)
+- [ ] **Sprite Per-Scanline Limit**: Restore hardware-accurate 10-sprite limit for DMG - `crates/systems/gb/src/ppu.rs`
+  - Current: DMG limit relaxed to 40 sprites per scanline for compatibility
+  - Needed: Accurate OAM selection (10 sprites) with proper timing so games don't flicker
+  - Impact: Fixes sprite flicker hacks while keeping correct hardware behavior
 
 #### Debugger/Tracing System
 
@@ -300,6 +357,21 @@ This file tracks unimplemented features, stubs, and simplified implementations a
 
 ### Low
 
+#### GBA (Game Boy Advance) - Low Priority
+
+- [ ] **Per-Sprite Mosaic**: Implement per-sprite mosaic flag - `crates/systems/gba/src/ppu.rs:1023`
+  - Current: OBJ mosaic uses global setting only; attr0 mosaic bit ignored
+  - Needed: Track and apply mosaic per-sprite based on attr0 bit 12
+  - Impact: Sprites incorrectly share global mosaic settings
+- [ ] **HBlank OAM Access Restriction**: Restrict OAM access during HBlank - `crates/systems/gba/src/ppu.rs:91`
+  - Current: OAM accessible at all times
+  - Needed: Hardware restricts OAM writes during HBlank period
+  - Impact: Games relying on this restriction may have rendering glitches
+- [ ] **LDM/STM User Bank Enforcement**: Handle S bit in LDM/STM - `crates/core/src/cpu_arm7tdmi.rs:1922`
+  - Current: S bit (force user banks) not enforced in LDM/STM instructions
+  - Needed: Load/store from user mode registers in privileged modes when S=1
+  - Impact: Very rare edge case, most games don't use this feature
+
 #### Debugger/Tracing System
 
 - [ ] **JSON Debug Dump Export**: Add JSON format option for debug dumps - `crates/frontend/gui/src/main.rs:1993-2179`
@@ -431,11 +503,11 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Note: Advanced feature, low priority as basic mapper functionality works
 
 #### SNES - Enhancement Chips
-- [ ] **DSP-1 Full Hardware Accuracy**: Implement Parameter command and shared projection state - `crates/systems/snes/src/coprocessors/dsp1.rs`
-  - Current: Simplified implementations of Attitude, Target, Rotate commands
-  - Needed: Parameter command (0x02) to set up shared projection matrices and camera parameters
-  - Impact: Current implementation sufficient for basic compatibility; full accuracy needed for advanced DSP-1 features
-  - Note: Target and Attitude commands use simplified transformations without shared state
+- [ ] **DSP-1 Full Hardware Accuracy**: Complete projection math for Parameter/Target/Attitude - `crates/systems/snes/src/coprocessors/dsp1.rs`
+  - Current: Parameter command (0x02) is accepted and cached; Attitude/Target/Rotate remain simplified
+  - Needed: Use cached parameters to build projection matrices and apply accurate Target/Attitude math
+  - Impact: Basic DSP-1 games may run, but advanced projection scenes can still break or hang
+  - Note: Target and Attitude commands still use simplified transformations without shared state
   - Reference: bsnes/sfc/coprocessor/dsp1/dsp1emu.cpp (parameter, target, attitude functions)
 
 #### SNES - Audio
@@ -600,11 +672,11 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Note: IR mode register write is silently ignored (line 99-100)
 
 #### CHIP-8
-- [ ] **Audio Beep Tone**: Implement sound timer beep - `crates/frontend/gui/src/main.rs:602`
-  - Current: Returns silence (vec![0; count]) instead of beep tone
-  - Needed: Generate simple beep tone when sound timer is non-zero
-  - Impact: CHIP-8/Super-CHIP/XO-CHIP games have no audio feedback
-  - Note: CHIP-8 has only one audio feature - a simple beep tone
+- [x] **Audio Beep Tone**: Implement sound timer beep - `crates/frontend/gui/src/main.rs:626-651`
+  - **COMPLETED**: 440Hz square wave generated when sound timer is active
+  - Implementation: Simple square wave with moderate amplitude (3000) to avoid clipping
+  - Impact: CHIP-8/Super-CHIP/XO-CHIP games now have audio feedback
+  - Future Enhancement: Could add phase continuity across audio buffers for smoother transitions
 
 #### GUI / Frontend
 - [ ] **Mouse Button Support**: Implement mouse input handling - `crates/frontend/gui/src/input_mapper.rs:51`

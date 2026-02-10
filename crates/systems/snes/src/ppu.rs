@@ -2121,6 +2121,13 @@ impl Ppu {
         pending
     }
 
+    /// If NMI is enabled during VBlank, trigger a pending NMI immediately.
+    pub fn notify_nmi_enable(&mut self, enabled: bool) {
+        if enabled && self.nmi_flag.get() {
+            self.nmi_pending = true;
+        }
+    }
+
     /// Clear NMI flag (called when $4210 is read)
     /// Note: Reading $213F also clears the flag, but that's handled in read_register
     pub fn clear_nmi_flag(&self) {

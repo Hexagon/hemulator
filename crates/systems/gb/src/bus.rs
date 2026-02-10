@@ -180,6 +180,14 @@ pub struct GbBus {
     hdma_dest: u16,
     /// GDMA pending flag (deferred execution to avoid nested read/write)
     gdma_pending: bool,
+    /// OAM DMA active flag
+    oam_dma_active: bool,
+    /// OAM DMA source base address
+    oam_dma_source: u16,
+    /// Next OAM DMA byte index
+    oam_dma_index: u16,
+    /// OAM DMA cycle accumulator
+    oam_dma_cycle_accum: u32,
 }
 
 impl GbBus {
@@ -214,7 +222,47 @@ impl GbBus {
             hdma_source: 0,
             hdma_dest: 0,
             gdma_pending: false,
+            oam_dma_active: false,
+            oam_dma_source: 0,
+            oam_dma_index: 0,
+            oam_dma_cycle_accum: 0,
         }
+    }
+
+    /// Step OAM DMA transfer
+    ///
+    /// OAM DMA takes 160 bytes * 4 cycles = 640 cycles.
+    pub fn step_oam_dma(&mut self, cycles: u32) {
+        if !self.oam_dma_active {
+            return;
+        }
+
+        self.oam_dma_cycle_accum += cycles;
+        let source_base = self.oam_dma_source;
+
+        while self.oam_dma_cycle_accum >= 4 && self.oam_dma_index < 0xA0 {
+            self.oam_dma_cycle_accum -= 4;
+            let addr = source_base.wrapping_add(self.oam_dma_index);
+            let byte = if (0xFE00..=0xFE9F).contains(&addr) {
+                self.ppu.read_oam(addr - 0xFE00)
+            } else {
+                self.read(addr)
+            };
+            self.ppu.write_oam(self.oam_dma_index, byte);
+            self.oam_dma_index += 1;
+        }
+
+        if self.oam_dma_index < 0xA0 {
+            return;
+        }
+
+        self.oam_dma_active = false;
+        self.oam_dma_cycle_accum = 0;
+    }
+
+    /// Returns true if an OAM DMA transfer is in progress
+    pub fn oam_dma_active(&self) -> bool {
+        self.oam_dma_active
     }
 
     /// Set joypad button state
@@ -634,7 +682,13 @@ impl MemoryLr35902 for GbBus {
                 self.wram[offset]
             }
             // OAM (Object Attribute Memory) - delegate to PPU
-            0xFE00..=0xFE9F => self.ppu.read_oam(addr - 0xFE00),
+            0xFE00..=0xFE9F => {
+                if self.oam_dma_active {
+                    0xFF
+                } else {
+                    self.ppu.read_oam(addr - 0xFE00)
+                }
+            }
             // Not usable
             0xFEA0..=0xFEFF => 0xFF,
             // I/O Registers
@@ -679,7 +733,13 @@ impl MemoryLr35902 for GbBus {
                 0xFF4B => self.ppu.wx,
                 0xFF4D => self.read_key1(), // KEY1 - Speed switch (CGB only)
                 // CGB registers
-                0xFF4F => self.ppu.get_vram_bank(), // VBK - VRAM bank
+                0xFF4F => {
+                    if self.cgb_mode {
+                        self.ppu.get_vram_bank()
+                    } else {
+                        0xFF
+                    }
+                } // VBK - VRAM bank
                 // HDMA registers (CGB only)
                 0xFF51 => self.hdma1,
                 0xFF52 => self.hdma2,
@@ -749,7 +809,11 @@ impl MemoryLr35902 for GbBus {
                 self.wram[offset] = val;
             }
             // OAM - delegate to PPU
-            0xFE00..=0xFE9F => self.ppu.write_oam(addr - 0xFE00, val),
+            0xFE00..=0xFE9F => {
+                if !self.oam_dma_active {
+                    self.ppu.write_oam(addr - 0xFE00, val);
+                }
+            }
             // Not usable
             0xFEA0..=0xFEFF => {}
             // I/O Registers
@@ -775,7 +839,7 @@ impl MemoryLr35902 for GbBus {
                     0xFF10..=0xFF26 => self.apu.write_register(addr, val),
                     0xFF30..=0xFF3F => self.apu.write_register(addr, val),
                     // PPU registers
-                    0xFF40 => self.ppu.lcdc = val,
+                    0xFF40 => self.ppu.write_lcdc(val),
                     0xFF41 => self.ppu.stat = val,
                     0xFF42 => self.ppu.scy = val,
                     0xFF43 => self.ppu.scx = val,
@@ -783,12 +847,10 @@ impl MemoryLr35902 for GbBus {
                     0xFF45 => self.ppu.lyc = val,
                     0xFF46 => {
                         // OAM DMA: Copy 160 bytes from XX00-XX9F to OAM
-                        let source_base = (val as u16) << 8;
-
-                        for i in 0..0xA0u16 {
-                            let byte = self.read(source_base + i);
-                            self.ppu.write_oam(i, byte);
-                        }
+                        self.oam_dma_source = (val as u16) << 8;
+                        self.oam_dma_active = true;
+                        self.oam_dma_index = 0;
+                        self.oam_dma_cycle_accum = 0;
                     }
                     0xFF47 => self.ppu.bgp = val,
                     0xFF48 => self.ppu.obp0 = val,
@@ -797,7 +859,11 @@ impl MemoryLr35902 for GbBus {
                     0xFF4B => self.ppu.wx = val,
                     0xFF4D => self.write_key1(val), // KEY1 - Speed switch (CGB only)
                     // CGB registers
-                    0xFF4F => self.ppu.set_vram_bank(val), // VBK - VRAM bank
+                    0xFF4F => {
+                        if self.cgb_mode {
+                            self.ppu.set_vram_bank(val);
+                        }
+                    } // VBK - VRAM bank
                     // HDMA registers (CGB only)
                     0xFF51 => self.hdma1 = val,
                     0xFF52 => self.hdma2 = val & 0xF0, // Lower 4 bits are ignored

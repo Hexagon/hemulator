@@ -89,6 +89,7 @@ impl RuntimeState {
 enum EmulatorSystem {
     NES(Box<emu_nes::NesSystem>),
     GameBoy(Box<emu_gb::GbSystem>),
+    GBA(Box<hemu_gba::GbaSystem>),
     Atari2600(Box<emu_atari2600::Atari2600System>),
     PC(Box<emu_pc::PcSystem>),
     SNES(Box<emu_snes::SnesSystem>),
@@ -107,6 +108,9 @@ impl EmulatorSystem {
                 .step_frame()
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
             EmulatorSystem::GameBoy(sys) => sys
+                .step_frame()
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::GBA(sys) => sys
                 .step_frame()
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
             EmulatorSystem::Atari2600(sys) => sys
@@ -140,6 +144,7 @@ impl EmulatorSystem {
         match self {
             EmulatorSystem::NES(sys) => sys.reset(),
             EmulatorSystem::GameBoy(sys) => sys.reset(),
+            EmulatorSystem::GBA(sys) => sys.reset(),
             EmulatorSystem::Atari2600(sys) => sys.reset(),
             EmulatorSystem::PC(sys) => sys.reset(),
             EmulatorSystem::SNES(sys) => sys.reset(),
@@ -155,6 +160,7 @@ impl EmulatorSystem {
         match self {
             EmulatorSystem::NES(sys) => sys.debugger(),
             EmulatorSystem::GameBoy(sys) => sys.debugger(),
+            EmulatorSystem::GBA(sys) => sys.debugger(),
             EmulatorSystem::Atari2600(sys) => sys.debugger(),
             EmulatorSystem::PC(sys) => sys.debugger(),
             EmulatorSystem::SNES(sys) => sys.debugger(),
@@ -170,6 +176,7 @@ impl EmulatorSystem {
         match self {
             EmulatorSystem::NES(sys) => sys.get_total_cycles(),
             EmulatorSystem::GameBoy(sys) => sys.get_total_cycles(),
+            EmulatorSystem::GBA(sys) => sys.get_total_cycles(),
             EmulatorSystem::Atari2600(sys) => sys.get_total_cycles(),
             EmulatorSystem::PC(sys) => sys.get_total_cycles(),
             EmulatorSystem::SNES(sys) => sys.get_total_cycles(),
@@ -192,6 +199,9 @@ impl EmulatorSystem {
                 .mount(mount_point_id, data)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
             EmulatorSystem::GameBoy(sys) => sys
+                .mount(mount_point_id, data)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::GBA(sys) => sys
                 .mount(mount_point_id, data)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
             EmulatorSystem::Atari2600(sys) => sys
@@ -226,6 +236,7 @@ impl EmulatorSystem {
         match self {
             EmulatorSystem::NES(sys) => sys.mount_points(),
             EmulatorSystem::GameBoy(sys) => sys.mount_points(),
+            EmulatorSystem::GBA(sys) => sys.mount_points(),
             EmulatorSystem::Atari2600(sys) => sys.mount_points(),
             EmulatorSystem::PC(sys) => sys.mount_points(),
             EmulatorSystem::SNES(sys) => sys.mount_points(),
@@ -244,6 +255,9 @@ impl EmulatorSystem {
                 .unmount(mount_point_id)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
             EmulatorSystem::GameBoy(sys) => sys
+                .unmount(mount_point_id)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::GBA(sys) => sys
                 .unmount(mount_point_id)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
             EmulatorSystem::Atari2600(sys) => sys
@@ -278,6 +292,7 @@ impl EmulatorSystem {
         match self {
             EmulatorSystem::NES(sys) => sys.is_mounted(mount_point_id),
             EmulatorSystem::GameBoy(sys) => sys.is_mounted(mount_point_id),
+            EmulatorSystem::GBA(sys) => sys.is_mounted(mount_point_id),
             EmulatorSystem::Atari2600(sys) => sys.is_mounted(mount_point_id),
             EmulatorSystem::PC(sys) => sys.is_mounted(mount_point_id),
             EmulatorSystem::SNES(sys) => sys.is_mounted(mount_point_id),
@@ -304,6 +319,7 @@ impl EmulatorSystem {
         match self {
             EmulatorSystem::NES(sys) => sys.supports_save_states(),
             EmulatorSystem::GameBoy(sys) => sys.supports_save_states(),
+            EmulatorSystem::GBA(sys) => sys.supports_save_states(),
             EmulatorSystem::Atari2600(sys) => sys.supports_save_states(),
             EmulatorSystem::PC(sys) => sys.supports_save_states(),
             EmulatorSystem::SNES(sys) => sys.supports_save_states(),
@@ -319,6 +335,7 @@ impl EmulatorSystem {
         match self {
             EmulatorSystem::NES(sys) => sys.save_state(),
             EmulatorSystem::GameBoy(sys) => sys.save_state(),
+            EmulatorSystem::GBA(sys) => sys.save_state(),
             EmulatorSystem::Atari2600(sys) => sys.save_state(),
             EmulatorSystem::PC(sys) => sys.save_state(),
             EmulatorSystem::SNES(sys) => sys.save_state(),
@@ -334,6 +351,7 @@ impl EmulatorSystem {
         match self {
             EmulatorSystem::NES(sys) => sys.load_state(state),
             EmulatorSystem::GameBoy(sys) => sys.load_state(state),
+            EmulatorSystem::GBA(sys) => sys.load_state(state),
             EmulatorSystem::Atari2600(sys) => sys.load_state(state),
             EmulatorSystem::PC(sys) => sys.load_state(state),
             EmulatorSystem::SNES(sys) => sys.load_state(state),
@@ -369,6 +387,7 @@ impl EmulatorSystem {
                     sys.set_controller(!gb_state);
                 }
             }
+            EmulatorSystem::GBA(_) => {} // GBA input handling not implemented yet
             EmulatorSystem::Atari2600(sys) => sys.set_controller(port, state),
             EmulatorSystem::PC(_) => {} // PC doesn't use controller input
             EmulatorSystem::SNES(_) => {} // SNES controller support stub
@@ -499,6 +518,7 @@ impl EmulatorSystem {
                 let debug = sys.debug_info();
                 Some(debug.pc as u32)
             }
+            EmulatorSystem::GBA(_) => None,
             EmulatorSystem::Atari2600(_) => {
                 // Atari 2600 doesn't expose PC in a simple way
                 None
@@ -542,6 +562,7 @@ impl EmulatorSystem {
         match self {
             EmulatorSystem::NES(_) => Some(1.79), // NTSC NES CPU (1.789773 MHz)
             EmulatorSystem::GameBoy(_) => Some(4.19), // Game Boy CPU (4.194304 MHz)
+            EmulatorSystem::GBA(_) => Some(16.78), // GBA ARM7TDMI (16.78 MHz)
             EmulatorSystem::Atari2600(_) => Some(1.19), // Atari 2600 6507 (1.19 MHz)
             EmulatorSystem::PC(sys) => Some(sys.cpu_speed_mhz()), // Variable based on CPU model
             EmulatorSystem::SNES(_) => Some(3.58), // SNES 65C816 (3.58 MHz)
@@ -565,6 +586,7 @@ impl EmulatorSystem {
         match self {
             EmulatorSystem::NES(sys) => sys.get_runtime_stats(),
             EmulatorSystem::GameBoy(_) => emu_nes::RuntimeStats::default(),
+            EmulatorSystem::GBA(_) => emu_nes::RuntimeStats::default(),
             EmulatorSystem::Atari2600(_) => emu_nes::RuntimeStats::default(),
             EmulatorSystem::PC(_) => emu_nes::RuntimeStats::default(),
             EmulatorSystem::SNES(_) => emu_nes::RuntimeStats::default(),
@@ -580,6 +602,7 @@ impl EmulatorSystem {
         match self {
             EmulatorSystem::NES(sys) => sys.timing(),
             EmulatorSystem::GameBoy(_) => emu_core::apu::TimingMode::Ntsc,
+            EmulatorSystem::GBA(_) => emu_core::apu::TimingMode::Ntsc,
             EmulatorSystem::Atari2600(_) => emu_core::apu::TimingMode::Ntsc,
             EmulatorSystem::PC(_) => emu_core::apu::TimingMode::Ntsc,
             EmulatorSystem::SNES(_) => emu_core::apu::TimingMode::Ntsc,
@@ -595,11 +618,37 @@ impl EmulatorSystem {
         match self {
             EmulatorSystem::NES(sys) => sys.get_audio_samples(count),
             EmulatorSystem::GameBoy(sys) => sys.get_audio_samples(count),
+            EmulatorSystem::GBA(_) => vec![0; count],
             EmulatorSystem::Atari2600(sys) => sys.get_audio_samples(count),
             EmulatorSystem::PC(sys) => sys.get_audio_samples(count),
             EmulatorSystem::SNES(sys) => sys.get_audio_samples(count),
             EmulatorSystem::N64(sys) => sys.get_audio_samples(count),
-            EmulatorSystem::Chip8(_) => vec![0; count], // CHIP-8 audio: Single beep tone not yet implemented
+            EmulatorSystem::Chip8(sys) => {
+                // CHIP-8 audio: Simple beep tone when sound timer is active
+                if sys.is_sound_playing() {
+                    // Generate 440Hz square wave (A4 note)
+                    const SAMPLE_RATE: f32 = 44100.0;
+                    const FREQUENCY: f32 = 440.0;
+                    const AMPLITUDE: i16 = 3000; // Moderate volume to avoid clipping
+
+                    let mut samples = Vec::with_capacity(count);
+                    let period_samples = (SAMPLE_RATE / FREQUENCY) as usize;
+                    let half_period = period_samples / 2;
+
+                    for i in 0..count {
+                        let position = i % period_samples;
+                        let sample = if position < half_period {
+                            AMPLITUDE
+                        } else {
+                            -AMPLITUDE
+                        };
+                        samples.push(sample);
+                    }
+                    samples
+                } else {
+                    vec![0; count]
+                }
+            }
             EmulatorSystem::SMS(sys) => sys.get_audio_samples(count),
             EmulatorSystem::ColecoVision(sys) => sys.get_audio_samples(count),
             EmulatorSystem::SG1000(sys) => sys.get_audio_samples(count),
@@ -610,8 +659,9 @@ impl EmulatorSystem {
         match self {
             EmulatorSystem::NES(_) => (256, 240),
             EmulatorSystem::GameBoy(_) => (160, 144),
+            EmulatorSystem::GBA(_) => (240, 160),
             EmulatorSystem::Atari2600(_) => (160, 192),
-            EmulatorSystem::PC(_) => (640, 400),
+            EmulatorSystem::PC(_) => (320, 200),
             EmulatorSystem::SNES(_) => (256, 224),
             EmulatorSystem::N64(_) => (320, 240),
             EmulatorSystem::SMS(_) => (256, 192),
@@ -625,6 +675,7 @@ impl EmulatorSystem {
         match self {
             EmulatorSystem::NES(_) => "nes",
             EmulatorSystem::GameBoy(_) => "gameboy",
+            EmulatorSystem::GBA(_) => "gba",
             EmulatorSystem::Atari2600(_) => "atari2600",
             EmulatorSystem::PC(_) => "pc",
             EmulatorSystem::SNES(_) => "snes",
@@ -641,6 +692,7 @@ impl EmulatorSystem {
         match self {
             EmulatorSystem::NES(_) => SystemType::NES,
             EmulatorSystem::GameBoy(_) => SystemType::GameBoy,
+            EmulatorSystem::GBA(_) => SystemType::GBA,
             EmulatorSystem::Atari2600(_) => SystemType::Atari2600,
             EmulatorSystem::PC(_) => SystemType::PC,
             EmulatorSystem::SNES(_) => SystemType::SNES,
@@ -692,6 +744,7 @@ impl EmulatorSystem {
                 }
             }
             EmulatorSystem::GameBoy(_) => "Software".to_string(),
+            EmulatorSystem::GBA(_) => "Software".to_string(),
             EmulatorSystem::Atari2600(_) => "Software".to_string(),
             EmulatorSystem::PC(sys) => {
                 // PC can use different video adapters
@@ -724,6 +777,7 @@ impl EmulatorSystem {
                 vec!["Software".to_string()]
             }
             EmulatorSystem::GameBoy(_) => vec!["Software".to_string()],
+            EmulatorSystem::GBA(_) => vec!["Software".to_string()],
             EmulatorSystem::Atari2600(_) => vec!["Software".to_string()],
             EmulatorSystem::PC(_) => {
                 // PC has both software and hardware video adapters available
@@ -754,6 +808,7 @@ impl EmulatorSystem {
         match self {
             EmulatorSystem::NES(_) => None, // NES: Debugger trait implementation needed
             EmulatorSystem::GameBoy(_) => None, // GameBoy: Debugger trait implementation needed
+            EmulatorSystem::GBA(_) => None,
             EmulatorSystem::Atari2600(_) => None,
             EmulatorSystem::PC(_) => None,
             EmulatorSystem::SNES(sys) => sys.check_breakpoint(),
@@ -770,6 +825,7 @@ impl EmulatorSystem {
         match self {
             EmulatorSystem::NES(sys) => sys.get_breakpoint_manager().get_all(),
             EmulatorSystem::GameBoy(sys) => sys.get_breakpoint_manager().get_all(),
+            EmulatorSystem::GBA(_) => Vec::new(),
             EmulatorSystem::Atari2600(sys) => sys.get_breakpoint_manager().get_all(),
             EmulatorSystem::PC(sys) => sys.get_breakpoint_manager().get_all(),
             EmulatorSystem::SNES(sys) => sys.get_breakpoint_manager().get_all(),
@@ -786,6 +842,7 @@ impl EmulatorSystem {
         match self {
             EmulatorSystem::NES(sys) => Some(sys.get_instruction_tracer()),
             EmulatorSystem::GameBoy(sys) => Some(sys.get_instruction_tracer()),
+            EmulatorSystem::GBA(sys) => Some(sys.get_instruction_tracer()),
             EmulatorSystem::Atari2600(sys) => Some(sys.get_instruction_tracer()),
             EmulatorSystem::PC(sys) => Some(sys.get_instruction_tracer()),
             EmulatorSystem::SNES(sys) => Some(sys.get_instruction_tracer()),
@@ -804,6 +861,7 @@ impl EmulatorSystem {
         match self {
             EmulatorSystem::NES(sys) => Some(sys.get_instruction_tracer_mut()),
             EmulatorSystem::GameBoy(sys) => Some(sys.get_instruction_tracer_mut()),
+            EmulatorSystem::GBA(sys) => Some(sys.get_instruction_tracer_mut()),
             EmulatorSystem::Atari2600(sys) => Some(sys.get_instruction_tracer_mut()),
             EmulatorSystem::PC(sys) => Some(sys.get_instruction_tracer_mut()),
             EmulatorSystem::SNES(sys) => Some(sys.get_instruction_tracer_mut()),
@@ -1119,6 +1177,7 @@ fn get_colecovision_controller_state(
 struct StreamSource {
     rx: Receiver<i16>,
     sample_rate: u32,
+    channels: u16,
 }
 
 impl Iterator for StreamSource {
@@ -1136,7 +1195,7 @@ impl Source for StreamSource {
     }
 
     fn channels(&self) -> u16 {
-        1
+        self.channels
     }
 
     fn sample_rate(&self) -> u32 {
@@ -1183,7 +1242,7 @@ fn save_project(
         let system_name = sys.system_name();
         let relevant_mounts: Vec<&str> = match system_name {
             "pc" => vec!["BIOS", "FloppyA", "FloppyB", "HardDrive"],
-            "nes" | "gameboy" | "atari2600" | "snes" | "n64" => vec!["Cartridge"],
+            "nes" | "gameboy" | "gba" | "atari2600" | "snes" | "n64" => vec!["Cartridge"],
             _ => vec![],
         };
 
@@ -1446,7 +1505,7 @@ impl CliArgs {
                         args.system = Some(system);
                     } else {
                         eprintln!(
-                            "Error: --system requires a value (pc, nes, gb, atari2600, snes, n64)."
+                            "Error: --system requires a value (pc, nes, gb, gba, atari2600, snes, n64)."
                         );
                         std::process::exit(1);
                     }
@@ -1702,7 +1761,7 @@ impl CliArgs {
             "  --benchmark              Disable frame limiter to measure raw emulation performance"
         );
         eprintln!(
-            "  -S, --system <SYSTEM>    Start clean system (pc, nes, gb, atari2600, snes, n64)"
+            "  -S, --system <SYSTEM>    Start clean system (pc, nes, gb, gba, atari2600, snes, n64)"
         );
         eprintln!("  --bios <file>            Load BIOS file (for ColecoVision, SMS, PC)");
         eprintln!("  --slot1 <file>           Load file into slot 1 (BIOS for PC)");
@@ -2037,6 +2096,7 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
                     s.get_instruction_tracer_mut().set_max_history(limit);
                 }
             }
+            EmulatorSystem::GBA(_) => {}
             EmulatorSystem::Atari2600(s) => {
                 s.set_instruction_tracing(true);
                 if let Some(limit) = cli_args.trace_limit {
@@ -2093,6 +2153,7 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
         match sys {
             EmulatorSystem::NES(s) => s.add_breakpoint(addr),
             EmulatorSystem::GameBoy(s) => s.add_breakpoint(addr),
+            EmulatorSystem::GBA(_) => {}
             EmulatorSystem::Atari2600(s) => s.add_breakpoint(addr),
             EmulatorSystem::Chip8(s) => s.add_breakpoint(addr),
             EmulatorSystem::SMS(s) => s.add_breakpoint(addr),
@@ -2109,6 +2170,7 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
         match sys {
             EmulatorSystem::NES(s) => s.add_read_breakpoint(addr),
             EmulatorSystem::GameBoy(s) => s.add_read_breakpoint(addr),
+            EmulatorSystem::GBA(_) => {}
             EmulatorSystem::Atari2600(s) => s.add_read_breakpoint(addr),
             EmulatorSystem::Chip8(s) => s.add_read_breakpoint(addr),
             EmulatorSystem::SMS(s) => s.add_read_breakpoint(addr),
@@ -2125,6 +2187,7 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
         match sys {
             EmulatorSystem::NES(s) => s.add_write_breakpoint(addr),
             EmulatorSystem::GameBoy(s) => s.add_write_breakpoint(addr),
+            EmulatorSystem::GBA(_) => {}
             EmulatorSystem::Atari2600(s) => s.add_write_breakpoint(addr),
             EmulatorSystem::Chip8(s) => s.add_write_breakpoint(addr),
             EmulatorSystem::SMS(s) => s.add_write_breakpoint(addr),
@@ -2606,6 +2669,41 @@ fn main() {
                     }
                 }
             }
+            "gba" | "gameboyadvance" => {
+                sys = EmulatorSystem::GBA(Box::new(hemu_gba::GbaSystem::new()));
+                rom_loaded = true; // Mark system as loaded even without ROM
+                status_message = "Clean GBA system started".to_string();
+                println!("Started clean GBA system");
+
+                // If a file is provided with --system gba, load it directly
+                if let Some(ref p) = rom_path {
+                    if !p.to_lowercase().ends_with(".hemu") {
+                        match std::fs::read(p) {
+                            Ok(data) => {
+                                rom_hash = Some(GameSaves::rom_hash(&data));
+                                if let EmulatorSystem::GBA(gba_sys) = &mut sys {
+                                    if let Err(e) = gba_sys.mount("Cartridge", &data) {
+                                        eprintln!("Failed to load GBA ROM: {}", e);
+                                        status_message = format!("Error: {}", e);
+                                        rom_hash = None;
+                                    } else {
+                                        rom_loaded = true;
+                                        runtime_state.set_mount("Cartridge".to_string(), p.clone());
+                                        if let Err(e) = settings.save() {
+                                            eprintln!("Warning: Failed to save settings: {}", e);
+                                        }
+                                        status_message = "GBA ROM loaded".to_string();
+                                        println!("Loaded GBA ROM: {}", p);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to read file: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
             "atari2600" | "atari" => {
                 sys = EmulatorSystem::Atari2600(Box::new(create_atari2600_system(&settings)));
                 rom_loaded = true; // Mark system as loaded even without ROM
@@ -2749,7 +2847,7 @@ fn main() {
             }
             _ => {
                 eprintln!("Error: Unknown system '{}'", system_name);
-                eprintln!("Valid systems: pc, nes, gb, atari2600, snes, n64");
+                eprintln!("Valid systems: pc, nes, gb, gba, atari2600, snes, n64");
                 std::process::exit(1);
             }
         }
@@ -2972,6 +3070,24 @@ fn main() {
                                 }
                                 status_message = "Game Boy ROM loaded".to_string();
                                 println!("Loaded Game Boy ROM: {}", p);
+                            }
+                        }
+                        Ok(SystemType::GBA) => {
+                            rom_hash = Some(GameSaves::rom_hash(&data));
+                            let mut gba_sys = hemu_gba::GbaSystem::new();
+                            if let Err(e) = gba_sys.mount("Cartridge", &data) {
+                                eprintln!("Failed to load GBA ROM: {}", e);
+                                status_message = format!("Error: {}", e);
+                                rom_hash = None;
+                            } else {
+                                rom_loaded = true;
+                                sys = EmulatorSystem::GBA(Box::new(gba_sys));
+                                runtime_state.set_mount("Cartridge".to_string(), p.clone());
+                                if let Err(e) = settings.save() {
+                                    eprintln!("Warning: Failed to save settings: {}", e);
+                                }
+                                status_message = "GBA ROM loaded".to_string();
+                                println!("Loaded GBA ROM: {}", p);
                             }
                         }
                         Ok(SystemType::PC) => {
@@ -3498,6 +3614,7 @@ fn main() {
         StreamSource {
             rx: audio_rx,
             sample_rate: 44100,
+            channels: 2,
         }
         .convert_samples(),
     ) {
@@ -3530,6 +3647,7 @@ fn main() {
 
     // Audio sample rate
     const SAMPLE_RATE: usize = 44100;
+    let mut audio_sample_remainder: f64 = 0.0;
 
     // Load saves for current ROM if available
     let mut _game_saves = if let Some(ref hash) = rom_hash {
@@ -3734,6 +3852,13 @@ fn main() {
             let debug_info = match &sys {
                 EmulatorSystem::NES(s) => SystemDebugInfo::from_nes(&s.get_debug_info()),
                 EmulatorSystem::GameBoy(s) => SystemDebugInfo::from_gb(&s.debug_info()),
+                EmulatorSystem::GBA(s) => {
+                    if let Some(debugger) = s.debugger() {
+                        SystemDebugInfo::from_debugger("GBA", debugger)
+                    } else {
+                        SystemDebugInfo::new("GBA".to_string())
+                    }
+                }
                 EmulatorSystem::Atari2600(s) => {
                     if let Some(info) = s.debug_info() {
                         SystemDebugInfo::from_atari2600(&info)
@@ -3788,6 +3913,10 @@ fn main() {
                     let debugger: &dyn Debugger = s.as_ref();
                     Some(create_enhanced_debug_state("Game Boy", debugger, &sys))
                 }
+                EmulatorSystem::GBA(s) => {
+                    let debugger: &dyn Debugger = s.as_ref();
+                    Some(create_enhanced_debug_state("GBA", debugger, &sys))
+                }
                 EmulatorSystem::Atari2600(s) => {
                     let debugger: &dyn Debugger = s.as_ref();
                     Some(create_enhanced_debug_state("Atari 2600", debugger, &sys))
@@ -3825,6 +3954,7 @@ fn main() {
                     EmulatorSystem::SMS(s) => Some(s.as_ref()),
                     EmulatorSystem::SNES(s) => Some(s.as_ref()),
                     EmulatorSystem::GameBoy(s) => Some(s.as_ref()),
+                    EmulatorSystem::GBA(s) => Some(s.as_ref()),
                     EmulatorSystem::Atari2600(s) => Some(s.as_ref()),
                     EmulatorSystem::PC(s) => Some(s.as_ref()),
                     EmulatorSystem::N64(s) => Some(s.as_ref()),
@@ -3914,6 +4044,7 @@ fn main() {
                     });
                     egui_app.tab_manager.update_system_tile_data(tile_data);
                 }
+                EmulatorSystem::GBA(_) => {}
                 EmulatorSystem::SMS(s) => {
                     let sms_data = s.get_tile_viewer_data();
                     let tile_data = egui_ui::SystemTileData::SMS(egui_ui::SmsTileData {
@@ -4139,6 +4270,17 @@ fn main() {
                                 &runtime_state,
                             );
                         }
+                        "GBA" => {
+                            sys = EmulatorSystem::GBA(Box::new(hemu_gba::GbaSystem::new()));
+                            configure_system_ui(
+                                &mut egui_app,
+                                &sys,
+                                "GBA",
+                                &mut rom_loaded,
+                                "Created new GBA system",
+                                &runtime_state,
+                            );
+                        }
                         "Atari 2600" => {
                             sys = EmulatorSystem::Atari2600(Box::new(create_atari2600_system(
                                 &settings,
@@ -4256,12 +4398,14 @@ fn main() {
                         .add_filter(
                             "All ROM Files",
                             &[
-                                "nes", "unf", "gb", "gbc", "bin", "a26", "smc", "sfc", "z64",
-                                "n64", "v64", "com", "exe", "sms", "ch8", "c8", "col", "sg", "sc",
+                                "nes", "unf", "gb", "gbc", "gba", "bin", "a26", "smc", "sfc",
+                                "z64", "n64", "v64", "com", "exe", "sms", "ch8", "c8", "col", "sg",
+                                "sc",
                             ],
                         )
                         .add_filter("NES ROMs", &["nes", "unf"])
                         .add_filter("Game Boy ROMs", &["gb", "gbc"])
+                        .add_filter("GBA ROMs", &["gba"])
                         .add_filter("Atari 2600 ROMs", &["a26", "bin"])
                         .add_filter("SNES ROMs", &["smc", "sfc", "bin"])
                         .add_filter("N64 ROMs", &["z64", "n64", "v64", "bin"])
@@ -4377,6 +4521,45 @@ fn main() {
                                                 .set_message("Game Boy ROM loaded".to_string());
                                             let _ = sys.resolution();
                                             // Load save states for this ROM
+                                            if let Some(ref hash) = rom_hash {
+                                                _game_saves = GameSaves::load(hash);
+                                            }
+                                        }
+                                    }
+                                    Ok(SystemType::GBA) => {
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        let mut gba_sys = hemu_gba::GbaSystem::new();
+                                        if let Err(e) = gba_sys.mount("Cartridge", &data) {
+                                            egui_app
+                                                .status_bar
+                                                .set_message(format!("Error: {}", e));
+                                            rom_hash = None;
+                                        } else {
+                                            rom_loaded = true;
+                                            sys = EmulatorSystem::GBA(Box::new(gba_sys));
+                                            egui_app.property_pane.system_name = "GBA".to_string();
+                                            egui_app.property_pane.rendering_backend =
+                                                sys.get_current_renderer_name();
+                                            egui_app.property_pane.available_renderers =
+                                                sys.get_available_renderers();
+                                            runtime_state.set_mount(
+                                                "Cartridge".to_string(),
+                                                path_str.clone(),
+                                            );
+                                            settings.add_recent_file(path_str.clone());
+                                            if let Err(e) = settings.save() {
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
+                                            }
+                                            egui_app.update_recent_files(
+                                                settings.get_recent_files().to_vec(),
+                                            );
+                                            egui_app
+                                                .status_bar
+                                                .set_message("GBA ROM loaded".to_string());
+                                            let _ = sys.resolution();
                                             if let Some(ref hash) = rom_hash {
                                                 _game_saves = GameSaves::load(hash);
                                             }
@@ -5017,6 +5200,45 @@ fn main() {
                                             egui_app
                                                 .status_bar
                                                 .set_message("Game Boy ROM loaded".to_string());
+                                            let _ = sys.resolution();
+                                            if let Some(ref hash) = rom_hash {
+                                                _game_saves = GameSaves::load(hash);
+                                            }
+                                        }
+                                    }
+                                    Ok(SystemType::GBA) => {
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        let mut gba_sys = hemu_gba::GbaSystem::new();
+                                        if let Err(e) = gba_sys.mount("Cartridge", &data) {
+                                            egui_app
+                                                .status_bar
+                                                .set_message(format!("Error: {}", e));
+                                            rom_hash = None;
+                                        } else {
+                                            rom_loaded = true;
+                                            sys = EmulatorSystem::GBA(Box::new(gba_sys));
+                                            egui_app.property_pane.system_name = "GBA".to_string();
+                                            egui_app.property_pane.rendering_backend =
+                                                sys.get_current_renderer_name();
+                                            egui_app.property_pane.available_renderers =
+                                                sys.get_available_renderers();
+                                            runtime_state.set_mount(
+                                                "Cartridge".to_string(),
+                                                file_path.clone(),
+                                            );
+                                            settings.add_recent_file(file_path.clone());
+                                            if let Err(e) = settings.save() {
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
+                                            }
+                                            egui_app.update_recent_files(
+                                                settings.get_recent_files().to_vec(),
+                                            );
+                                            egui_app
+                                                .status_bar
+                                                .set_message("GBA ROM loaded".to_string());
                                             let _ = sys.resolution();
                                             if let Some(ref hash) = rom_hash {
                                                 _game_saves = GameSaves::load(hash);
@@ -6173,6 +6395,20 @@ fn main() {
                                 .status_bar
                                 .set_message("Created new Game Boy system".to_string());
                         }
+                        "GBA" => {
+                            sys = EmulatorSystem::GBA(Box::new(hemu_gba::GbaSystem::new()));
+                            rom_loaded = true; // Mark system as created even without ROM
+                            rom_hash = None;
+                            runtime_state.clear_mounts();
+                            egui_app.property_pane.system_name = "GBA".to_string();
+                            egui_app.property_pane.rendering_backend =
+                                sys.get_current_renderer_name();
+                            egui_app.property_pane.available_renderers =
+                                sys.get_available_renderers();
+                            egui_app
+                                .status_bar
+                                .set_message("Created new GBA system".to_string());
+                        }
                         "Atari 2600" => {
                             sys = EmulatorSystem::Atari2600(Box::new(create_atari2600_system(
                                 &settings,
@@ -6444,6 +6680,16 @@ fn main() {
                         }
                     }
                 }
+                DebugAction::SetGbAudioChannels(mask) => {
+                    if rom_loaded {
+                        if let EmulatorSystem::GameBoy(sys) = &mut sys {
+                            sys.set_audio_channel_mask(mask);
+                            egui_app
+                                .status_bar
+                                .set_message("Updated GB audio channels".to_string());
+                        }
+                    }
+                }
                 DebugAction::AddBreakpoint(address, bp_type) => {
                     if rom_loaded {
                         match &mut sys {
@@ -6673,10 +6919,23 @@ fn main() {
                         total_cycles += 1; // This is a placeholder - actual cycle count would depend on system
 
                         // Handle audio for each stepped frame
-                        let samples_per_frame = (SAMPLE_RATE as f64 / frame_rate) as usize;
+                        let samples_per_frame_f =
+                            (SAMPLE_RATE as f64 / frame_rate) + audio_sample_remainder;
+                        let samples_per_frame = samples_per_frame_f.floor() as usize;
+                        audio_sample_remainder = samples_per_frame_f - samples_per_frame as f64;
                         let audio_samples = sys.get_audio_samples(samples_per_frame);
-                        for sample in audio_samples {
-                            let _ = audio_tx.try_send(sample);
+                        let expected_mono = samples_per_frame;
+                        let expected_stereo = samples_per_frame * 2;
+                        if audio_samples.len() == expected_stereo {
+                            for sample in audio_samples {
+                                let _ = audio_tx.try_send(sample);
+                            }
+                        } else {
+                            for i in 0..expected_mono {
+                                let sample = audio_samples.get(i).copied().unwrap_or(0);
+                                let _ = audio_tx.try_send(sample);
+                                let _ = audio_tx.try_send(sample);
+                            }
                         }
                     }
                     Err(e) => {

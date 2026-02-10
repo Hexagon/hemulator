@@ -4,6 +4,7 @@ members = [
   "crates/core",
   "crates/systems/nes",
   "crates/systems/gb",
+  "crates/systems/gba",
   "crates/systems/atari2600",
   "crates/systems/pc",
   "crates/systems/snes",

@@ -153,6 +153,12 @@ struct ScanlineState {
     wx: u8,
     /// LCD Control register for this scanline
     lcdc: u8,
+    /// BG Palette (DMG) for this scanline
+    bgp: u8,
+    /// OBJ Palette 0 (DMG) for this scanline
+    obp0: u8,
+    /// OBJ Palette 1 (DMG) for this scanline
+    obp1: u8,
 }
 
 impl Default for ScanlineState {
@@ -163,6 +169,9 @@ impl Default for ScanlineState {
             wy: 0,
             wx: 0,
             lcdc: 0x91,
+            bgp: 0xFC,
+            obp0: 0xE4,
+            obp1: 0xE4,
         }
     }
 }
@@ -220,6 +229,8 @@ pub struct Ppu {
     /// Per-scanline register states (144 scanlines for the visible screen)
     /// Captures register values at the start of each scanline to support scanline split effects
     scanline_states: [ScanlineState; 144],
+    /// Per-scanline OAM snapshot for sprite stability
+    oam_scanlines: [[u8; 0xA0]; 144],
     /// Flag indicating whether scanline states have been captured this frame
     /// Used to avoid O(n²) iteration in get_scanline_state()
     scanline_states_captured: bool,
@@ -280,6 +291,7 @@ impl Ppu {
             obj_palette_data: [0; 64],
             cgb_mode: false,
             scanline_states: [ScanlineState::default(); 144],
+            oam_scanlines: [[0; 0xA0]; 144],
             scanline_states_captured: false,
             window_line_counter: 0,
             stat_interrupt_line: false,
@@ -346,9 +358,10 @@ impl Ppu {
 
     /// Read from VRAM (0x8000-0x9FFF)
     ///
-    /// # Hardware Accuracy
-    /// VRAM is inaccessible during PPU Mode 3 (Pixel Transfer).
-    /// Reads return 0xFF during Mode 3 to match hardware behavior.
+    /// # Timing Note
+    /// This emulator uses a frame-based timing model, so strict Mode 3 VRAM
+    /// access restrictions would drop valid writes for some games. We allow
+    /// VRAM access during Mode 3 for better compatibility.
     pub fn read_vram(&self, addr: u16) -> u8 {
         // Check if LCD is enabled
         if (self.lcdc & LCDC_ENABLE) == 0 {
@@ -361,16 +374,8 @@ impl Ppu {
             };
         }
 
-        // Get current PPU mode from STAT register (bits 0-1)
-        let mode = self.stat & 0x03;
-
-        // VRAM is inaccessible during Mode 3 (Pixel Transfer)
-        if mode == 3 {
-            return 0xFF;
-        }
-
         let offset = (addr & 0x1FFF) as usize;
-        if self.vram_bank == 0 {
+        if !self.cgb_mode || self.vram_bank == 0 {
             self.vram_bank0[offset]
         } else {
             self.vram_bank1[offset]
@@ -379,9 +384,10 @@ impl Ppu {
 
     /// Write to VRAM (0x8000-0x9FFF)
     ///
-    /// # Hardware Accuracy
-    /// VRAM is inaccessible during PPU Mode 3 (Pixel Transfer).
-    /// Writes are ignored during Mode 3 to match hardware behavior.
+    /// # Timing Note
+    /// This emulator uses a frame-based timing model, so strict Mode 3 VRAM
+    /// access restrictions would drop valid writes for some games. We allow
+    /// VRAM access during Mode 3 for better compatibility.
     pub fn write_vram(&mut self, addr: u16, val: u8) {
         // Check if LCD is enabled
         if (self.lcdc & LCDC_ENABLE) == 0 {
@@ -395,16 +401,8 @@ impl Ppu {
             return;
         }
 
-        // Get current PPU mode from STAT register (bits 0-1)
-        let mode = self.stat & 0x03;
-
-        // VRAM is inaccessible during Mode 3 (Pixel Transfer)
-        if mode == 3 {
-            return; // Write ignored
-        }
-
         let offset = (addr & 0x1FFF) as usize;
-        if self.vram_bank == 0 {
+        if !self.cgb_mode || self.vram_bank == 0 {
             self.vram_bank0[offset] = val;
         } else {
             self.vram_bank1[offset] = val;
@@ -417,6 +415,33 @@ impl Ppu {
         self.vram_bank = val & 0x01;
     }
 
+    /// Write LCDC (0xFF40) with LCD on/off side effects
+    pub fn write_lcdc(&mut self, val: u8) {
+        let old = self.lcdc;
+        self.lcdc = val;
+
+        let was_enabled = (old & LCDC_ENABLE) != 0;
+        let now_enabled = (val & LCDC_ENABLE) != 0;
+
+        if was_enabled && !now_enabled {
+            // LCD turned off: reset LY and mode timing state
+            self.ly = 0;
+            self.cycle_counter = 0;
+            self.prev_mode = 0;
+            self.stat &= !0x03;
+            self.stat_interrupt_line = false;
+            self.scanline_states_captured = false;
+            self.window_line_counter = 0;
+        } else if !was_enabled && now_enabled {
+            // LCD turned on: restart timing from LY=0
+            self.ly = 0;
+            self.cycle_counter = 0;
+            self.prev_mode = 0;
+            self.scanline_states_captured = false;
+            self.window_line_counter = 0;
+        }
+    }
+
     /// Get VRAM bank
     pub fn get_vram_bank(&self) -> u8 {
         self.vram_bank | 0xFE // Bits 1-7 return 1
@@ -424,9 +449,10 @@ impl Ppu {
 
     /// Read from OAM (0xFE00-0xFE9F)
     ///
-    /// # Hardware Accuracy
-    /// OAM is inaccessible during PPU Mode 2 (OAM Search) and Mode 3 (Pixel Transfer).
-    /// Reads return 0xFF during these modes to match hardware behavior.
+    /// # Timing Note
+    /// This emulator uses a frame-based timing model, so strict Mode 2/3 OAM
+    /// access restrictions can drop valid writes. We allow OAM access during
+    /// these modes for better compatibility.
     pub fn read_oam(&self, addr: u16) -> u8 {
         if addr >= 0xA0 {
             return 0xFF; // Out of bounds
@@ -438,22 +464,15 @@ impl Ppu {
             return self.oam[addr as usize];
         }
 
-        // Get current PPU mode from STAT register (bits 0-1)
-        let mode = self.stat & 0x03;
-
-        // OAM is inaccessible during Mode 2 (OAM Search) and Mode 3 (Pixel Transfer)
-        if mode == 2 || mode == 3 {
-            return 0xFF;
-        }
-
         self.oam[addr as usize]
     }
 
     /// Write to OAM (0xFE00-0xFE9F)
     ///
-    /// # Hardware Accuracy
-    /// OAM is inaccessible during PPU Mode 2 (OAM Search) and Mode 3 (Pixel Transfer).
-    /// Writes are ignored during these modes to match hardware behavior.
+    /// # Timing Note
+    /// This emulator uses a frame-based timing model, so strict Mode 2/3 OAM
+    /// access restrictions can drop valid writes. We allow OAM access during
+    /// these modes for better compatibility.
     pub fn write_oam(&mut self, addr: u16, val: u8) {
         if addr >= 0xA0 {
             return; // Out of bounds
@@ -464,14 +483,6 @@ impl Ppu {
             // LCD is off, OAM is always accessible
             self.oam[addr as usize] = val;
             return;
-        }
-
-        // Get current PPU mode from STAT register (bits 0-1)
-        let mode = self.stat & 0x03;
-
-        // OAM is inaccessible during Mode 2 (OAM Search) and Mode 3 (Pixel Transfer)
-        if mode == 2 || mode == 3 {
-            return; // Write ignored
         }
 
         self.oam[addr as usize] = val;
@@ -617,6 +628,9 @@ impl Ppu {
                 wy: self.wy,
                 wx: self.wx,
                 lcdc: self.lcdc,
+                bgp: self.bgp,
+                obp0: self.obp0,
+                obp1: self.obp1,
             }
         }
     }
@@ -720,7 +734,7 @@ impl Ppu {
                     self.cgb_color_to_rgb(color_low, color_high)
                 } else {
                     // DMG mode: use monochrome palette
-                    let palette_color = (self.bgp >> (color_index * 2)) & 0x03;
+                    let palette_color = (scanline.bgp >> (color_index * 2)) & 0x03;
                     match palette_color {
                         0 => 0xFFFFFFFF, // White (lightest) - ARGB8888 format: 0xAARRGGBB
                         1 => 0xFFAAAAAA, // Light gray (2/3 brightness)
@@ -865,7 +879,7 @@ impl Ppu {
                     self.cgb_color_to_rgb(color_low, color_high)
                 } else {
                     // DMG mode: use monochrome palette
-                    let palette_color = (self.bgp >> (color_index * 2)) & 0x03;
+                    let palette_color = (scanline.bgp >> (color_index * 2)) & 0x03;
                     match palette_color {
                         0 => 0xFFFFFFFF, // White (lightest) - ARGB8888 format: 0xAARRGGBB
                         1 => 0xFFAAAAAA, // Light gray (2/3 brightness)
@@ -893,13 +907,20 @@ impl Ppu {
 
         // Process sprites scanline by scanline to enforce 10-sprite limit
         for screen_y in 0u8..144 {
+            let scanline = self.get_scanline_state(screen_y);
+            let oam = if self.scanline_states_captured {
+                &self.oam_scanlines[screen_y as usize]
+            } else {
+                &self.oam
+            };
             // Collect all sprites that intersect this scanline
-            let mut sprites_on_line: Vec<(u8, u8)> = Vec::new();
+            // Store: (oam_x, x_pos, oam_index)
+            let mut sprites_on_line: Vec<(u8, u8, u8)> = Vec::new();
 
             for sprite_idx in 0u8..40 {
                 let oam_addr = (sprite_idx as usize) * 4;
-                let oam_y = self.oam[oam_addr];
-                let oam_x = self.oam[oam_addr + 1];
+                let oam_y = oam[oam_addr];
+                let oam_x = oam[oam_addr + 1];
 
                 // OAM Y/X are offset by 16/8 respectively
                 // Sprites are visible when: 0 < Y < 160 and 0 < X < 168
@@ -918,34 +939,37 @@ impl Ppu {
                 {
                     // Sprite intersects this scanline, store X position for sorting
                     let x_pos = oam_x.wrapping_sub(8);
-                    sprites_on_line.push((x_pos, sprite_idx));
+                    sprites_on_line.push((oam_x, x_pos, sprite_idx));
                 }
             }
 
             // Hardware-accurate sprite selection:
             // Both DMG and CGB select the first 10 sprites in OAM order that intersect the scanline
             // Sort by OAM index only for selection
-            sprites_on_line.sort_by_key(|&(_x, oam_idx)| oam_idx);
+            sprites_on_line.sort_by_key(|&(_oam_x, _x_pos, oam_idx)| oam_idx);
 
-            // Take only first 10 sprites (hardware limit)
-            sprites_on_line.truncate(10);
+            // TODO: Restore hardware-accurate 10-sprite limit for DMG once timing is improved.
+            // Compatibility: some DMG games drop sprites with the strict limit under
+            // frame-based timing; relax to reduce flicker.
+            let max_sprites = if self.cgb_mode { 10 } else { 40 };
+            sprites_on_line.truncate(max_sprites);
 
             // Hardware-accurate sprite rendering priority:
             // - DMG: Lower X coordinate has higher priority, OAM order as tiebreaker
             // - CGB: Lower OAM index has higher priority (X coordinate irrelevant)
             if !self.cgb_mode {
-                // DMG: Re-sort selected sprites by X coordinate, then OAM order for rendering priority
-                sprites_on_line.sort_by_key(|&(x, oam_idx)| (x, oam_idx));
+                // DMG: Re-sort selected sprites by OAM X coordinate, then OAM order for rendering priority
+                sprites_on_line.sort_by_key(|&(oam_x, _x_pos, oam_idx)| (oam_x, oam_idx));
             }
             // CGB: Already sorted by OAM order, which is the rendering priority
 
             // Render sprites in reverse order so lower priority sprites are drawn first
             // (higher priority sprites will overwrite their pixels)
-            for &(x_pos, sprite_idx) in sprites_on_line.iter().rev() {
+            for &(_oam_x, x_pos, sprite_idx) in sprites_on_line.iter().rev() {
                 let oam_addr = (sprite_idx as usize) * 4;
-                let oam_y = self.oam[oam_addr];
-                let tile_index = self.oam[oam_addr + 2];
-                let flags = self.oam[oam_addr + 3];
+                let oam_y = oam[oam_addr];
+                let tile_index = oam[oam_addr + 2];
+                let flags = oam[oam_addr + 3];
 
                 // OAM flags interpretation differs between DMG and CGB
                 // Bit 7: BG/Window priority
@@ -1067,9 +1091,9 @@ impl Ppu {
                     } else {
                         // DMG mode: use monochrome palettes
                         let palette = if dmg_palette_num == 1 {
-                            self.obp1
+                            scanline.obp1
                         } else {
-                            self.obp0
+                            scanline.obp0
                         };
                         // Map 2-bit color to grayscale using OBP0/OBP1 palette
                         let palette_color = (palette >> (color_index * 2)) & 0x03;
@@ -1103,6 +1127,18 @@ impl Ppu {
     ///
     /// Returns (vblank_started, stat_interrupt, hblank_entered)
     pub fn step(&mut self, cycles: u32) -> (bool, bool, bool) {
+        // When LCD is disabled, LY stays at 0 and no timing progresses.
+        if (self.lcdc & LCDC_ENABLE) == 0 {
+            self.ly = 0;
+            self.cycle_counter = 0;
+            self.prev_mode = 0;
+            self.stat &= !0x03;
+            self.stat_interrupt_line = false;
+            self.scanline_states_captured = false;
+            self.window_line_counter = 0;
+            return (false, false, false);
+        }
+
         // Accumulate cycles
         self.cycle_counter += cycles;
 
@@ -1127,7 +1163,11 @@ impl Ppu {
                     wy: self.wy,
                     wx: self.wx,
                     lcdc: self.lcdc,
+                    bgp: self.bgp,
+                    obp0: self.obp0,
+                    obp1: self.obp1,
                 };
+                self.oam_scanlines[self.ly as usize] = self.oam;
                 self.scanline_states_captured = true;
             }
 
@@ -1357,20 +1397,13 @@ mod tests {
             "VRAM should be accessible in Mode 2"
         );
 
-        // Mode 3 (Pixel Transfer) - VRAM inaccessible
+        // Mode 3 (Pixel Transfer) - VRAM still accessible in frame-based model
         ppu.stat = 0x03;
-        ppu.write_vram(0x1003, 0x45); // This write should be ignored
+        ppu.write_vram(0x1003, 0x45);
         assert_eq!(
             ppu.read_vram(0x1003),
-            0xFF,
-            "VRAM reads should return 0xFF in Mode 3"
-        );
-        // Verify the write was actually ignored
-        ppu.stat = 0x00; // Switch to Mode 0 to check
-        assert_eq!(
-            ppu.read_vram(0x1003),
-            0x00,
-            "VRAM write should be ignored in Mode 3"
+            0x45,
+            "VRAM writes should be allowed in Mode 3 for compatibility"
         );
 
         // LCD disabled - VRAM always accessible
@@ -1414,36 +1447,22 @@ mod tests {
             "OAM should be accessible in Mode 1"
         );
 
-        // Mode 2 (OAM Search) - OAM inaccessible
+        // Mode 2 (OAM Search) - OAM still accessible in frame-based model
         ppu.stat = 0x02;
-        ppu.write_oam(0x12, 0x44); // This write should be ignored
+        ppu.write_oam(0x12, 0x44);
         assert_eq!(
             ppu.read_oam(0x12),
-            0xFF,
-            "OAM reads should return 0xFF in Mode 2"
-        );
-        // Verify the write was actually ignored
-        ppu.stat = 0x00; // Switch to Mode 0 to check
-        assert_eq!(
-            ppu.read_oam(0x12),
-            0x00,
-            "OAM write should be ignored in Mode 2"
+            0x44,
+            "OAM writes should be allowed in Mode 2 for compatibility"
         );
 
-        // Mode 3 (Pixel Transfer) - OAM inaccessible
+        // Mode 3 (Pixel Transfer) - OAM still accessible in frame-based model
         ppu.stat = 0x03;
-        ppu.write_oam(0x13, 0x45); // This write should be ignored
+        ppu.write_oam(0x13, 0x45);
         assert_eq!(
             ppu.read_oam(0x13),
-            0xFF,
-            "OAM reads should return 0xFF in Mode 3"
-        );
-        // Verify the write was actually ignored
-        ppu.stat = 0x00; // Switch to Mode 0 to check
-        assert_eq!(
-            ppu.read_oam(0x13),
-            0x00,
-            "OAM write should be ignored in Mode 3"
+            0x45,
+            "OAM writes should be allowed in Mode 3 for compatibility"
         );
 
         // LCD disabled - OAM always accessible

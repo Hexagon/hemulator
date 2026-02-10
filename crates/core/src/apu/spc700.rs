@@ -454,10 +454,8 @@ pub struct Spc700 {
     cpu: CpuSpc700<Spc700Memory>,
     /// Timing mode (always NTSC for SNES)
     timing: TimingMode,
-    /// Cycle accumulator for audio sample generation
+    /// Cycle accumulator for audio sample generation (used for resampling)
     cycle_acc: f64,
-    /// Cycles per audio sample
-    cycles_per_sample: f64,
     /// DSP cycle accumulator (DSP runs at 32kHz, CPU at 1.024MHz)
     /// DSP clocks every 32 CPU cycles (1024000/32000 = 32)
     dsp_cycle_acc: u32,
@@ -469,6 +467,11 @@ pub struct Spc700 {
     last_sample: i16,
     /// Previous DSP sample (for linear interpolation)
     prev_sample: i16,
+    /// Buffer of mono DSP samples produced by run_cycles() at 32kHz
+    /// Consumed by generate_samples() with resampling to output rate
+    sample_buffer: Vec<i16>,
+    /// Fractional position for resampling from 32kHz to output rate
+    resample_pos: f64,
 }
 
 impl Spc700 {
@@ -479,19 +482,18 @@ impl Spc700 {
 
         // SNES APU runs at ~1.024 MHz
         // Audio output is typically 32000 Hz
-        let apu_clock_hz = 1024000.0;
-        let sample_rate = 32000.0;
 
         Self {
             cpu,
             timing: TimingMode::Ntsc,
             cycle_acc: 0.0,
-            cycles_per_sample: apu_clock_hz / sample_rate,
             dsp_cycle_acc: 0,
             total_cycles_requested: 0,
             run_cycles_call_count: 0,
             last_sample: 0,
             prev_sample: 0,
+            sample_buffer: Vec::with_capacity(2048),
+            resample_pos: 0.0,
         }
     }
 
@@ -513,6 +515,11 @@ impl Spc700 {
         } else {
             0
         }
+    }
+
+    /// Get the current SPC700 CPU program counter (for debugging)
+    pub fn cpu_pc(&self) -> u16 {
+        self.cpu.pc
     }
 
     /// Execute CPU for a number of cycles
@@ -590,6 +597,16 @@ impl Spc700 {
             // Update timers based on executed cycles
             self.cpu.memory.tick_timers(executed);
 
+            // Clock DSP every 32 CPU cycles and buffer mono samples
+            // DSP runs at 32kHz (1024000 / 32 = 32000)
+            self.dsp_cycle_acc += executed;
+            while self.dsp_cycle_acc >= 32 {
+                self.dsp_cycle_acc -= 32;
+                let (left, right) = self.cpu.memory.dsp.clock();
+                let mono = ((left as i32 + right as i32) / 2) as i16;
+                self.sample_buffer.push(mono);
+            }
+
             remaining = remaining.saturating_sub(executed);
         }
     }
@@ -663,33 +680,51 @@ impl AudioChip for Spc700 {
         self.dsp_cycle_acc = 0;
         self.last_sample = 0;
         self.prev_sample = 0;
+        self.sample_buffer.clear();
+        self.resample_pos = 0.0;
     }
 
     fn generate_samples(&mut self, count: usize) -> Vec<i16> {
+        // Resample from 32kHz sample_buffer to the requested output count
+        // The sample_buffer is filled by run_cycles() during frame execution
         let mut samples = Vec::with_capacity(count);
+        let buf_len = self.sample_buffer.len();
 
-        for _ in 0..count {
-            // Accumulate cycles
-            self.cycle_acc += self.cycles_per_sample;
-
-            // Execute CPU cycles
-            let mut dsp_sample = (0i16, 0i16);
-            while self.cycle_acc >= 1.0 {
-                self.cpu.step();
-                self.cycle_acc -= 1.0;
-
-                // Clock DSP at 32kHz (every 32 CPU cycles)
-                self.dsp_cycle_acc += 1;
-                if self.dsp_cycle_acc >= 32 {
-                    self.dsp_cycle_acc -= 32;
-                    dsp_sample = self.cpu.memory.dsp.clock();
-                }
-            }
-
-            // Mix stereo to mono for now
-            let mono = ((dsp_sample.0 as i32 + dsp_sample.1 as i32) / 2) as i16;
-            samples.push(mono);
+        if buf_len == 0 {
+            // No samples generated yet — return silence
+            return vec![0; count];
         }
+
+        // Calculate step through the buffer for the requested output count
+        let step = buf_len as f64 / count as f64;
+
+        for i in 0..count {
+            let pos = self.resample_pos + i as f64 * step;
+            let idx = pos as usize;
+
+            if idx + 1 < buf_len {
+                // Linear interpolation between adjacent samples
+                let frac = pos - idx as f64;
+                let s0 = self.sample_buffer[idx] as f64;
+                let s1 = self.sample_buffer[idx + 1] as f64;
+                samples.push((s0 + (s1 - s0) * frac) as i16);
+            } else if idx < buf_len {
+                samples.push(self.sample_buffer[idx]);
+            } else {
+                // Past end of buffer — use last sample
+                samples.push(*self.sample_buffer.last().unwrap_or(&0));
+            }
+        }
+
+        // Store last sample for interpolation continuity
+        if let Some(&last) = self.sample_buffer.last() {
+            self.prev_sample = self.last_sample;
+            self.last_sample = last;
+        }
+
+        // Clear consumed buffer
+        self.sample_buffer.clear();
+        self.resample_pos = 0.0;
 
         samples
     }

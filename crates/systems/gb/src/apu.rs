@@ -149,6 +149,16 @@ pub struct GbApu {
 
     // Sample generation
     _cycle_accum: f64,
+    last_pulse1_sample: i16,
+    last_pulse2_sample: i16,
+    last_wave_sample: i16,
+    channel_mask: [bool; 4],
+    dc_prev_input_l: f32,
+    dc_prev_output_l: f32,
+    dc_prev_input_r: f32,
+    dc_prev_output_r: f32,
+    lp_prev_l: f32,
+    lp_prev_r: f32,
 }
 
 impl GbApu {
@@ -185,6 +195,16 @@ impl GbApu {
             wave_dac_enabled: false,
 
             _cycle_accum: 0.0,
+            last_pulse1_sample: 0,
+            last_pulse2_sample: 0,
+            last_wave_sample: 0,
+            channel_mask: [true, true, true, true],
+            dc_prev_input_l: 0.0,
+            dc_prev_output_l: 0.0,
+            dc_prev_input_r: 0.0,
+            dc_prev_output_r: 0.0,
+            lp_prev_l: 0.0,
+            lp_prev_r: 0.0,
         }
     }
 
@@ -202,9 +222,9 @@ impl GbApu {
         // Clock all channels
         if self.power_on {
             // Pulse channels clock at CPU speed
-            let _ = self.pulse1.clock();
-            let _ = self.pulse2.clock();
-            let _ = self.wave.clock();
+            self.last_pulse1_sample = self.pulse1.clock();
+            self.last_pulse2_sample = self.pulse2.clock();
+            self.last_wave_sample = self.wave.clock();
             let _ = self.noise.clock();
         }
     }
@@ -247,7 +267,7 @@ impl GbApu {
                 if self.frame_sequencer_step == 2 || self.frame_sequencer_step == 6 {
                     if let Some(new_freq) = self.pulse1_sweep.clock() {
                         self.pulse1_frequency = new_freq;
-                        self.pulse1.set_timer(new_freq);
+                        self.pulse1.set_timer(gb_square_timer(new_freq));
                     }
                 }
             }
@@ -266,6 +286,10 @@ impl GbApu {
         }
 
         self.frame_sequencer_step = (self.frame_sequencer_step + 1) & 7;
+    }
+
+    pub fn set_channel_mask(&mut self, mask: [bool; 4]) {
+        self.channel_mask = mask;
     }
 
     /// Read from an APU register
@@ -458,7 +482,8 @@ impl GbApu {
 
                 if trigger {
                     self.pulse1.enabled = true;
-                    self.pulse1.set_timer(self.pulse1_frequency);
+                    self.pulse1
+                        .set_timer(gb_square_timer(self.pulse1_frequency));
                     self.pulse1_envelope.trigger();
                     self.pulse1_sweep.trigger(self.pulse1_frequency);
 
@@ -505,7 +530,8 @@ impl GbApu {
 
                 if trigger {
                     self.pulse2.enabled = true;
-                    self.pulse2.set_timer(self.pulse2_frequency);
+                    self.pulse2
+                        .set_timer(gb_square_timer(self.pulse2_frequency));
                     self.pulse2_envelope.trigger();
 
                     if self.pulse2_length.value() == 0 {
@@ -544,7 +570,7 @@ impl GbApu {
 
                 if trigger && self.wave_dac_enabled {
                     self.wave.enabled = true;
-                    self.wave.set_timer(self.wave_frequency);
+                    self.wave.set_timer(gb_wave_timer(self.wave_frequency));
                     self.wave.reset_position();
 
                     if self.wave_length.value() == 0 {
@@ -586,11 +612,7 @@ impl GbApu {
                 let _divisor = val & 0x07;
 
                 self.noise.mode = width;
-
-                // Convert to period index
-                // GB uses: frequency = 262144 / (divisor * 2^(shift+1))
-                // We'll store shift and divisor in period_index for now
-                self.noise.period_index = val;
+                self.noise.set_period(gb_noise_period_index(val));
             }
             // NR44: Noise control
             0xFF23 => {
@@ -669,6 +691,12 @@ impl GbApu {
         self.pulse2_frequency = 0;
         self.wave_frequency = 0;
         self.wave_dac_enabled = false;
+        self.dc_prev_input_l = 0.0;
+        self.dc_prev_output_l = 0.0;
+        self.dc_prev_input_r = 0.0;
+        self.dc_prev_output_r = 0.0;
+        self.lp_prev_l = 0.0;
+        self.lp_prev_r = 0.0;
     }
 
     /// Generate audio samples for a number of CPU cycles
@@ -691,8 +719,34 @@ impl GbApu {
                 cycle_accum -= CYCLES_PER_SAMPLE;
 
                 // Mix all channels
-                let sample = self.mix_channels();
-                samples.push(sample);
+                let (left, right) = self.mix_channels_stereo();
+                let sample = ((left as i32) + (right as i32)) / 2;
+                samples.push(sample as i16);
+            }
+        }
+
+        samples
+    }
+
+    /// Generate interleaved stereo samples for a number of CPU cycles
+    pub fn generate_samples_stereo(&mut self, cpu_cycles: u32) -> Vec<i16> {
+        const SAMPLE_RATE: f64 = 44100.0;
+        const CPU_CLOCK: f64 = 4194304.0;
+        const CYCLES_PER_SAMPLE: f64 = CPU_CLOCK / SAMPLE_RATE;
+
+        let mut samples = Vec::new();
+        let mut cycle_accum = 0.0;
+
+        for _ in 0..cpu_cycles {
+            self.clock();
+
+            cycle_accum += 1.0;
+            if cycle_accum >= CYCLES_PER_SAMPLE {
+                cycle_accum -= CYCLES_PER_SAMPLE;
+
+                let (left, right) = self.mix_channels_stereo();
+                samples.push(left);
+                samples.push(right);
             }
         }
 
@@ -700,50 +754,172 @@ impl GbApu {
     }
 
     /// Mix all active channels into a single sample
-    fn mix_channels(&self) -> i16 {
+    fn mix_channels_stereo(&mut self) -> (i16, i16) {
         if !self.power_on {
-            return 0;
+            return (0, 0);
         }
 
-        let mut sample = 0i32;
-        let mut active_channels = 0;
+        let mut left_sum = 0i32;
+        let mut right_sum = 0i32;
+        let mut left_weight = 0i32;
+        let mut right_weight = 0i32;
+
+        let pan = self.channel_panning;
+        let ch_pan = |left_bit: u8, right_bit: u8| -> (i32, i32) {
+            let left = (pan >> left_bit) & 0x01;
+            let right = (pan >> right_bit) & 0x01;
+            (left as i32, right as i32)
+        };
 
         // Add pulse 1
-        if self.pulse1.enabled && self.pulse1_length.is_active() {
-            sample += self.pulse1.duty_output() as i32 * (self.pulse1.envelope as i32);
-            active_channels += 1;
+        if self.channel_mask[0] && self.pulse1.enabled && self.pulse1_length.is_active() {
+            let (l, r) = ch_pan(4, 0);
+            if l > 0 {
+                left_sum += (self.last_pulse1_sample as i32 / 2) * l;
+                left_weight += l;
+            }
+            if r > 0 {
+                right_sum += (self.last_pulse1_sample as i32 / 2) * r;
+                right_weight += r;
+            }
         }
 
         // Add pulse 2
-        if self.pulse2.enabled && self.pulse2_length.is_active() {
-            sample += self.pulse2.duty_output() as i32 * (self.pulse2.envelope as i32);
-            active_channels += 1;
+        if self.channel_mask[1] && self.pulse2.enabled && self.pulse2_length.is_active() {
+            let (l, r) = ch_pan(5, 1);
+            if l > 0 {
+                left_sum += (self.last_pulse2_sample as i32 / 2) * l;
+                left_weight += l;
+            }
+            if r > 0 {
+                right_sum += (self.last_pulse2_sample as i32 / 2) * r;
+                right_weight += r;
+            }
         }
 
         // Add wave
-        if self.wave.enabled && self.wave_length.is_active() && self.wave_dac_enabled {
-            // Wave channel outputs 4-bit samples
-            let wave_sample = self.wave.wave_ram[0] as i32;
-            sample += wave_sample * (1 << (self.wave.volume_shift));
-            active_channels += 1;
+        if self.channel_mask[2]
+            && self.wave.enabled
+            && self.wave_length.is_active()
+            && self.wave_dac_enabled
+        {
+            // Wave channel outputs unsigned 4-bit samples; center around zero
+            let wave_sample = ((self.last_wave_sample as i32) - 7680) * 2;
+            let (l, r) = ch_pan(6, 2);
+            if l > 0 {
+                left_sum += (wave_sample / 2) * l;
+                left_weight += l;
+            }
+            if r > 0 {
+                right_sum += (wave_sample / 2) * r;
+                right_weight += r;
+            }
         }
 
         // Add noise
-        if self.noise.enabled && self.noise_length.is_active() {
-            sample += self.noise.envelope as i32;
-            active_channels += 1;
+        if self.channel_mask[3] && self.noise.enabled && self.noise_length.is_active() {
+            let noise_sample = if self.noise.is_silenced() {
+                -((self.noise.envelope as i32) << 10)
+            } else {
+                (self.noise.envelope as i32) << 10
+            };
+            let (l, r) = ch_pan(7, 3);
+            if l > 0 {
+                left_sum += (noise_sample / 2) * l;
+                left_weight += l;
+            }
+            if r > 0 {
+                right_sum += (noise_sample / 2) * r;
+                right_weight += r;
+            }
         }
 
         // Average and apply master volume
-        if active_channels > 0 {
-            sample /= active_channels;
-            sample = sample * ((self.left_volume + self.right_volume) as i32) / 14;
-            // Scale to 16-bit range
-            (sample << 8) as i16
+        let left = if left_weight > 0 {
+            let mut sample = left_sum / left_weight;
+            sample = sample * (self.left_volume as i32) / 7;
+            apply_filters(
+                sample as f32,
+                &mut self.dc_prev_input_l,
+                &mut self.dc_prev_output_l,
+                &mut self.lp_prev_l,
+            )
         } else {
             0
+        };
+
+        let right = if right_weight > 0 {
+            let mut sample = right_sum / right_weight;
+            sample = sample * (self.right_volume as i32) / 7;
+            apply_filters(
+                sample as f32,
+                &mut self.dc_prev_input_r,
+                &mut self.dc_prev_output_r,
+                &mut self.lp_prev_r,
+            )
+        } else {
+            0
+        };
+
+        (left, right)
+    }
+}
+
+const GB_NOISE_PERIOD_TABLE: [u16; 16] = [
+    4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068,
+];
+
+const GB_NOISE_DIVISOR_TABLE: [u16; 8] = [8, 16, 32, 48, 64, 80, 96, 112];
+
+fn gb_square_timer(freq: u16) -> u16 {
+    let period = (2048u32.saturating_sub(freq as u32)) * 4;
+    let reload = period / 2;
+    reload.saturating_sub(1) as u16
+}
+
+fn gb_wave_timer(freq: u16) -> u16 {
+    let period = (2048u32.saturating_sub(freq as u32)) * 2;
+    period.saturating_sub(1) as u16
+}
+
+fn gb_noise_period_index(val: u8) -> u8 {
+    let shift = (val >> 4) & 0x0F;
+    let divisor_code = val & 0x07;
+    let divisor = GB_NOISE_DIVISOR_TABLE[divisor_code as usize] as u32;
+    let target_cycles = divisor << shift;
+
+    let mut best_idx = 0;
+    let mut best_diff = u32::MAX;
+    for (idx, &period) in GB_NOISE_PERIOD_TABLE.iter().enumerate() {
+        let diff = period.abs_diff(target_cycles as u16) as u32;
+        if diff < best_diff {
+            best_diff = diff;
+            best_idx = idx as u8;
         }
     }
+
+    best_idx
+}
+
+fn apply_filters(
+    input: f32,
+    prev_input: &mut f32,
+    prev_output: &mut f32,
+    lp_prev: &mut f32,
+) -> i16 {
+    // DC-blocking high-pass filter
+    let y = input - *prev_input + (0.995 * *prev_output);
+    *prev_input = input;
+    *prev_output = y;
+
+    // One-pole low-pass filter to smooth harsh edges
+    let lp = *lp_prev + (0.08 * (y - *lp_prev));
+    *lp_prev = lp;
+
+    // Soft clip to avoid hard saturation
+    let clipped = lp / (1.0 + lp.abs() / 32768.0);
+
+    clipped.clamp(i16::MIN as f32, i16::MAX as f32) as i16
 }
 
 impl Default for GbApu {

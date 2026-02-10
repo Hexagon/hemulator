@@ -154,7 +154,10 @@
 //! ```
 
 use emu_core::debug::Debugger;
-use emu_core::{cpu_lr35902::CpuLr35902, types::Frame, MountPointInfo, System};
+use emu_core::logging::{log, LogCategory, LogLevel};
+use emu_core::{
+    cpu_lr35902::CpuLr35902, cpu_lr35902::MemoryLr35902, types::Frame, MountPointInfo, System,
+};
 
 mod apu;
 mod boot_rom;
@@ -207,6 +210,8 @@ pub struct GbSystem {
     instruction_tracer: emu_core::instruction_tracer::InstructionTracer,
     /// Breakpoint manager for debugging
     breakpoint_manager: emu_core::breakpoints::BreakpointManager,
+    /// One-shot log for PC=0x0038 hangs
+    pc_0038_logged: bool,
 }
 
 impl Default for GbSystem {
@@ -229,6 +234,7 @@ impl GbSystem {
             renderer: Box::new(SoftwarePpuRenderer::new()),
             instruction_tracer: emu_core::instruction_tracer::InstructionTracer::new(),
             breakpoint_manager: emu_core::breakpoints::BreakpointManager::new(),
+            pc_0038_logged: false,
         }
     }
 
@@ -280,27 +286,32 @@ impl GbSystem {
         // Calculate cycles needed for requested sample count
         // Sample rate: 44100 Hz, CPU clock: 4.194304 MHz
         // Cycles per sample: 4194304 / 44100 ≈ 95.1
-        const CYCLES_PER_SAMPLE: u32 = 95;
-
-        let cycles_needed = count as u32 * CYCLES_PER_SAMPLE;
+        const SAMPLE_RATE: f64 = 44100.0;
+        const CPU_CLOCK: f64 = 4194304.0;
+        let cycles_needed = ((count as f64) * (CPU_CLOCK / SAMPLE_RATE)).ceil() as u32;
 
         // Use accumulated cycles from actual emulation
         let cycles_to_use = self.audio_cycles_accumulated.min(cycles_needed);
 
-        let samples = self.cpu.memory.apu.generate_samples(cycles_to_use);
+        let samples = self.cpu.memory.apu.generate_samples_stereo(cycles_to_use);
 
         // Subtract used cycles
         self.audio_cycles_accumulated = self.audio_cycles_accumulated.saturating_sub(cycles_to_use);
 
         // Pad with silence if we don't have enough samples
         let mut result = samples;
-        while result.len() < count {
+        let target_len = count * 2;
+        while result.len() < target_len {
             result.push(0);
         }
 
         // Truncate if we have too many
-        result.truncate(count);
+        result.truncate(target_len);
         result
+    }
+
+    pub fn set_audio_channel_mask(&mut self, mask: [bool; 4]) {
+        self.cpu.memory.apu.set_channel_mask(mask);
     }
 
     /// Get debug information about the Game Boy system
@@ -417,6 +428,7 @@ impl System for GbSystem {
     fn reset(&mut self) {
         self.cpu.reset();
         self.total_cycles = 0;
+        self.pc_0038_logged = false;
 
         // Apply post-boot hardware state
         // This skips the boot ROM animation but initializes hardware correctly
@@ -439,10 +451,85 @@ impl System for GbSystem {
             // Execute any pending GDMA before CPU step
             self.cpu.memory.execute_pending_gdma();
 
+            if self.cpu.memory.oam_dma_active() {
+                // CPU is halted during OAM DMA. Advance time in 4-cycle chunks.
+                let dma_cycles = 4;
+                cycles += dma_cycles;
+                self.total_cycles += dma_cycles as u64;
+
+                // Accumulate cycles for audio generation
+                self.audio_cycles_accumulated += dma_cycles;
+
+                // Step timer and handle timer interrupt
+                if self.cpu.memory.timer.step(dma_cycles) {
+                    // Timer overflow - request timer interrupt (bit 2)
+                    self.cpu.memory.request_interrupt(0x04);
+                }
+
+                // Step OAM DMA transfer
+                self.cpu.memory.step_oam_dma(dma_cycles);
+
+                // Step PPU and handle VBlank, STAT interrupts, and HDMA
+                let (vblank_started, stat_interrupt, hblank_entered) =
+                    self.cpu.memory.ppu.step(dma_cycles);
+
+                if vblank_started {
+                    // V-Blank started - request VBlank interrupt (bit 0)
+                    self.cpu.memory.request_interrupt(0x01);
+                }
+
+                if stat_interrupt {
+                    // STAT interrupt - request STAT interrupt (bit 1)
+                    self.cpu.memory.request_interrupt(0x02);
+                }
+
+                // Perform HDMA transfer during HBlank if active
+                if hblank_entered {
+                    self.cpu.memory.step_hdma();
+                }
+
+                // Step serial transfer and handle serial interrupt
+                if self.cpu.memory.step_serial(dma_cycles) {
+                    // Serial transfer complete - request serial interrupt (bit 3)
+                    self.cpu.memory.request_interrupt(0x08);
+                }
+
+                continue;
+            }
+
             let pc_before = self.cpu.pc;
             let cpu_cycles = self.cpu.step();
             cycles += cpu_cycles;
             self.total_cycles += cpu_cycles as u64;
+
+            if !self.pc_0038_logged && self.cpu.pc == 0x0038 {
+                self.pc_0038_logged = true;
+                let ie = self.cpu.memory.read(0xFFFF);
+                let if_reg = self.cpu.memory.read(0xFF0F);
+                let sp = self.cpu.sp;
+                let s0 = self.cpu.memory.read(sp);
+                let s1 = self.cpu.memory.read(sp.wrapping_add(1));
+                let s2 = self.cpu.memory.read(sp.wrapping_add(2));
+                let s3 = self.cpu.memory.read(sp.wrapping_add(3));
+                log(LogCategory::CPU, LogLevel::Error, || {
+                    format!(
+                        "GB: PC hit $0038 (pc_before=${:04X}) A=${:02X} F=${:02X} BC=${:04X} DE=${:04X} HL=${:04X} SP=${:04X} IE=${:02X} IF=${:02X} STACK=[{:02X} {:02X} {:02X} {:02X}]",
+                        pc_before,
+                        self.cpu.a,
+                        self.cpu.f,
+                        ((self.cpu.b as u16) << 8) | self.cpu.c as u16,
+                        ((self.cpu.d as u16) << 8) | self.cpu.e as u16,
+                        ((self.cpu.h as u16) << 8) | self.cpu.l as u16,
+                        sp,
+                        ie,
+                        if_reg,
+                        s0,
+                        s1,
+                        s2,
+                        s3
+                    )
+                });
+            }
 
             // Record instruction if tracing is enabled
             if self.instruction_tracer.is_enabled() {
@@ -460,6 +547,9 @@ impl System for GbSystem {
                 // Timer overflow - request timer interrupt (bit 2)
                 self.cpu.memory.request_interrupt(0x04);
             }
+
+            // Step OAM DMA transfer
+            self.cpu.memory.step_oam_dma(cpu_cycles);
 
             // Step PPU and handle VBlank, STAT interrupts, and HDMA
             let (vblank_started, stat_interrupt, hblank_entered) =
@@ -770,7 +860,7 @@ mod tests {
         let samples = sys.get_audio_samples(1000);
 
         // Verify we got the requested number of samples
-        assert_eq!(samples.len(), 1000);
+        assert_eq!(samples.len(), 2000);
 
         // Samples should be valid i16 values (no need to check range, type system ensures this)
         // Audio system should not crash when generating samples
