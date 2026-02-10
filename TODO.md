@@ -60,10 +60,14 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Current: CPU/PPU/DMA/timers/debugger implemented; audio and save states missing
   - Needed: APU channels, mixer, and full state persistence
   - Impact: No sound and no save/load support
-- [ ] **Remaining BIOS SWI Functions**: Implement missing BIOS calls (BitUnPack, HuffUnComp, Diff filters, affine transforms, IntrWait/Halt/Stop) - `crates/core/src/cpu_arm7tdmi.rs`
-  - Current: Only CpuSet/CpuFastSet, Div/DivArm, Sqrt, LZ77, RL decompression are emulated
-  - Needed: Complete BIOS SWI coverage for compatibility with more games
-  - Impact: Some GBA titles still hang or show blank screens
+- [ ] **Exception Handlers**: Implement missing CPU exception handlers - `crates/core/src/cpu_arm7tdmi.rs`
+  - Current: SWI, IRQ, Undefined implemented; FIQ, Prefetch Abort, Data Abort missing
+  - Needed: FIQ (line 84-85), Prefetch Abort (line 79-80), Data Abort (line 81-82)
+  - Impact: Memory protection features and fast interrupts not supported
+- [ ] **BIOS SWI HuffUnComp**: Implement Huffman decompression - `crates/core/src/cpu_arm7tdmi.rs:800`
+  - Current: Logged as stub, not implemented
+  - Needed: Full Huffman decompression algorithm for SWI 0x13
+  - Impact: Games using Huffman compression will fail to decompress assets
 
 #### NES (Nintendo Entertainment System) - Completed
 - [x] **APU Non-Linear Mixing**: Implement hardware-accurate mixer impedance curves - `crates/systems/nes/src/apu.rs:609-880`
@@ -303,6 +307,21 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Impact: Hard to verify hardware accuracy without original documentation
 
 ### Low
+
+#### GBA (Game Boy Advance) - Low Priority
+
+- [ ] **Per-Sprite Mosaic**: Implement per-sprite mosaic flag - `crates/systems/gba/src/ppu.rs:1023`
+  - Current: OBJ mosaic uses global setting only; attr0 mosaic bit ignored
+  - Needed: Track and apply mosaic per-sprite based on attr0 bit 12
+  - Impact: Sprites incorrectly share global mosaic settings
+- [ ] **HBlank OAM Access Restriction**: Restrict OAM access during HBlank - `crates/systems/gba/src/ppu.rs:91`
+  - Current: OAM accessible at all times
+  - Needed: Hardware restricts OAM writes during HBlank period
+  - Impact: Games relying on this restriction may have rendering glitches
+- [ ] **LDM/STM User Bank Enforcement**: Handle S bit in LDM/STM - `crates/core/src/cpu_arm7tdmi.rs:1922`
+  - Current: S bit (force user banks) not enforced in LDM/STM instructions
+  - Needed: Load/store from user mode registers in privileged modes when S=1
+  - Impact: Very rare edge case, most games don't use this feature
 
 #### Debugger/Tracing System
 

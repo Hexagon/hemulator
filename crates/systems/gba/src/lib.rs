@@ -138,14 +138,14 @@ impl GbaBus {
 
         Self {
             bios,
-            ewram: vec![0; 0x40000],  // 256KB
-            iwram: vec![0; 0x8000],   // 32KB
-            io: vec![0; 0x400],       // 1KB
-            palette: vec![0; 0x400],  // 1KB
-            vram: vec![0; 0x18000],   // 96KB
-            oam: vec![0; 0x400],      // 1KB
+            ewram: vec![0; 0x40000], // 256KB
+            iwram: vec![0; 0x8000],  // 32KB
+            io: vec![0; 0x400],      // 1KB
+            palette: vec![0; 0x400], // 1KB
+            vram: vec![0; 0x18000],  // 96KB
+            oam: vec![0; 0x400],     // 1KB
             rom: Vec::new(),
-            sram: vec![0; 0x10000],   // 64KB
+            sram: vec![0; 0x10000], // 64KB
             dma: dma::Dma::new(),
             timers: timers::Timers::new(),
             irq_pending: false,
@@ -200,14 +200,10 @@ impl GbaBus {
             0x04000007 => 0, // VCOUNT is only 8 bits
 
             // DMA registers (0x040000B0-0x040000DF)
-            0x040000B0..=0x040000DF => {
-                self.dma.read(addr - 0x040000B0)
-            }
+            0x040000B0..=0x040000DF => self.dma.read(addr - 0x040000B0),
 
             // Timer registers (0x04000100-0x0400010F)
-            0x04000100..=0x0400010F => {
-                self.timers.read(addr - 0x04000100)
-            }
+            0x04000100..=0x0400010F => self.timers.read(addr - 0x04000100),
 
             // KEYINPUT (Key Status) - all keys released = 0x03FF
             0x04000130 => 0xFF,
@@ -290,9 +286,7 @@ impl MemoryArm7 for GbaBus {
     fn read_byte(&self, addr: u32) -> u8 {
         match addr {
             // BIOS (0x00000000 - 0x00003FFF)
-            0x00000000..=0x00003FFF => {
-                self.bios.get(addr as usize).copied().unwrap_or(0)
-            }
+            0x00000000..=0x00003FFF => self.bios.get(addr as usize).copied().unwrap_or(0),
 
             // External WRAM (0x02000000 - 0x0203FFFF, mirrored)
             0x02000000..=0x02FFFFFF => {
@@ -668,7 +662,10 @@ impl System for GbaSystem {
                     }
 
                     // Trigger HBlank DMA
-                    self.cpu.memory.dma.notify_timing(dma::DmaStartTiming::HBlank);
+                    self.cpu
+                        .memory
+                        .dma
+                        .notify_timing(dma::DmaStartTiming::HBlank);
                     let dma_cycles = self.execute_dma();
                     self.total_cycles += dma_cycles;
                     self.scanline_cycles += dma_cycles;
@@ -691,7 +688,10 @@ impl System for GbaSystem {
                     self.ppu.on_vblank(&self.cpu.memory.io);
 
                     // Trigger VBlank DMA
-                    self.cpu.memory.dma.notify_timing(dma::DmaStartTiming::VBlank);
+                    self.cpu
+                        .memory
+                        .dma
+                        .notify_timing(dma::DmaStartTiming::VBlank);
                     let dma_cycles = self.execute_dma();
                     self.total_cycles += dma_cycles;
                     self.scanline_cycles += dma_cycles;
@@ -750,14 +750,18 @@ impl System for GbaSystem {
                 self.cpu.gpr[15] = 0x08000000;
                 // Set initial SP values (as BIOS would)
                 self.cpu.gpr[13] = 0x03007F00; // SP_usr/sys
-                // Switch to System mode (post-BIOS state)
+                                               // Switch to System mode (post-BIOS state)
                 self.cpu.cpsr = 0x1F; // System mode, ARM, IRQ+FIQ enabled
 
                 // Initialize banked stack pointers (as the real BIOS does)
                 // SP_irq = 0x03007FA0
-                self.cpu.set_banked_sp(emu_core::cpu_arm7tdmi::ProcessorMode::Irq, 0x03007FA0);
+                self.cpu
+                    .set_banked_sp(emu_core::cpu_arm7tdmi::ProcessorMode::Irq, 0x03007FA0);
                 // SP_svc = 0x03007FE0
-                self.cpu.set_banked_sp(emu_core::cpu_arm7tdmi::ProcessorMode::Supervisor, 0x03007FE0);
+                self.cpu.set_banked_sp(
+                    emu_core::cpu_arm7tdmi::ProcessorMode::Supervisor,
+                    0x03007FE0,
+                );
 
                 Ok(())
             }
