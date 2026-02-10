@@ -76,12 +76,9 @@ const MODE_MASK: u32 = 0x1F;
 const VECTOR_RESET: u32 = 0x00000000;
 const VECTOR_UNDEFINED: u32 = 0x00000004;
 const VECTOR_SWI: u32 = 0x00000008;
-#[allow(dead_code)] // TODO: Implement prefetch abort exception
 const VECTOR_PREFETCH_ABORT: u32 = 0x0000000C;
-#[allow(dead_code)] // TODO: Implement data abort exception
 const VECTOR_DATA_ABORT: u32 = 0x00000010;
 const VECTOR_IRQ: u32 = 0x00000018;
-#[allow(dead_code)] // TODO: Implement FIQ exception
 const VECTOR_FIQ: u32 = 0x0000001C;
 
 // ARM condition codes (bits 31:28 of instruction)
@@ -1149,6 +1146,39 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
     fn handle_undefined(&mut self) {
         let lr_offset = if self.is_thumb() { 2 } else { 4 };
         self.enter_exception(VECTOR_UNDEFINED, ProcessorMode::Undefined, lr_offset);
+    }
+
+    /// Handle a Fast Interrupt Request (FIQ)
+    fn handle_fiq(&mut self) {
+        // FIQ uses same return address convention as IRQ
+        // LR_fiq = next_instruction_addr + 4
+        let lr_offset = (-4i32) as u32;
+        log(LogCategory::Interrupts, LogLevel::Debug, || {
+            format!("ARM7: FIQ handler: PC={:08X}", self.gpr[15])
+        });
+        self.enter_exception(VECTOR_FIQ, ProcessorMode::Fiq, lr_offset);
+    }
+
+    /// Handle a Prefetch Abort exception
+    fn handle_prefetch_abort(&mut self) {
+        // Prefetch Abort: return to the instruction that failed to fetch
+        // LR_abt = failed_instruction_addr + 4
+        let lr_offset = 4;
+        log(LogCategory::CPU, LogLevel::Debug, || {
+            format!("ARM7: Prefetch Abort at PC={:08X}", self.gpr[15])
+        });
+        self.enter_exception(VECTOR_PREFETCH_ABORT, ProcessorMode::Abort, lr_offset);
+    }
+
+    /// Handle a Data Abort exception
+    fn handle_data_abort(&mut self) {
+        // Data Abort: return to the instruction that caused the abort
+        // LR_abt = faulting_instruction_addr + 8
+        let lr_offset = 8;
+        log(LogCategory::CPU, LogLevel::Debug, || {
+            format!("ARM7: Data Abort at PC={:08X}", self.gpr[15])
+        });
+        self.enter_exception(VECTOR_DATA_ABORT, ProcessorMode::Abort, lr_offset);
     }
 
     /// Check and handle pending interrupts
@@ -3402,5 +3432,112 @@ mod tests {
         cpu.memory.write_halfword_at(0, instr);
         cpu.step();
         assert!(cpu.flag_z());
+    }
+
+    #[test]
+    fn test_fiq_handler() {
+        let mut cpu = make_cpu();
+        cpu.gpr[15] = 0x1000;
+        cpu.cpsr = 0x10; // User mode, ARM state
+
+        cpu.handle_fiq();
+
+        // Should have switched to FIQ mode
+        assert_eq!(cpu.current_mode(), ProcessorMode::Fiq);
+        // Should have jumped to FIQ vector
+        assert_eq!(cpu.gpr[15], VECTOR_FIQ);
+        // IRQ and FIQ should be disabled
+        assert!(cpu.cpsr & FLAG_I != 0);
+        assert!(cpu.cpsr & FLAG_F != 0);
+        // Should be in ARM state
+        assert!(cpu.cpsr & FLAG_T == 0);
+    }
+
+    #[test]
+    fn test_prefetch_abort_handler() {
+        let mut cpu = make_cpu();
+        cpu.gpr[15] = 0x2000;
+        cpu.cpsr = 0x10; // User mode, ARM state
+        let old_cpsr = cpu.cpsr;
+
+        cpu.handle_prefetch_abort();
+
+        // Should have switched to Abort mode
+        assert_eq!(cpu.current_mode(), ProcessorMode::Abort);
+        // Should have jumped to Prefetch Abort vector
+        assert_eq!(cpu.gpr[15], VECTOR_PREFETCH_ABORT);
+        // SPSR should save old CPSR
+        assert_eq!(cpu.get_spsr(), old_cpsr);
+        // LR should be PC - 4 (failed instruction address + 4)
+        assert_eq!(cpu.gpr[14], 0x2000 - 4);
+        // IRQ should be disabled
+        assert!(cpu.cpsr & FLAG_I != 0);
+        // Should be in ARM state
+        assert!(cpu.cpsr & FLAG_T == 0);
+    }
+
+    #[test]
+    fn test_data_abort_handler() {
+        let mut cpu = make_cpu();
+        cpu.gpr[15] = 0x3000;
+        cpu.cpsr = 0x10; // User mode, ARM state
+        let old_cpsr = cpu.cpsr;
+
+        cpu.handle_data_abort();
+
+        // Should have switched to Abort mode
+        assert_eq!(cpu.current_mode(), ProcessorMode::Abort);
+        // Should have jumped to Data Abort vector
+        assert_eq!(cpu.gpr[15], VECTOR_DATA_ABORT);
+        // SPSR should save old CPSR
+        assert_eq!(cpu.get_spsr(), old_cpsr);
+        // LR should be PC - 8 (faulting instruction address + 8)
+        assert_eq!(cpu.gpr[14], 0x3000 - 8);
+        // IRQ should be disabled
+        assert!(cpu.cpsr & FLAG_I != 0);
+        // Should be in ARM state
+        assert!(cpu.cpsr & FLAG_T == 0);
+    }
+
+    #[test]
+    fn test_exception_handlers_preserve_banked_registers() {
+        let mut cpu = make_cpu();
+        
+        // Start in User mode
+        cpu.cpsr = 0x10; // User mode
+        cpu.switch_mode(ProcessorMode::User);
+
+        // Set up user mode registers
+        cpu.gpr[13] = 0x1000; // User SP
+        cpu.gpr[14] = 0x2000; // User LR
+        cpu.gpr[0] = 0xAAAA;  // General register for testing
+
+        // Take a FIQ exception (this will modify R14 with return address)
+        cpu.handle_fiq();
+
+        // Verify we're in FIQ mode
+        assert_eq!(cpu.current_mode(), ProcessorMode::Fiq);
+
+        // Set FIQ mode banked registers
+        cpu.gpr[13] = 0x3000; // FIQ SP
+        cpu.gpr[14] = 0x4000; // FIQ LR (override exception handler's value)
+        cpu.gpr[8] = 0xBBBB;  // FIQ has banked R8-R14
+
+        // Switch back to user mode using proper API
+        cpu.switch_mode(ProcessorMode::User);
+
+        // User mode registers should be preserved
+        assert_eq!(cpu.gpr[13], 0x1000);
+        assert_eq!(cpu.gpr[14], 0x2000);
+        assert_eq!(cpu.gpr[0], 0xAAAA);
+
+        // R8 should be different from what we set in FIQ mode
+        assert_ne!(cpu.gpr[8], 0xBBBB);
+
+        // Switch back to FIQ to verify its registers are preserved
+        cpu.switch_mode(ProcessorMode::Fiq);
+        assert_eq!(cpu.gpr[13], 0x3000);
+        assert_eq!(cpu.gpr[14], 0x4000);
+        assert_eq!(cpu.gpr[8], 0xBBBB);
     }
 }
