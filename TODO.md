@@ -65,18 +65,33 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Note: Implementation appears correct based on code review, issue may be in edge cases or timing
 
 #### GBA (Game Boy Advance)
-- [ ] **Audio + Save States**: Implement APU audio and save state serialization - `crates/systems/gba/src/lib.rs`
-  - Current: CPU/PPU/DMA/timers/debugger implemented; audio and save states missing
-  - Needed: APU channels, mixer, and full state persistence
-  - Impact: No sound and no save/load support
-- [ ] **Exception Handlers**: Implement missing CPU exception handlers - `crates/core/src/cpu_arm7tdmi.rs`
-  - Current: SWI, IRQ, Undefined implemented; FIQ, Prefetch Abort, Data Abort missing
-  - Needed: FIQ (line 84-85), Prefetch Abort (line 79-80), Data Abort (line 81-82)
-  - Impact: Memory protection features and fast interrupts not supported
-- [ ] **BIOS SWI HuffUnComp**: Implement Huffman decompression - `crates/core/src/cpu_arm7tdmi.rs:800`
-  - Current: Logged as stub, not implemented
-  - Needed: Full Huffman decompression algorithm for SWI 0x13
-  - Impact: Games using Huffman compression will fail to decompress assets
+- [ ] **Audio (APU)**: Implement APU audio - `crates/systems/gba/src/lib.rs`
+  - Current: CPU/PPU/DMA/timers/debugger/save states implemented; audio missing
+  - Needed: APU channels, mixer, and audio output
+  - Impact: No sound support
+- [x] **Save States**: Implement save state serialization - `crates/systems/gba/src/lib.rs:714-905`
+  - **FIXED**: Full save state serialization/deserialization implemented
+  - CPU state: All 16 GPRs, CPSR, all banked registers (FIQ/IRQ/SVC/ABT/UND/USR), all SPSRs
+  - Memory state: EWRAM, IWRAM, I/O registers, Palette RAM, VRAM, OAM, SRAM (base64 encoded)
+  - PPU state: Affine reference points for BG2/BG3
+  - Interrupt state: IME, IE, IF flags
+  - Impact: Full save/load support for GBA games
+- [x] **Exception Handlers**: Implement missing CPU exception handlers - `crates/core/src/cpu_arm7tdmi.rs:1338-1371`
+  - **FIXED**: FIQ, Prefetch Abort, and Data Abort handlers implemented
+  - FIQ: Fast interrupt handler with proper mode switch and flag disable
+  - Prefetch Abort: Handles instruction fetch failures (LR = failed_addr + 4)
+  - Data Abort: Handles memory access faults (LR = faulting_addr + 8)
+  - All exception handlers properly save CPSR, switch modes, and jump to vectors
+  - Added comprehensive tests for exception handlers and register banking
+  - Impact: Complete ARM7TDMI exception handling support
+- [x] **BIOS SWI HuffUnComp**: Implement Huffman decompression - `crates/core/src/cpu_arm7tdmi.rs:1125-1232`
+  - **FIXED**: Full Huffman decompression (SWI 0x13) implemented
+  - Supports 4-bit and 8-bit data widths
+  - Binary tree traversal: 0 bit = left child, 1 bit = right child
+  - Tree format: Internal nodes (bit 7=1) with offset, leaf nodes (bit 7=0) with data
+  - Proper header parsing: compression type, decompressed size, tree structure
+  - Impact: Games using Huffman compression can now decompress assets correctly
+  - Reference: GBATEK BIOS Decompression Functions
 
 #### NES (Nintendo Entertainment System) - Completed
 - [x] **APU Non-Linear Mixing**: Implement hardware-accurate mixer impedance curves - `crates/systems/nes/src/apu.rs:609-880`

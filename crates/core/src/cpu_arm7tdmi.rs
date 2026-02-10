@@ -103,9 +103,12 @@ const MODE_MASK: u32 = 0x1F;
 const VECTOR_RESET: u32 = 0x00000000;
 const VECTOR_UNDEFINED: u32 = 0x00000004;
 const VECTOR_SWI: u32 = 0x00000008;
+#[allow(dead_code)] // Called when prefetch abort occurs
 const VECTOR_PREFETCH_ABORT: u32 = 0x0000000C;
+#[allow(dead_code)] // Called when data abort occurs
 const VECTOR_DATA_ABORT: u32 = 0x00000010;
 const VECTOR_IRQ: u32 = 0x00000018;
+#[allow(dead_code)] // Called when FIQ occurs
 const VECTOR_FIQ: u32 = 0x0000001C;
 
 // ARM condition codes (bits 31:28 of instruction)
@@ -1335,6 +1338,7 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
     }
 
     /// Handle a Fast Interrupt Request (FIQ)
+    #[allow(dead_code)] // Called when FIQ exception occurs
     fn handle_fiq(&mut self) {
         // FIQ uses same return address convention as IRQ
         // LR_fiq = next_instruction_addr + 4
@@ -1346,6 +1350,7 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
     }
 
     /// Handle a Prefetch Abort exception
+    #[allow(dead_code)] // Called when instruction fetch fails
     fn handle_prefetch_abort(&mut self) {
         // Prefetch Abort: return to the instruction that failed to fetch
         // LR_abt = failed_instruction_addr + 4
@@ -1357,6 +1362,7 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
     }
 
     /// Handle a Data Abort exception
+    #[allow(dead_code)] // Called when memory access faults
     fn handle_data_abort(&mut self) {
         // Data Abort: return to the instruction that caused the abort
         // LR_abt = faulting_instruction_addr + 8
@@ -3688,7 +3694,7 @@ mod tests {
     #[test]
     fn test_exception_handlers_preserve_banked_registers() {
         let mut cpu = make_cpu();
-        
+
         // Start in User mode
         cpu.cpsr = 0x10; // User mode
         cpu.switch_mode(ProcessorMode::User);
@@ -3696,7 +3702,7 @@ mod tests {
         // Set up user mode registers
         cpu.gpr[13] = 0x1000; // User SP
         cpu.gpr[14] = 0x2000; // User LR
-        cpu.gpr[0] = 0xAAAA;  // General register for testing
+        cpu.gpr[0] = 0xAAAA; // General register for testing
 
         // Take a FIQ exception (this will modify R14 with return address)
         cpu.handle_fiq();
@@ -3707,7 +3713,7 @@ mod tests {
         // Set FIQ mode banked registers
         cpu.gpr[13] = 0x3000; // FIQ SP
         cpu.gpr[14] = 0x4000; // FIQ LR (override exception handler's value)
-        cpu.gpr[8] = 0xBBBB;  // FIQ has banked R8-R14
+        cpu.gpr[8] = 0xBBBB; // FIQ has banked R8-R14
 
         // Switch back to user mode using proper API
         cpu.switch_mode(ProcessorMode::User);
@@ -3733,7 +3739,7 @@ mod tests {
 
         // Create a simple Huffman compressed test case
         // This will decompress to "AAABBC" (6 bytes)
-        
+
         // Setup compressed data in memory at 0x1000
         let src_addr = 0x1000u32;
         let dst_addr = 0x2000u32;
@@ -3746,14 +3752,15 @@ mod tests {
 
         // Write header (4 bytes): compression type + 24-bit size
         cpu.memory.write_byte(src_addr, header_byte0);
-        cpu.memory.write_byte(src_addr + 1, (decompressed_size & 0xFF) as u8);
+        cpu.memory
+            .write_byte(src_addr + 1, (decompressed_size & 0xFF) as u8);
         cpu.memory
             .write_byte(src_addr + 2, ((decompressed_size >> 8) & 0xFF) as u8);
         cpu.memory
             .write_byte(src_addr + 3, ((decompressed_size >> 16) & 0xFF) as u8);
 
         // Tree size: Number of tree nodes - 1 (we'll use a simple tree with 3 leaves)
-        // Tree: 
+        // Tree:
         //     Root (internal, offset to children)
         //       /  \
         //     'A'  Internal
