@@ -223,6 +223,11 @@ pub struct Arm7Tdmi<M: MemoryArm7> {
     /// Whether we just flushed the pipeline (branch, exception, etc.)
     pipeline_flushed: bool,
 
+    // ---- CPU halt state ----
+    /// Whether the CPU is halted (e.g., by SWI Halt/IntrWait/VBlankIntrWait).
+    /// When halted, instruction execution is skipped until an IRQ fires.
+    pub halted: bool,
+
     // ---- Cycle counting ----
     /// Total cycles executed
     pub cycles: u64,
@@ -257,6 +262,7 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
             spsr_abt: 0,
             spsr_und: 0,
             pipeline_flushed: true,
+            halted: false,
             cycles: 0,
             memory,
         }
@@ -280,6 +286,7 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
         self.spsr_abt = 0;
         self.spsr_und = 0;
         self.pipeline_flushed = true;
+        self.halted = false;
         self.cycles = 0;
         // PC = reset vector
         self.gpr[15] = VECTOR_RESET;
@@ -308,6 +315,20 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
     #[inline]
     pub fn pc(&self) -> u32 {
         self.gpr[15]
+    }
+
+    /// Set a banked stack pointer for a given mode.
+    /// This is used during initialization to set up SP values
+    /// that the real BIOS would configure during boot.
+    pub fn set_banked_sp(&mut self, mode: ProcessorMode, sp: u32) {
+        match mode {
+            ProcessorMode::Irq => self.irq_r13_r14[0] = sp,
+            ProcessorMode::Supervisor => self.svc_r13_r14[0] = sp,
+            ProcessorMode::Fiq => self.fiq_r13_r14[0] = sp,
+            ProcessorMode::Abort => self.abt_r13_r14[0] = sp,
+            ProcessorMode::Undefined => self.und_r13_r14[0] = sp,
+            ProcessorMode::User | ProcessorMode::System => self.usr_r13_r14[0] = sp,
+        }
     }
 
     /// Set PC and flush the pipeline
@@ -534,15 +555,587 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
         self.enter_exception(VECTOR_SWI, ProcessorMode::Supervisor, lr_offset);
     }
 
+    /// Emulate GBA BIOS SWI calls (when BIOS ROM is not present).
+    /// Returns true if the SWI was handled here and no exception is needed.
+    fn handle_bios_swi(&mut self, imm: u32) -> bool {
+        match imm {
+            0x06 => {
+                // Div (signed) - R0 / R1
+                let n = self.gpr[0] as i32;
+                let d = self.gpr[1] as i32;
+                if d == 0 {
+                    self.gpr[0] = 0;
+                    self.gpr[1] = 0;
+                    self.gpr[3] = 0;
+                } else {
+                    let q = n / d;
+                    let r = n % d;
+                    self.gpr[0] = q as u32;
+                    self.gpr[1] = r as u32;
+                    self.gpr[3] = q.unsigned_abs();
+                }
+                true
+            }
+            0x07 => {
+                // DivArm (signed) - identical results, different timing on hardware
+                let n = self.gpr[0] as i32;
+                let d = self.gpr[1] as i32;
+                if d == 0 {
+                    self.gpr[0] = 0;
+                    self.gpr[1] = 0;
+                    self.gpr[3] = 0;
+                } else {
+                    let q = n / d;
+                    let r = n % d;
+                    self.gpr[0] = q as u32;
+                    self.gpr[1] = r as u32;
+                    self.gpr[3] = q.unsigned_abs();
+                }
+                true
+            }
+            0x08 => {
+                // Sqrt (unsigned)
+                let n = self.gpr[0] as u32;
+                let r = (n as f64).sqrt() as u32;
+                self.gpr[0] = r;
+                true
+            }
+            0x0B => {
+                // CpuSet
+                let src = self.gpr[0];
+                let dst = self.gpr[1];
+                let control = self.gpr[2];
+                self.bios_cpu_set(src, dst, control);
+                true
+            }
+            0x0C => {
+                // CpuFastSet
+                let src = self.gpr[0];
+                let dst = self.gpr[1];
+                let control = self.gpr[2];
+                self.bios_cpu_fast_set(src, dst, control);
+                true
+            }
+            0x11 => {
+                // LZ77UnCompWram
+                let src = self.gpr[0];
+                let dst = self.gpr[1];
+                self.bios_lz77_decompress(src, dst, false);
+                true
+            }
+            0x12 => {
+                // LZ77UnCompVram
+                let src = self.gpr[0];
+                let dst = self.gpr[1];
+                self.bios_lz77_decompress(src, dst, true);
+                true
+            }
+            0x14 => {
+                // RLUnCompWram
+                let src = self.gpr[0];
+                let dst = self.gpr[1];
+                self.bios_rl_decompress(src, dst, false);
+                true
+            }
+            0x15 => {
+                // RLUnCompVram
+                let src = self.gpr[0];
+                let dst = self.gpr[1];
+                self.bios_rl_decompress(src, dst, true);
+                true
+            }
+            0x00 => {
+                // SoftReset - reset to ROM entry point
+                self.gpr = [0; 16];
+                self.gpr[15] = 0x08000000; // Jump to ROM start
+                self.gpr[13] = 0x03007F00; // SP_usr
+                self.cpsr = MODE_SYSTEM; // System mode, ARM, IRQ+FIQ enabled
+                self.halted = false;
+                true
+            }
+            0x01 => {
+                // RegisterRamReset - clear memory regions based on R0 flags
+                let flags = self.gpr[0];
+                if flags & 0x01 != 0 {
+                    // Clear 256KB EWRAM (0x02000000-0x0203FFFF)
+                    for addr in (0x0200_0000u32..0x0204_0000).step_by(4) {
+                        self.memory.write_word(addr, 0);
+                    }
+                }
+                if flags & 0x02 != 0 {
+                    // Clear 32KB IWRAM (0x03000000-0x03007FFF)
+                    for addr in (0x0300_0000u32..0x0300_7F00).step_by(4) {
+                        self.memory.write_word(addr, 0);
+                    }
+                }
+                if flags & 0x04 != 0 {
+                    // Clear palette RAM
+                    for addr in (0x0500_0000u32..0x0500_0400).step_by(4) {
+                        self.memory.write_word(addr, 0);
+                    }
+                }
+                if flags & 0x08 != 0 {
+                    // Clear VRAM
+                    for addr in (0x0600_0000u32..0x0601_8000).step_by(4) {
+                        self.memory.write_word(addr, 0);
+                    }
+                }
+                if flags & 0x10 != 0 {
+                    // Clear OAM
+                    for addr in (0x0700_0000u32..0x0700_0400).step_by(4) {
+                        self.memory.write_word(addr, 0);
+                    }
+                }
+                true
+            }
+            0x02 => {
+                // Halt - halt CPU until next interrupt
+                self.halted = true;
+                true
+            }
+            0x03 => {
+                // Stop - deep sleep until keypad/cartridge/serial interrupt
+                // For emulation, treat like Halt
+                self.halted = true;
+                true
+            }
+            0x04 => {
+                // IntrWait - wait for specific interrupt(s)
+                // R0 = whether to clear existing BIOS IF flags first
+                // R1 = interrupt mask to wait for
+                let clear_existing = self.gpr[0] != 0;
+                let wait_flags = self.gpr[1] as u16;
+
+                // Address 0x03007FF8 (BIOS IRQ flags) in IWRAM
+                let bios_if_addr = 0x0300_7FF8u32;
+
+                if clear_existing {
+                    // Clear the BIOS IF flags for the requested interrupts
+                    let current = self.memory.read_word(bios_if_addr);
+                    self.memory.write_word(bios_if_addr, current & !(wait_flags as u32));
+                }
+
+                // Check if the requested interrupt is already pending in BIOS flags
+                let bios_flags = self.memory.read_word(bios_if_addr) as u16;
+                if bios_flags & wait_flags != 0 {
+                    // Clear the matched flags and return immediately
+                    let current = self.memory.read_word(bios_if_addr);
+                    self.memory.write_word(bios_if_addr, current & !(wait_flags as u32));
+                    return true;
+                }
+
+                // Enable IME so interrupts can fire
+                self.memory.write_halfword(0x0400_0208, 1);
+
+                // Halt until an interrupt wakes us
+                self.halted = true;
+                true
+            }
+            0x05 => {
+                // VBlankIntrWait - shortcut for IntrWait(1, 1)
+                self.gpr[0] = 1; // Clear existing flags
+                self.gpr[1] = 1; // Wait for VBlank (bit 0)
+
+                let bios_if_addr = 0x0300_7FF8u32;
+                // Clear VBlank bit in BIOS flags
+                let current = self.memory.read_word(bios_if_addr);
+                self.memory.write_word(bios_if_addr, current & !1);
+
+                // Enable IME
+                self.memory.write_halfword(0x0400_0208, 1);
+
+                // Halt until interrupt
+                self.halted = true;
+                true
+            }
+            0x09 => {
+                // ArcTan - R0 = tan (in 1.14 fixed point), result in R0
+                let tan = (self.gpr[0] as i16) as f64 / 16384.0;
+                let result = tan.atan();
+                // Convert back to GBA fixed-point format (signed 1.14)
+                let r = (result / std::f64::consts::FRAC_PI_2 * 16384.0) as i16;
+                self.gpr[0] = r as u16 as u32;
+                true
+            }
+            0x0A => {
+                // ArcTan2 - R0 = x, R1 = y (both 1.14 fixed point), result in R0
+                let x = (self.gpr[0] as i16) as f64;
+                let y = (self.gpr[1] as i16) as f64;
+                let result = y.atan2(x);
+                // Convert to GBA range: 0x0000-0xFFFF for full circle
+                let r = (result / (2.0 * std::f64::consts::PI) * 65536.0) as i32;
+                // Ensure positive range
+                let r = if r < 0 { r + 65536 } else { r };
+                self.gpr[0] = (r & 0xFFFF) as u32;
+                true
+            }
+            0x0E => {
+                // BgAffineSet - calculate background affine parameters
+                let src = self.gpr[0];
+                let dst = self.gpr[1];
+                let count = self.gpr[2];
+                self.bios_bg_affine_set(src, dst, count);
+                true
+            }
+            0x0F => {
+                // ObjAffineSet - calculate sprite affine parameters
+                let src = self.gpr[0];
+                let dst = self.gpr[1];
+                let count = self.gpr[2];
+                let offset = self.gpr[3];
+                self.bios_obj_affine_set(src, dst, count, offset);
+                true
+            }
+            0x10 => {
+                // BitUnPack - unpack and expand bit-packed data
+                let src = self.gpr[0];
+                let dst = self.gpr[1];
+                let info = self.gpr[2];
+                self.bios_bit_unpack(src, dst, info);
+                true
+            }
+            0x13 => {
+                // HuffUnComp - Huffman decompression
+                // Complex to implement fully; for now log and return
+                log(LogCategory::Stubs, LogLevel::Warn, || {
+                    format!("SWI 0x13 HuffUnComp: stub (src={:08X}, dst={:08X})", self.gpr[0], self.gpr[1])
+                });
+                true
+            }
+            _ => {
+                log(LogCategory::Stubs, LogLevel::Warn, || {
+                    format!("Unhandled BIOS SWI 0x{:02X} at PC={:08X}", imm, self.gpr[15])
+                });
+                false
+            }
+        }
+    }
+
+    fn bios_cpu_set(&mut self, mut src: u32, mut dst: u32, control: u32) {
+        let count = control & 0x001F_FFFF;
+        if count == 0 {
+            return;
+        }
+
+        let fixed = (control & 0x0100_0000) != 0;
+        let transfer_32 = (control & 0x0400_0000) != 0;
+
+        if transfer_32 {
+            let mut value = 0u32;
+            if fixed {
+                value = self.memory.read_word(src & !3);
+            }
+            for _ in 0..count {
+                let v = if fixed {
+                    value
+                } else {
+                    let v = self.memory.read_word(src & !3);
+                    src = src.wrapping_add(4);
+                    v
+                };
+                self.memory.write_word(dst & !3, v);
+                dst = dst.wrapping_add(4);
+            }
+        } else {
+            let mut value = 0u16;
+            if fixed {
+                value = self.memory.read_halfword(src & !1);
+            }
+            for _ in 0..count {
+                let v = if fixed {
+                    value
+                } else {
+                    let v = self.memory.read_halfword(src & !1);
+                    src = src.wrapping_add(2);
+                    v
+                };
+                self.memory.write_halfword(dst & !1, v);
+                dst = dst.wrapping_add(2);
+            }
+        }
+    }
+
+    fn bios_cpu_fast_set(&mut self, mut src: u32, mut dst: u32, control: u32) {
+        let count = control & 0x001F_FFFF;
+        if count == 0 {
+            return;
+        }
+
+        let fixed = (control & 0x0100_0000) != 0;
+        let total_words = count * 8;
+
+        let mut value = 0u32;
+        if fixed {
+            value = self.memory.read_word(src & !3);
+        }
+
+        for _ in 0..total_words {
+            let v = if fixed {
+                value
+            } else {
+                let v = self.memory.read_word(src & !3);
+                src = src.wrapping_add(4);
+                v
+            };
+            self.memory.write_word(dst & !3, v);
+            dst = dst.wrapping_add(4);
+        }
+    }
+
+    fn bios_lz77_decompress(&mut self, src: u32, dst: u32, vram: bool) {
+        let header = self.memory.read_byte(src);
+        if header != 0x10 {
+            return;
+        }
+
+        let len = (self.memory.read_byte(src + 1) as u32)
+            | ((self.memory.read_byte(src + 2) as u32) << 8)
+            | ((self.memory.read_byte(src + 3) as u32) << 16);
+
+        let mut src_ptr = src + 4;
+        let mut out: Vec<u8> = Vec::with_capacity(len as usize);
+
+        while out.len() < len as usize {
+            let flags = self.memory.read_byte(src_ptr);
+            src_ptr = src_ptr.wrapping_add(1);
+
+            for bit in 0..8 {
+                if out.len() >= len as usize {
+                    break;
+                }
+
+                if (flags & (0x80 >> bit)) == 0 {
+                    let b = self.memory.read_byte(src_ptr);
+                    src_ptr = src_ptr.wrapping_add(1);
+                    out.push(b);
+                } else {
+                    let b1 = self.memory.read_byte(src_ptr);
+                    let b2 = self.memory.read_byte(src_ptr + 1);
+                    src_ptr = src_ptr.wrapping_add(2);
+
+                    let disp = (((b1 as u32 & 0xF) << 8) | (b2 as u32)) + 1;
+                    let count = ((b1 as usize) >> 4) + 3;
+
+                    for _ in 0..count {
+                        if out.len() >= len as usize {
+                            break;
+                        }
+                        let back = out.len().saturating_sub(disp as usize);
+                        let b = out[back];
+                        out.push(b);
+                    }
+                }
+            }
+        }
+
+        self.bios_write_decompressed(dst, &out, vram);
+    }
+
+    fn bios_rl_decompress(&mut self, src: u32, dst: u32, vram: bool) {
+        let header = self.memory.read_byte(src);
+        if header != 0x30 {
+            return;
+        }
+
+        let len = (self.memory.read_byte(src + 1) as u32)
+            | ((self.memory.read_byte(src + 2) as u32) << 8)
+            | ((self.memory.read_byte(src + 3) as u32) << 16);
+
+        let mut src_ptr = src + 4;
+        let mut out: Vec<u8> = Vec::with_capacity(len as usize);
+
+        while out.len() < len as usize {
+            let control = self.memory.read_byte(src_ptr);
+            src_ptr = src_ptr.wrapping_add(1);
+
+            if (control & 0x80) == 0 {
+                let count = (control as usize) + 1;
+                for _ in 0..count {
+                    if out.len() >= len as usize {
+                        break;
+                    }
+                    let b = self.memory.read_byte(src_ptr);
+                    src_ptr = src_ptr.wrapping_add(1);
+                    out.push(b);
+                }
+            } else {
+                let count = ((control & 0x7F) as usize) + 3;
+                let value = self.memory.read_byte(src_ptr);
+                src_ptr = src_ptr.wrapping_add(1);
+                for _ in 0..count {
+                    if out.len() >= len as usize {
+                        break;
+                    }
+                    out.push(value);
+                }
+            }
+        }
+
+        self.bios_write_decompressed(dst, &out, vram);
+    }
+
+    fn bios_write_decompressed(&mut self, dst: u32, data: &[u8], vram: bool) {
+        if vram {
+            let mut addr = dst & !1;
+            let mut i = 0usize;
+            while i < data.len() {
+                let lo = data[i] as u16;
+                let hi = if i + 1 < data.len() {
+                    (data[i + 1] as u16) << 8
+                } else {
+                    0
+                };
+                self.memory.write_halfword(addr, lo | hi);
+                addr = addr.wrapping_add(2);
+                i += 2;
+            }
+        } else {
+            let mut addr = dst;
+            for &b in data {
+                self.memory.write_byte(addr, b);
+                addr = addr.wrapping_add(1);
+            }
+        }
+    }
+
+    fn bios_bg_affine_set(&mut self, mut src: u32, mut dst: u32, count: u32) {
+        for _ in 0..count {
+            // Source: 20 bytes per entry
+            let orig_cx = self.memory.read_word(src) as i32;      // Original center X (8.8 fixed)
+            let orig_cy = self.memory.read_word(src + 4) as i32;  // Original center Y (8.8 fixed)
+            let disp_cx = self.memory.read_halfword(src + 8) as i16 as i32; // Display center X
+            let disp_cy = self.memory.read_halfword(src + 10) as i16 as i32; // Display center Y
+            let sx = self.memory.read_halfword(src + 12) as i16 as f64 / 256.0; // Scale X (8.8)
+            let sy = self.memory.read_halfword(src + 14) as i16 as f64 / 256.0; // Scale Y (8.8)
+            let angle_raw = self.memory.read_halfword(src + 16); // Angle (0-FFFF = full circle)
+            src += 20;
+
+            let angle = (angle_raw as f64) / 65536.0 * 2.0 * std::f64::consts::PI;
+            let cos_a = angle.cos();
+            let sin_a = angle.sin();
+
+            // Affine matrix: PA, PB, PC, PD (each 16-bit, 8.8 fixed)
+            let pa = (cos_a / sx * 256.0) as i16;
+            let pb = (sin_a / sx * 256.0) as i16;
+            let pc = (-sin_a / sy * 256.0) as i16;
+            let pd = (cos_a / sy * 256.0) as i16;
+
+            // Reference point X and Y (32-bit, 8.8 fixed)
+            let ref_x = orig_cx - (pa as i32 * disp_cx + pb as i32 * disp_cy);
+            let ref_y = orig_cy - (pc as i32 * disp_cx + pd as i32 * disp_cy);
+
+            // Destination: 16 bytes per entry (PA, PB, PC, PD, RefX, RefY)
+            self.memory.write_halfword(dst, pa as u16);
+            self.memory.write_halfword(dst + 2, pb as u16);
+            self.memory.write_halfword(dst + 4, pc as u16);
+            self.memory.write_halfword(dst + 6, pd as u16);
+            self.memory.write_word(dst + 8, ref_x as u32);
+            self.memory.write_word(dst + 12, ref_y as u32);
+            dst += 16;
+        }
+    }
+
+    fn bios_obj_affine_set(&mut self, mut src: u32, mut dst: u32, count: u32, offset: u32) {
+        for _ in 0..count {
+            // Source: 8 bytes per entry (sx, sy, angle as 16-bit values)
+            let sx = self.memory.read_halfword(src) as i16 as f64 / 256.0;
+            let sy = self.memory.read_halfword(src + 2) as i16 as f64 / 256.0;
+            let angle_raw = self.memory.read_halfword(src + 4);
+            src += 8;
+
+            let angle = (angle_raw as f64) / 65536.0 * 2.0 * std::f64::consts::PI;
+            let cos_a = angle.cos();
+            let sin_a = angle.sin();
+
+            let pa = (cos_a / sx * 256.0) as i16;
+            let pb = (sin_a / sx * 256.0) as i16;
+            let pc = (-sin_a / sy * 256.0) as i16;
+            let pd = (cos_a / sy * 256.0) as i16;
+
+            // Write with offset between each parameter (for OAM interleaving)
+            self.memory.write_halfword(dst, pa as u16);
+            dst += offset;
+            self.memory.write_halfword(dst, pb as u16);
+            dst += offset;
+            self.memory.write_halfword(dst, pc as u16);
+            dst += offset;
+            self.memory.write_halfword(dst, pd as u16);
+            dst += offset;
+        }
+    }
+
+    fn bios_bit_unpack(&mut self, src: u32, mut dst: u32, info_ptr: u32) {
+        // Info structure: src_len (u16), src_bit_width (u8), dst_bit_width (u8), data_offset_flag (u32)
+        let src_len = self.memory.read_halfword(info_ptr) as u32;
+        let src_bw = self.memory.read_byte(info_ptr + 2) as u32;
+        let dst_bw = self.memory.read_byte(info_ptr + 3) as u32;
+        let data_offset_flag = self.memory.read_word(info_ptr + 4);
+
+        let data_offset = data_offset_flag & 0x7FFF_FFFF;
+        let zero_data_flag = data_offset_flag & 0x8000_0000 != 0;
+
+        if src_bw == 0 || dst_bw == 0 || dst_bw > 32 {
+            return;
+        }
+
+        let src_mask = (1u32 << src_bw) - 1;
+        let mut src_addr = src;
+        let mut src_byte = 0u32;
+        let mut src_bits_left = 0u32;
+        let mut dst_word = 0u32;
+        let mut dst_bits_used = 0u32;
+        let mut bytes_read = 0u32;
+
+        while bytes_read < src_len {
+            if src_bits_left == 0 {
+                src_byte = self.memory.read_byte(src_addr) as u32;
+                src_addr += 1;
+                src_bits_left = 8;
+                bytes_read += 1;
+            }
+
+            let val = src_byte & src_mask;
+            src_byte >>= src_bw;
+            src_bits_left -= src_bw;
+
+            let out_val = if val == 0 && !zero_data_flag {
+                0
+            } else {
+                val + data_offset
+            };
+
+            dst_word |= out_val << dst_bits_used;
+            dst_bits_used += dst_bw;
+
+            if dst_bits_used >= 32 {
+                self.memory.write_word(dst, dst_word);
+                dst += 4;
+                dst_word = 0;
+                dst_bits_used = 0;
+            }
+        }
+
+        // Write remaining partial word
+        if dst_bits_used > 0 {
+            self.memory.write_word(dst, dst_word);
+        }
+    }
+
     /// Handle an IRQ
     fn handle_irq(&mut self) {
-        // LR = PC of next instruction + 4 (ARM) or + 2 (Thumb)
-        // The +4 is because the pipeline has advanced
-        let lr_offset = 0;
-        self.enter_exception(VECTOR_IRQ, ProcessorMode::Irq, lr_offset);
-        // Note: The actual return address calculation is handled by the
-        // instruction that was about to execute. The CPU saves PC+4 for ARM
-        // or PC+4 for Thumb into LR, and SUBS PC, LR, #4 is used to return.
+        // In our emulator, PC = address of next instruction to execute.
+        // ARM7TDMI convention: LR_irq = next_instruction_addr + 4
+        // The BIOS returns with SUBS PC, LR, #4 → PC = LR - 4 = next_instruction_addr
+        // enter_exception computes: LR = PC.wrapping_sub(lr_offset)
+        // We need LR = PC + 4, so lr_offset = -4 (wrapping)
+        let isr_addr = self.memory.read_word(0x03FF_FFFC);
+        log(LogCategory::Interrupts, LogLevel::Debug, || {
+            format!(
+                "ARM7: IRQ handler: PC={:08X} ISR=[03FFFFFC]={:08X}",
+                self.gpr[15], isr_addr
+            )
+        });
+        self.enter_exception(VECTOR_IRQ, ProcessorMode::Irq, (-4i32) as u32);
     }
 
     /// Handle an undefined instruction exception
@@ -694,8 +1287,15 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
 
         // Check for pending interrupts
         if self.check_interrupts() {
+            self.halted = false; // IRQ wakes CPU from halt
             self.cycles += 3; // IRQ entry takes ~3 cycles
             return (self.cycles - start_cycles) as u32;
+        }
+
+        // When halted, skip instruction execution but advance time
+        if self.halted {
+            self.cycles += 1;
+            return 1;
         }
 
         if self.is_thumb() {
@@ -810,7 +1410,10 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
 
             // Software Interrupt (SWI)
             (0b111, _) if bits_27_20 & 0x10 != 0 => {
-                self.handle_swi();
+                let imm = instr & 0x00FF_FFFF;
+                if !self.handle_bios_swi(imm) {
+                    self.handle_swi();
+                }
                 self.cycles += 3;
             }
 
@@ -1550,7 +2153,10 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
                     self.thumb_multiple_load_store(instr);
                 } else if bits_15_8 == 0b11011111 {
                     // Format 17: Software Interrupt
-                    self.handle_swi();
+                    let imm = instr & 0xFF;
+                    if !self.handle_bios_swi(imm) {
+                        self.handle_swi();
+                    }
                     self.cycles += 3;
                 } else if bits_15_8 >> 4 == 0b1101 {
                     // Format 16: Conditional branch

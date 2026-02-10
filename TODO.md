@@ -56,10 +56,14 @@ This file tracks unimplemented features, stubs, and simplified implementations a
 ### High
 
 #### GBA (Game Boy Advance)
-- [ ] **Core Emulator Implementation**: Build ARM7TDMI CPU, memory map, PPU, APU, DMA, and timers - `crates/systems/gba/src/lib.rs`
-  - Current: Shell only (mounts ROM, returns blank frame)
-  - Needed: Full CPU execution, graphics pipeline, audio pipeline, and timing
-  - Impact: GBA ROMs cannot run yet
+- [ ] **Audio + Save States**: Implement APU audio and save state serialization - `crates/systems/gba/src/lib.rs`
+  - Current: CPU/PPU/DMA/timers/debugger implemented; audio and save states missing
+  - Needed: APU channels, mixer, and full state persistence
+  - Impact: No sound and no save/load support
+- [ ] **Remaining BIOS SWI Functions**: Implement missing BIOS calls (BitUnPack, HuffUnComp, Diff filters, affine transforms, IntrWait/Halt/Stop) - `crates/core/src/cpu_arm7tdmi.rs`
+  - Current: Only CpuSet/CpuFastSet, Div/DivArm, Sqrt, LZ77, RL decompression are emulated
+  - Needed: Complete BIOS SWI coverage for compatibility with more games
+  - Impact: Some GBA titles still hang or show blank screens
 
 #### NES (Nintendo Entertainment System) - Completed
 - [x] **APU Non-Linear Mixing**: Implement hardware-accurate mixer impedance curves - `crates/systems/nes/src/apu.rs:609-880`

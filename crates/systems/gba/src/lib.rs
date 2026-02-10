@@ -26,6 +26,7 @@
 //! | 0x0E000000-0x0E00FFFF | 64KB  | Game Pak SRAM                  |
 
 use emu_core::cpu_arm7tdmi::{Arm7Tdmi, MemoryArm7};
+use emu_core::debug::Debugger;
 use emu_core::{types::Frame, MountPointInfo, System};
 use serde_json::Value;
 use thiserror::Error;
@@ -105,13 +106,35 @@ impl Default for GbaBus {
 
 impl GbaBus {
     pub fn new() -> Self {
-        // Default BIOS: just contains infinite loop at reset vector
+        // Stub BIOS with essential handlers for HLE operation
         let mut bios = vec![0u8; 0x4000];
-        // ARM instruction at 0x00: B 0x00 (infinite loop) = 0xEAFFFFFE
-        bios[0] = 0xFE;
-        bios[1] = 0xFF;
-        bios[2] = 0xFF;
-        bios[3] = 0xEA;
+
+        // 0x00: Reset vector - infinite loop (B 0x00)
+        Self::write_arm_word(&mut bios, 0x00, 0xEAFF_FFFE);
+
+        // 0x08: SWI vector - just return (safety net for unhandled SWIs)
+        // MOVS PC, LR restores CPSR from SPSR and returns
+        Self::write_arm_word(&mut bios, 0x08, 0xE1B0_F00E);
+
+        // 0x18-0x2C: IRQ handler stub
+        // This matches the real GBA BIOS IRQ handler behavior:
+        // 1. Save context on IRQ stack
+        // 2. Load game's IRQ handler from [0x03FFFFFC] (IWRAM mirror of 0x03007FFC)
+        // 3. Set return address and call handler
+        // 4. Restore context and return from exception
+        //
+        // 0x18: STMFD SP!, {R0-R3, R12, LR}  - save registers on IRQ stack
+        Self::write_arm_word(&mut bios, 0x18, 0xE92D_500F);
+        // 0x1C: MOV R0, #0x04000000           - load I/O base address
+        Self::write_arm_word(&mut bios, 0x1C, 0xE3A0_0301);
+        // 0x20: ADD LR, PC, #0                - set return address to 0x28
+        Self::write_arm_word(&mut bios, 0x20, 0xE28F_E000);
+        // 0x24: LDR PC, [R0, #-4]             - jump to handler at [0x03FFFFFC]
+        Self::write_arm_word(&mut bios, 0x24, 0xE510_F004);
+        // 0x28: LDMFD SP!, {R0-R3, R12, LR}  - restore registers
+        Self::write_arm_word(&mut bios, 0x28, 0xE8BD_500F);
+        // 0x2C: SUBS PC, LR, #4               - return from IRQ (restores CPSR)
+        Self::write_arm_word(&mut bios, 0x2C, 0xE25E_F004);
 
         Self {
             bios,
@@ -130,6 +153,14 @@ impl GbaBus {
             ie: 0,
             if_flags: 0,
         }
+    }
+
+    /// Write a 32-bit ARM instruction to the BIOS buffer (little-endian)
+    fn write_arm_word(bios: &mut [u8], offset: usize, word: u32) {
+        bios[offset] = word as u8;
+        bios[offset + 1] = (word >> 8) as u8;
+        bios[offset + 2] = (word >> 16) as u8;
+        bios[offset + 3] = (word >> 24) as u8;
     }
 
     /// Load cartridge ROM data
@@ -463,6 +494,8 @@ pub struct GbaSystem {
     scanline_cycles: u64,
     /// Parsed cartridge header (set on mount)
     header: Option<cartridge::GbaCartridgeHeader>,
+    /// Instruction tracer for debugging
+    instruction_tracer: emu_core::instruction_tracer::InstructionTracer,
 }
 
 impl std::fmt::Debug for GbaSystem {
@@ -494,8 +527,11 @@ impl GbaSystem {
             scanline: 0,
             scanline_cycles: 0,
             header: None,
+            instruction_tracer: emu_core::instruction_tracer::InstructionTracer::new(),
         }
     }
+
+    emu_core::impl_instruction_tracer_methods!();
 
     /// Check if a ROM is loaded
     fn has_rom(&self) -> bool {
@@ -587,9 +623,25 @@ impl System for GbaSystem {
 
         while self.total_cycles < frame_end {
             // Execute one CPU instruction
+            let pc_before = self.cpu.pc();
             let cycles = self.cpu.step() as u64;
             self.total_cycles += cycles;
             self.scanline_cycles += cycles;
+
+            // Record instruction if tracing is enabled
+            if self.instruction_tracer.is_enabled() {
+                if let Some(instr) = self.disassemble_instruction(pc_before) {
+                    let cpu_state = self.get_cpu_state();
+                    self.instruction_tracer.trace(instr, cpu_state);
+                }
+
+                if self.instruction_tracer.history_size()
+                    >= self.instruction_tracer.get_max_history()
+                {
+                    // Prevent long-running traces from stalling the UI.
+                    self.instruction_tracer.set_enabled(false);
+                }
+            }
 
             // Tick hardware timers
             let timer_irqs = self.cpu.memory.timers.tick(cycles as u32);
@@ -700,6 +752,12 @@ impl System for GbaSystem {
                 self.cpu.gpr[13] = 0x03007F00; // SP_usr/sys
                 // Switch to System mode (post-BIOS state)
                 self.cpu.cpsr = 0x1F; // System mode, ARM, IRQ+FIQ enabled
+
+                // Initialize banked stack pointers (as the real BIOS does)
+                // SP_irq = 0x03007FA0
+                self.cpu.set_banked_sp(emu_core::cpu_arm7tdmi::ProcessorMode::Irq, 0x03007FA0);
+                // SP_svc = 0x03007FE0
+                self.cpu.set_banked_sp(emu_core::cpu_arm7tdmi::ProcessorMode::Supervisor, 0x03007FE0);
 
                 Ok(())
             }

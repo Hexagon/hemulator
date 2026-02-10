@@ -817,7 +817,7 @@ impl EmulatorSystem {
         match self {
             EmulatorSystem::NES(sys) => Some(sys.get_instruction_tracer()),
             EmulatorSystem::GameBoy(sys) => Some(sys.get_instruction_tracer()),
-            EmulatorSystem::GBA(_) => None,
+            EmulatorSystem::GBA(sys) => Some(sys.get_instruction_tracer()),
             EmulatorSystem::Atari2600(sys) => Some(sys.get_instruction_tracer()),
             EmulatorSystem::PC(sys) => Some(sys.get_instruction_tracer()),
             EmulatorSystem::SNES(sys) => Some(sys.get_instruction_tracer()),
@@ -836,7 +836,7 @@ impl EmulatorSystem {
         match self {
             EmulatorSystem::NES(sys) => Some(sys.get_instruction_tracer_mut()),
             EmulatorSystem::GameBoy(sys) => Some(sys.get_instruction_tracer_mut()),
-            EmulatorSystem::GBA(_) => None,
+            EmulatorSystem::GBA(sys) => Some(sys.get_instruction_tracer_mut()),
             EmulatorSystem::Atari2600(sys) => Some(sys.get_instruction_tracer_mut()),
             EmulatorSystem::PC(sys) => Some(sys.get_instruction_tracer_mut()),
             EmulatorSystem::SNES(sys) => Some(sys.get_instruction_tracer_mut()),
