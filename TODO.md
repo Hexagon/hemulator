@@ -55,6 +55,15 @@ This file tracks unimplemented features, stubs, and simplified implementations a
 
 ### High
 
+#### NES (Nintendo Entertainment System)
+- [ ] **Mapper 1 (MMC1) Game Compatibility Issues**: Debug and fix Mapper 1 games that hang or don't display - `crates/systems/nes/src/mappers/mmc1.rs`
+  - Current: Comprehensive MMC1 implementation with 11 passing tests, but some games hang or show gray screen
+  - Reported issues: #307 (Rad Racer hangs), #324 (Mike Tyson's Punch-Out gray screen), #363 (Rad Racer rendering)
+  - Possible causes: Consecutive write filtering (line 126), bank switching edge cases, or integration with NES bus
+  - Needed: Test with actual Mapper 1 ROMs, enable debug logging, compare with known-good emulator
+  - Impact: Affects ~30% of NES library including Zelda, Mega Man, Final Fantasy, Metroid
+  - Note: Implementation appears correct based on code review, issue may be in edge cases or timing
+
 #### GBA (Game Boy Advance)
 - [ ] **Audio + Save States**: Implement APU audio and save state serialization - `crates/systems/gba/src/lib.rs`
   - Current: CPU/PPU/DMA/timers/debugger implemented; audio and save states missing
@@ -96,6 +105,19 @@ This file tracks unimplemented features, stubs, and simplified implementations a
 
 
 ### Medium
+
+#### Atari 2600
+- [ ] **TIA Rendering and HMOVE Timing**: Fix horizontal positioning and rendering issues - `crates/systems/atari2600/src/tia.rs`
+  - Current: Multiple rendering and control issues reported in #305
+  - Issues: Background compressed/duplicated horizontally, player sprite not moveable sideways, ball movement glitches
+  - Root causes: HMOVE timing incorrect, playfield mirroring/repeat logic wrong, sprite positioning broken
+  - Needed: 
+    - Fix HMOVE strobe timing during horizontal blank
+    - Correct playfield rendering (PF0/PF1/PF2 pattern handling)
+    - Fix player/missile/ball horizontal position counters
+    - Implement proper HMP0/HMP1 register application
+  - Impact: System is currently mostly non-functional for gameplay
+  - Reference: ATARI_2600_REVIEW_SUMMARY.md, Stella Programmer's Guide, TIA Hardware Manual
 
 #### Game Boy (DMG)
 - [ ] **Sprite Per-Scanline Limit**: Restore hardware-accurate 10-sprite limit for DMG - `crates/systems/gb/src/ppu.rs`
@@ -623,11 +645,11 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Note: IR mode register write is silently ignored (line 99-100)
 
 #### CHIP-8
-- [ ] **Audio Beep Tone**: Implement sound timer beep - `crates/frontend/gui/src/main.rs:602`
-  - Current: Returns silence (vec![0; count]) instead of beep tone
-  - Needed: Generate simple beep tone when sound timer is non-zero
-  - Impact: CHIP-8/Super-CHIP/XO-CHIP games have no audio feedback
-  - Note: CHIP-8 has only one audio feature - a simple beep tone
+- [x] **Audio Beep Tone**: Implement sound timer beep - `crates/frontend/gui/src/main.rs:626-651`
+  - **COMPLETED**: 440Hz square wave generated when sound timer is active
+  - Implementation: Simple square wave with moderate amplitude (3000) to avoid clipping
+  - Impact: CHIP-8/Super-CHIP/XO-CHIP games now have audio feedback
+  - Future Enhancement: Could add phase continuity across audio buffers for smoother transitions
 
 #### GUI / Frontend
 - [ ] **Mouse Button Support**: Implement mouse input handling - `crates/frontend/gui/src/input_mapper.rs:51`

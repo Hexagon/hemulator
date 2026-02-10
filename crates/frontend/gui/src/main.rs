@@ -623,7 +623,32 @@ impl EmulatorSystem {
             EmulatorSystem::PC(sys) => sys.get_audio_samples(count),
             EmulatorSystem::SNES(sys) => sys.get_audio_samples(count),
             EmulatorSystem::N64(sys) => sys.get_audio_samples(count),
-            EmulatorSystem::Chip8(_) => vec![0; count], // CHIP-8 audio: Single beep tone not yet implemented
+            EmulatorSystem::Chip8(sys) => {
+                // CHIP-8 audio: Simple beep tone when sound timer is active
+                if sys.is_sound_playing() {
+                    // Generate 440Hz square wave (A4 note)
+                    const SAMPLE_RATE: f32 = 44100.0;
+                    const FREQUENCY: f32 = 440.0;
+                    const AMPLITUDE: i16 = 3000; // Moderate volume to avoid clipping
+
+                    let mut samples = Vec::with_capacity(count);
+                    let period_samples = (SAMPLE_RATE / FREQUENCY) as usize;
+                    let half_period = period_samples / 2;
+
+                    for i in 0..count {
+                        let position = i % period_samples;
+                        let sample = if position < half_period {
+                            AMPLITUDE
+                        } else {
+                            -AMPLITUDE
+                        };
+                        samples.push(sample);
+                    }
+                    samples
+                } else {
+                    vec![0; count]
+                }
+            }
             EmulatorSystem::SMS(sys) => sys.get_audio_samples(count),
             EmulatorSystem::ColecoVision(sys) => sys.get_audio_samples(count),
             EmulatorSystem::SG1000(sys) => sys.get_audio_samples(count),
