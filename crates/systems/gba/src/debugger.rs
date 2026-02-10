@@ -178,6 +178,8 @@ impl Debugger for GbaSystem {
 
         state
     }
+
+    emu_core::impl_debugger_execution_history!();
 }
 
 #[cfg(test)]

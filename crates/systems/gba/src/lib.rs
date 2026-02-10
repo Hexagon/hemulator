@@ -480,6 +480,39 @@ const IRQ_VBLANK: u16 = 1 << 0;
 const IRQ_HBLANK: u16 = 1 << 1;
 const IRQ_VCOUNT: u16 = 1 << 2;
 
+/// Tile viewer data for debugging GBA PPU graphics.
+///
+/// Contains VRAM, palette RAM, OAM, and PPU state for visualization in the inspector.
+#[derive(Debug, Clone)]
+pub struct TileViewerData {
+    /// VRAM data - 96KB (tile data and tilemaps)
+    pub vram: Vec<u8>,
+    /// Palette RAM - 1KB (512 colors: 256 BG + 256 OBJ, each 15-bit BGR)
+    pub palette_ram: Vec<u8>,
+    /// OAM data - 1KB (128 sprites × 8 bytes)
+    pub oam: Vec<u8>,
+    /// Converted master palette for display (512 colors as RGBA)
+    pub master_palette: Vec<u32>,
+    
+    // PPU state registers
+    /// DISPCNT - Display Control
+    pub dispcnt: u16,
+    /// BG0CNT - BG0 Control
+    pub bg0cnt: u16,
+    /// BG1CNT - BG1 Control
+    pub bg1cnt: u16,
+    /// BG2CNT - BG2 Control
+    pub bg2cnt: u16,
+    /// BG3CNT - BG3 Control
+    pub bg3cnt: u16,
+    /// BG scroll offsets (X and Y for each BG layer)
+    pub bg_scroll: [(u16, u16); 4],
+    /// BLDCNT - Color Special Effects Selection
+    pub bldcnt: u16,
+    /// BLDALPHA - Alpha Blending Coefficients
+    pub bldalpha: u16,
+}
+
 pub struct GbaSystem {
     cpu: Arm7Tdmi<GbaBus>,
     ppu: ppu::Ppu,
@@ -535,6 +568,64 @@ impl GbaSystem {
     /// Get the parsed cartridge header (if a ROM is loaded)
     pub fn cartridge_header(&self) -> Option<&cartridge::GbaCartridgeHeader> {
         self.header.as_ref()
+    }
+
+    /// Get tile viewer data for debugging PPU graphics.
+    ///
+    /// Provides VRAM, palette RAM, OAM, and PPU state for the inspector.
+    pub fn get_tile_viewer_data(&self) -> TileViewerData {
+        // Helper to read 16-bit I/O register
+        let read_io_u16 = |offset: usize| -> u16 {
+            if offset + 1 < self.cpu.memory.io.len() {
+                u16::from_le_bytes([
+                    self.cpu.memory.io[offset],
+                    self.cpu.memory.io[offset + 1],
+                ])
+            } else {
+                0
+            }
+        };
+
+        // Convert 15-bit BGR palette to 32-bit RGBA for display
+        let convert_palette = |pal_ram: &[u8]| -> Vec<u32> {
+            let mut result = Vec::with_capacity(512);
+            for i in 0..512 {
+                let offset = i * 2;
+                if offset + 1 < pal_ram.len() {
+                    let bgr555 = u16::from_le_bytes([pal_ram[offset], pal_ram[offset + 1]]);
+                    let r = ((bgr555 & 0x1F) << 3) as u32;
+                    let g = (((bgr555 >> 5) & 0x1F) << 3) as u32;
+                    let b = (((bgr555 >> 10) & 0x1F) << 3) as u32;
+                    result.push(0xFF00_0000 | (r << 16) | (g << 8) | b);
+                } else {
+                    result.push(0xFF00_0000); // Black
+                }
+            }
+            result
+        };
+
+        // Read BG scroll offsets
+        let bg_scroll = [
+            (read_io_u16(0x010), read_io_u16(0x012)), // BG0HOFS, BG0VOFS
+            (read_io_u16(0x014), read_io_u16(0x016)), // BG1HOFS, BG1VOFS
+            (read_io_u16(0x018), read_io_u16(0x01A)), // BG2HOFS, BG2VOFS
+            (read_io_u16(0x01C), read_io_u16(0x01E)), // BG3HOFS, BG3VOFS
+        ];
+
+        TileViewerData {
+            vram: self.cpu.memory.vram.clone(),
+            palette_ram: self.cpu.memory.palette.clone(),
+            oam: self.cpu.memory.oam.clone(),
+            master_palette: convert_palette(&self.cpu.memory.palette),
+            dispcnt: read_io_u16(0x000),
+            bg0cnt: read_io_u16(0x008),
+            bg1cnt: read_io_u16(0x00A),
+            bg2cnt: read_io_u16(0x00C),
+            bg3cnt: read_io_u16(0x00E),
+            bg_scroll,
+            bldcnt: read_io_u16(0x050),
+            bldalpha: read_io_u16(0x052),
+        }
     }
 
     /// Execute any pending DMA transfers.

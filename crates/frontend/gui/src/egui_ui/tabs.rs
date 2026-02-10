@@ -20,6 +20,7 @@ pub enum Tab {
 pub enum SystemTileData {
     NES(NesTileData),
     GameBoy(GbTileData),
+    GBA(GbaTileData),
     SMS(SmsTileData),
     ColecoVision(ColecoVisionTileData),
     SG1000(Sg1000TileData),
@@ -101,6 +102,37 @@ pub struct GbTileData {
     pub wx: u8,
     pub wy: u8,
     pub is_cgb_mode: bool,
+}
+
+/// GBA tile viewer data
+#[derive(Clone)]
+pub struct GbaTileData {
+    /// VRAM data - 96KB (tile data and tilemaps)
+    pub vram: Vec<u8>,
+    /// Palette RAM - 1KB (512 colors as RGBA)
+    pub palette_ram: Vec<u8>,
+    /// OAM data - 1KB (128 sprites × 8 bytes)
+    pub oam: Vec<u8>,
+    /// Master palette converted to RGBA for display
+    pub master_palette: Vec<u32>,
+    
+    // PPU state registers
+    /// DISPCNT - Display Control
+    pub dispcnt: u16,
+    /// BG0CNT - BG0 Control
+    pub bg0cnt: u16,
+    /// BG1CNT - BG1 Control
+    pub bg1cnt: u16,
+    /// BG2CNT - BG2 Control
+    pub bg2cnt: u16,
+    /// BG3CNT - BG3 Control
+    pub bg3cnt: u16,
+    /// BG scroll offsets (X and Y for each BG layer)
+    pub bg_scroll: [(u16, u16); 4],
+    /// BLDCNT - Color Special Effects Selection
+    pub bldcnt: u16,
+    /// BLDALPHA - Alpha Blending Coefficients
+    pub bldalpha: u16,
 }
 
 /// SMS tile viewer data
@@ -1674,6 +1706,49 @@ impl TabManager {
                                 "OBJ Palettes: {} colors",
                                 gb_data.obj_palettes.len()
                             ));
+                        }
+                        SystemTileData::GBA(gba_data) => {
+                            ui.heading("🎮 GBA Tile Viewer");
+                            ui.separator();
+
+                            // Display control
+                            let bg_mode = gba_data.dispcnt & 0x7;
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new(format!("BG Mode: {}", bg_mode))
+                                        .monospace(),
+                                );
+                                ui.separator();
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "DISPCNT: ${:04X}",
+                                        gba_data.dispcnt
+                                    ))
+                                    .monospace(),
+                                );
+                            });
+
+                            ui.add_space(5.0);
+
+                            // Memory sizes
+                            ui.label(format!("VRAM: {} KB", gba_data.vram.len() / 1024));
+                            ui.label(format!("Palette RAM: {} bytes ({} colors)", gba_data.palette_ram.len(), gba_data.master_palette.len()));
+                            ui.label(format!("OAM: {} bytes (128 sprites)", gba_data.oam.len()));
+
+                            ui.add_space(5.0);
+
+                            // Enabled layers
+                            ui.label("Enabled Layers:");
+                            ui.horizontal(|ui| {
+                                for i in 0..4 {
+                                    if (gba_data.dispcnt & (1 << (8 + i))) != 0 {
+                                        ui.label(format!("BG{}", i));
+                                    }
+                                }
+                                if gba_data.dispcnt & (1 << 12) != 0 {
+                                    ui.label("OBJ");
+                                }
+                            });
                         }
                         SystemTileData::SMS(sms_data) => {
                             ui.heading("🎮 SMS Tile Viewer");
