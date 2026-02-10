@@ -5075,4 +5075,88 @@ mod tests {
             "Sprite 0 hit should NOT occur when rendering is disabled"
         );
     }
+
+    #[test]
+    fn test_sprite_0_hit_pal_timing() {
+        // Test that sprite 0 hit works correctly with PAL timing (311 scanline pre-render)
+        // This verifies flag persistence through PAL's longer VBlank period
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Pal);
+        ppu.clear_first_frame_lock();
+        ppu.chr_is_ram = true;
+
+        // Set up sprite 0 and background for guaranteed overlap
+        ppu.oam[0] = 16 - 1;
+        ppu.oam[1] = 1;
+        ppu.oam[2] = 0;
+        ppu.oam[3] = 16;
+
+        for i in 0..8 {
+            ppu.chr[0x10 + i] = 0xFF;
+            ppu.chr[0x18 + i] = 0x00;
+        }
+
+        let nt_addr = ppu.map_nametable_addr(0x2000);
+        ppu.vram[nt_addr + 2 * 32 + 2] = 2;
+        for i in 0..8 {
+            ppu.chr[0x20 + i] = 0xFF;
+            ppu.chr[0x28 + i] = 0x00;
+        }
+
+        ppu.palette[0] = 0x0F;
+        ppu.palette[1] = 0x30;
+        ppu.palette[0x11] = 0x16;
+        ppu.mask = 0x1E;
+        ppu.vram_addr.set(0x0040);
+
+        // Render scanline and trigger sprite 0 hit
+        let mut frame = Frame::new(256, 240);
+        ppu.render_scanline(16, &mut frame);
+        ppu.resolve_pending_sprite_0_hit();
+
+        assert!(ppu.sprite_0_hit.get(), "Sprite 0 hit should be set (PAL)");
+
+        // Advance to VBlank start (scanline 241, same as NTSC)
+        ppu.scanline.set(241);
+        ppu.dot.set(1);
+        ppu.tick();
+
+        // Sprite 0 hit should PERSIST through VBlank (same as NTSC)
+        assert!(
+            ppu.sprite_0_hit.get(),
+            "Sprite 0 hit should persist at VBlank start (PAL)"
+        );
+
+        // Advance through PAL's longer VBlank period
+        ppu.scanline.set(270);
+        assert!(
+            ppu.sprite_0_hit.get(),
+            "Sprite 0 hit should persist mid-VBlank (PAL)"
+        );
+
+        ppu.scanline.set(310); // Last VBlank scanline for PAL
+        assert!(
+            ppu.sprite_0_hit.get(),
+            "Sprite 0 hit should persist through end of VBlank (PAL)"
+        );
+
+        // Pre-render scanline for PAL is 311 (vs 261 for NTSC)
+        ppu.scanline.set(311);
+        ppu.dot.set(0);
+
+        // Sprite 0 hit should still be set before we reach dot 1
+        assert!(
+            ppu.sprite_0_hit.get(),
+            "Sprite 0 hit should persist at PAL pre-render scanline, dot 0"
+        );
+
+        ppu.tick(); // Advance from (311,0) to (311,1) - clearing happens here
+        ppu.tick(); // Advance from (311,1) to (311,2) after clearing
+
+        assert_eq!(ppu.scanline.get(), 311);
+        assert_eq!(ppu.dot.get(), 2);
+        assert!(
+            !ppu.sprite_0_hit.get(),
+            "Sprite 0 hit should be cleared at PAL pre-render scanline (311), dot 1"
+        );
+    }
 }

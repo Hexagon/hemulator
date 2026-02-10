@@ -205,13 +205,14 @@ cargo run --release -p emu_gui -- path/to/game.nes
 
 The NES crate includes comprehensive tests:
 
-- **222+ total tests**:
+- **263+ total tests**:
   - PPU tests (scrolling, loopy registers, sprite handling, rendering)
     - Loopy register behavior (5 tests)
-    - Sprite 0 hit comprehensive tests (10 tests):
+    - Sprite 0 hit comprehensive tests (11 tests):
       - Edge cases (x=255, clipping, transparent pixels, rendering disabled)
       - Timing precision (cycle-accurate, odd frame behavior)
       - Advanced scenarios (8x16 mode, scrolling, background transparency)
+      - **PAL timing verification** (VBlank persistence through longer VBlank period)
     - Sprite overflow detection (3 tests)
     - Sprite priority and rendering (8 tests)
     - Nametable scrolling (5 tests)
@@ -382,9 +383,14 @@ Since hit detection uses pixel positions (not dot positions), the odd frame skip
 
 - **Set**: During visible scanline rendering (scanlines 0-239)
 - **Cleared**: Pre-render scanline (dot 1) - hardware-accurate timing
+  - **NTSC**: Scanline 261, dot 1
+  - **PAL**: Scanline 311, dot 1 (50 scanlines later due to longer VBlank)
 - **VBlank Behavior**: Flag **persists through VBlank** - critical for Battletoads and other games
+  - **VBlank start**: Scanline 241 (same for both NTSC and PAL)
+  - **NTSC VBlank**: 20 scanlines (241-260)
+  - **PAL VBlank**: 70 scanlines (241-310) - 3.5× longer than NTSC
 
-Games like Battletoads poll the sprite 0 hit flag during VBlank (in the NMI handler) to detect split-screen timing. The flag must persist from when it's set during rendering through the entire VBlank period until the pre-render scanline clears it.
+Games like Battletoads poll the sprite 0 hit flag during VBlank (in the NMI handler) to detect split-screen timing. The flag must persist from when it's set during rendering through the entire VBlank period until the pre-render scanline clears it. This behavior is identical for both NTSC and PAL - only the VBlank duration differs.
 
 ### References
 
