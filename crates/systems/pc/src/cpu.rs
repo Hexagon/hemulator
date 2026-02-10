@@ -123,7 +123,6 @@ impl PcCpu {
     #[allow(dead_code)]
     const BDA_CURSOR_POS_BASE: u32 = 0x450; // Base address for cursor positions (2 bytes per page)
 
-
     /// Create a new PC CPU with the given bus (defaults to 8086)
     #[allow(dead_code)] // Public API, used in tests
     pub fn new(bus: PcBus) -> Self {

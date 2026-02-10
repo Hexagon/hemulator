@@ -108,9 +108,7 @@ impl Keyboard {
     /// Find the first make code (key press) in the buffer, skipping break codes
     /// Returns None if no make code is found
     pub fn peek_make_code(&self) -> Option<u8> {
-        self.scancode_buffer
-            .iter()
-            .find(|&code| code & 0x80 == 0) // Find first code with high bit clear (make code)
+        self.scancode_buffer.iter().find(|&code| code & 0x80 == 0) // Find first code with high bit clear (make code)
     }
 
     /// Add a key press event (generates make code)
@@ -176,9 +174,7 @@ impl Keyboard {
 
     /// Check if ESC key is in the buffer (for boot abort)
     pub fn has_esc(&self) -> bool {
-        self.scancode_buffer
-            .iter()
-            .any(|code| code == SCANCODE_ESC)
+        self.scancode_buffer.iter().any(|code| code == SCANCODE_ESC)
     }
 
     /// Get the current shift flags (for INT 16h AH=02h)
