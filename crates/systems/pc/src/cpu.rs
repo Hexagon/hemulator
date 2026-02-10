@@ -96,6 +96,11 @@ pub struct PcCpu {
 }
 
 impl PcCpu {
+    // BIOS Data Area (BDA) constants
+    // The BDA is a 256-byte region at segment 0x0040 (physical address 0x00400-0x004FF)
+    // containing system state like keyboard buffer, video mode, cursor positions, etc.
+    // Reference: IBM PC Technical Reference Manual - BIOS Data Area
+
     // BDA keyboard buffer field addresses (linear addresses in segment 0x0040)
     // These locations each contain a 16-bit offset within the BDA segment,
     // not absolute physical addresses. The actual buffer data is accessed
@@ -108,6 +113,16 @@ impl PcCpu {
     // Default BDA keyboard buffer offsets within segment 0x0040
     const BDA_KB_BUFFER_START_OFFSET: u16 = 0x001E; // Default buffer start offset
     const BDA_KB_BUFFER_END_OFFSET: u16 = 0x003E; // Default buffer end offset (exclusive)
+
+    // Video memory and BDA video state constants
+    // These are defined but not yet used throughout the codebase
+    #[allow(dead_code)]
+    const VIDEO_BUFFER_ADDR: u32 = 0xB8000; // CGA/VGA text mode buffer (segment 0xB800)
+    #[allow(dead_code)]
+    const BDA_ACTIVE_PAGE_ADDR: u32 = 0x462; // BIOS Data Area (0x40:0x62) - active video page
+    #[allow(dead_code)]
+    const BDA_CURSOR_POS_BASE: u32 = 0x450; // Base address for cursor positions (2 bytes per page)
+
 
     /// Create a new PC CPU with the given bus (defaults to 8086)
     #[allow(dead_code)] // Public API, used in tests
@@ -409,7 +424,38 @@ impl PcCpu {
         self.cpu.step()
     }
 
-    /// Handle INT 10h - Video BIOS services
+    /// Handle INT 10h - BIOS Video Services
+    ///
+    /// Provides video hardware abstraction for DOS and applications through BIOS interrupt 0x10.
+    /// This implementation supports CGA, EGA, and VGA video modes and text operations.
+    ///
+    /// # Supported Subfunctions (AH register)
+    /// - **0x00**: Set video mode (text/graphics modes 0x00-0x13)
+    /// - **0x01**: Set cursor shape (start/end scanlines)
+    /// - **0x02**: Set cursor position (row/column)
+    /// - **0x03**: Get cursor position and shape
+    /// - **0x05**: Select active display page
+    /// - **0x06**: Scroll window up
+    /// - **0x07**: Scroll window down
+    /// - **0x08**: Read character and attribute at cursor
+    /// - **0x09**: Write character and attribute N times
+    /// - **0x0A**: Write character only (keep attribute)
+    /// - **0x0B**: Set color palette or border color
+    /// - **0x0C**: Write graphics pixel
+    /// - **0x0D**: Read graphics pixel
+    /// - **0x0E**: Teletype output (TTY mode with auto-advance)
+    /// - **0x0F**: Get current video mode and page
+    /// - **0x10**: Palette functions (set/get individual colors)
+    /// - **0x11**: Character generator functions (load fonts)
+    /// - **0x12**: Video subsystem configuration (get/set)
+    /// - **0x13**: Write string (with attribute)
+    /// - **0x1A**: Display combination code (VGA/MCGA detection)
+    /// - **0x1B**: Get video state information
+    ///
+    /// # References
+    /// - IBM PC BIOS Interface Technical Reference (INT 10h services)
+    /// - VGA BIOS Programmer's Reference Guide
+    /// - Ralf Brown's Interrupt List (INT 10h)
     #[allow(dead_code)] // Called dynamically based on interrupt number
     fn handle_int10h(&mut self) -> u32 {
         // Simulate INT instruction: push FLAGS, CS, IP and advance past INT opcode
