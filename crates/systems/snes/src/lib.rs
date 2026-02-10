@@ -540,6 +540,7 @@ impl System for SnesSystem {
         // Reference: "V-Blank begins on scanline $E1 or $F0, at H=0"
         // NMI triggers at H=0.5 (approximately half a dot into the scanline)
         self.cpu.bus_mut().ppu_mut().set_vblank(true);
+        self.cpu.bus_mut().start_auto_joypad_read();
         log(LogCategory::PPU, LogLevel::Debug, || {
             format!(
                 "SNES: VBlank started (cycle {}), NMI enabled: {}",

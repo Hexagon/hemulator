@@ -11,6 +11,7 @@ path = "src/main.rs"
 emu_core = { path = "../../core" }
 emu_nes = { path = "../../systems/nes", features = ["opengl"] }
 emu_gb = { path = "../../systems/gb" }
+hemu_gba = { path = "../../systems/gba" }
 emu_atari2600 = { path = "../../systems/atari2600" }
 emu_pc = { path = "../../systems/pc" }
 emu_snes = { path = "../../systems/snes" }

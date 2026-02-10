@@ -100,6 +100,10 @@ pub struct SnesBus {
     controller_strobe: bool,
     /// Auto-joypad read enable ($4200 bit 0)
     auto_joypad_enable: bool,
+    /// Auto-joypad latched states (JOY1/JOY2)
+    auto_joypad_latch: [u16; 2],
+    /// Remaining cycles for auto-joypad read busy flag
+    auto_joypad_busy_cycles: u32,
     /// DMA channels (8 channels)
     dma_channels: [DmaChannel; 8],
     /// HDMA enable register ($420C)
@@ -204,6 +208,8 @@ impl SnesBus {
             controller_shift: [Cell::new(0), Cell::new(0)],
             controller_strobe: false,
             auto_joypad_enable: true, // Default to enabled
+            auto_joypad_latch: [0; 2],
+            auto_joypad_busy_cycles: 0,
             dma_channels: [DmaChannel::default(); 8],
             hdma_enable: 0,
             hdma_state: [HdmaState::default(); 8],
@@ -327,9 +333,23 @@ impl SnesBus {
         self.frame_cycle = 0; // Reset cycle counter at frame start
     }
 
+    pub fn start_auto_joypad_read(&mut self) {
+        if !self.auto_joypad_enable {
+            return;
+        }
+
+        self.auto_joypad_latch = self.controller_state;
+        // Auto-joypad read takes ~4224 master cycles (~704 CPU cycles).
+        self.auto_joypad_busy_cycles = 704;
+    }
+
     /// Update cycle counter within frame (called after each CPU step)
     pub fn tick_cycles(&mut self, cycles: u32) {
         self.frame_cycle += cycles;
+
+        if self.auto_joypad_busy_cycles > 0 {
+            self.auto_joypad_busy_cycles = self.auto_joypad_busy_cycles.saturating_sub(cycles);
+        }
 
         // Tick cartridge enhancement chip (e.g., SuperFX) with master cycles
         // SuperFX runs at the master clock frequency (21.48 MHz)
@@ -1013,6 +1033,10 @@ impl Memory65c816 for SnesBus {
                             val |= 0x40;
                         }
 
+                        if self.auto_joypad_busy_cycles > 0 {
+                            val |= 0x01;
+                        }
+
                         // Hot path optimization: Remove trace logging from HVBJOY reads
                         // This register is polled frequently (every frame) to detect VBlank
 
@@ -1077,28 +1101,28 @@ impl Memory65c816 for SnesBus {
                     // $4218-$421F - JOYxL/JOYxH - Auto-joypad read (only valid when auto-read enabled)
                     0x4218 => {
                         if self.auto_joypad_enable {
-                            (self.controller_state[0] & 0xFF) as u8 // JOY1L
+                            (self.auto_joypad_latch[0] & 0xFF) as u8 // JOY1L
                         } else {
                             0 // Return 0 when auto-read disabled
                         }
                     }
                     0x4219 => {
                         if self.auto_joypad_enable {
-                            ((self.controller_state[0] >> 8) & 0xFF) as u8 // JOY1H
+                            ((self.auto_joypad_latch[0] >> 8) & 0xFF) as u8 // JOY1H
                         } else {
                             0
                         }
                     }
                     0x421A => {
                         if self.auto_joypad_enable {
-                            (self.controller_state[1] & 0xFF) as u8 // JOY2L
+                            (self.auto_joypad_latch[1] & 0xFF) as u8 // JOY2L
                         } else {
                             0
                         }
                     }
                     0x421B => {
                         if self.auto_joypad_enable {
-                            ((self.controller_state[1] >> 8) & 0xFF) as u8 // JOY2H
+                            ((self.auto_joypad_latch[1] >> 8) & 0xFF) as u8 // JOY2H
                         } else {
                             0
                         }
@@ -1186,7 +1210,17 @@ impl Memory65c816 for SnesBus {
             0x00..=0x3F | 0x80..=0xBF => {
                 match offset {
                     // WRAM (shadow at $0000-$1FFF)
-                    0x0000..=0x1FFF => self.wram[offset as usize] = val,
+                    0x0000..=0x1FFF => {
+                        if offset == 0x003F {
+                            log(LogCategory::Interrupts, LogLevel::Debug, || {
+                                format!(
+                                    "SNES WRAM: write $003F = ${:02X} (PC=${:06X})",
+                                    val, self.last_cpu_pc
+                                )
+                            });
+                        }
+                        self.wram[offset as usize] = val;
+                    }
 
                     // $2180-$2183 - WRAM access port
                     0x2180 => {
@@ -1380,6 +1414,9 @@ impl Memory65c816 for SnesBus {
                         // Bit 0: Joypad auto-read enable
                         let old_nmi_enable = self.ppu.nmi_enable;
                         self.ppu.nmi_enable = (val & 0x80) != 0;
+                        if !old_nmi_enable && self.ppu.nmi_enable {
+                            self.ppu.notify_nmi_enable(true);
+                        }
 
                         // H/V timer IRQ mode (bits 5-4)
                         let old_hv_irq_mode = self.hv_irq_mode;

@@ -608,6 +608,7 @@ Access: R/W
 
 Command-line debug dump works with all systems that implement the `Debugger` trait:
 - ✅ **NES** - Full support with complete memory map
+- ✅ **GBA** - Full support with ARM/Thumb disassembly and complete memory map
 - ⏳ **Other systems** - Can be added by implementing the `Debugger` trait (see `crates/systems/nes/src/debugger.rs` for reference)
 
 ### Performance
@@ -636,7 +637,7 @@ diff reference.txt current.txt
 ### Troubleshooting
 
 - **No dump generated**: Ensure the trigger condition is reached. For PC-based dumps, verify the code actually executes that address.
-- **"Debug interface not available"**: The system hasn't implemented the `Debugger` trait yet. Currently only NES is fully supported.
+- **"Debug interface not available"**: The system hasn't implemented the `Debugger` trait yet. Currently NES and GBA are fully supported.
 - **Incomplete dump**: For very early PC values or cycle counts, the emulator may not have reached the trigger point yet.
 
 See `workbench/README.md` for detailed instructions and examples.

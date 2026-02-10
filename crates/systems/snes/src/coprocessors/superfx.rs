@@ -318,47 +318,52 @@ impl SuperFx {
         self.sreg_dreg
     }
 
-    /// Read a byte from GSU address space (ROM or RAM)
+    /// Read a byte from GSU ROM space (24-bit addressing)
     fn read_byte(&self, addr: u32) -> u8 {
-        // GSU has its own address space
-        // For simplicity, treat lower addresses as ROM and high addresses as RAM
-        // Real implementation would use banking registers properly
-        let addr = addr as usize;
-
-        // Try ROM first (mirrored if needed)
-        if !self.rom.is_empty() && addr < 0x800000 {
-            let rom_addr = addr % self.rom.len();
-            return self.rom[rom_addr];
+        if self.rom.is_empty() {
+            return 0;
         }
 
-        // Fall back to RAM
-        if addr < self.ram.len() {
-            self.ram[addr]
+        let bank = ((addr >> 16) & 0xFF) as usize;
+        let offset = (addr & 0xFFFF) as usize;
+        let rom_offset = (bank << 16) | offset;
+        self.rom[rom_offset % self.rom.len()]
+    }
+
+    /// Read a byte from GSU RAM space (RAMBR-selected bank)
+    fn read_ram_byte(&self, addr: u32) -> u8 {
+        let offset = (addr as usize) & 0xFFFF;
+        let bank = (self.rambr as usize) & 0x01;
+        let ram_offset = (bank << 16) | offset;
+        if ram_offset < self.ram.len() {
+            self.ram[ram_offset]
         } else {
             0
         }
     }
 
-    /// Write a byte to GSU address space
-    fn write_byte(&mut self, addr: u32, val: u8) {
-        let addr = addr as usize;
-        if addr < self.ram.len() {
-            self.ram[addr] = val;
+    /// Write a byte to GSU RAM space (RAMBR-selected bank)
+    fn write_ram_byte(&mut self, addr: u32, val: u8) {
+        let offset = (addr as usize) & 0xFFFF;
+        let bank = (self.rambr as usize) & 0x01;
+        let ram_offset = (bank << 16) | offset;
+        if ram_offset < self.ram.len() {
+            self.ram[ram_offset] = val;
         }
     }
 
-    /// Read a word from GSU address space
+    /// Read a word from GSU RAM space
     fn read_word(&mut self, addr: u32) -> u16 {
-        let low = self.read_byte(addr);
-        let high = self.read_byte(addr + 1);
+        let low = self.read_ram_byte(addr);
+        let high = self.read_ram_byte(addr + 1);
         u16::from_le_bytes([low, high])
     }
 
-    /// Write a word to GSU address space
+    /// Write a word to GSU RAM space
     fn write_word(&mut self, addr: u32, val: u16) {
         let bytes = val.to_le_bytes();
-        self.write_byte(addr, bytes[0]);
-        self.write_byte(addr + 1, bytes[1]);
+        self.write_ram_byte(addr, bytes[0]);
+        self.write_ram_byte(addr + 1, bytes[1]);
     }
 
     /// Update zero and sign flags based on value
@@ -847,7 +852,8 @@ impl SuperFx {
 
         while self.flags_g && (self.cycles - start_cycles) < target_cycles {
             let pc = self.pc() as u32;
-            let opcode = self.read_byte(pc);
+            let addr = ((self.pbr as u32) << 16) | pc;
+            let opcode = self.read_byte(addr);
             let pc_increment = self.execute_instruction(opcode);
             self.set_pc(self.pc().wrapping_add(pc_increment));
         }

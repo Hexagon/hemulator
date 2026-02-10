@@ -553,6 +553,7 @@ impl TabManager {
                         "NES" => "🎮",
                         "SNES" => "🎮",
                         "Game Boy" => "🎮",
+                        "GBA" => "🎮",
                         "SMS" => "🎮",
                         "Atari 2600" => "🕹️",
                         "N64" => "🎮",
@@ -2899,7 +2900,7 @@ impl TabManager {
                 ui.heading(egui::RichText::new("📖 About").strong());
                 ui.add_space(5.0);
                 ui.label("A cross-platform, multi-system console emulator written in Rust,");
-                ui.label("supporting NES, Atari 2600, Game Boy, SNES, N64, and PC emulation");
+                ui.label("supporting NES, Atari 2600, Game Boy, GBA, SNES, N64, and PC emulation");
                 ui.label("with comprehensive save state management and customizable controls.");
                 ui.add_space(10.0);
 

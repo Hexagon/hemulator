@@ -7,6 +7,7 @@ use std::fmt;
 pub enum SystemType {
     NES,
     GameBoy,
+    GBA,
     Atari2600,
     PC,
     SNES,
@@ -61,6 +62,9 @@ pub fn detect_rom_type_with_extension(
                     }
                 }
                 // Fall through to content detection
+            }
+            "gba" | "agb" => {
+                return Ok(SystemType::GBA);
             }
             "sms" => {
                 // Prefer SMS for .sms extension even without header
@@ -297,12 +301,12 @@ pub fn detect_rom_type(data: &[u8]) -> Result<SystemType, UnsupportedRomError> {
     // Check if it might be a raw binary
     if data.len().is_multiple_of(1024) {
         return Err(UnsupportedRomError {
-            reason: "Unrecognized ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), Atari 2600 (.a26/.bin), DOS (.com/.exe), SNES (.smc/.sfc), N64 (.z64/.n64/.v64), SMS (.sms), CHIP-8 (.ch8/.c8), ColecoVision (.col), SG-1000 (.sg/.sc)".to_string(),
+            reason: "Unrecognized ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), GBA (.gba), Atari 2600 (.a26/.bin), DOS (.com/.exe), SNES (.smc/.sfc), N64 (.z64/.n64/.v64), SMS (.sms), CHIP-8 (.ch8/.c8), ColecoVision (.col), SG-1000 (.sg/.sc)".to_string(),
         });
     }
 
     Err(UnsupportedRomError {
-        reason: "Unknown ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), Atari 2600 (.a26/.bin), DOS (.com/.exe), SNES (.smc/.sfc), N64 (.z64/.n64/.v64), SMS (.sms), CHIP-8 (.ch8/.c8), ColecoVision (.col), SG-1000 (.sg/.sc)"
+        reason: "Unknown ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), GBA (.gba), Atari 2600 (.a26/.bin), DOS (.com/.exe), SNES (.smc/.sfc), N64 (.z64/.n64/.v64), SMS (.sms), CHIP-8 (.ch8/.c8), ColecoVision (.col), SG-1000 (.sg/.sc)"
             .to_string(),
     })
 }
@@ -517,6 +521,15 @@ mod tests {
         assert_eq!(
             detect_rom_type_with_extension(&data, Some("C8"), None).unwrap(),
             SystemType::Chip8
+        );
+    }
+
+    #[test]
+    fn test_gba_extension_detection() {
+        let data = vec![0u8; 1024];
+        assert_eq!(
+            detect_rom_type_with_extension(&data, Some("gba"), None).unwrap(),
+            SystemType::GBA
         );
     }
 

@@ -6,7 +6,7 @@ nav_order: 5
 
 # Supported Systems
 
-This emulator supports 10 different retro gaming systems. **NES emulation is fully working** with ~90% game coverage. Other systems are in various stages of development.
+This emulator supports 11 different retro gaming systems. **NES emulation is fully working** with ~90% game coverage. Other systems are in various stages of development.
 
 | System | Status | What Works | What's Missing | Recommended For |
 |--------|--------|------------|----------------|-----------------|
@@ -14,6 +14,7 @@ This emulator supports 10 different retro gaming systems. **NES emulation is ful
 | **Atari 2600** | 🚧 In Development | TIA, RIOT, cartridge formats | Rendering issues, stability | Testing/development |
 | **CHIP-8** | ✅ Fully Working | Complete CHIP-8/Super-CHIP/XO-CHIP | - | Playing CHIP-8 programs |
 | **Game Boy** | ✅ Fully Functional (GB) / 🚧 GBC WIP | Core features, MBC0/1/2/3/5 | Some edge cases, GBC features incomplete | Playing GB games |
+| **GBA** | 🚧 In Development | ARM7TDMI CPU, PPU (all 6 modes), DMA, timers, sprites, blending | APU, save states | Development/testing |
 | **SMS** | 🚧 In Development | Z80 CPU, VDP, PSG, ROM banking | Not producing image, test ROM | Development only |
 | **ColecoVision** | 🚧 In Development | Z80 CPU, TMS9918A VDP, SN76489 PSG | Not producing image, audio output, BIOS required | Development only |
 | **SG-1000** | ⚠️ Experimental | Z80 CPU, TMS9918A VDP, SN76489 PSG | Audio output, test ROM | Development/testing |
@@ -243,6 +244,57 @@ For more technical information, see [crates/systems/chip8/README.md](../crates/s
 - X = B button
 - Enter = Start
 - Left Shift = Select
+
+### GBA (Game Boy Advance)
+
+**Status**: 🚧 In Development  
+**Coverage**: CPU, PPU, DMA, timers, cartridge ID, and debugger implemented; no audio
+
+**ROM Format**: GBA (.gba files) - extension-based detection with full header parsing
+
+**Features**:
+- **ARM7TDMI CPU**: Complete ARM and Thumb instruction sets
+  - All ARM data processing, multiply, branch, load/store, block transfer instructions
+  - Full Thumb compressed instruction set
+  - 7 processor modes with banked registers
+  - Hardware interrupt support
+- **PPU**: Full 240×160 scanline-based rendering
+  - All 6 background modes (0–5)
+  - Text backgrounds with 4bpp/8bpp tiles, scroll, flip, mosaic
+  - Affine backgrounds with rotation/scaling
+  - Bitmap modes (direct color, paletted, double-buffered)
+  - 128 hardware sprites (normal and affine)
+  - Layer compositing with priority system
+  - Window system (WIN0, WIN1, OBJ window)
+  - Color effects (alpha blending, brightness increase/decrease)
+- **Cartridge Identification**: Full ROM header parsing
+  - Game title, game code, maker code with publisher lookup
+  - Region detection (Japan, USA, Europe, etc.)
+  - Nintendo logo and header checksum validation
+  - Save type auto-detection (EEPROM, SRAM, Flash 64K/128K)
+- **Debugger**: Full debug introspection (via `--debug-dump-pc` / `--debug-dump-cycles`)
+  - ARM and Thumb disassembly
+  - All CPU registers (R0–R15, CPSR) and flags (N/Z/C/V/I/F/T)
+  - Complete memory map (BIOS, EWRAM, IWRAM, I/O, Palette, VRAM, OAM, ROM, SRAM)
+- **Hardware Timers**: All 4 timers fully implemented
+  - Configurable prescaler (F/1, F/64, F/256, F/1024)
+  - Cascade mode (count overflows from previous timer)
+  - Timer overflow IRQ support
+  - Reload on overflow
+- **DMA Controller**: All 4 DMA channels fully implemented
+  - Immediate, VBlank, and HBlank start timing
+  - 16-bit and 32-bit transfer modes
+  - Source/destination address control (increment, decrement, fixed, increment/reload)
+  - Repeat mode with word count and destination reload
+  - DMA completion IRQ support
+  - Hardware priority ordering (DMA0 highest)
+
+**Known Limitations**:
+- **APU**: Audio not implemented
+- **Save States**: Not supported
+- **Serial**: Link cable / serial not implemented
+
+For detailed technical information, see [crates/systems/gba/README.md](../../../crates/systems/gba/README.md).
 
 ### SMS (Sega Master System)
 

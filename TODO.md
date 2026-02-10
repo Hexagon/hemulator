@@ -55,6 +55,12 @@ This file tracks unimplemented features, stubs, and simplified implementations a
 
 ### High
 
+#### GBA (Game Boy Advance)
+- [ ] **Core Emulator Implementation**: Build ARM7TDMI CPU, memory map, PPU, APU, DMA, and timers - `crates/systems/gba/src/lib.rs`
+  - Current: Shell only (mounts ROM, returns blank frame)
+  - Needed: Full CPU execution, graphics pipeline, audio pipeline, and timing
+  - Impact: GBA ROMs cannot run yet
+
 #### NES (Nintendo Entertainment System) - Completed
 - [x] **APU Non-Linear Mixing**: Implement hardware-accurate mixer impedance curves - `crates/systems/nes/src/apu.rs:609-880`
   - **FIXED**: Implemented hardware-accurate non-linear mixing formulas
@@ -425,11 +431,11 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Note: Advanced feature, low priority as basic mapper functionality works
 
 #### SNES - Enhancement Chips
-- [ ] **DSP-1 Full Hardware Accuracy**: Implement Parameter command and shared projection state - `crates/systems/snes/src/coprocessors/dsp1.rs`
-  - Current: Simplified implementations of Attitude, Target, Rotate commands
-  - Needed: Parameter command (0x02) to set up shared projection matrices and camera parameters
-  - Impact: Current implementation sufficient for basic compatibility; full accuracy needed for advanced DSP-1 features
-  - Note: Target and Attitude commands use simplified transformations without shared state
+- [ ] **DSP-1 Full Hardware Accuracy**: Complete projection math for Parameter/Target/Attitude - `crates/systems/snes/src/coprocessors/dsp1.rs`
+  - Current: Parameter command (0x02) is accepted and cached; Attitude/Target/Rotate remain simplified
+  - Needed: Use cached parameters to build projection matrices and apply accurate Target/Attitude math
+  - Impact: Basic DSP-1 games may run, but advanced projection scenes can still break or hang
+  - Note: Target and Attitude commands still use simplified transformations without shared state
   - Reference: bsnes/sfc/coprocessor/dsp1/dsp1emu.cpp (parameter, target, attitude functions)
 
 #### SNES - Audio
