@@ -303,11 +303,12 @@ impl System for N64System {
                 static mut DIAG_COUNTER: u32 = 0;
                 unsafe {
                     DIAG_COUNTER += 1;
-                    if DIAG_COUNTER % 100000 == 0 {
+                    if DIAG_COUNTER.is_multiple_of(100000) {
                         let cpu = &self.cpu.cpu;
+                        let counter = DIAG_COUNTER;
                         eprintln!(
                             "[DIAG] count={} PC=0x{:08X} t0=0x{:016X} t1=0x{:016X} at=0x{:016X} v0=0x{:016X} a0=0x{:016X}",
-                            DIAG_COUNTER, pc_before, cpu.gpr[8], cpu.gpr[9], cpu.gpr[1], cpu.gpr[2], cpu.gpr[4]
+                            counter, pc_before, cpu.gpr[8], cpu.gpr[9], cpu.gpr[1], cpu.gpr[2], cpu.gpr[4]
                         );
                     }
                 }

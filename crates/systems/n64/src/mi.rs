@@ -37,6 +37,7 @@ pub const MI_INTR_AI: u32 = 0x04; // Bit 2
 pub const MI_INTR_VI: u32 = 0x08; // Bit 3
 #[allow(dead_code)]
 const MI_INTR_PI: u32 = 0x10; // Bit 4
+#[allow(dead_code)] // Reserved for future RDP interrupt handling
 pub const MI_INTR_DP: u32 = 0x20; // Bit 5
 
 /// MIPS Interface (MI) - Interrupt controller

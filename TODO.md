@@ -122,17 +122,16 @@ This file tracks unimplemented features, stubs, and simplified implementations a
 ### Medium
 
 #### Atari 2600
-- [ ] **TIA Rendering and HMOVE Timing**: Fix horizontal positioning and rendering issues - `crates/systems/atari2600/src/tia.rs`
-  - Current: Multiple rendering and control issues reported in #305
-  - Issues: Background compressed/duplicated horizontally, player sprite not moveable sideways, ball movement glitches
-  - Root causes: HMOVE timing incorrect, playfield mirroring/repeat logic wrong, sprite positioning broken
-  - Needed: 
-    - Fix HMOVE strobe timing during horizontal blank
-    - Correct playfield rendering (PF0/PF1/PF2 pattern handling)
-    - Fix player/missile/ball horizontal position counters
-    - Implement proper HMP0/HMP1 register application
-  - Impact: System is currently mostly non-functional for gameplay
-  - Reference: ATARI_2600_REVIEW_SUMMARY.md, Stella Programmer's Guide, TIA Hardware Manual
+- [ ] **Paddle Controllers GUI Integration**: Add mouse/analog input support for paddles - `crates/frontend/gui/`
+  - Current: Hardware emulation complete (INPT4/INPT5 with charge/discharge timing), GUI integration needed
+  - Needed: Map mouse X/Y or analog stick to paddle pot values
+  - Impact: Cannot play paddle games (Breakout, Kaboom!, Circus Atari) without controller input
+  - Quality: Hardware-ready, just needs frontend work
+- [ ] **Optional HMOVE Comb Artifacts Mode**: Add cycle-accurate HMOVE visualization - `crates/systems/atari2600/src/tia.rs`
+  - Current: HMOVE applies motion instantly (no visible comb)
+  - Needed: Add optional 6-clock delay and visible comb artifacts for accuracy enthusiasts (off by default)
+  - Impact: Very low - only affects cycle-accurate demos; all games work correctly
+  - Quality: Nice-to-have for hardware perfectionism
 
 #### Game Boy (DMG)
 - [ ] **Sprite Per-Scanline Limit**: Restore hardware-accurate 10-sprite limit for DMG - `crates/systems/gb/src/ppu.rs`
@@ -387,6 +386,18 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Needed: Script engine for custom breakpoint logic, automated testing
   - Impact: Cannot automate complex debugging scenarios
   - Use case: Automated regression testing, custom analysis tools
+
+#### N64 Testing
+
+- [ ] **Ignored Tests Require OpenGL Context**: 15+ N64 tests marked with #[ignore] - `crates/systems/n64/src/lib.rs`, `crates/frontend/gui/tests/logging_integration.rs`
+  - Current: Tests disabled because they require OpenGL context initialization
+  - Tests affected: test_n64_initialization, test_n64_reset, test_n64_cpu_basic, test_n64_pif_boot, test_n64_rdp_commands, test_n64_memory_map, test_n64_sp_dma, and 8 more
+  - Impact: Core N64 functionality untested in CI
+  - Possible solutions:
+    - Use headless/offscreen OpenGL context for tests (e.g., glutin with EGL)
+    - Mock the renderer interface for unit tests
+    - Run tests only on platforms with GL support
+  - Note: Tests work when run manually with graphics context available
 
 #### Game Boy / Game Boy Color - Performance
 
