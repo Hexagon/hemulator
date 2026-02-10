@@ -20,6 +20,6 @@ pub use menu_bar::MenuAction;
 pub use property_pane::{InputConfigSource, PropertyAction};
 pub use tabs::{
     Atari2600TileData, CartridgeData, Chip8TileData, ColecoVisionTileData, DebugAction, GbTileData,
-    MountInfo, NesTileData, PcBdaData, Sg1000TileData, SmsTileData, SnesTileData, SystemTileData,
-    Tab, TabAction,
+    GbaTileData, MountInfo, NesTileData, PcBdaData, Sg1000TileData, SmsTileData, SnesTileData,
+    SystemTileData, Tab, TabAction,
 };

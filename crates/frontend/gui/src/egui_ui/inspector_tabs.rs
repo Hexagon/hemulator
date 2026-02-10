@@ -25,6 +25,11 @@ pub enum InspectorTab {
     GbPalettes,
     GbTilemaps, // Background/Window tilemaps
 
+    GbaTiles,
+    GbaPalettes,
+    GbaOam,      // Object Attribute Memory (sprites)
+    GbaBgLayers, // Background layer configuration and state
+
     SmsTiles,
     SmsPalettes,
 
@@ -62,6 +67,10 @@ impl InspectorTab {
             InspectorTab::GbTiles => "🎨 Tiles",
             InspectorTab::GbPalettes => "🎨 Palettes",
             InspectorTab::GbTilemaps => "🗺️ Tilemaps",
+            InspectorTab::GbaTiles => "🎨 Tiles",
+            InspectorTab::GbaPalettes => "🎨 Palettes",
+            InspectorTab::GbaOam => "👾 OAM",
+            InspectorTab::GbaBgLayers => "📐 BG Layers",
             InspectorTab::SmsTiles => "🎨 Tiles",
             InspectorTab::SmsPalettes => "🎨 Palettes",
             InspectorTab::ColecoVisionTiles => "🎨 Tiles",
@@ -109,6 +118,15 @@ pub fn get_tabs_for_system(system_type: Option<&SystemType>) -> Vec<InspectorTab
                     InspectorTab::GbTiles,
                     InspectorTab::GbPalettes,
                     InspectorTab::GbTilemaps,
+                ]);
+            }
+            SystemType::GBA => {
+                tabs.push(InspectorTab::Cartridge); // Unified cartridge tab instead of Mounts
+                tabs.extend_from_slice(&[
+                    InspectorTab::GbaTiles,
+                    InspectorTab::GbaPalettes,
+                    InspectorTab::GbaOam,
+                    InspectorTab::GbaBgLayers,
                 ]);
             }
             SystemType::SMS => {
@@ -180,6 +198,7 @@ pub fn render_inspector_tab(tab: &InspectorTab, ui: &mut Ui, tab_manager: &mut T
         }
         InspectorTab::NesTiles
         | InspectorTab::GbTiles
+        | InspectorTab::GbaTiles
         | InspectorTab::SmsTiles
         | InspectorTab::ColecoVisionTiles
         | InspectorTab::SnesTiles => {
@@ -187,6 +206,7 @@ pub fn render_inspector_tab(tab: &InspectorTab, ui: &mut Ui, tab_manager: &mut T
         }
         InspectorTab::NesPalettes
         | InspectorTab::GbPalettes
+        | InspectorTab::GbaPalettes
         | InspectorTab::SmsPalettes
         | InspectorTab::ColecoVisionPalettes
         | InspectorTab::SnesPalettes => {
@@ -197,6 +217,12 @@ pub fn render_inspector_tab(tab: &InspectorTab, ui: &mut Ui, tab_manager: &mut T
         }
         InspectorTab::NesNametables | InspectorTab::GbTilemaps => {
             tab_manager.render_tilemaps_tab(ui);
+        }
+        InspectorTab::GbaOam => {
+            render_gba_oam_tab(ui, tab_manager);
+        }
+        InspectorTab::GbaBgLayers => {
+            render_gba_bg_layers_tab(ui, tab_manager);
         }
         InspectorTab::SnesLayers => {
             render_snes_layers_tab(ui, tab_manager);
@@ -1427,4 +1453,228 @@ fn render_cartridge_tab(ui: &mut Ui, tab_manager: &mut TabManager) {
                 });
             }
         });
+}
+
+/// Render the GBA OAM (Object Attribute Memory) tab
+fn render_gba_oam_tab(ui: &mut Ui, tab_manager: &TabManager) {
+    use egui::ScrollArea;
+
+    ui.heading("GBA OAM (Object Attribute Memory)");
+    ui.separator();
+
+    if let Some(SystemTileData::GBA(ref data)) = tab_manager.system_tile_data {
+        // Display basic OAM info
+        ui.label(format!("OAM Size: {} bytes (128 sprites)", data.oam.len()));
+        ui.separator();
+
+        // Display sprite information
+        ui.label("Sprite OAM Entries:");
+
+        ScrollArea::vertical().max_height(500.0).show(ui, |ui| {
+            use egui_extras::{Column, TableBuilder};
+
+            TableBuilder::new(ui)
+                .striped(true)
+                .column(Column::auto().at_least(40.0)) // Index
+                .column(Column::auto().at_least(60.0)) // Y
+                .column(Column::auto().at_least(60.0)) // X
+                .column(Column::auto().at_least(80.0)) // Tile
+                .column(Column::auto().at_least(120.0)) // Size
+                .column(Column::auto().at_least(100.0)) // Flags
+                .header(20.0, |mut header| {
+                    header.col(|ui| {
+                        ui.strong("#");
+                    });
+                    header.col(|ui| {
+                        ui.strong("Y");
+                    });
+                    header.col(|ui| {
+                        ui.strong("X");
+                    });
+                    header.col(|ui| {
+                        ui.strong("Tile");
+                    });
+                    header.col(|ui| {
+                        ui.strong("Size");
+                    });
+                    header.col(|ui| {
+                        ui.strong("Flags");
+                    });
+                })
+                .body(|mut body| {
+                    // Each OAM entry is 8 bytes
+                    for sprite_idx in 0..128 {
+                        let offset = sprite_idx * 8;
+                        if offset + 5 < data.oam.len() {
+                            let attr0 =
+                                u16::from_le_bytes([data.oam[offset], data.oam[offset + 1]]);
+                            let attr1 =
+                                u16::from_le_bytes([data.oam[offset + 2], data.oam[offset + 3]]);
+                            let attr2 =
+                                u16::from_le_bytes([data.oam[offset + 4], data.oam[offset + 5]]);
+
+                            let y = (attr0 & 0xFF) as u8;
+                            let x = (attr1 & 0x1FF) as u16;
+                            let tile_num = attr2 & 0x3FF;
+
+                            // Decode size (depends on shape and size bits)
+                            let shape = (attr0 >> 14) & 0x3;
+                            let size = (attr1 >> 14) & 0x3;
+                            let size_str = match (shape, size) {
+                                (0, 0) => "8x8",
+                                (0, 1) => "16x16",
+                                (0, 2) => "32x32",
+                                (0, 3) => "64x64",
+                                (1, 0) => "16x8",
+                                (1, 1) => "32x8",
+                                (1, 2) => "32x16",
+                                (1, 3) => "64x32",
+                                (2, 0) => "8x16",
+                                (2, 1) => "8x32",
+                                (2, 2) => "16x32",
+                                (2, 3) => "32x64",
+                                _ => "?",
+                            };
+
+                            let mode = (attr0 >> 8) & 0x3;
+                            let mode_str = match mode {
+                                0 => "Normal",
+                                1 => "Semi-Transparent",
+                                2 => "OBJ Window",
+                                3 => "Prohibited",
+                                _ => "?",
+                            };
+
+                            let palette = if attr0 & (1 << 13) != 0 {
+                                "256-color"
+                            } else {
+                                &format!("16-color/{}", (attr2 >> 12) & 0xF)
+                            };
+
+                            let hflip = if attr1 & (1 << 12) != 0 { "H" } else { "" };
+                            let vflip = if attr1 & (1 << 13) != 0 { "V" } else { "" };
+                            let flip = if !hflip.is_empty() || !vflip.is_empty() {
+                                format!("{}{}", hflip, vflip)
+                            } else {
+                                "-".to_string()
+                            };
+
+                            body.row(18.0, |mut row| {
+                                row.col(|ui| {
+                                    ui.label(format!("{}", sprite_idx));
+                                });
+                                row.col(|ui| {
+                                    ui.label(format!("{}", y));
+                                });
+                                row.col(|ui| {
+                                    ui.label(format!("{}", x));
+                                });
+                                row.col(|ui| {
+                                    ui.label(format!("${:03X}", tile_num));
+                                });
+                                row.col(|ui| {
+                                    ui.label(size_str);
+                                });
+                                row.col(|ui| {
+                                    ui.label(format!("{} {} Flip:{}", mode_str, palette, flip));
+                                });
+                            });
+                        }
+                    }
+                });
+        });
+    } else {
+        ui.label("No GBA system data available");
+    }
+}
+
+/// Render the GBA BG Layers tab
+fn render_gba_bg_layers_tab(ui: &mut Ui, tab_manager: &TabManager) {
+    ui.heading("GBA Background Layers");
+    ui.separator();
+
+    if let Some(SystemTileData::GBA(ref data)) = tab_manager.system_tile_data {
+        // Display DISPCNT
+        ui.label(format!("DISPCNT: ${:04X}", data.dispcnt));
+
+        let bg_mode = data.dispcnt & 0x7;
+        ui.label(format!("BG Mode: {}", bg_mode));
+
+        // Which layers are enabled
+        ui.label("Enabled Layers:");
+        ui.horizontal(|ui| {
+            for i in 0..4 {
+                let enabled = (data.dispcnt & (1 << (8 + i))) != 0;
+                if enabled {
+                    ui.label(format!("BG{}", i));
+                }
+            }
+            if data.dispcnt & (1 << 12) != 0 {
+                ui.label("OBJ");
+            }
+        });
+
+        ui.separator();
+
+        // Display each BG layer configuration
+        let bg_cnts = [data.bg0cnt, data.bg1cnt, data.bg2cnt, data.bg3cnt];
+
+        for (i, &bgcnt) in bg_cnts.iter().enumerate() {
+            ui.collapsing(format!("BG{} Configuration", i), |ui| {
+                ui.label(format!("BGxCNT: ${:04X}", bgcnt));
+
+                let priority = bgcnt & 0x3;
+                let char_base = ((bgcnt >> 2) & 0x3) * 0x4000;
+                let mosaic = (bgcnt >> 6) & 0x1;
+                let palette_mode = if (bgcnt >> 7) & 0x1 != 0 {
+                    "256-color"
+                } else {
+                    "16-color"
+                };
+                let screen_base = ((bgcnt >> 8) & 0x1F) * 0x800;
+                let screen_size = (bgcnt >> 14) & 0x3;
+
+                ui.label(format!("Priority: {}", priority));
+                ui.label(format!("Character Base: ${:05X}", char_base));
+                ui.label(format!("Screen Base: ${:05X}", screen_base));
+                ui.label(format!("Palette Mode: {}", palette_mode));
+                ui.label(format!("Screen Size: {}", screen_size));
+                ui.label(format!(
+                    "Mosaic: {}",
+                    if mosaic != 0 { "Yes" } else { "No" }
+                ));
+
+                // Scroll position
+                let (scroll_x, scroll_y) = data.bg_scroll[i];
+                ui.label(format!("Scroll: X={}, Y={}", scroll_x, scroll_y));
+            });
+        }
+
+        ui.separator();
+
+        // Color effects
+        ui.collapsing("Color Special Effects", |ui| {
+            ui.label(format!("BLDCNT: ${:04X}", data.bldcnt));
+            ui.label(format!("BLDALPHA: ${:04X}", data.bldalpha));
+
+            let effect = (data.bldcnt >> 6) & 0x3;
+            let effect_str = match effect {
+                0 => "None",
+                1 => "Alpha Blending",
+                2 => "Brightness Increase",
+                3 => "Brightness Decrease",
+                _ => "?",
+            };
+            ui.label(format!("Effect Mode: {}", effect_str));
+
+            if effect == 1 {
+                let eva = data.bldalpha & 0x1F;
+                let evb = (data.bldalpha >> 8) & 0x1F;
+                ui.label(format!("EVA (1st target): {}/16", eva));
+                ui.label(format!("EVB (2nd target): {}/16", evb));
+            }
+        });
+    } else {
+        ui.label("No GBA system data available");
+    }
 }

@@ -4044,7 +4044,53 @@ fn main() {
                     });
                     egui_app.tab_manager.update_system_tile_data(tile_data);
                 }
-                EmulatorSystem::GBA(_) => {}
+                EmulatorSystem::GBA(s) => {
+                    let gba_data = s.get_tile_viewer_data();
+                    let tile_data = egui_ui::SystemTileData::GBA(egui_ui::GbaTileData {
+                        vram: gba_data.vram,
+                        palette_ram: gba_data.palette_ram,
+                        oam: gba_data.oam,
+                        master_palette: gba_data.master_palette,
+                        dispcnt: gba_data.dispcnt,
+                        bg0cnt: gba_data.bg0cnt,
+                        bg1cnt: gba_data.bg1cnt,
+                        bg2cnt: gba_data.bg2cnt,
+                        bg3cnt: gba_data.bg3cnt,
+                        bg_scroll: gba_data.bg_scroll,
+                        bldcnt: gba_data.bldcnt,
+                        bldalpha: gba_data.bldalpha,
+                    });
+                    egui_app.tab_manager.update_system_tile_data(tile_data);
+
+                    // Update cartridge info if available
+                    if let Some(header) = s.cartridge_header() {
+                        let cart_data = egui_ui::CartridgeData {
+                            system_name: "GBA".to_string(),
+                            crc32: 0, // TODO: Calculate CRC32 if needed
+                            rom_size: s.rom_size(),
+                            nes_mapper: None,
+                            nes_submapper: None,
+                            nes_mapper_name: None,
+                            nes_mirroring: None,
+                            nes_timing: None,
+                            nes_prg_size: None,
+                            nes_chr_size: None,
+                            nes_header_mapper: None,
+                            nes_header_submapper: None,
+                            nes_header_mirroring: None,
+                            nes_db_mapper_override: false,
+                            nes_db_mirroring_override: false,
+                            nes_board_name: Some(format!(
+                                "{} - {}",
+                                header.title, header.game_code
+                            )),
+                            snes_has_smc_header: None,
+                            snes_mapping_mode: None,
+                            snes_chip_type: None,
+                        };
+                        egui_app.tab_manager.update_cartridge_data(cart_data);
+                    }
+                }
                 EmulatorSystem::SMS(s) => {
                     let sms_data = s.get_tile_viewer_data();
                     let tile_data = egui_ui::SystemTileData::SMS(egui_ui::SmsTileData {
