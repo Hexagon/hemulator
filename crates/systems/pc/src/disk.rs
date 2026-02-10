@@ -2,6 +2,14 @@
 //!
 //! Provides INT 13h disk I/O services for floppy and hard drives
 
+use std::sync::OnceLock;
+
+/// Check if bus logging is enabled (cached from environment variable)
+fn is_bus_logging_enabled() -> bool {
+    static BUS_LOGGING: OnceLock<bool> = OnceLock::new();
+    *BUS_LOGGING.get_or_init(|| std::env::var("EMU_LOG_BUS").is_ok())
+}
+
 /// Disk request parameters
 #[allow(dead_code)]
 pub struct DiskRequest {
@@ -79,7 +87,7 @@ impl DiskController {
             && request.sector < 64
         {
             // Linear sector addressing (used by SYSLINUX boot sector)
-            if std::env::var("EMU_LOG_BUS").is_ok() {
+            if is_bus_logging_enabled() {
                 eprintln!(
                     "Disk read: Using linear addressing for S={} > SPT={}",
                     request.sector, sectors_per_track
@@ -100,7 +108,7 @@ impl DiskController {
         let offset = (lba * sector_size) as usize;
 
         // Log LBA calculation for debugging
-        if std::env::var("EMU_LOG_BUS").is_ok() {
+        if is_bus_logging_enabled() {
             eprintln!(
                 "Disk read: C={} H={} S={} -> LBA={} offset=0x{:X} (SPT={}, heads={})",
                 request.cylinder,
@@ -124,7 +132,7 @@ impl DiskController {
         buffer[..bytes_to_copy].copy_from_slice(&disk_image[offset..offset + bytes_to_copy]);
 
         // Log first few bytes of data read
-        if std::env::var("EMU_LOG_BUS").is_ok() {
+        if is_bus_logging_enabled() {
             eprint!("First 128 bytes read:");
             for (i, &byte) in buffer.iter().enumerate().take(128.min(bytes_to_copy)) {
                 if i % 16 == 0 {
@@ -178,7 +186,7 @@ impl DiskController {
             && request.sector < 64
         {
             // Linear sector addressing (used by SYSLINUX boot sector)
-            if std::env::var("EMU_LOG_BUS").is_ok() {
+            if is_bus_logging_enabled() {
                 eprintln!(
                     "Disk write: Using linear addressing for S={} > SPT={}",
                     request.sector, sectors_per_track
