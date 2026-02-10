@@ -122,17 +122,16 @@ This file tracks unimplemented features, stubs, and simplified implementations a
 ### Medium
 
 #### Atari 2600
-- [ ] **TIA Rendering and HMOVE Timing**: Fix horizontal positioning and rendering issues - `crates/systems/atari2600/src/tia.rs`
-  - Current: Multiple rendering and control issues reported in #305
-  - Issues: Background compressed/duplicated horizontally, player sprite not moveable sideways, ball movement glitches
-  - Root causes: HMOVE timing incorrect, playfield mirroring/repeat logic wrong, sprite positioning broken
-  - Needed: 
-    - Fix HMOVE strobe timing during horizontal blank
-    - Correct playfield rendering (PF0/PF1/PF2 pattern handling)
-    - Fix player/missile/ball horizontal position counters
-    - Implement proper HMP0/HMP1 register application
-  - Impact: System is currently mostly non-functional for gameplay
-  - Reference: ATARI_2600_REVIEW_SUMMARY.md, Stella Programmer's Guide, TIA Hardware Manual
+- [ ] **Paddle Controllers GUI Integration**: Add mouse/analog input support for paddles - `crates/frontend/gui/`
+  - Current: Hardware emulation complete (INPT4/INPT5 with charge/discharge timing), GUI integration needed
+  - Needed: Map mouse X/Y or analog stick to paddle pot values
+  - Impact: Cannot play paddle games (Breakout, Kaboom!, Circus Atari) without controller input
+  - Quality: Hardware-ready, just needs frontend work
+- [ ] **Optional HMOVE Comb Artifacts Mode**: Add cycle-accurate HMOVE visualization - `crates/systems/atari2600/src/tia.rs`
+  - Current: HMOVE applies motion instantly (no visible comb)
+  - Needed: Add optional 6-clock delay and visible comb artifacts for accuracy enthusiasts (off by default)
+  - Impact: Very low - only affects cycle-accurate demos; all games work correctly
+  - Quality: Nice-to-have for hardware perfectionism
 
 #### Game Boy (DMG)
 - [ ] **Sprite Per-Scanline Limit**: Restore hardware-accurate 10-sprite limit for DMG - `crates/systems/gb/src/ppu.rs`
@@ -173,6 +172,20 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Requires: Expression parser, state evaluation
 
 #### SNES - Bus/Memory  
+- [ ] **Controller Register Test Failures**: Fix failing controller tests - `crates/systems/snes/src/bus.rs:1641-1722`
+  - Current: Tests test_controller_registers and test_dual_controllers fail
+  - Issue: Controller data reads returning 0 instead of expected button states
+  - Expected: test_controller_registers should read 0x80 (B button), test_dual_controllers should read 0xAA
+  - Actual: Reads return 0x00
+  - Impact: Controller input reading may not be working correctly
+  - Note: This is a pre-existing test failure, not introduced by recent changes
+  - Reference: SNES Dev Manual "Controller Reading"
+- [ ] **APU Upload Protocol Test Failure**: Fix failing test_apu_upload_protocol - `crates/systems/snes/src/lib.rs:981-1041`
+  - Current: Test times out waiting for APU ready signal after 9 frames
+  - Issue: APU upload protocol not completing handshake (ports show 01 02 03 00 instead of ready)
+  - Impact: APU data upload may not be working correctly
+  - Note: This is a pre-existing test failure, not introduced by recent changes
+  - Reference: SNES Dev Manual "APU Communication"
 - [ ] **FastROM Timing**: Implement FastROM memory access timing - `crates/systems/snes/src/bus.rs:1482-1486`
   - Current: MEMSEL register ($420D) written but not applied to memory access timing
   - Needed: CPU memory accesses should be faster (6 cycles vs 8) for ROM in banks $80+ when MEMSEL bit 0 is set
@@ -387,6 +400,18 @@ This file tracks unimplemented features, stubs, and simplified implementations a
   - Needed: Script engine for custom breakpoint logic, automated testing
   - Impact: Cannot automate complex debugging scenarios
   - Use case: Automated regression testing, custom analysis tools
+
+#### N64 Testing
+
+- [ ] **Ignored Tests Require OpenGL Context**: 15+ N64 tests marked with #[ignore] - `crates/systems/n64/src/lib.rs`, `crates/frontend/gui/tests/logging_integration.rs`
+  - Current: Tests disabled because they require OpenGL context initialization
+  - Tests affected: test_n64_initialization, test_n64_reset, test_n64_cpu_basic, test_n64_pif_boot, test_n64_rdp_commands, test_n64_memory_map, test_n64_sp_dma, and 8 more
+  - Impact: Core N64 functionality untested in CI
+  - Possible solutions:
+    - Use headless/offscreen OpenGL context for tests (e.g., glutin with EGL)
+    - Mock the renderer interface for unit tests
+    - Run tests only on platforms with GL support
+  - Note: Tests work when run manually with graphics context available
 
 #### Game Boy / Game Boy Color - Performance
 
@@ -637,6 +662,21 @@ This file tracks unimplemented features, stubs, and simplified implementations a
 
 #### Game Boy / Game Boy Color
 
+- [ ] **OAM DMA Transfer Test Failures**: Fix failing OAM DMA tests - `crates/systems/gb/src/lib.rs:1220-1294`
+  - Current: Tests test_oam_dma_basic and test_oam_dma_full_copy fail
+  - Issue: OAM memory not being populated after DMA transfer (all zeros instead of expected values)
+  - Expected: OAM[0] = 0x80 (test_oam_dma_basic), OAM[0] = 0xAA (test_oam_dma_full_copy)
+  - Actual: OAM[0] = 0x00 in both tests
+  - Impact: OAM DMA transfer may not be working correctly
+  - Note: This is a pre-existing test failure, not introduced by recent changes
+  - Reference: Pan Docs "LCD OAM DMA Transfers"
+- [ ] **LR35902 EI Delayed Enable Test Failure**: Fix failing test_di_ei test - `crates/core/src/cpu_lr35902.rs:1552-1568`
+  - Current: Test expects EI instruction to delay IME enable by one instruction (per hardware spec)
+  - Issue: Test assertion `assert!(!cpu.ime)` fails after EI instruction executes
+  - Expected behavior: EI should set ime_scheduled flag, then IME becomes true after next instruction
+  - Impact: Test failure indicates EI instruction may not be following hardware-accurate delayed enable
+  - Note: This is a pre-existing test failure, not introduced by recent changes
+  - Reference: Pan Docs "Interrupt Master Enable Flag (IME)"
 - [ ] **Game Boy Color Speed Switching**: Implement double-speed mode - `crates/core/src/cpu_lr35902.rs:27`
   - Current: Returns false for speed switching query (DMG mode)
   - Needed: Implement CGB double-speed mode (KEY1 register)

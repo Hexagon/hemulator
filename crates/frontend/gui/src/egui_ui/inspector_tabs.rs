@@ -1514,7 +1514,7 @@ fn render_gba_oam_tab(ui: &mut Ui, tab_manager: &TabManager) {
                                 u16::from_le_bytes([data.oam[offset + 4], data.oam[offset + 5]]);
 
                             let y = (attr0 & 0xFF) as u8;
-                            let x = (attr1 & 0x1FF) as u16;
+                            let x = attr1 & 0x1FF;
                             let tile_num = attr2 & 0x3FF;
 
                             // Decode size (depends on shape and size bits)

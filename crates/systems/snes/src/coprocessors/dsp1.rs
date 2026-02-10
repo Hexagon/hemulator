@@ -38,6 +38,7 @@ enum Dsp1Command {
     /// Multiply and accumulate
     MultiplyAccumulate = 0x01,
     /// Parameter setup (projection/camera state)
+    #[allow(dead_code)] // Used for future projection math implementation
     Parameter = 0x02,
     /// Inverse (1/x)
     Inverse = 0x04,
