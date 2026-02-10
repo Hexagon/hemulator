@@ -2663,8 +2663,7 @@ fn main() {
                                         rom_hash = None;
                                     } else {
                                         rom_loaded = true;
-                                        runtime_state
-                                            .set_mount("Cartridge".to_string(), p.clone());
+                                        runtime_state.set_mount("Cartridge".to_string(), p.clone());
                                         if let Err(e) = settings.save() {
                                             eprintln!("Warning: Failed to save settings: {}", e);
                                         }
@@ -4375,8 +4374,8 @@ fn main() {
                             "All ROM Files",
                             &[
                                 "nes", "unf", "gb", "gbc", "gba", "bin", "a26", "smc", "sfc",
-                                "z64", "n64", "v64", "com", "exe", "sms", "ch8", "c8", "col",
-                                "sg", "sc",
+                                "z64", "n64", "v64", "com", "exe", "sms", "ch8", "c8", "col", "sg",
+                                "sc",
                             ],
                         )
                         .add_filter("NES ROMs", &["nes", "unf"])
@@ -6895,8 +6894,8 @@ fn main() {
                         total_cycles += 1; // This is a placeholder - actual cycle count would depend on system
 
                         // Handle audio for each stepped frame
-                        let samples_per_frame_f = (SAMPLE_RATE as f64 / frame_rate)
-                            + audio_sample_remainder;
+                        let samples_per_frame_f =
+                            (SAMPLE_RATE as f64 / frame_rate) + audio_sample_remainder;
                         let samples_per_frame = samples_per_frame_f.floor() as usize;
                         audio_sample_remainder = samples_per_frame_f - samples_per_frame as f64;
                         let audio_samples = sys.get_audio_samples(samples_per_frame);

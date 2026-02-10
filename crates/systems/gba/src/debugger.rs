@@ -153,10 +153,7 @@ impl Debugger for GbaSystem {
 
         // General purpose registers R0-R12
         for i in 0..=12 {
-            state.add_register(CpuRegister::new_32bit(
-                format!("R{}", i),
-                self.cpu.gpr[i],
-            ));
+            state.add_register(CpuRegister::new_32bit(format!("R{}", i), self.cpu.gpr[i]));
         }
 
         // SP (R13), LR (R14)
