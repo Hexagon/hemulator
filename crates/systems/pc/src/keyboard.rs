@@ -3,14 +3,74 @@
 //! This module implements basic keyboard input for the PC emulator.
 //! It translates window backend Key events to PC keyboard scancodes.
 
-use std::collections::VecDeque;
+/// Fixed-size ring buffer for keyboard scancodes
+/// Matches hardware behavior with 16-byte buffer
+struct RingBuffer {
+    buffer: [u8; 16],
+    read_pos: usize,
+    write_pos: usize,
+    count: usize,
+}
+
+impl RingBuffer {
+    fn new() -> Self {
+        Self {
+            buffer: [0; 16],
+            read_pos: 0,
+            write_pos: 0,
+            count: 0,
+        }
+    }
+
+    fn push(&mut self, value: u8) -> bool {
+        if self.count >= 16 {
+            return false; // Buffer full
+        }
+        self.buffer[self.write_pos] = value;
+        self.write_pos = (self.write_pos + 1) % 16;
+        self.count += 1;
+        true
+    }
+
+    fn pop(&mut self) -> Option<u8> {
+        if self.count == 0 {
+            return None;
+        }
+        let value = self.buffer[self.read_pos];
+        self.read_pos = (self.read_pos + 1) % 16;
+        self.count -= 1;
+        Some(value)
+    }
+
+    fn peek(&self) -> Option<u8> {
+        if self.count == 0 {
+            None
+        } else {
+            Some(self.buffer[self.read_pos])
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.count == 0
+    }
+
+    #[allow(dead_code)] // May be used in future
+    fn len(&self) -> usize {
+        self.count
+    }
+
+    fn iter(&self) -> impl Iterator<Item = u8> + '_ {
+        (0..self.count).map(move |i| {
+            let pos = (self.read_pos + i) % 16;
+            self.buffer[pos]
+        })
+    }
+}
 
 /// PC keyboard controller
 pub struct Keyboard {
-    /// Queue of scancodes waiting to be read
-    scancode_buffer: VecDeque<u8>,
-    /// Maximum buffer size
-    max_buffer_size: usize,
+    /// Fixed ring buffer of scancodes waiting to be read (16 bytes to match hardware)
+    scancode_buffer: RingBuffer,
     /// Modifier key states (for INT 16h AH=02h)
     /// Bit 0 = Right Shift, Bit 1 = Left Shift
     /// Bit 2 = Ctrl, Bit 3 = Alt
@@ -24,8 +84,7 @@ impl Keyboard {
     /// Create a new keyboard controller
     pub fn new() -> Self {
         Self {
-            scancode_buffer: VecDeque::with_capacity(16),
-            max_buffer_size: 16,
+            scancode_buffer: RingBuffer::new(),
             shift_flags: 0,
             altgr_pressed: false,
         }
@@ -38,21 +97,18 @@ impl Keyboard {
 
     /// Read a scancode from the buffer
     pub fn read_scancode(&mut self) -> u8 {
-        self.scancode_buffer.pop_front().unwrap_or(0)
+        self.scancode_buffer.pop().unwrap_or(0)
     }
 
     /// Peek at the next scancode without consuming it
     pub fn peek_scancode(&self) -> u8 {
-        self.scancode_buffer.front().copied().unwrap_or(0)
+        self.scancode_buffer.peek().unwrap_or(0)
     }
 
     /// Find the first make code (key press) in the buffer, skipping break codes
     /// Returns None if no make code is found
     pub fn peek_make_code(&self) -> Option<u8> {
-        self.scancode_buffer
-            .iter()
-            .find(|&&code| code & 0x80 == 0) // Find first code with high bit clear (make code)
-            .copied()
+        self.scancode_buffer.iter().find(|&code| code & 0x80 == 0) // Find first code with high bit clear (make code)
     }
 
     /// Add a key press event (generates make code)
@@ -85,8 +141,8 @@ impl Keyboard {
         // Only store non-modifier make codes in the buffer for INT 16h
         // Modifier keys (Shift, Ctrl, Alt) only update shift flags, not the scancode buffer
         // This prevents INT 16h from reading modifier scancodes which would cause FreeDOS to loop
-        if !is_modifier && self.scancode_buffer.len() < self.max_buffer_size {
-            self.scancode_buffer.push_back(key);
+        if !is_modifier {
+            let _ = self.scancode_buffer.push(key);
         }
     }
 
@@ -113,14 +169,12 @@ impl Keyboard {
 
     /// Clear the scancode buffer
     pub fn clear(&mut self) {
-        self.scancode_buffer.clear();
+        self.scancode_buffer = RingBuffer::new();
     }
 
     /// Check if ESC key is in the buffer (for boot abort)
     pub fn has_esc(&self) -> bool {
-        self.scancode_buffer
-            .iter()
-            .any(|&code| code == SCANCODE_ESC)
+        self.scancode_buffer.iter().any(|code| code == SCANCODE_ESC)
     }
 
     /// Get the current shift flags (for INT 16h AH=02h)

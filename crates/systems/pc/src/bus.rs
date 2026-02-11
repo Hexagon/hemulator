@@ -90,30 +90,76 @@ pub struct PcBus {
     /// CRTC (CRT Controller) index register - selects which CRTC register to access
     crtc_index: Cell<u8>,
     /// CRTC data registers (25 registers total for VGA)
+    /// Controls display timing, resolution, cursor position, and scrolling
+    /// - Reg 0-5: Horizontal timing (total, display end, blank start/end, retrace)
+    /// - Reg 6-7: Vertical total (9-bit value split across two registers)
+    /// - Reg 8: Preset Row Scan (vertical fine scrolling)
+    /// - Reg 9: Maximum Scan Line (character height - 1 in text mode)
+    /// - Reg 10-11: Cursor Start/End (cursor shape, bits 0-4 = scanline, bit 5 = cursor off)
+    /// - Reg 12-13: Start Address High/Low (video memory offset for display, enables scrolling)
+    /// - Reg 14-15: Cursor Location High/Low (cursor position in video memory)
+    /// - Reg 16-17: Vertical Retrace Start/End
+    /// - Reg 18: Vertical Display End (9-bit value)
+    /// - Reg 19: Offset (logical line width in words)
+    /// - Reg 20: Underline Location
+    /// - Reg 21-22: Vertical Blank Start/End
+    /// - Reg 23: Mode Control (CRT mode bits)
+    /// - Reg 24: Line Compare (split screen scanline)
+    ///
+    /// Reference: VGA CRTC Registers (IBM VGA Technical Reference Manual)
     crtc_data: [Cell<u8>; 25],
     /// Sequencer index register (selects which sequencer register to access)
     sequencer_index: Cell<u8>,
-    /// Sequencer data registers (5 registers: reset, clocking, map mask, char map, memory mode)
+    /// Sequencer data registers (5 registers total)
+    /// - Reg 0: Reset control (bit 0 = async reset, bit 1 = sync reset)
+    /// - Reg 1: Clocking mode (bit 0 = 8/9 dot mode, bit 3 = half dot clock)
+    /// - Reg 2: Map mask (bits 0-3 enable writing to memory planes 0-3)
+    /// - Reg 3: Character map select (selects font in text mode)
+    /// - Reg 4: Memory mode (bit 1 = extended memory, bit 2 = odd/even mode, bit 3 = chain 4)
+    ///
+    /// Reference: VGA Sequencer Registers (IBM VGA Technical Reference)
     sequencer_data: [Cell<u8>; 5],
     /// Graphics Controller index register
     graphics_index: Cell<u8>,
-    /// Graphics Controller data registers (9 registers: set/reset, enable, color compare, etc.)
+    /// Graphics Controller data registers (9 registers total)
+    /// - Reg 0: Set/Reset (4 bits for planes 0-3, used when Reg 1 enables)
+    /// - Reg 1: Enable Set/Reset (4 bits to enable set/reset per plane)
+    /// - Reg 2: Color Compare (compared against read data when Reg 7 masks)
+    /// - Reg 3: Data Rotate (bits 0-2 = rotate count, bits 3-4 = function select)
+    /// - Reg 4: Read Map Select (selects which plane to read in read mode 0)
+    /// - Reg 5: Graphics Mode (bits 0-1 = write mode, bits 2-3 = test, bits 5-6 = read mode)
+    /// - Reg 6: Miscellaneous (bit 0 = graphics mode, bits 2-3 = memory map select)
+    /// - Reg 7: Color Don't Care (4 bits to mask color compare per plane)
+    /// - Reg 8: Bit Mask (8 bits to mask individual bits during write)
+    ///
+    /// Reference: VGA Graphics Controller Registers (IBM VGA Technical Reference)
     graphics_data: [Cell<u8>; 9],
     /// Attribute Controller index register (also used as data for some operations)
     attribute_index: Cell<u8>,
     /// Attribute Controller flip-flop state (false = index mode, true = data mode)
     attribute_flipflop: Cell<bool>,
-    /// Attribute Controller data registers (21 registers: palette + mode control)
+    /// Attribute Controller data registers (21 registers total)
+    /// - Reg 0-15: Palette registers (map color index to palette entry)
+    /// - Reg 16: Mode Control (bit 0 = graphics, bit 3 = enable blink, bit 5 = pixel panning)
+    /// - Reg 17: Overscan Color (border color in text modes)
+    /// - Reg 18: Color Plane Enable (4 bits enable display of planes 0-3)
+    /// - Reg 19: Horizontal Pixel Panning (smooth horizontal scrolling)
+    /// - Reg 20: Color Select (selects upper color bits for 256-color mode)
+    ///
+    /// Reference: VGA Attribute Controller Registers (IBM VGA Technical Reference)
     attribute_data: [Cell<u8>; 21],
     /// DAC (Digital-to-Analog Converter) pixel mask
+    /// All 8 bits set = all pixels visible; cleared bits mask corresponding palette entries
     dac_mask: Cell<u8>,
-    /// DAC read index
+    /// DAC read index (current palette entry being read)
     dac_read_index: Cell<u8>,
-    /// DAC write index
+    /// DAC write index (current palette entry being written)
     dac_write_index: Cell<u8>,
     /// DAC color data (3 bytes per color: R, G, B for 256 colors = 768 bytes)
+    /// Each color component is 6 bits (0-63), stored in lower 6 bits of each byte
     dac_data: [Cell<u8>; 768],
-    /// DAC state (0 = ready for red, 1 = ready for green, 2 = ready for blue)
+    /// DAC state machine (0 = ready for red, 1 = ready for green, 2 = ready for blue)
+    /// After writing blue, state resets to 0 and write index auto-increments
     dac_state: Cell<u8>,
     /// CGA Mode Control Register (port 0x3D8)
     cga_mode_control: Cell<u8>,
@@ -691,6 +737,47 @@ impl PcBus {
     }
 
     /// Read from an I/O port
+    ///
+    /// # I/O Port Map
+    ///
+    /// ## Timer/Speaker (Intel 8253/8254 PIT)
+    /// - **0x40**: PIT Channel 0 (system timer, IRQ 0 at ~18.2 Hz)
+    /// - **0x41**: PIT Channel 1 (DRAM refresh, legacy on modern systems)
+    /// - **0x42**: PIT Channel 2 (PC speaker tone generation)
+    /// - **0x43**: PIT Mode/Command register (write-only)
+    /// - **0x61**: PC speaker control (bit 0 = gate, bit 1 = speaker enable)
+    ///
+    /// ## Keyboard Controller (Intel 8042)
+    /// - **0x60**: Data port (keyboard scancodes, controller responses)
+    /// - **0x64**: Status (read) / Command (write) register
+    ///
+    /// ## System Control
+    /// - **0x92**: PS/2 system control port (bit 1 = A20 gate)
+    ///
+    /// ## VGA Registers
+    /// - **0x3B4/0x3D4**: CRTC Index register (select register 0-24)
+    /// - **0x3B5/0x3D5**: CRTC Data register (access selected register)
+    /// - **0x3BA/0x3DA**: Input Status Register 1 (VGA status, vertical retrace)
+    /// - **0x3C0**: Attribute Controller Index/Data (palette, mode control)
+    /// - **0x3C1**: Attribute Controller Data Read
+    /// - **0x3C2**: Input Status Register 0 (read) / Miscellaneous Output (write)
+    /// - **0x3C4**: Sequencer Index register
+    /// - **0x3C5**: Sequencer Data register
+    /// - **0x3C6**: DAC Pixel Mask
+    /// - **0x3C7**: DAC State Register (read)
+    /// - **0x3C8**: DAC Write Index
+    /// - **0x3C9**: DAC Data (RGB values)
+    /// - **0x3CC**: Miscellaneous Output Register (read)
+    /// - **0x3CE**: Graphics Controller Index
+    /// - **0x3CF**: Graphics Controller Data
+    /// - **0x3D8**: CGA Mode Control Register
+    /// - **0x3D9**: CGA Color Select Register
+    ///
+    /// # References
+    /// - Intel 8253/8254 Programmable Interval Timer Datasheet
+    /// - Intel 8042 Keyboard Controller Datasheet
+    /// - IBM VGA Technical Reference Manual
+    /// - IBM PC/XT Technical Reference Manual
     pub fn io_read(&self, port: u16) -> u8 {
         let value = match port {
             // PIT Channel 0 (system timer)

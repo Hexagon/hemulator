@@ -1247,12 +1247,13 @@ impl Ppu {
                 }
 
                 // This sprite is on the current scanline
-                sprites_on_scanline += 1;
-                if sprites_on_scanline > 8 {
-                    // NES hardware limit: only 8 sprites can be rendered per scanline
+                // NES hardware limit: only 8 sprites can be rendered per scanline
+                // Break immediately after finding the 8th sprite (optimization - skip checking remaining sprites)
+                if sprites_on_scanline >= 8 {
                     // Sprites beyond the 8th are skipped (sprite overflow flag is set by evaluate_sprites_for_scanline)
                     break;
                 }
+                sprites_on_scanline += 1;
 
                 let sy = if flip_v { height_px - 1 - row } else { row };
                 let (tile_index, fine_y) = if height_px == 16 {

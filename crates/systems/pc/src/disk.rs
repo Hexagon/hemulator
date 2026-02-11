@@ -2,6 +2,39 @@
 //!
 //! Provides INT 13h disk I/O services for floppy and hard drives
 
+use std::sync::OnceLock;
+
+/// Check if bus logging is enabled (cached from environment variable)
+fn is_bus_logging_enabled() -> bool {
+    static BUS_LOGGING: OnceLock<bool> = OnceLock::new();
+    *BUS_LOGGING.get_or_init(|| std::env::var("EMU_LOG_BUS").is_ok())
+}
+
+/// Parse BIOS Parameter Block (BPB) from a disk image to determine geometry
+/// Returns (sectors_per_track, heads) or None if BPB is invalid
+fn parse_bpb(disk_image: &[u8]) -> Option<(u8, u8)> {
+    // BPB starts at offset 0x0B in the boot sector
+    // Need at least 512 bytes for a boot sector
+    if disk_image.len() < 512 {
+        return None;
+    }
+
+    // Read sectors per track (offset 0x18, 2 bytes, little-endian)
+    let spt = u16::from_le_bytes([disk_image[0x18], disk_image[0x19]]);
+
+    // Read number of heads (offset 0x1A, 2 bytes, little-endian)
+    let heads = u16::from_le_bytes([disk_image[0x1A], disk_image[0x1B]]);
+
+    // Validate reasonable values
+    // SPT: typically 9, 15, 18 for floppies; up to 63 for hard drives
+    // Heads: typically 2 for floppies; up to 255 for hard drives
+    if spt == 0 || spt > 255 || heads == 0 || heads > 255 {
+        return None;
+    }
+
+    Some((spt as u8, heads as u8))
+}
+
 /// Disk request parameters
 #[allow(dead_code)]
 pub struct DiskRequest {
@@ -59,27 +92,61 @@ impl DiskController {
             }
         };
 
-        // Calculate disk parameters based on drive type
+        // Determine disk geometry: try to parse BPB, fall back to defaults
         let (sectors_per_track, heads) = if request.drive < 0x80 {
-            // Floppy: assume 1.44MB format
-            (18, 2)
+            // Floppy: try to parse BPB from boot sector
+            parse_bpb(disk_image).unwrap_or((18, 2)) // Default to 1.44MB if BPB invalid
         } else {
-            // Hard drive: assume 10MB format
-            (17, 4)
+            // Hard drive: try to parse BPB, fall back to 10MB format
+            parse_bpb(disk_image).unwrap_or((17, 4))
         };
+
+        // Validate CHS parameters before calculating LBA
+        // Sector numbering is 1-based (1 to sectors_per_track)
+        // Allow exception for linear addressing mode (validated below)
+        let using_linear_addressing = request.cylinder == 0
+            && request.head == 0
+            && request.sector > sectors_per_track
+            && request.sector < 64;
+
+        if !using_linear_addressing {
+            // Validate sector number (1-based)
+            if request.sector == 0 || request.sector > sectors_per_track {
+                self.status = 0x01; // Invalid parameter
+                return self.status;
+            }
+
+            // Validate head number
+            if request.head >= heads {
+                self.status = 0x01; // Invalid parameter
+                return self.status;
+            }
+
+            // Calculate maximum cylinders from disk size
+            let sector_size: u32 = 512;
+            let total_sectors = (disk_image.len() as u32) / sector_size;
+            let sectors_per_cylinder = (sectors_per_track as u32) * (heads as u32);
+            let max_cylinders = if sectors_per_cylinder > 0 {
+                total_sectors.div_ceil(sectors_per_cylinder)
+            } else {
+                0
+            };
+
+            // Validate cylinder number
+            if (request.cylinder as u32) >= max_cylinders {
+                self.status = 0x01; // Invalid parameter
+                return self.status;
+            }
+        }
 
         // Calculate LBA (Logical Block Address)
         // SYSLINUX and some bootloaders use a hybrid addressing scheme:
         // When C=0, H=0, and S > SPT (but S < 64), treat S as a direct LBA (linear sector number)
         // This is only valid for the boot sector stage, not for normal operation
         // Otherwise use standard CHS formula: LBA = (C × HPC + H) × SPT + (S - 1)
-        let lba = if request.cylinder == 0
-            && request.head == 0
-            && request.sector > sectors_per_track
-            && request.sector < 64
-        {
+        let lba = if using_linear_addressing {
             // Linear sector addressing (used by SYSLINUX boot sector)
-            if std::env::var("EMU_LOG_BUS").is_ok() {
+            if is_bus_logging_enabled() {
                 eprintln!(
                     "Disk read: Using linear addressing for S={} > SPT={}",
                     request.sector, sectors_per_track
@@ -87,9 +154,7 @@ impl DiskController {
             }
             request.sector as u32 - 1
         } else {
-            // Standard CHS addressing
-            // Note: We don't validate CHS parameters here - we let the bounds check below
-            // handle out-of-range requests. This is more permissive and matches real BIOS behavior.
+            // Standard CHS addressing (already validated above)
             ((request.cylinder as u32 * heads as u32 + request.head as u32)
                 * sectors_per_track as u32)
                 + (request.sector as u32 - 1)
@@ -100,7 +165,7 @@ impl DiskController {
         let offset = (lba * sector_size) as usize;
 
         // Log LBA calculation for debugging
-        if std::env::var("EMU_LOG_BUS").is_ok() {
+        if is_bus_logging_enabled() {
             eprintln!(
                 "Disk read: C={} H={} S={} -> LBA={} offset=0x{:X} (SPT={}, heads={})",
                 request.cylinder,
@@ -124,7 +189,7 @@ impl DiskController {
         buffer[..bytes_to_copy].copy_from_slice(&disk_image[offset..offset + bytes_to_copy]);
 
         // Log first few bytes of data read
-        if std::env::var("EMU_LOG_BUS").is_ok() {
+        if is_bus_logging_enabled() {
             eprint!("First 128 bytes read:");
             for (i, &byte) in buffer.iter().enumerate().take(128.min(bytes_to_copy)) {
                 if i % 16 == 0 {
@@ -158,27 +223,55 @@ impl DiskController {
             }
         };
 
-        // Calculate disk parameters based on drive type
+        // Determine disk geometry: try to parse BPB, fall back to defaults
         let (sectors_per_track, heads) = if request.drive < 0x80 {
-            // Floppy: assume 1.44MB format
-            (18, 2)
+            // Floppy: try to parse BPB from boot sector
+            parse_bpb(disk_image).unwrap_or((18, 2)) // Default to 1.44MB if BPB invalid
         } else {
-            // Hard drive: assume 10MB format
-            (17, 4)
+            // Hard drive: try to parse BPB, fall back to 10MB format
+            parse_bpb(disk_image).unwrap_or((17, 4))
         };
+
+        // Validate CHS parameters (same as read_sectors)
+        let using_linear_addressing = request.cylinder == 0
+            && request.head == 0
+            && request.sector > sectors_per_track
+            && request.sector < 64;
+
+        if !using_linear_addressing {
+            if request.sector == 0 || request.sector > sectors_per_track {
+                self.status = 0x01; // Invalid parameter
+                return self.status;
+            }
+
+            if request.head >= heads {
+                self.status = 0x01; // Invalid parameter
+                return self.status;
+            }
+
+            let sector_size: u32 = 512;
+            let total_sectors = (disk_image.len() as u32) / sector_size;
+            let sectors_per_cylinder = (sectors_per_track as u32) * (heads as u32);
+            let max_cylinders = if sectors_per_cylinder > 0 {
+                total_sectors.div_ceil(sectors_per_cylinder)
+            } else {
+                0
+            };
+
+            if (request.cylinder as u32) >= max_cylinders {
+                self.status = 0x01; // Invalid parameter
+                return self.status;
+            }
+        }
 
         // Calculate LBA (Logical Block Address)
         // SYSLINUX and some bootloaders use a hybrid addressing scheme:
         // When C=0, H=0, and S > SPT (but S < 64), treat S as a direct LBA (linear sector number)
         // This is only valid for the boot sector stage, not for normal operation
         // Otherwise use standard CHS formula: LBA = (C × HPC + H) × SPT + (S - 1)
-        let lba = if request.cylinder == 0
-            && request.head == 0
-            && request.sector > sectors_per_track
-            && request.sector < 64
-        {
+        let lba = if using_linear_addressing {
             // Linear sector addressing (used by SYSLINUX boot sector)
-            if std::env::var("EMU_LOG_BUS").is_ok() {
+            if is_bus_logging_enabled() {
                 eprintln!(
                     "Disk write: Using linear addressing for S={} > SPT={}",
                     request.sector, sectors_per_track
