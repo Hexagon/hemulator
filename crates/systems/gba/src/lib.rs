@@ -25,6 +25,8 @@
 //! | 0x0C000000-0x0DFFFFFF | 32MB  | Game Pak ROM (Wait State 2)    |
 //! | 0x0E000000-0x0E00FFFF | 64KB  | Game Pak SRAM                  |
 
+use std::cell::RefCell;
+
 use emu_core::cpu_arm7tdmi::{Arm7Tdmi, MemoryArm7};
 use emu_core::debug::Debugger;
 use emu_core::{types::Frame, MountPointInfo, System};
@@ -34,6 +36,7 @@ use thiserror::Error;
 pub mod cartridge;
 pub mod debugger;
 pub mod dma;
+pub mod eeprom;
 pub mod ppu;
 pub mod timers;
 
@@ -75,6 +78,12 @@ pub struct GbaBus {
     dma: dma::Dma,
     /// Hardware timers (4 × 16-bit)
     timers: timers::Timers,
+    /// EEPROM save storage (for games that use EEPROM)
+    /// Wrapped in RefCell because EEPROM reads advance internal state
+    /// but MemoryArm7::read_byte takes &self.
+    eeprom: RefCell<eeprom::Eeprom>,
+    /// Detected save type from cartridge header
+    save_type: cartridge::SaveType,
     /// Whether an IRQ is currently pending (IE & IF & IME)
     irq_pending: bool,
     /// Interrupt Master Enable (0x04000208)
@@ -148,6 +157,8 @@ impl GbaBus {
             sram: vec![0; 0x10000], // 64KB
             dma: dma::Dma::new(),
             timers: timers::Timers::new(),
+            eeprom: RefCell::new(eeprom::Eeprom::new()),
+            save_type: cartridge::SaveType::None,
             irq_pending: false,
             ime: false,
             ie: 0,
@@ -329,6 +340,12 @@ impl MemoryArm7 for GbaBus {
 
             // Cartridge ROM (0x08000000 - 0x0DFFFFFF, 3 wait state regions)
             0x08000000..=0x0DFFFFFF => {
+                // Check for EEPROM access
+                if self.save_type == cartridge::SaveType::Eeprom
+                    && eeprom::Eeprom::is_eeprom_address(addr, self.rom.len())
+                {
+                    return self.eeprom.borrow_mut().read_bit() as u8;
+                }
                 let offset = (addr & 0x01FFFFFF) as usize;
                 self.rom.get(offset).copied().unwrap_or(0)
             }
@@ -346,6 +363,14 @@ impl MemoryArm7 for GbaBus {
 
     fn read_halfword(&self, addr: u32) -> u16 {
         let addr = addr & !1; // Force alignment
+
+        // EEPROM reads: return single bit in bit 0, don't call read_byte twice
+        if self.save_type == cartridge::SaveType::Eeprom
+            && eeprom::Eeprom::is_eeprom_address(addr, self.rom.len())
+        {
+            return self.eeprom.borrow_mut().read_bit();
+        }
+
         let lo = self.read_byte(addr) as u16;
         let hi = self.read_byte(addr + 1) as u16;
         lo | (hi << 8)
@@ -408,8 +433,14 @@ impl MemoryArm7 for GbaBus {
             // OAM (byte writes are ignored)
             0x07000000..=0x07FFFFFF => {}
 
-            // Cartridge ROM is read-only
-            0x08000000..=0x0DFFFFFF => {}
+            // Cartridge ROM (writes to EEPROM address range)
+            0x08000000..=0x0DFFFFFF => {
+                if self.save_type == cartridge::SaveType::Eeprom
+                    && eeprom::Eeprom::is_eeprom_address(addr, self.rom.len())
+                {
+                    self.eeprom.borrow_mut().write_bit(val as u16);
+                }
+            }
 
             // Cartridge SRAM
             0x0E000000..=0x0EFFFFFF => {
@@ -457,6 +488,13 @@ impl MemoryArm7 for GbaBus {
             }
             // Everything else goes through write_byte (safe for non-special regions)
             _ => {
+                // EEPROM writes: single bit per transfer, don't split into two write_byte calls
+                if self.save_type == cartridge::SaveType::Eeprom
+                    && eeprom::Eeprom::is_eeprom_address(addr, self.rom.len())
+                {
+                    self.eeprom.borrow_mut().write_bit(val);
+                    return;
+                }
                 self.write_byte(addr, val as u8);
                 self.write_byte(addr + 1, (val >> 8) as u8);
             }
@@ -714,6 +752,19 @@ impl GbaSystem {
             return 0;
         }
 
+        // Detect EEPROM size from DMA3 transfers targeting EEPROM addresses
+        if self.cpu.memory.save_type == cartridge::SaveType::Eeprom {
+            if let Some((word_count, dst_addr)) = self.cpu.memory.dma.dma3_transfer_info() {
+                if eeprom::Eeprom::is_eeprom_address(dst_addr, self.cpu.memory.rom.len()) {
+                    self.cpu
+                        .memory
+                        .eeprom
+                        .borrow_mut()
+                        .detect_size_from_dma(word_count);
+                }
+            }
+        }
+
         // Take DMA out to avoid borrow conflicts between DMA and bus
         let mut dma = std::mem::take(&mut self.cpu.memory.dma);
 
@@ -918,6 +969,7 @@ impl System for GbaSystem {
                 "vram": STANDARD.encode(&self.cpu.memory.vram),
                 "oam": STANDARD.encode(&self.cpu.memory.oam),
                 "sram": STANDARD.encode(&self.cpu.memory.sram),
+                "eeprom": STANDARD.encode(self.cpu.memory.eeprom.borrow().data()),
             },
             "interrupts": {
                 "ime": self.cpu.memory.ime,
@@ -1056,6 +1108,12 @@ impl System for GbaSystem {
             }
         }
 
+        if let Some(eeprom_str) = mem_json["eeprom"].as_str() {
+            if let Ok(data) = STANDARD.decode(eeprom_str) {
+                self.cpu.memory.eeprom.borrow_mut().set_data(&data);
+            }
+        }
+
         // Restore interrupts
         let int_json = &v["interrupts"];
         self.cpu.memory.ime = int_json["ime"].as_bool().unwrap_or(false);
@@ -1086,6 +1144,12 @@ impl System for GbaSystem {
             "Cartridge" => {
                 // Parse cartridge header before loading
                 self.header = cartridge::GbaCartridgeHeader::from_bytes(data);
+
+                // Set save type on bus so memory map knows about EEPROM
+                if let Some(ref header) = self.header {
+                    self.cpu.memory.save_type = header.save_type;
+                }
+
                 self.cpu.memory.load_rom(data);
                 self.reset();
 

@@ -551,6 +551,19 @@ impl Dma {
     pub fn channel(&self, idx: usize) -> Option<&DmaChannel> {
         self.channels.get(idx)
     }
+
+    /// Get DMA3's word count and destination address if it's active.
+    ///
+    /// Used for EEPROM size detection — the DMA word count indicates
+    /// whether 6-bit or 14-bit addressing is being used.
+    pub fn dma3_transfer_info(&self) -> Option<(u32, u32)> {
+        let ch = &self.channels[3];
+        if ch.active && ch.enabled() {
+            Some((ch.word_count, ch.dst_addr))
+        } else {
+            None
+        }
+    }
 }
 
 impl Default for Dma {
