@@ -1087,7 +1087,7 @@ impl Ppu {
 
                 // Calculate CHR addresses for this tile
                 let tile_chr_addr = bg_pattern_base + (tile_index as usize) * 16;
-                
+
                 // Invoke CHR read callback BEFORE fetching for MMC2/MMC4 latch switching compatibility.
                 // This is CRITICAL: the callback must be invoked BEFORE the actual CHR fetch so that
                 // mappers can update their CHR bank selection based on the read address.
@@ -1273,7 +1273,7 @@ impl Ppu {
                 };
 
                 let addr = pattern_base + (tile_index as usize) * 16;
-                
+
                 // Invoke CHR read callback BEFORE fetching for MMC2/MMC4 latch switching compatibility.
                 // This is CRITICAL: the callback must be invoked BEFORE the actual CHR fetch so that
                 // mappers can update their CHR bank selection based on the read address.
@@ -1283,7 +1283,7 @@ impl Ppu {
                     cb((addr + fine_y) as u16); // Low bitplane
                     cb((addr + fine_y + 8) as u16); // High bitplane
                 }
-                
+
                 // Fetch CHR pattern data AFTER callback so any CHR bank switching takes effect
                 let lo = self.chr_fetch_fast(addr + fine_y);
                 let hi = self.chr_fetch_fast(addr + fine_y + 8);
