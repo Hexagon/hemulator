@@ -425,16 +425,90 @@ impl MemoryArm7 for GbaBus {
 
     fn write_halfword(&mut self, addr: u32, val: u16) {
         let addr = addr & !1;
-        self.write_byte(addr, val as u8);
-        self.write_byte(addr + 1, (val >> 8) as u8);
+        match addr {
+            // Palette RAM - halfword writes work normally (no byte-doubling)
+            0x05000000..=0x05FFFFFF => {
+                let offset = (addr & 0x3FF) as usize;
+                if offset + 1 < self.palette.len() {
+                    self.palette[offset] = val as u8;
+                    self.palette[offset + 1] = (val >> 8) as u8;
+                }
+            }
+            // VRAM - halfword writes work normally (no byte-doubling)
+            0x06000000..=0x06FFFFFF => {
+                let offset = (addr & 0x1FFFF) as usize;
+                let offset = if offset >= 0x18000 {
+                    offset - 0x8000
+                } else {
+                    offset
+                };
+                if offset + 1 < self.vram.len() {
+                    self.vram[offset] = val as u8;
+                    self.vram[offset + 1] = (val >> 8) as u8;
+                }
+            }
+            // OAM - halfword writes work normally (not ignored like byte writes)
+            0x07000000..=0x07FFFFFF => {
+                let offset = (addr & 0x3FF) as usize;
+                if offset + 1 < self.oam.len() {
+                    self.oam[offset] = val as u8;
+                    self.oam[offset + 1] = (val >> 8) as u8;
+                }
+            }
+            // Everything else goes through write_byte (safe for non-special regions)
+            _ => {
+                self.write_byte(addr, val as u8);
+                self.write_byte(addr + 1, (val >> 8) as u8);
+            }
+        }
     }
 
     fn write_word(&mut self, addr: u32, val: u32) {
         let addr = addr & !3;
-        self.write_byte(addr, val as u8);
-        self.write_byte(addr + 1, (val >> 8) as u8);
-        self.write_byte(addr + 2, (val >> 16) as u8);
-        self.write_byte(addr + 3, (val >> 24) as u8);
+        match addr {
+            // Palette RAM - word writes work normally
+            0x05000000..=0x05FFFFFF => {
+                let offset = (addr & 0x3FF) as usize;
+                if offset + 3 < self.palette.len() {
+                    self.palette[offset] = val as u8;
+                    self.palette[offset + 1] = (val >> 8) as u8;
+                    self.palette[offset + 2] = (val >> 16) as u8;
+                    self.palette[offset + 3] = (val >> 24) as u8;
+                }
+            }
+            // VRAM - word writes work normally
+            0x06000000..=0x06FFFFFF => {
+                let offset = (addr & 0x1FFFF) as usize;
+                let offset = if offset >= 0x18000 {
+                    offset - 0x8000
+                } else {
+                    offset
+                };
+                if offset + 3 < self.vram.len() {
+                    self.vram[offset] = val as u8;
+                    self.vram[offset + 1] = (val >> 8) as u8;
+                    self.vram[offset + 2] = (val >> 16) as u8;
+                    self.vram[offset + 3] = (val >> 24) as u8;
+                }
+            }
+            // OAM - word writes work normally
+            0x07000000..=0x07FFFFFF => {
+                let offset = (addr & 0x3FF) as usize;
+                if offset + 3 < self.oam.len() {
+                    self.oam[offset] = val as u8;
+                    self.oam[offset + 1] = (val >> 8) as u8;
+                    self.oam[offset + 2] = (val >> 16) as u8;
+                    self.oam[offset + 3] = (val >> 24) as u8;
+                }
+            }
+            // Everything else goes through write_byte
+            _ => {
+                self.write_byte(addr, val as u8);
+                self.write_byte(addr + 1, (val >> 8) as u8);
+                self.write_byte(addr + 2, (val >> 16) as u8);
+                self.write_byte(addr + 3, (val >> 24) as u8);
+            }
+        }
     }
 
     fn irq_pending(&self) -> bool {
