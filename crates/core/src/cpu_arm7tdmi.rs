@@ -579,7 +579,7 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
             COND_GT => !self.flag_z() && (self.flag_n() == self.flag_v()),
             COND_LE => self.flag_z() || (self.flag_n() != self.flag_v()),
             COND_AL => true,
-            0xF => true, // NV (ARMv4: unpredictable, but treat as AL for compatibility)
+            0xF => false, // NV (ARMv4T: Never execute - condition always fails)
             _ => unreachable!(),
         }
     }
@@ -627,8 +627,10 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
 
     /// Handle a Software Interrupt (SWI)
     fn handle_swi(&mut self) {
-        let lr_offset = if self.is_thumb() { 2 } else { 4 };
-        self.enter_exception(VECTOR_SWI, ProcessorMode::Supervisor, lr_offset);
+        // SWI: LR_svc = address of next instruction after the SWI
+        // gpr[15] already points to next instruction (advanced in step_arm/step_thumb)
+        // So lr_offset = 0 (no adjustment needed)
+        self.enter_exception(VECTOR_SWI, ProcessorMode::Supervisor, 0);
     }
 
     /// Emulate GBA BIOS SWI calls (when BIOS ROM is not present).
@@ -1333,8 +1335,10 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
 
     /// Handle an undefined instruction exception
     fn handle_undefined(&mut self) {
-        let lr_offset = if self.is_thumb() { 2 } else { 4 };
-        self.enter_exception(VECTOR_UNDEFINED, ProcessorMode::Undefined, lr_offset);
+        // Undefined: LR_und = address of next instruction after the undefined one
+        // gpr[15] already points to next instruction (advanced in step_arm/step_thumb)
+        // So lr_offset = 0 (no adjustment needed)
+        self.enter_exception(VECTOR_UNDEFINED, ProcessorMode::Undefined, 0);
     }
 
     /// Handle a Fast Interrupt Request (FIQ)
@@ -1352,25 +1356,26 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
     /// Handle a Prefetch Abort exception
     #[allow(dead_code)] // Called when instruction fetch fails
     fn handle_prefetch_abort(&mut self) {
-        // Prefetch Abort: return to the instruction that failed to fetch
-        // LR_abt = failed_instruction_addr + 4
-        let lr_offset = 4;
+        // Prefetch Abort: LR_abt = aborted_instruction_addr + 4
+        // gpr[15] already = instruction_addr + 4, so lr_offset = 0
+        // Return with SUBS PC, LR, #4 to retry the aborted instruction
         log(LogCategory::CPU, LogLevel::Debug, || {
             format!("ARM7: Prefetch Abort at PC={:08X}", self.gpr[15])
         });
-        self.enter_exception(VECTOR_PREFETCH_ABORT, ProcessorMode::Abort, lr_offset);
+        self.enter_exception(VECTOR_PREFETCH_ABORT, ProcessorMode::Abort, 0);
     }
 
     /// Handle a Data Abort exception
     #[allow(dead_code)] // Called when memory access faults
     fn handle_data_abort(&mut self) {
-        // Data Abort: return to the instruction that caused the abort
-        // LR_abt = faulting_instruction_addr + 8
-        let lr_offset = 8;
+        // Data Abort: LR_abt = faulting_instruction_addr + 8
+        // gpr[15] = instruction_addr + 4, need LR = instruction_addr + 8
+        // So lr_offset = -4 (wrapping subtract adds 4)
+        // Return with SUBS PC, LR, #8 to retry the faulting instruction
         log(LogCategory::CPU, LogLevel::Debug, || {
             format!("ARM7: Data Abort at PC={:08X}", self.gpr[15])
         });
-        self.enter_exception(VECTOR_DATA_ABORT, ProcessorMode::Abort, lr_offset);
+        self.enter_exception(VECTOR_DATA_ABORT, ProcessorMode::Abort, (-4i32) as u32);
     }
 
     /// Check and handle pending interrupts
@@ -1392,13 +1397,9 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
 
     /// Perform a barrel shift operation, returning (result, carry_out).
     ///
-    /// The ARM barrel shifter supports:
-    /// - LSL (Logical Shift Left)
-    /// - LSR (Logical Shift Right)
-    /// - ASR (Arithmetic Shift Right)
-    /// - ROR (Rotate Right)
-    /// - RRX (Rotate Right Extended, shift amount = 0 with ROR)
-    fn barrel_shift(
+    /// Immediate barrel shift (used for immediate-specified shift amounts in ARM instructions).
+    /// Handles special encodings: LSR #0 → LSR #32, ASR #0 → ASR #32, ROR #0 → RRX.
+    fn barrel_shift_immediate(
         &self,
         value: u32,
         shift_type: u32,
@@ -1420,9 +1421,8 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
                 }
             }
             0b01 => {
-                // LSR
+                // LSR #0 encodes as LSR #32
                 if amount == 0 {
-                    // LSR #0 encodes as LSR #32
                     (0, value >> 31 != 0)
                 } else if amount < 32 {
                     let carry = (value >> (amount - 1)) & 1 != 0;
@@ -1434,9 +1434,8 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
                 }
             }
             0b10 => {
-                // ASR
+                // ASR #0 encodes as ASR #32
                 if amount == 0 {
-                    // ASR #0 encodes as ASR #32
                     let sign = value as i32 >> 31;
                     (sign as u32, value >> 31 != 0)
                 } else if amount < 32 {
@@ -1448,9 +1447,8 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
                 }
             }
             0b11 => {
-                // ROR
+                // ROR #0 encodes as RRX (33-bit rotate through carry)
                 if amount == 0 {
-                    // RRX (Rotate Right Extended): 33-bit rotate through carry
                     let carry = value & 1 != 0;
                     let result = (value >> 1) | if carry_in { 0x80000000 } else { 0 };
                     (result, carry)
@@ -1463,6 +1461,66 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
                         let carry = result >> 31 != 0;
                         (result, carry)
                     }
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    /// Register-specified barrel shift (used for register-specified shift amounts in ARM/Thumb).
+    /// Amount=0 always means "no shift" — value passes through unchanged with carry_in preserved.
+    fn barrel_shift(
+        &self,
+        value: u32,
+        shift_type: u32,
+        amount: u32,
+        carry_in: bool,
+    ) -> (u32, bool) {
+        if amount == 0 {
+            return (value, carry_in);
+        }
+        match shift_type {
+            0b00 => {
+                // LSL
+                if amount < 32 {
+                    let carry = (value >> (32 - amount)) & 1 != 0;
+                    (value << amount, carry)
+                } else if amount == 32 {
+                    (0, value & 1 != 0)
+                } else {
+                    (0, false)
+                }
+            }
+            0b01 => {
+                // LSR
+                if amount < 32 {
+                    let carry = (value >> (amount - 1)) & 1 != 0;
+                    (value >> amount, carry)
+                } else if amount == 32 {
+                    (0, value >> 31 != 0)
+                } else {
+                    (0, false)
+                }
+            }
+            0b10 => {
+                // ASR
+                if amount < 32 {
+                    let carry = (value >> (amount - 1)) & 1 != 0;
+                    ((value as i32 >> amount) as u32, carry)
+                } else {
+                    let sign = value as i32 >> 31;
+                    (sign as u32, value >> 31 != 0)
+                }
+            }
+            0b11 => {
+                // ROR
+                let amount = amount & 31;
+                if amount == 0 {
+                    (value, value >> 31 != 0)
+                } else {
+                    let result = value.rotate_right(amount);
+                    let carry = result >> 31 != 0;
+                    (result, carry)
                 }
             }
             _ => unreachable!(),
@@ -1488,24 +1546,29 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
         } else {
             // Register operand with shift
             let rm = (instr & 0xF) as usize;
-            let rm_val = if rm == 15 {
-                // PC + 8 in ARM mode (current instruction + 8 due to pipeline)
-                self.gpr[15].wrapping_add(8)
-            } else {
-                self.gpr[rm]
-            };
-
             let shift_type = (instr >> 5) & 0x3;
 
             if instr & (1 << 4) != 0 {
                 // Register-specified shift amount (Rs)
+                // When Rm=R15 with register shift, value is PC+12
+                let rm_val = if rm == 15 {
+                    self.gpr[15].wrapping_add(8) // gpr[15] is addr+4, so +8 = addr+12
+                } else {
+                    self.gpr[rm]
+                };
                 let rs = ((instr >> 8) & 0xF) as usize;
                 let shift_amount = self.gpr[rs] & 0xFF;
                 self.barrel_shift(rm_val, shift_type, shift_amount, carry_in)
             } else {
                 // Immediate shift amount
+                // When Rm=R15 with immediate shift, value is PC+8
+                let rm_val = if rm == 15 {
+                    self.gpr[15].wrapping_add(4) // gpr[15] is addr+4, so +4 = addr+8
+                } else {
+                    self.gpr[rm]
+                };
                 let shift_amount = (instr >> 7) & 0x1F;
-                self.barrel_shift(rm_val, shift_type, shift_amount, carry_in)
+                self.barrel_shift_immediate(rm_val, shift_type, shift_amount, carry_in)
             }
         }
     }
@@ -1577,13 +1640,13 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
                 self.arm_branch_exchange(instr);
             }
 
-            // Multiply instructions
-            (0b000, bits) if bits & 0b1001 == 0b1001 && bits_27_20 & 0xFC == 0x00 => {
+            // Multiply instructions (bits[7:4] must be exactly 1001)
+            (0b000, 0b1001) if bits_27_20 & 0xFC == 0x00 => {
                 self.arm_multiply(instr);
             }
 
-            // Multiply long
-            (0b000, bits) if bits & 0b1001 == 0b1001 && bits_27_20 & 0xF8 == 0x08 => {
+            // Multiply long (bits[7:4] must be exactly 1001)
+            (0b000, 0b1001) if bits_27_20 & 0xF8 == 0x08 => {
                 self.arm_multiply_long(instr);
             }
 
@@ -1641,7 +1704,8 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
 
             // Software Interrupt (SWI)
             (0b111, _) if bits_27_20 & 0x10 != 0 => {
-                let imm = instr & 0x00FF_FFFF;
+                // GBA convention: SWI number is in bits 23-16 of 24-bit comment field
+                let imm = (instr >> 16) & 0xFF;
                 if !self.handle_bios_swi(imm) {
                     self.handle_swi();
                 }
@@ -1948,7 +2012,7 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
             let shift_type = (instr >> 5) & 0x3;
             let shift_amount = (instr >> 7) & 0x1F;
             let (shifted, _) =
-                self.barrel_shift(self.gpr[rm], shift_type, shift_amount, self.flag_c());
+                self.barrel_shift_immediate(self.gpr[rm], shift_type, shift_amount, self.flag_c());
             shifted
         };
 
@@ -2174,8 +2238,8 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
             }
         }
 
-        // Write-back
-        if write_back {
+        // Write-back (skip if LDM and Rn is in register list - loaded value wins)
+        if write_back && !(is_load && (reg_list & (1 << rn)) != 0) {
             self.gpr[rn] = if add_offset {
                 base.wrapping_add(total_size)
             } else {
@@ -2410,7 +2474,7 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
         let rs = ((instr >> 3) & 0x7) as usize;
         let rd = (instr & 0x7) as usize;
 
-        let (result, carry) = self.barrel_shift(self.gpr[rs], op, offset, self.flag_c());
+        let (result, carry) = self.barrel_shift_immediate(self.gpr[rs], op, offset, self.flag_c());
 
         self.gpr[rd] = result;
         self.set_nz(result);
@@ -3660,8 +3724,8 @@ mod tests {
         assert_eq!(cpu.gpr[15], VECTOR_PREFETCH_ABORT);
         // SPSR should save old CPSR
         assert_eq!(cpu.get_spsr(), old_cpsr);
-        // LR should be PC - 4 (failed instruction address + 4)
-        assert_eq!(cpu.gpr[14], 0x2000 - 4);
+        // LR should be PC (aborted instruction addr + 4, with lr_offset=0)
+        assert_eq!(cpu.gpr[14], 0x2000);
         // IRQ should be disabled
         assert!(cpu.cpsr & FLAG_I != 0);
         // Should be in ARM state
@@ -3683,8 +3747,8 @@ mod tests {
         assert_eq!(cpu.gpr[15], VECTOR_DATA_ABORT);
         // SPSR should save old CPSR
         assert_eq!(cpu.get_spsr(), old_cpsr);
-        // LR should be PC - 8 (faulting instruction address + 8)
-        assert_eq!(cpu.gpr[14], 0x3000 - 8);
+        // LR should be PC + 4 (faulting instruction addr + 8, with lr_offset=-4)
+        assert_eq!(cpu.gpr[14], 0x3000 + 4);
         // IRQ should be disabled
         assert!(cpu.cpsr & FLAG_I != 0);
         // Should be in ARM state

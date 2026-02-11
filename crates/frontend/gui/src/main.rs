@@ -406,8 +406,8 @@ impl EmulatorSystem {
                         | (((state >> 7) & 1) as u16) << 4          // Right (bit 7 -> bit 4)
                         | (((state >> 6) & 1) as u16) << 5          // Left (bit 6 -> bit 5)
                         | (((state >> 4) & 1) as u16) << 6          // Up (bit 4 -> bit 6)
-                        | (((state >> 5) & 1) as u16) << 7;         // Down (bit 5 -> bit 7)
-                    // L/R buttons would need extra key bindings; not mapped from 8-bit state
+                        | (((state >> 5) & 1) as u16) << 7; // Down (bit 5 -> bit 7)
+                                                            // L/R buttons would need extra key bindings; not mapped from 8-bit state
                     sys.set_controller(gba_state);
                 }
             }

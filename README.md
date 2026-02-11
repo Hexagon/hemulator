@@ -1,10 +1,10 @@
 # Hemulator — Multi-System Console Emulator
 
-A cross-platform, multi-system console emulator written in Rust. **NES emulation is fully working** with ~90% game coverage. Other systems (Game Boy, CHIP-8, SMS, ColecoVision, SG-1000, Atari 2600, SNES, N64, PC/DOS) are in various stages of development.
+A cross-platform, multi-system console emulator written in Rust. **NES emulation is fully working** with ~90% game coverage. Other systems (Game Boy, GBA, CHIP-8, SMS, ColecoVision, SG-1000, Atari 2600, SNES, N64, PC/DOS) are in various stages of development.
 
 ## Features
 
-- 🎮 **Multiple Systems**: NES, Game Boy, CHIP-8, SMS, ColecoVision, SG-1000, Atari 2600, SNES, N64, PC/DOS
+- 🎮 **Multiple Systems**: NES, Game Boy, GBA, CHIP-8, SMS, ColecoVision, SG-1000, Atari 2600, SNES, N64, PC/DOS
 - 💾 **Save States**: 5 slots per game with menu-based save/load (Ctrl+1-5 / Ctrl+Shift+1-5)
 - ⚙️ **Persistent Settings**: Customizable controls, window scaling, and project files
 - 🖥️ **Cross-Platform GUI**: Built with SDL2 for Windows, Linux, and macOS
@@ -19,6 +19,7 @@ A cross-platform, multi-system console emulator written in Rust. **NES emulation
 |--------|--------|----------------|
 | **NES** | ✅ Fully Working | ~90% of games via 14 mappers |
 | **Game Boy** | ✅ Fully Functional | ~99% of games; MBC0/1/2/3/5, HuC1 |
+| **GBA** | 🚧 In Development | Simple games working; ARM7TDMI CPU, PPU, Flash/EEPROM/SRAM saves |
 | **CHIP-8** | ✅ Fully Working | CHIP-8/Hires/Super-CHIP/XO-CHIP/Mega-CHIP |
 | **SMS** | 🚧 In Development | VDP initialization issue; test ROMs work, real games don't display |
 | **ColecoVision** | 🚧 In Development | Not producing image; full hardware emulation |
@@ -88,6 +89,7 @@ hemulator/
 │   ├── systems/           # System implementations (NES, GB, SNES, N64, PC, etc.)
 │   │   ├── nes/           # Nintendo Entertainment System
 │   │   ├── gb/            # Game Boy / Game Boy Color
+│   │   ├── gba/           # Game Boy Advance
 │   │   ├── chip8/         # CHIP-8 variants
 │   │   ├── sms/           # Sega Master System
 │   │   ├── colecovision/  # ColecoVision
