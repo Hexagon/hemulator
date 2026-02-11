@@ -298,7 +298,10 @@ NES ROM DB: Overriding mirroring Vertical -> Horizontal for CRC32 0x12345678 (TL
 See [User Manual](https://hemulator.56k.guru/user/systems.html#nes-nintendo-entertainment-system) for user-facing limitations.
 
 **Technical Limitations**:
-- MMC2/MMC4 latch switching happens per-frame, not mid-scanline
+- MMC2/MMC4 latch switching happens per-scanline (improved from per-frame)
+  - CHR banks update after each scanline instead of after full frame
+  - This reduces glitches in games like Punch Out!! from 240-scanline delay to 1-scanline delay
+  - True mid-scanline switching would require architectural changes for immediate CHR buffer updates
 - Some games requiring dot-level PPU rendering may not work perfectly
 
 **Cycle-Accurate Features** (implemented):

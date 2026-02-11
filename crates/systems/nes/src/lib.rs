@@ -683,6 +683,12 @@ impl System for NesSystem {
                                 .render_scanline(&mut b.ppu, scanline_before as u32);
                             rendered_scanlines = scanline_before as u32 + 1;
 
+                            // Apply any pending CHR updates from MMC2/MMC4 latch switching.
+                            // This allows CHR bank switches to take effect on the next scanline
+                            // instead of waiting until the end of the frame, reducing glitches
+                            // in games like Punch Out!! that use CHR latching for animations.
+                            b.apply_mapper_chr_update();
+
                             // Approximate MMC3 scanline IRQ clocking once per visible scanline.
                             // Gate it by rendering enabled (BG or sprites), matching common emulator behavior.
                             let rendering_enabled = (b.ppu.mask() & 0x18) != 0;
@@ -755,10 +761,9 @@ impl System for NesSystem {
             }
         }
 
-        // Apply any pending CHR updates from MMC2/MMC4 latch switching during rendering.
-        if let Some(b) = self.cpu.bus_mut() {
-            b.apply_mapper_chr_update();
-        }
+        // Note: CHR updates for MMC2/MMC4 are now applied after each scanline
+        // in the rendering loop above, not once at the end of the frame.
+        // This reduces latency from 240 scanlines to 1 scanline.
 
         if debug_scanline_drift {
             if let Some(b) = self.cpu.bus() {
