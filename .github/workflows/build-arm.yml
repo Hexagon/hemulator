@@ -1,0 +1,91 @@
+name: Build ARM Packages
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-arm64:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - aarch64-unknown-linux-gnu
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      
+      - name: Install cross-compilation tools
+        run: |
+          cargo install cross --git https://github.com/cross-rs/cross
+      
+      - name: Build for ${{ matrix.target }}
+        run: |
+          cross build --profile release-quick --target ${{ matrix.target }}
+      
+      - name: Package ARM64 binary
+        run: |
+          mkdir -p release-arm64
+          cp target/${{ matrix.target }}/release-quick/hemu release-arm64/
+          cp LICENSE README.md release-arm64/
+          cd release-arm64
+          tar -czf ../hemu-arm64-linux.tar.gz *
+      
+      - name: Upload ARM64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hemu-arm64-linux
+          path: hemu-arm64-linux.tar.gz
+      
+      - name: Create Debian package for ARM64
+        run: |
+          mkdir -p debian-arm64/DEBIAN
+          mkdir -p debian-arm64/usr/bin
+          mkdir -p debian-arm64/usr/share/doc/hemu
+          
+          # Copy binary
+          cp target/${{ matrix.target }}/release-quick/hemu debian-arm64/usr/bin/
+          chmod +x debian-arm64/usr/bin/hemu
+          
+          # Copy documentation
+          cp LICENSE README.md debian-arm64/usr/share/doc/hemu/
+          
+          # Get version from Cargo.toml
+          VERSION=$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2)
+          
+          # Create control file
+          cat > debian-arm64/DEBIAN/control << EOF
+          Package: hemu
+          Version: ${VERSION}
+          Section: games
+          Priority: optional
+          Architecture: arm64
+          Maintainer: Hemulator Developers
+          Description: Multi-system emulator supporting NES, Game Boy, SNES, N64, and more
+           Hemulator is a multi-system emulator written in Rust, supporting:
+           - Nintendo Entertainment System (NES)
+           - Game Boy / Game Boy Color
+           - Super Nintendo Entertainment System (SNES)
+           - Nintendo 64 (N64)
+           - Atari 2600
+           - Sega Master System
+           - CHIP-8/Super-CHIP/XO-CHIP
+           - And more
+          EOF
+          
+          # Build .deb package
+          dpkg-deb --build debian-arm64
+          mv debian-arm64.deb hemu_${VERSION}_arm64.deb
+      
+      - name: Upload Debian package
+        uses: actions/upload-artifact@v4
+        with:
+          name: hemu-arm64-deb
+          path: hemu_*_arm64.deb

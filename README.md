@@ -80,6 +80,31 @@ cargo build --profile release-quick
 cargo test --workspace
 ```
 
+### ARM / Raspberry Pi 5
+
+The emulator supports ARM64 (aarch64) platforms including Raspberry Pi 5. 
+
+**Pre-built ARM packages** are available from GitHub Actions or can be built locally:
+
+```bash
+# Option 1: Build natively on ARM device (Raspberry Pi 5, etc.)
+cargo build --profile release-quick
+
+# Option 2: Cross-compile from x86_64 Linux using 'cross'
+cargo install cross --git https://github.com/cross-rs/cross
+cross build --profile release-quick --target aarch64-unknown-linux-gnu
+
+# Option 3: Use GitHub Actions workflow
+# ARM64 packages (.tar.gz and .deb) are automatically built on tagged releases
+```
+
+**Dependencies on Raspberry Pi OS:**
+```bash
+sudo apt-get install libasound2-dev cmake pkg-config libsdl2-dev
+```
+
+The ARM build produces both a standalone binary (`hemu`) and a Debian package (`hemu_*_arm64.deb`) for easy installation.
+
 ## Project Structure
 
 ```
