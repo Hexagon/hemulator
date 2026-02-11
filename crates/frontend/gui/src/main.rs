@@ -387,7 +387,30 @@ impl EmulatorSystem {
                     sys.set_controller(!gb_state);
                 }
             }
-            EmulatorSystem::GBA(_) => {} // GBA input handling not implemented yet
+            EmulatorSystem::GBA(sys) => {
+                if port == 0 {
+                    // GBA button layout matches the standard frontend mapping:
+                    // Bit 0: A, Bit 1: B, Bit 2: Select, Bit 3: Start
+                    // Bit 4: Right (was Up in 8-bit), Bit 5: Left (was Down)
+                    // Bit 6: Up (was Left), Bit 7: Down (was Right)
+                    //
+                    // Frontend state (8-bit):
+                    // Bit 0: A, Bit 1: B, Bit 2: Select, Bit 3: Start
+                    // Bit 4: Up, Bit 5: Down, Bit 6: Left, Bit 7: Right
+                    //
+                    // GBA KEYINPUT (10-bit):
+                    // Bit 0: A, Bit 1: B, Bit 2: Select, Bit 3: Start
+                    // Bit 4: Right, Bit 5: Left, Bit 6: Up, Bit 7: Down
+                    // Bit 8: R, Bit 9: L
+                    let gba_state: u16 = (state as u16 & 0x0F)      // A, B, Select, Start stay
+                        | (((state >> 7) & 1) as u16) << 4          // Right (bit 7 -> bit 4)
+                        | (((state >> 6) & 1) as u16) << 5          // Left (bit 6 -> bit 5)
+                        | (((state >> 4) & 1) as u16) << 6          // Up (bit 4 -> bit 6)
+                        | (((state >> 5) & 1) as u16) << 7;         // Down (bit 5 -> bit 7)
+                    // L/R buttons would need extra key bindings; not mapped from 8-bit state
+                    sys.set_controller(gba_state);
+                }
+            }
             EmulatorSystem::Atari2600(sys) => sys.set_controller(port, state),
             EmulatorSystem::PC(_) => {} // PC doesn't use controller input
             EmulatorSystem::SNES(_) => {} // SNES controller support stub

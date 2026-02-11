@@ -37,6 +37,7 @@ pub mod cartridge;
 pub mod debugger;
 pub mod dma;
 pub mod eeprom;
+pub mod flash;
 pub mod ppu;
 pub mod timers;
 
@@ -82,6 +83,10 @@ pub struct GbaBus {
     /// Wrapped in RefCell because EEPROM reads advance internal state
     /// but MemoryArm7::read_byte takes &self.
     eeprom: RefCell<eeprom::Eeprom>,
+    /// Flash save storage (for games that use Flash)
+    /// Wrapped in RefCell because Flash reads may update state
+    /// but MemoryArm7::read_byte takes &self.
+    flash: RefCell<flash::Flash>,
     /// Detected save type from cartridge header
     save_type: cartridge::SaveType,
     /// Whether an IRQ is currently pending (IE & IF & IME)
@@ -92,6 +97,10 @@ pub struct GbaBus {
     ie: u16,
     /// Interrupt Request Flags (0x04000202)
     if_flags: u16,
+    /// Controller state: GBA KEYINPUT register (active-low)
+    /// Bits: 0=A, 1=B, 2=Select, 3=Start, 4=Right, 5=Left, 6=Up, 7=Down, 8=R, 9=L
+    /// 0 = pressed, 1 = released. Default: 0x03FF (all released)
+    keyinput: u16,
 }
 
 impl std::fmt::Debug for GbaBus {
@@ -158,11 +167,13 @@ impl GbaBus {
             dma: dma::Dma::new(),
             timers: timers::Timers::new(),
             eeprom: RefCell::new(eeprom::Eeprom::new()),
+            flash: RefCell::new(flash::Flash::new(false)),
             save_type: cartridge::SaveType::None,
             irq_pending: false,
             ime: false,
             ie: 0,
             if_flags: 0,
+            keyinput: 0x03FF, // All buttons released
         }
     }
 
@@ -216,9 +227,9 @@ impl GbaBus {
             // Timer registers (0x04000100-0x0400010F)
             0x04000100..=0x0400010F => self.timers.read(addr - 0x04000100),
 
-            // KEYINPUT (Key Status) - all keys released = 0x03FF
-            0x04000130 => 0xFF,
-            0x04000131 => 0x03,
+            // KEYINPUT (Key Status) - active-low button state
+            0x04000130 => self.keyinput as u8,
+            0x04000131 => (self.keyinput >> 8) as u8,
 
             // IE (Interrupt Enable)
             0x04000200 => self.ie as u8,
@@ -350,11 +361,16 @@ impl MemoryArm7 for GbaBus {
                 self.rom.get(offset).copied().unwrap_or(0)
             }
 
-            // Cartridge SRAM (0x0E000000 - 0x0E00FFFF)
-            0x0E000000..=0x0EFFFFFF => {
-                let offset = (addr & 0xFFFF) as usize;
-                self.sram.get(offset).copied().unwrap_or(0)
-            }
+            // Cartridge SRAM / Flash (0x0E000000 - 0x0E00FFFF)
+            0x0E000000..=0x0EFFFFFF => match self.save_type {
+                cartridge::SaveType::Flash64K | cartridge::SaveType::Flash128K => {
+                    self.flash.borrow().read((addr & 0xFFFF) as u16)
+                }
+                _ => {
+                    let offset = (addr & 0xFFFF) as usize;
+                    self.sram.get(offset).copied().unwrap_or(0)
+                }
+            },
 
             // Unused / open bus
             _ => 0,
@@ -442,13 +458,18 @@ impl MemoryArm7 for GbaBus {
                 }
             }
 
-            // Cartridge SRAM
-            0x0E000000..=0x0EFFFFFF => {
-                let offset = (addr & 0xFFFF) as usize;
-                if offset < self.sram.len() {
-                    self.sram[offset] = val;
+            // Cartridge SRAM / Flash
+            0x0E000000..=0x0EFFFFFF => match self.save_type {
+                cartridge::SaveType::Flash64K | cartridge::SaveType::Flash128K => {
+                    self.flash.borrow_mut().write((addr & 0xFFFF) as u16, val);
                 }
-            }
+                _ => {
+                    let offset = (addr & 0xFFFF) as usize;
+                    if offset < self.sram.len() {
+                        self.sram[offset] = val;
+                    }
+                }
+            },
 
             _ => {}
         }
@@ -671,6 +692,25 @@ impl GbaSystem {
     }
 
     emu_core::impl_instruction_tracer_methods!();
+
+    /// Set the controller button state.
+    ///
+    /// The input `state` uses the standard frontend format:
+    /// - Bit 0: A, Bit 1: B, Bit 2: Select, Bit 3: Start
+    /// - Bit 4: Right, Bit 5: Left, Bit 6: Up, Bit 7: Down
+    /// - Bit 8: R, Bit 9: L
+    ///
+    /// Active-high (1 = pressed). This is converted to GBA's active-low KEYINPUT format.
+    pub fn set_controller(&mut self, state: u16) {
+        // GBA KEYINPUT format (active-low: 0 = pressed, 1 = released):
+        // Bit 0: A, Bit 1: B, Bit 2: Select, Bit 3: Start
+        // Bit 4: Right, Bit 5: Left, Bit 6: Up, Bit 7: Down
+        // Bit 8: R, Bit 9: L
+        //
+        // Frontend format uses the same bit layout but active-high.
+        // So we just invert and mask to 10 bits.
+        self.cpu.memory.keyinput = (!state) & 0x03FF;
+    }
 
     /// Check if a ROM is loaded
     fn has_rom(&self) -> bool {
@@ -970,6 +1010,7 @@ impl System for GbaSystem {
                 "oam": STANDARD.encode(&self.cpu.memory.oam),
                 "sram": STANDARD.encode(&self.cpu.memory.sram),
                 "eeprom": STANDARD.encode(self.cpu.memory.eeprom.borrow().data()),
+                "flash": STANDARD.encode(self.cpu.memory.flash.borrow().data()),
             },
             "interrupts": {
                 "ime": self.cpu.memory.ime,
@@ -1114,6 +1155,12 @@ impl System for GbaSystem {
             }
         }
 
+        if let Some(flash_str) = mem_json["flash"].as_str() {
+            if let Ok(data) = STANDARD.decode(flash_str) {
+                self.cpu.memory.flash.borrow_mut().load_data(&data);
+            }
+        }
+
         // Restore interrupts
         let int_json = &v["interrupts"];
         self.cpu.memory.ime = int_json["ime"].as_bool().unwrap_or(false);
@@ -1145,9 +1192,19 @@ impl System for GbaSystem {
                 // Parse cartridge header before loading
                 self.header = cartridge::GbaCartridgeHeader::from_bytes(data);
 
-                // Set save type on bus so memory map knows about EEPROM
+                // Set save type on bus so memory map knows about EEPROM/Flash
                 if let Some(ref header) = self.header {
                     self.cpu.memory.save_type = header.save_type;
+                    // Initialize Flash with the correct size if needed
+                    match header.save_type {
+                        cartridge::SaveType::Flash128K => {
+                            self.cpu.memory.flash = RefCell::new(flash::Flash::new(true));
+                        }
+                        cartridge::SaveType::Flash64K => {
+                            self.cpu.memory.flash = RefCell::new(flash::Flash::new(false));
+                        }
+                        _ => {}
+                    }
                 }
 
                 self.cpu.memory.load_rom(data);
@@ -1158,9 +1215,12 @@ impl System for GbaSystem {
                 // at the cartridge header. The BIOS normally jumps here after boot.
                 // For now, skip BIOS and jump directly to ROM.
                 self.cpu.gpr[15] = 0x08000000;
-                // Set initial SP values (as BIOS would)
+                // Set initial register values (as BIOS would after boot)
+                self.cpu.gpr[0] = 0x08000000; // R0 = entry point (BIOS convention)
+                self.cpu.gpr[1] = 0x000000EA; // R1 = boot mode indicator
                 self.cpu.gpr[13] = 0x03007F00; // SP_usr/sys
-                                               // Switch to System mode (post-BIOS state)
+
+                // Switch to System mode (post-BIOS state)
                 self.cpu.cpsr = 0x1F; // System mode, ARM, IRQ+FIQ enabled
 
                 // Initialize banked stack pointers (as the real BIOS does)
@@ -1172,6 +1232,11 @@ impl System for GbaSystem {
                     emu_core::cpu_arm7tdmi::ProcessorMode::Supervisor,
                     0x03007FE0,
                 );
+
+                // Set post-boot I/O register state (as the real BIOS leaves them)
+                self.cpu.memory.io[0x300] = 0x01; // POSTFLG = 1 (boot complete)
+                self.cpu.memory.io[0x088] = 0x00; // SOUNDBIAS low byte
+                self.cpu.memory.io[0x089] = 0x02; // SOUNDBIAS = 0x0200 (default)
 
                 Ok(())
             }
