@@ -1001,14 +1001,18 @@ mod tests {
 
             // Read SWCHA (joystick directions)
             let swcha = bus.riot.read(0x0280);
-            // Right pressed should clear bit 3 (active-low)
+            // Right pressed should clear bit 7 (active-low, P0 Right = bit 7)
             assert_eq!(
-                swcha & 0x08,
+                swcha & 0x80,
                 0x00,
-                "Right direction should be pressed (bit 3 = 0)"
+                "Right direction should be pressed (bit 7 = 0)"
             );
-            // Other directions should be unpressed (bits high)
-            assert_eq!(swcha & 0x07, 0x07, "Other directions should be unpressed");
+            // Other P0 directions should be unpressed (bits 4-6 high)
+            assert_eq!(
+                swcha & 0x70,
+                0x70,
+                "Other P0 directions should be unpressed"
+            );
         } else {
             panic!("Bus not available");
         }
@@ -1024,9 +1028,9 @@ mod tests {
 
             // Read SWCHA
             let swcha = bus.riot.read(0x0280);
-            // Player 1 Up is bit 4 (active-low)
+            // Player 1 Up is bit 0 (active-low)
             assert_eq!(
-                swcha & 0x10,
+                swcha & 0x01,
                 0x00,
                 "Player 1 Up direction should be pressed"
             );
@@ -1057,7 +1061,7 @@ mod tests {
             assert_eq!(inpt4 & 0x80, 0x80, "Fire should be released");
 
             let swcha = bus.riot.read(0x0280);
-            assert_eq!(swcha & 0x0F, 0x0F, "All directions should be released");
+            assert_eq!(swcha & 0xF0, 0xF0, "All P0 directions should be released");
         }
     }
 
@@ -1080,7 +1084,11 @@ mod tests {
         // Controller state should still be readable
         if let Some(bus) = sys.cpu.bus() {
             assert_eq!(bus.tia.read(0x0C) & 0x80, 0x00, "Fire still pressed");
-            assert_eq!(bus.riot.read(0x0280) & 0x08, 0x00, "Right still pressed");
+            assert_eq!(
+                bus.riot.read(0x0280) & 0x80,
+                0x00,
+                "Right still pressed"
+            );
         }
 
         // Change controller state
@@ -1094,7 +1102,7 @@ mod tests {
         // New state should be reflected
         if let Some(bus) = sys.cpu.bus() {
             assert_eq!(bus.tia.read(0x0C) & 0x80, 0x80, "Fire released");
-            assert_eq!(bus.riot.read(0x0280) & 0x0F, 0x0F, "All released");
+            assert_eq!(bus.riot.read(0x0280) & 0xF0, 0xF0, "All P0 released");
         }
     }
 
@@ -1176,14 +1184,14 @@ mod tests {
         let rom = include_bytes!("../../../../test_roms/atari2600/test.bin");
         sys.mount("Cartridge", rom).unwrap();
 
-        // Set contradictory directions: Up + Down (bits 4 and 5)
+        // Set contradictory directions: Up + Down (bits 4 and 5 of input state)
         let state = 0b00110000; // Up and Down both pressed
         sys.set_controller(0, state);
 
         if let Some(bus) = sys.cpu.bus() {
             let swcha = bus.riot.read(0x0280);
-            // Both Up (bit 0) and Down (bit 1) should be pressed (active-low)
-            assert_eq!(swcha & 0x03, 0x00, "Both Up and Down should be active");
+            // P0 Up (bit 4) and P0 Down (bit 5) should both be pressed (active-low)
+            assert_eq!(swcha & 0x30, 0x00, "Both Up and Down should be active");
         }
     }
 

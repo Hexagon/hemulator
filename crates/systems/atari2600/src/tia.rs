@@ -1861,11 +1861,11 @@ impl Tia {
         // Check each copy
         for copy in 0..num_copies {
             let copy_pos = (pos as usize + copy * spacing) % 160;
+            let player_width = 8 * player_size;
 
-            // Check if x is within this copy's range
-            if x >= copy_pos && x < copy_pos + 8 * player_size {
-                let offset = x - copy_pos;
-
+            // Check if x is within this copy's range, handling screen wrapping
+            let offset = (x + 160 - copy_pos) % 160;
+            if offset < player_width {
                 // Get the graphics value at the START of this copy's position
                 // This is critical for racing-the-beam effects with multiple copies
                 let grp = if player == 0 {
@@ -1933,8 +1933,8 @@ impl Tia {
         for copy in 0..num_copies {
             let copy_pos = (pos as usize + copy * spacing) % 160;
 
-            // Check if x is within this copy's range
-            if x >= copy_pos && x < copy_pos + missile_size {
+            // Check if x is within this copy's range, handling screen wrapping
+            if (x + 160 - copy_pos) % 160 < missile_size {
                 return true;
             }
         }
@@ -1952,8 +1952,8 @@ impl Tia {
         let ball_pos = state.ball_x as usize;
         let ball_size = state.ball_size as usize;
 
-        // Check if x is within ball's range
-        x >= ball_pos && x < ball_pos + ball_size
+        // Check if x is within ball's range, handling screen wrapping at 160 pixels
+        (x + 160 - ball_pos) % 160 < ball_size
     }
 
     /// Check if a pixel is part of the playfield
