@@ -691,6 +691,10 @@ impl GbApu {
         self.pulse2_frequency = 0;
         self.wave_frequency = 0;
         self.wave_dac_enabled = false;
+        self.sample_cycle_accum = 0.0;
+        self.last_pulse1_sample = 0;
+        self.last_pulse2_sample = 0;
+        self.last_wave_sample = 0;
         self.dc_prev_input_l = 0.0;
         self.dc_prev_output_l = 0.0;
         self.dc_prev_input_r = 0.0;
@@ -1146,6 +1150,74 @@ mod tests {
         // Sweep should be enabled after trigger
         assert!(
             apu.pulse1_sweep.enabled || apu.pulse1_sweep.period > 0 || apu.pulse1_sweep.shift > 0
+        );
+    }
+
+    #[test]
+    fn test_reset_clears_sample_cycle_accum() {
+        let mut apu = GbApu::new();
+
+        // Advance accumulator by generating some samples
+        apu.write_register(0xFF12, 0xF0); // DAC on
+        apu.write_register(0xFF14, 0x80); // Trigger
+        let _ = apu.generate_samples_stereo(50);
+        assert!(apu.sample_cycle_accum > 0.0);
+
+        // Power off should reset accumulator and last samples
+        apu.write_register(0xFF26, 0x00);
+        assert_eq!(apu.sample_cycle_accum, 0.0);
+        assert_eq!(apu.last_pulse1_sample, 0);
+        assert_eq!(apu.last_pulse2_sample, 0);
+        assert_eq!(apu.last_wave_sample, 0);
+    }
+
+    #[test]
+    fn test_sample_cycle_accum_continuity_across_calls() {
+        let mut apu = GbApu::new();
+
+        // Set up a pulse channel so we get non-silent output
+        apu.write_register(0xFF12, 0xF0); // DAC on, volume 15
+        apu.write_register(0xFF14, 0x80); // Trigger
+
+        // Generate samples in two separate small calls that together span
+        // at least one sample boundary (~95.1 cycles per sample at 44.1 kHz)
+        let samples_a = apu.generate_samples_stereo(50);
+        let accum_after_a = apu.sample_cycle_accum;
+
+        let samples_b = apu.generate_samples_stereo(50);
+        let accum_after_b = apu.sample_cycle_accum;
+
+        // Neither 50-cycle call alone should produce a sample (need ~95.1 cycles)
+        assert!(
+            samples_a.is_empty(),
+            "first 50 cycles should not produce a sample"
+        );
+
+        // But the second call should have continued from the first accumulator
+        // and crossed the sample boundary
+        assert!(
+            !samples_b.is_empty(),
+            "second 50 cycles should produce a sample via persistence"
+        );
+
+        // Verify accumulator didn't reset to 0 between calls
+        assert!(accum_after_a > 0.0);
+        assert!(
+            accum_after_b < accum_after_a,
+            "accumulator should have wrapped after emitting a sample"
+        );
+
+        // Compare against a single 100-cycle call on a fresh APU
+        let mut apu2 = GbApu::new();
+        apu2.write_register(0xFF12, 0xF0);
+        apu2.write_register(0xFF14, 0x80);
+        let samples_combined = apu2.generate_samples_stereo(100);
+
+        // Both approaches should produce the same number of samples
+        assert_eq!(
+            samples_a.len() + samples_b.len(),
+            samples_combined.len(),
+            "split calls should produce the same sample count as a single call"
         );
     }
 }

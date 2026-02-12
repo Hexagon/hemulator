@@ -2272,4 +2272,52 @@ mod tests {
             "Boot ROM should be disabled after reset"
         );
     }
+
+    #[test]
+    fn test_double_speed_frame_progression() {
+        // Test that frame progression stays at 70,224 PPU cycles per frame
+        // regardless of double-speed mode, and audio cycle accounting is consistent.
+        let mut rom = vec![0; 0x8000];
+        rom[0x143] = 0x80; // CGB-compatible
+
+        // Normal-speed system
+        let mut sys_normal = GbSystem::new();
+        sys_normal.mount("Cartridge", &rom.clone()).unwrap();
+
+        // Step one frame in normal speed
+        let frame_normal = sys_normal.step_frame().unwrap();
+        let audio_normal = sys_normal.audio_cycles_accumulated;
+
+        // Double-speed system: force KEY1 bit 7 to enter double speed
+        let mut sys_double = GbSystem::new();
+        sys_double.mount("Cartridge", &rom).unwrap();
+        // Directly set KEY1 bit 7 to simulate double-speed mode
+        sys_double.cpu.memory.write(0xFF4D, 0x01); // Arm speed switch
+        sys_double.cpu.memory.perform_speed_switch(); // Toggle speed
+
+        assert!(
+            sys_double.cpu.memory.is_double_speed(),
+            "System should be in double-speed mode"
+        );
+
+        // Step one frame in double speed
+        let frame_double = sys_double.step_frame().unwrap();
+        let audio_double = sys_double.audio_cycles_accumulated;
+
+        // Both frames should have the same dimensions
+        assert_eq!(frame_normal.width, frame_double.width);
+        assert_eq!(frame_normal.height, frame_double.height);
+
+        // Audio cycles accumulated should be similar (both in PPU-rate cycles)
+        // Allow some tolerance since the exact CPU instructions executed differ
+        let diff = (audio_normal as i64 - audio_double as i64).unsigned_abs();
+        assert!(
+            diff < 1000,
+            "Audio cycle accumulation should be similar in both speed modes, \
+             normal={} double={} diff={}",
+            audio_normal,
+            audio_double,
+            diff
+        );
+    }
 }
