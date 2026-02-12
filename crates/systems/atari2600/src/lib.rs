@@ -955,13 +955,15 @@ mod tests {
 
         // The ROM sets COLUBK to $02 (dark blue) and COLUPF to $0E (white)
         // Playfield borders + ball should produce non-black, non-background pixels
+        // Expected: ~192 scanlines of dark blue background + playfield border bars + ball
         let non_black_pixels = frame
             .pixels
             .iter()
             .filter(|&&pixel| pixel != 0xFF000000)
             .count();
 
-        // Should have visible content (background color + playfield + ball)
+        // Should have many visible pixels: background color fills most of the screen,
+        // playfield borders add columns, ball adds a few pixels per scanline
         assert!(
             non_black_pixels > 1000,
             "Expected visible content from ball test ROM, got {} non-black pixels",

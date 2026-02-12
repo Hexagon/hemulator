@@ -100,7 +100,7 @@ MainLoop:
     sta VBLANK
 
     ; Set timer for VBLANK period (37 scanlines * 76 cycles = 2812 cycles)
-    ; Use TIM64T: 2812 / 64 = ~44
+    ; Use TIM64T: 2812 / 64 ≈ 43 (conservative to avoid overrunning)
     lda #43
     sta TIM64T
 
