@@ -932,6 +932,64 @@ mod tests {
     }
 
     #[test]
+    fn test_ball_animation_rom() {
+        // Tests the ball animation ROM which uses commercial-style techniques:
+        // - Standard divide-by-15 positioning with HMOVE fine adjustment
+        // - Animated ball bouncing across screen
+        // - Reflected playfield mode
+        let test_rom = include_bytes!("../../../../test_roms/atari2600/ball_test.bin");
+
+        let mut sys = Atari2600System::new();
+        sys.mount("Cartridge", test_rom).unwrap();
+
+        // Run several frames to let the ROM initialize and animate
+        for _ in 0..20 {
+            sys.step_frame().unwrap();
+        }
+
+        let frame = sys.step_frame().unwrap();
+
+        // Verify frame dimensions
+        assert_eq!(frame.width, 160);
+        assert_eq!(frame.height, 192);
+
+        // The ROM sets COLUBK to $02 (dark blue) and COLUPF to $0E (white)
+        // Playfield borders + ball should produce non-black, non-background pixels
+        let non_black_pixels = frame
+            .pixels
+            .iter()
+            .filter(|&&pixel| pixel != 0xFF000000)
+            .count();
+
+        // Should have visible content (background color + playfield + ball)
+        assert!(
+            non_black_pixels > 1000,
+            "Expected visible content from ball test ROM, got {} non-black pixels",
+            non_black_pixels
+        );
+
+        // Run more frames to verify ball movement doesn't crash and produces changing output
+        let frame1 = sys.step_frame().unwrap();
+        for _ in 0..30 {
+            sys.step_frame().unwrap();
+        }
+        let frame2 = sys.step_frame().unwrap();
+
+        // After 30+ frames, the ball should have moved, so frames should differ
+        let pixel_diffs = frame1
+            .pixels
+            .iter()
+            .zip(frame2.pixels.iter())
+            .filter(|(a, b)| a != b)
+            .count();
+
+        assert!(
+            pixel_diffs > 0,
+            "Ball should be moving - frames should differ after 30+ frames"
+        );
+    }
+
+    #[test]
     fn test_playfield_pixel_scaling() {
         // This test validates the fix for playfield bit-to-pixel scaling
         // Each playfield bit should span 4 pixels, not 2
@@ -1084,11 +1142,7 @@ mod tests {
         // Controller state should still be readable
         if let Some(bus) = sys.cpu.bus() {
             assert_eq!(bus.tia.read(0x0C) & 0x80, 0x00, "Fire still pressed");
-            assert_eq!(
-                bus.riot.read(0x0280) & 0x80,
-                0x00,
-                "Right still pressed"
-            );
+            assert_eq!(bus.riot.read(0x0280) & 0x80, 0x00, "Right still pressed");
         }
 
         // Change controller state

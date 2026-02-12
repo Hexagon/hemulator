@@ -23,5 +23,9 @@ fi
 echo "  Building game_test.bin..."
 dasm game_test.asm -f3 -ogame_test.bin
 
+# Build the ball animation test ROM
+echo "  Building ball_test.bin..."
+dasm ball_test.asm -f3 -oball_test.bin
+
 echo "Atari 2600 test ROMs built successfully:"
 ls -lh *.bin
