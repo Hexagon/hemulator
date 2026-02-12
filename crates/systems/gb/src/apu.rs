@@ -148,7 +148,7 @@ pub struct GbApu {
     wave_dac_enabled: bool,
 
     // Sample generation
-    _cycle_accum: f64,
+    sample_cycle_accum: f64,
     last_pulse1_sample: i16,
     last_pulse2_sample: i16,
     last_wave_sample: i16,
@@ -194,7 +194,7 @@ impl GbApu {
             wave_frequency: 0,
             wave_dac_enabled: false,
 
-            _cycle_accum: 0.0,
+            sample_cycle_accum: 0.0,
             last_pulse1_sample: 0,
             last_pulse2_sample: 0,
             last_wave_sample: 0,
@@ -734,15 +734,16 @@ impl GbApu {
         const CPU_CLOCK: f64 = 4194304.0;
         const CYCLES_PER_SAMPLE: f64 = CPU_CLOCK / SAMPLE_RATE;
 
-        let mut samples = Vec::new();
-        let mut cycle_accum = 0.0;
+        // Estimate sample count for pre-allocation
+        let estimated_samples = (cpu_cycles as f64 / CYCLES_PER_SAMPLE) as usize + 2;
+        let mut samples = Vec::with_capacity(estimated_samples * 2);
 
         for _ in 0..cpu_cycles {
             self.clock();
 
-            cycle_accum += 1.0;
-            if cycle_accum >= CYCLES_PER_SAMPLE {
-                cycle_accum -= CYCLES_PER_SAMPLE;
+            self.sample_cycle_accum += 1.0;
+            if self.sample_cycle_accum >= CYCLES_PER_SAMPLE {
+                self.sample_cycle_accum -= CYCLES_PER_SAMPLE;
 
                 let (left, right) = self.mix_channels_stereo();
                 samples.push(left);
