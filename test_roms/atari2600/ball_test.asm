@@ -25,8 +25,6 @@
 
 BallXPos    ds 1    ; Ball horizontal position (0-159)
 BallDir     ds 1    ; Ball direction: 0 = right, 1 = left
-FrameCount  ds 1    ; Frame counter for animation
-TempDiv     ds 1    ; Temp for positioning divide
 
     seg Code
     org $F000
@@ -109,20 +107,18 @@ MainLoop:
     bne .MoveLeft
 
 .MoveRight:
-    ; Move ball right: need HM value for +1 right = $F0
     inc BallXPos
     lda BallXPos
-    cmp #150        ; Right boundary
+    cmp #158        ; Right boundary (ball is 4px wide, wraps at 160)
     bcc .DoneMove
     lda #1          ; Switch to left
     sta BallDir
     jmp .DoneMove
 
 .MoveLeft:
-    ; Move ball left: need HM value for +1 left = $10
     dec BallXPos
     lda BallXPos
-    cmp #10         ; Left boundary
+    cmp #2          ; Left boundary
     bcs .DoneMove
     lda #0          ; Switch to right
     sta BallDir
@@ -180,7 +176,8 @@ MainLoop:
 
 .CoarseLoop:
     dex             ; 2 cycles
-    bpl .CoarseLoop ; 3 cycles (taken) = 5 cycles = 15 color clocks per iteration
+    bne .CoarseLoop ; 3 cycles (taken) = 5 cycles = 15 color clocks per iteration
+    ; X == 0 means no coarse delays needed beyond the base position
 
     ; After loop: we're at the right coarse position
     sta RESBL       ; 4 cycles - strobe ball position reset
@@ -217,9 +214,6 @@ MainLoop:
     ; 2280 / 64 = ~36
     lda #35
     sta TIM64T
-
-    ; Increment frame counter
-    inc FrameCount
 
 .WaitOverscan:
     lda TIMINT

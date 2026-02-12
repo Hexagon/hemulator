@@ -937,6 +937,7 @@ mod tests {
         // - Standard divide-by-15 positioning with HMOVE fine adjustment
         // - Animated ball bouncing across screen
         // - Reflected playfield mode
+        // - Ball bounces between x=2 and x=158 (4px wide, exercises right-edge wrapping)
         let test_rom = include_bytes!("../../../../test_roms/atari2600/ball_test.bin");
 
         let mut sys = Atari2600System::new();
