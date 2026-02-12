@@ -1085,19 +1085,25 @@ impl Ppu {
                 let shift = (quadrant * 2) as u8;
                 let palette_idx = (attr_byte >> shift) & 0x03;
 
-                // Fetch CHR pattern data once for the tile (optimized - no callbacks during fetch)
+                // Calculate CHR addresses for this tile
                 let tile_chr_addr = bg_pattern_base + (tile_index as usize) * 16;
-                let lo = self.chr_fetch_fast(tile_chr_addr + fine_y_in_tile);
-                let hi = self.chr_fetch_fast(tile_chr_addr + fine_y_in_tile + 8);
 
-                // Invoke CHR read callback for MMC2/MMC4 latch switching compatibility
-                // This is done once per tile instead of per pixel for performance
-                // CRITICAL: Must invoke for BOTH low and high bitplane reads
-                // MMC2 latch triggers are on the high bitplane addresses (e.g., $0FD8, $0FE8)
+                // Invoke CHR read callback BEFORE fetching for MMC2/MMC4 latch switching compatibility.
+                // This is CRITICAL: the callback must be invoked BEFORE the actual CHR fetch so that
+                // mappers can update their CHR bank selection based on the read address.
+                // MMC2/MMC4 latches trigger on specific addresses (e.g., $0FD8, $0FE8) and must switch
+                // banks BEFORE the tile data is fetched, not after.
+                // CRITICAL: Must invoke for BOTH low and high bitplane reads.
+                // MMC2 latch triggers are on the high bitplane addresses (e.g., $0FD8, $0FE8).
                 if let Some(cb) = &mut *self.chr_read_callback.borrow_mut() {
                     cb((tile_chr_addr + fine_y_in_tile) as u16); // Low bitplane
                     cb((tile_chr_addr + fine_y_in_tile + 8) as u16); // High bitplane
                 }
+
+                // Fetch CHR pattern data once for the tile (optimized - no callbacks during fetch).
+                // This happens AFTER the callback so that any CHR bank switching takes effect.
+                let lo = self.chr_fetch_fast(tile_chr_addr + fine_y_in_tile);
+                let hi = self.chr_fetch_fast(tile_chr_addr + fine_y_in_tile + 8);
 
                 // Render 8 pixels from this tile (or remaining pixels if less than 8)
                 let start_pixel = if screen_x == 0 {
@@ -1267,16 +1273,20 @@ impl Ppu {
                 };
 
                 let addr = pattern_base + (tile_index as usize) * 16;
-                let lo = self.chr_fetch_fast(addr + fine_y);
-                let hi = self.chr_fetch_fast(addr + fine_y + 8);
 
-                // Invoke CHR read callback for MMC2/MMC4 latch switching compatibility
-                // CRITICAL: Must invoke for BOTH low and high bitplane reads
-                // MMC2 latch triggers are on the high bitplane addresses (e.g., $0FD8, $0FE8)
+                // Invoke CHR read callback BEFORE fetching for MMC2/MMC4 latch switching compatibility.
+                // This is CRITICAL: the callback must be invoked BEFORE the actual CHR fetch so that
+                // mappers can update their CHR bank selection based on the read address.
+                // CRITICAL: Must invoke for BOTH low and high bitplane reads.
+                // MMC2 latch triggers are on the high bitplane addresses (e.g., $0FD8, $0FE8).
                 if let Some(cb) = &mut *self.chr_read_callback.borrow_mut() {
                     cb((addr + fine_y) as u16); // Low bitplane
                     cb((addr + fine_y + 8) as u16); // High bitplane
                 }
+
+                // Fetch CHR pattern data AFTER callback so any CHR bank switching takes effect
+                let lo = self.chr_fetch_fast(addr + fine_y);
+                let hi = self.chr_fetch_fast(addr + fine_y + 8);
 
                 for col in 0..8 {
                     let sx_bit = if flip_h { col } else { 7 - col };
