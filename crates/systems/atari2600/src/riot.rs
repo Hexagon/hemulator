@@ -20,14 +20,14 @@
 //! Used for **joystick and paddle controllers**:
 //!
 //! **SWCHA bits** (active low - 0 = pressed):
-//! - Bit 0: Player 0 Up
-//! - Bit 1: Player 0 Down  
-//! - Bit 2: Player 0 Left
-//! - Bit 3: Player 0 Right
-//! - Bit 4: Player 1 Up
-//! - Bit 5: Player 1 Down
-//! - Bit 6: Player 1 Left
-//! - Bit 7: Player 1 Right
+//! - Bit 7: Player 0 Right
+//! - Bit 6: Player 0 Left
+//! - Bit 5: Player 0 Down
+//! - Bit 4: Player 0 Up
+//! - Bit 3: Player 1 Right
+//! - Bit 2: Player 1 Left
+//! - Bit 1: Player 1 Down
+//! - Bit 0: Player 1 Up
 //!
 //! **SWACNT**: Data direction register (0 = input, 1 = output)
 //!
@@ -335,14 +335,19 @@ impl Riot {
     }
 
     /// Set joystick state (Port A)
-    /// Bits: P0 Right, P0 Left, P0 Down, P0 Up, P1 Right, P1 Left, P1 Down, P1 Up
+    ///
+    /// SWCHA bit layout per hardware spec:
+    ///   D7   D6   D5   D4   D3   D2   D1   D0
+    ///   P0R  P0L  P0D  P0U  P1R  P1L  P1D  P1U
+    ///
+    /// Direction encoding: 0=Up, 1=Down, 2=Left, 3=Right
     /// 0 = pressed, 1 = not pressed (active low)
     #[allow(dead_code)]
     pub fn set_joystick(&mut self, player: u8, direction: u8, pressed: bool) {
         let bit = if player == 0 {
-            direction // Player 0: bits 0-3
+            direction + 4 // Player 0: bits 4-7 (Up=4, Down=5, Left=6, Right=7)
         } else {
-            direction + 4 // Player 1: bits 4-7
+            direction // Player 1: bits 0-3 (Up=0, Down=1, Left=2, Right=3)
         };
 
         if pressed {
@@ -464,13 +469,13 @@ mod tests {
         // Initially all joysticks unpressed (all bits high)
         assert_eq!(riot.read(0x0280), 0xFF); // SWCHA at $280
 
-        // Press Player 0 Up (bit 0)
+        // Press Player 0 Up (bit 4)
         riot.set_joystick(0, 0, true);
-        assert_eq!(riot.read(0x0280) & 0x01, 0x00);
+        assert_eq!(riot.read(0x0280) & 0x10, 0x00);
 
-        // Press Player 1 Down (bit 6)
+        // Press Player 1 Left (bit 2)
         riot.set_joystick(1, 2, true);
-        assert_eq!(riot.read(0x0280) & 0x40, 0x00);
+        assert_eq!(riot.read(0x0280) & 0x04, 0x00);
     }
 
     #[test]
@@ -576,7 +581,7 @@ mod tests {
 
         // SWCHA at $280 (Port A data)
         riot.set_joystick(0, 0, true); // Press P0 Up
-        assert_eq!(riot.read(0x0280) & 0x01, 0x00);
+        assert_eq!(riot.read(0x0280) & 0x10, 0x00);
 
         // SWACNT at $281 (Port A direction - written but not enforced)
         riot.write(0x0281, 0xFF);
@@ -599,17 +604,17 @@ mod tests {
         // Initial state: all released (all bits 1)
         assert_eq!(riot.read(0x0280), 0xFF);
 
-        // Press Player 0 Up (bit 0) - should become 0
+        // Press Player 0 Up (bit 4) - should become 0
         riot.set_joystick(0, 0, true);
-        assert_eq!(riot.read(0x0280) & 0x01, 0x00);
+        assert_eq!(riot.read(0x0280) & 0x10, 0x00);
 
         // Release Player 0 Up - should become 1
         riot.set_joystick(0, 0, false);
-        assert_eq!(riot.read(0x0280) & 0x01, 0x01);
+        assert_eq!(riot.read(0x0280) & 0x10, 0x10);
 
-        // Press Player 1 Right (bit 7) - should become 0
+        // Press Player 1 Right (bit 3) - should become 0
         riot.set_joystick(1, 3, true);
-        assert_eq!(riot.read(0x0280) & 0x80, 0x00);
+        assert_eq!(riot.read(0x0280) & 0x08, 0x00);
     }
 
     #[test]
@@ -682,32 +687,33 @@ mod tests {
     #[test]
     fn test_riot_joystick_all_directions() {
         // Test all 8 joystick direction bits per spec
+        // SWCHA: D7=P0R D6=P0L D5=P0D D4=P0U D3=P1R D2=P1L D1=P1D D0=P1U
         let mut riot = Riot::new();
 
-        // Player 0 directions (bits 0-3)
-        riot.set_joystick(0, 0, true); // Up (bit 0)
-        assert_eq!(riot.read(0x0280) & 0x01, 0x00);
-
-        riot.set_joystick(0, 1, true); // Down (bit 1)
-        assert_eq!(riot.read(0x0280) & 0x02, 0x00);
-
-        riot.set_joystick(0, 2, true); // Left (bit 2)
-        assert_eq!(riot.read(0x0280) & 0x04, 0x00);
-
-        riot.set_joystick(0, 3, true); // Right (bit 3)
-        assert_eq!(riot.read(0x0280) & 0x08, 0x00);
-
-        // Player 1 directions (bits 4-7)
-        riot.set_joystick(1, 0, true); // Up (bit 4)
+        // Player 0 directions (bits 4-7)
+        riot.set_joystick(0, 0, true); // Up (bit 4)
         assert_eq!(riot.read(0x0280) & 0x10, 0x00);
 
-        riot.set_joystick(1, 1, true); // Down (bit 5)
+        riot.set_joystick(0, 1, true); // Down (bit 5)
         assert_eq!(riot.read(0x0280) & 0x20, 0x00);
 
-        riot.set_joystick(1, 2, true); // Left (bit 6)
+        riot.set_joystick(0, 2, true); // Left (bit 6)
         assert_eq!(riot.read(0x0280) & 0x40, 0x00);
 
-        riot.set_joystick(1, 3, true); // Right (bit 7)
+        riot.set_joystick(0, 3, true); // Right (bit 7)
         assert_eq!(riot.read(0x0280) & 0x80, 0x00);
+
+        // Player 1 directions (bits 0-3)
+        riot.set_joystick(1, 0, true); // Up (bit 0)
+        assert_eq!(riot.read(0x0280) & 0x01, 0x00);
+
+        riot.set_joystick(1, 1, true); // Down (bit 1)
+        assert_eq!(riot.read(0x0280) & 0x02, 0x00);
+
+        riot.set_joystick(1, 2, true); // Left (bit 2)
+        assert_eq!(riot.read(0x0280) & 0x04, 0x00);
+
+        riot.set_joystick(1, 3, true); // Right (bit 3)
+        assert_eq!(riot.read(0x0280) & 0x08, 0x00);
     }
 }
