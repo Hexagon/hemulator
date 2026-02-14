@@ -177,9 +177,14 @@ impl Bus for NesBus {
                         // When strobed, return current button A state (bit 0).
                         // When not strobed, shift out latched controller bits.
                         // Controller ports affect only bits 4-0; bits 7-5 are open bus
+                        //
+                        // IMPORTANT: NES controllers use active-low logic!
+                        // - D0 = 0 means button is PRESSED
+                        // - D0 = 1 means button is RELEASED
+                        // The frontend uses active-high (1=pressed), so we must invert.
                         let open_bus_bits = self.open_bus.get() & 0xE0;
                         let controller_bits = if self.strobe.get() {
-                            self.controller_state[0] & 1
+                            (self.controller_state[0] & 1) ^ 1 // Invert: 0->1, 1->0
                         } else {
                             let count = self.controller_read_count[0].get();
                             self.controller_read_count[0].set(count.saturating_add(1));
@@ -189,7 +194,7 @@ impl Bus for NesBus {
                                 1
                             } else {
                                 let cur = self.controller_shift[0].get();
-                                let v = cur & 1;
+                                let v = (cur & 1) ^ 1; // Invert: 0->1, 1->0
                                 self.controller_shift[0].set(cur >> 1);
                                 v
                             }
@@ -198,9 +203,14 @@ impl Bus for NesBus {
                     }
                     0x4017 => {
                         // Controller ports affect only bits 4-0; bits 7-5 are open bus
+                        //
+                        // IMPORTANT: NES controllers use active-low logic!
+                        // - D0 = 0 means button is PRESSED
+                        // - D0 = 1 means button is RELEASED
+                        // The frontend uses active-high (1=pressed), so we must invert.
                         let open_bus_bits = self.open_bus.get() & 0xE0;
                         let controller_bits = if self.strobe.get() {
-                            self.controller_state[1] & 1
+                            (self.controller_state[1] & 1) ^ 1 // Invert: 0->1, 1->0
                         } else {
                             let count = self.controller_read_count[1].get();
                             self.controller_read_count[1].set(count.saturating_add(1));
@@ -210,7 +220,7 @@ impl Bus for NesBus {
                                 1
                             } else {
                                 let cur = self.controller_shift[1].get();
-                                let v = cur & 1;
+                                let v = (cur & 1) ^ 1; // Invert: 0->1, 1->0
                                 self.controller_shift[1].set(cur >> 1);
                                 v
                             }
@@ -303,6 +313,9 @@ impl Bus for NesBus {
                     let st = (val & 1) != 0;
                     self.strobe.set(st);
                     if st {
+                        // Latch current controller state into shift registers
+                        // Frontend uses active-high (1=pressed), but NES uses active-low (0=pressed)
+                        // We invert on read, not on latch, so we store the frontend state as-is
                         self.controller_shift[0].set(self.controller_state[0]);
                         self.controller_shift[1].set(self.controller_state[1]);
                     } else {

@@ -1044,20 +1044,23 @@ mod tests {
         }
 
         // Test controller strobe and shift behavior
+        // NES controllers use active-low logic: 0=pressed, 1=released
         if let Some(bus) = sys.cpu.bus_mut() {
             // Strobe controller to latch state
             bus.write(0x4016, 1);
             bus.write(0x4016, 0);
 
             // Read 8 bits from controller 0
-            assert_eq!(bus.read(0x4016) & 1, 1); // A button
-            assert_eq!(bus.read(0x4016) & 1, 1); // B button
-            assert_eq!(bus.read(0x4016) & 1, 0); // Select
-            assert_eq!(bus.read(0x4016) & 1, 0); // Start
-            assert_eq!(bus.read(0x4016) & 1, 0); // Up
-            assert_eq!(bus.read(0x4016) & 1, 0); // Down
-            assert_eq!(bus.read(0x4016) & 1, 0); // Left
-            assert_eq!(bus.read(0x4016) & 1, 0); // Right
+            // buttons = 0b00000011, so A=pressed, B=pressed, others=released
+            // Active-low: 0=pressed, 1=released
+            assert_eq!(bus.read(0x4016) & 1, 0); // A button (pressed)
+            assert_eq!(bus.read(0x4016) & 1, 0); // B button (pressed)
+            assert_eq!(bus.read(0x4016) & 1, 1); // Select (released)
+            assert_eq!(bus.read(0x4016) & 1, 1); // Start (released)
+            assert_eq!(bus.read(0x4016) & 1, 1); // Up (released)
+            assert_eq!(bus.read(0x4016) & 1, 1); // Down (released)
+            assert_eq!(bus.read(0x4016) & 1, 1); // Left (released)
+            assert_eq!(bus.read(0x4016) & 1, 1); // Right (released)
         }
     }
 
@@ -1065,6 +1068,7 @@ mod tests {
     fn test_nes_controller_reads_beyond_8_bits() {
         // Edge case: Reading beyond the standard 8 button bits
         // Hardware behavior: After 8 reads, subsequent reads should return 1 (open bus)
+        // NES controllers use active-low logic: 0=pressed, 1=released
         use crate::bus::Bus;
 
         let mut sys = NesSystem::default();
@@ -1077,9 +1081,11 @@ mod tests {
             bus.write(0x4016, 1);
             bus.write(0x4016, 0);
 
-            // Read 8 bits (should match button state)
+            // Read 8 bits (should match button state, inverted for active-low)
+            // Frontend: 1=pressed, NES hardware: 0=pressed
             for i in 0..8 {
-                let expected = (buttons >> i) & 1;
+                let button_state = (buttons >> i) & 1;
+                let expected = button_state ^ 1; // Invert: frontend 1 -> NES 0
                 assert_eq!(bus.read(0x4016) & 1, expected, "Bit {} mismatch", i);
             }
 
@@ -1098,22 +1104,23 @@ mod tests {
     #[test]
     fn test_nes_controller_ninth_read_is_open_bus() {
         // Specific test for the 9th read to verify off-by-one handling
-        // When all buttons are released (0), first 8 reads return 0, 9th returns 1
+        // NES controllers use active-low logic: 0=pressed, 1=released
+        // When all buttons are released (frontend=0), first 8 reads return 1 (active-low), 9th returns 1 (open bus)
         use crate::bus::Bus;
 
         let mut sys = NesSystem::default();
-        sys.set_controller(0, 0); // No buttons pressed
+        sys.set_controller(0, 0); // No buttons pressed (frontend representation)
 
         if let Some(bus) = sys.cpu.bus_mut() {
             bus.write(0x4016, 1);
             bus.write(0x4016, 0);
 
-            // First 8 reads should return 0 (no buttons pressed)
+            // First 8 reads should return 1 (buttons released, active-low)
             for i in 0..8 {
                 assert_eq!(
                     bus.read(0x4016) & 1,
-                    0,
-                    "Read {} should return 0 (button not pressed)",
+                    1,
+                    "Read {} should return 1 (button not pressed, active-low)",
                     i + 1
                 );
             }
@@ -1137,10 +1144,11 @@ mod tests {
     #[test]
     fn test_nes_controller_strobe_during_reads() {
         // Edge case: Strobing controller during reads should reset the shift register
+        // NES controllers use active-low logic: 0=pressed, 1=released
         use crate::bus::Bus;
 
         let mut sys = NesSystem::default();
-        let buttons = 0b10101010;
+        let buttons = 0b10101010; // Frontend: bits 1,3,5,7 pressed
 
         sys.set_controller(0, buttons);
 
@@ -1149,28 +1157,29 @@ mod tests {
             bus.write(0x4016, 1);
             bus.write(0x4016, 0);
 
-            // Read first 3 bits
-            assert_eq!(bus.read(0x4016) & 1, 0); // bit 0
-            assert_eq!(bus.read(0x4016) & 1, 1); // bit 1
-            assert_eq!(bus.read(0x4016) & 1, 0); // bit 2
+            // Read first 3 bits (active-low: invert frontend state)
+            assert_eq!(bus.read(0x4016) & 1, 1); // bit 0: frontend=0 (released) -> NES=1
+            assert_eq!(bus.read(0x4016) & 1, 0); // bit 1: frontend=1 (pressed) -> NES=0
+            assert_eq!(bus.read(0x4016) & 1, 1); // bit 2: frontend=0 (released) -> NES=1
 
             // Re-strobe (reset shift register)
             bus.write(0x4016, 1);
             bus.write(0x4016, 0);
 
             // Should start from bit 0 again
-            assert_eq!(bus.read(0x4016) & 1, 0); // bit 0
-            assert_eq!(bus.read(0x4016) & 1, 1); // bit 1
+            assert_eq!(bus.read(0x4016) & 1, 1); // bit 0: frontend=0 (released) -> NES=1
+            assert_eq!(bus.read(0x4016) & 1, 0); // bit 1: frontend=1 (pressed) -> NES=0
         }
     }
 
     #[test]
     fn test_nes_controller_read_while_strobed() {
         // Edge case: Reading while strobe is high should always return button A state
+        // NES controllers use active-low logic: 0=pressed, 1=released
         use crate::bus::Bus;
 
         let mut sys = NesSystem::default();
-        let buttons = 0b00000001; // Only A button pressed
+        let buttons = 0b00000001; // Only A button pressed (frontend representation)
 
         sys.set_controller(0, buttons);
 
@@ -1179,11 +1188,12 @@ mod tests {
             bus.write(0x4016, 1);
 
             // Multiple reads while strobed should all return A button state
+            // Frontend: A=1 (pressed), NES hardware: 0 (active-low)
             for _ in 0..10 {
                 assert_eq!(
                     bus.read(0x4016) & 1,
-                    1,
-                    "While strobed, should return A button state"
+                    0,
+                    "While strobed, should return A button state (active-low: 0=pressed)"
                 );
             }
 
@@ -1191,8 +1201,10 @@ mod tests {
             bus.write(0x4016, 0);
 
             // Now should shift normally
-            assert_eq!(bus.read(0x4016) & 1, 1); // A
-            assert_eq!(bus.read(0x4016) & 1, 0); // B (not pressed)
+            // buttons = 0b00000001 (A pressed)
+            // Active-low: A=0 (pressed), others=1 (released)
+            assert_eq!(bus.read(0x4016) & 1, 0); // A (pressed, active-low)
+            assert_eq!(bus.read(0x4016) & 1, 1); // B (not pressed, active-low)
         }
     }
 
