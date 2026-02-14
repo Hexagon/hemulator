@@ -100,8 +100,9 @@ Row 1: 0xFF, 0x00, 0x00, 0x00
 
 ### Display Enable Logic
 The test ROMs demonstrate the correct display enable behavior:
-- In Mode 4: Display is always on when Mode 4 is enabled (bit 2 of register 0)
-- Bit 6 of register 1 controls 192-line vs 224-line mode (not blanking)
-- In TMS modes (0-3): Bit 6 of register 1 controls display blanking
-
-This matches the real SMS hardware behavior where Mode 4 games don't use display blanking.
+- Register 1, Bit 6 (BL): Display enable/blank control
+  - Bit 6 = 1: Display enabled (screen shows rendered graphics)
+  - Bit 6 = 0: Display blanked (screen shows solid backdrop color)
+- This applies to both Mode 4 (SMS) and TMS modes (same polarity)
+- Real SMS hardware powers up with bit 6 = 1 (display enabled)
+- Most commercial games explicitly set this bit to ensure display is on

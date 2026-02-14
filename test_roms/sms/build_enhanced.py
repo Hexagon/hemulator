@@ -27,7 +27,7 @@ def assemble_z80(rom):
     # Helper to write register
     regs = [
         (0, 0x04),  # Mode 4
-        (1, 0x28),  # Display on (bit 6=0), sprites on (bit 3=1), frame interrupt (bit 5=1)
+        (1, 0x68),  # Display on (bit 6=1), sprites on (bit 3=1), frame interrupt (bit 5=1)
         (2, 0x0E),  # Name table at 0x3800
         (5, 0x7E),  # Sprite table at 0x3F00
         (7, 0x0F),  # Backdrop color entry 15

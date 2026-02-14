@@ -503,20 +503,12 @@ impl Vdp {
             self.frame.pixels[line_offset + x] = backdrop_color;
         }
 
-        // Check if Mode 4 is enabled (register 0, bit 2)
-        let mode_4_enabled = (self.registers[0] & 0x04) != 0;
-
-        // Display enable logic differs between Mode 4 and TMS modes
-        let display_enabled = if mode_4_enabled {
-            // In Mode 4 (SMS mode):
-            // - Bit 6 of register 1 is BLK (blank bit): 1=blank, 0=display
-            (self.registers[1] & 0x40) == 0 // Display when BLK=0
-        } else {
-            // In TMS modes (0-3) for backward compatibility:
-            // - Bit 6 of register 1 controls display: 1=display, 0=blank
-            // - TMS9918A uses opposite polarity from Mode 4
-            (self.registers[1] & 0x40) != 0 // Display when bit 6=1
-        };
+        // Display enable logic: Bit 6 of register 1 is BL (Blank/Display Enable)
+        // According to TMS9918A spec and real SMS hardware:
+        // - Bit 6 = 1: Display enabled
+        // - Bit 6 = 0: Display blanked
+        // This applies to BOTH Mode 4 and TMS modes (same polarity)
+        let display_enabled = (self.registers[1] & 0x40) != 0;
 
         // Render background if display enabled
         if display_enabled {
@@ -1004,14 +996,10 @@ impl Renderer for Vdp {
         // Log every time frame is retrieved
         let backdrop = self.decode_color(self.cram[16] & 0x3F);
         // Check if Mode 4 is enabled to determine display enable logic
-        let mode_4_enabled = (self.registers[0] & 0x04) != 0;
-        let display_enabled = if mode_4_enabled {
-            // In Mode 4: bit 6 is BLK (blank bit), 1=blank, 0=display
-            (self.registers[1] & 0x40) == 0
-        } else {
-            // In TMS modes: bit 6 controls display, 1=display, 0=blank
-            (self.registers[1] & 0x40) != 0
-        };
+        // Display enable logic: Bit 6 of register 1 is BL (Blank/Display Enable)
+        // Bit 6 = 1: Display enabled
+        // Bit 6 = 0: Display blanked
+        let display_enabled = (self.registers[1] & 0x40) != 0;
         let sprite_enabled = (self.registers[1] & 0x08) != 0;
         let mut non_backdrop = 0;
         for &pixel in &self.frame.pixels {
@@ -1040,6 +1028,10 @@ impl Renderer for Vdp {
         // Real SMS hardware defaults to Mode 4 enabled (M4 bit set)
         // This ensures real SMS ROMs work without explicit VDP initialization
         self.registers[0] = 0x04;
+        // Set Register 1 bit 6 to enable display by default
+        // Bit 6 (BL): 1 = display enabled, 0 = display blanked
+        // Real hardware powers up with display enabled
+        self.registers[1] = 0x40;
         self.address_register = 0;
         self.code_register = 0;
         self.read_buffer = 0;

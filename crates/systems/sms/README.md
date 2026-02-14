@@ -138,9 +138,10 @@ The VDP also supports the original TMS9918A video modes for backward compatibili
 
 **Display Control:**
 - Frame and line interrupts
-- Display blanking (BLK bit in Register 1, bit 6)
-  - Mode 4: 1=blank, 0=display
-  - TMS modes: 0=blank, 1=display (opposite polarity)
+- Display blanking (BL bit in Register 1, bit 6)
+  - Bit 6 = 1: Display enabled
+  - Bit 6 = 0: Display blanked
+  - Note: Same polarity for both Mode 4 and TMS modes (contrary to some documentation)
 - Sprite overflow and collision detection
 
 **Register Interface:**
