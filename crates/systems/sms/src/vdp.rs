@@ -1254,4 +1254,47 @@ mod tests {
         let status2 = vdp.read_status();
         assert_eq!(status2 & 0xE0, 0);
     }
+
+    #[test]
+    fn test_display_enable_real_rom_behavior() {
+        let mut vdp = Vdp::new();
+
+        // Simulate what a real ROM does: set Register 1 to 0x40 or 0xC0
+        // First write: value (0x40)
+        vdp.write_control(0x40);
+        // Second write: register number with bit 7 set (0x81 = register 1)
+        vdp.write_control(0x81);
+
+        // Now Register 1 should be 0x40
+        assert_eq!(vdp.registers[1], 0x40);
+
+        // Check that display is enabled with bit 6 = 1
+        let display_enabled = (vdp.registers[1] & 0x40) != 0;
+        assert!(
+            display_enabled,
+            "Display should be enabled when Register 1 bit 6 = 1"
+        );
+
+        // Test with 0xC0 (common in real ROMs for display + interrupts)
+        vdp.write_control(0xC0);
+        vdp.write_control(0x81);
+        assert_eq!(vdp.registers[1], 0xC0);
+
+        let display_enabled = (vdp.registers[1] & 0x40) != 0;
+        assert!(
+            display_enabled,
+            "Display should be enabled when Register 1 = 0xC0"
+        );
+
+        // Test display blanked (bit 6 = 0)
+        vdp.write_control(0x00);
+        vdp.write_control(0x81);
+        assert_eq!(vdp.registers[1], 0x00);
+
+        let display_enabled = (vdp.registers[1] & 0x40) != 0;
+        assert!(
+            !display_enabled,
+            "Display should be blanked when Register 1 bit 6 = 0"
+        );
+    }
 }
