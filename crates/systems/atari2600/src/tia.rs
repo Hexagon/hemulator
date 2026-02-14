@@ -1861,11 +1861,15 @@ impl Tia {
         // Check each copy
         for copy in 0..num_copies {
             let copy_pos = (pos as usize + copy * spacing) % 160;
+            let player_width = 8 * player_size;
 
-            // Check if x is within this copy's range
-            if x >= copy_pos && x < copy_pos + 8 * player_size {
-                let offset = x - copy_pos;
-
+            // Check if x is within this copy's range, handling screen wrapping
+            let offset = if x >= copy_pos {
+                x - copy_pos
+            } else {
+                x + 160 - copy_pos
+            };
+            if offset < player_width {
                 // Get the graphics value at the START of this copy's position
                 // This is critical for racing-the-beam effects with multiple copies
                 let grp = if player == 0 {
@@ -1933,8 +1937,13 @@ impl Tia {
         for copy in 0..num_copies {
             let copy_pos = (pos as usize + copy * spacing) % 160;
 
-            // Check if x is within this copy's range
-            if x >= copy_pos && x < copy_pos + missile_size {
+            // Check if x is within this copy's range, handling screen wrapping
+            let dx = if x >= copy_pos {
+                x - copy_pos
+            } else {
+                x + 160 - copy_pos
+            };
+            if dx < missile_size {
                 return true;
             }
         }
@@ -1952,8 +1961,13 @@ impl Tia {
         let ball_pos = state.ball_x as usize;
         let ball_size = state.ball_size as usize;
 
-        // Check if x is within ball's range
-        x >= ball_pos && x < ball_pos + ball_size
+        // Check if x is within ball's range, handling screen wrapping at 160 pixels
+        let offset = if x >= ball_pos {
+            x - ball_pos
+        } else {
+            x + 160 - ball_pos
+        };
+        offset < ball_size
     }
 
     /// Check if a pixel is part of the playfield
@@ -3549,6 +3563,42 @@ mod tests {
             Tia::HBLANK_COLOR_CLOCKS,
             68,
             "HBLANK should be 68 color clocks"
+        );
+    }
+
+    #[test]
+    fn test_ball_right_edge_wrapping() {
+        // Verify that a ball near the right edge of the screen wraps correctly
+        // Ball at x=158 with size=4 should render at pixels 158, 159, 0, 1
+        let state = ScanlineState {
+            enabl: true,
+            ball_x: 158,
+            ball_size: 4,
+            ..Default::default()
+        };
+
+        // Pixels 158, 159 (right edge) should be visible
+        assert!(
+            Tia::is_ball_pixel(&state, 158),
+            "Ball at x=158 should be visible at pixel 158"
+        );
+        assert!(
+            Tia::is_ball_pixel(&state, 159),
+            "Ball at x=158 should be visible at pixel 159"
+        );
+        // Pixels 0, 1 (wrapped to left edge) should also be visible
+        assert!(
+            Tia::is_ball_pixel(&state, 0),
+            "Ball at x=158 with size 4 should wrap to pixel 0"
+        );
+        assert!(
+            Tia::is_ball_pixel(&state, 1),
+            "Ball at x=158 with size 4 should wrap to pixel 1"
+        );
+        // Pixel 2 should NOT be visible (ball is only 4 pixels wide)
+        assert!(
+            !Tia::is_ball_pixel(&state, 2),
+            "Ball at x=158 with size 4 should not be visible at pixel 2"
         );
     }
 }
