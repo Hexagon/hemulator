@@ -829,8 +829,8 @@ impl EmulatorSystem {
     /// Returns Some(pc) if a breakpoint is hit, None otherwise
     fn check_breakpoint(&self) -> Option<u32> {
         match self {
-            EmulatorSystem::NES(_) => None, // NES: Debugger trait implementation needed
-            EmulatorSystem::GameBoy(_) => None, // GameBoy: Debugger trait implementation needed
+            EmulatorSystem::NES(sys) => sys.check_breakpoint(),
+            EmulatorSystem::GameBoy(sys) => sys.check_breakpoint(),
             EmulatorSystem::GBA(_) => None,
             EmulatorSystem::Atari2600(_) => None,
             EmulatorSystem::PC(_) => None,
@@ -853,10 +853,10 @@ impl EmulatorSystem {
             EmulatorSystem::PC(sys) => sys.get_breakpoint_manager().get_all(),
             EmulatorSystem::SNES(sys) => sys.get_breakpoint_manager().get_all(),
             EmulatorSystem::N64(sys) => sys.get_breakpoint_manager().get_all(),
-            EmulatorSystem::SMS(_) => Vec::new(), // TODO: Add breakpoint_manager to SMS
+            EmulatorSystem::SMS(sys) => sys.get_breakpoint_manager().get_all(),
             EmulatorSystem::Chip8(sys) => sys.get_breakpoint_manager().get_all(),
-            EmulatorSystem::ColecoVision(_) => Vec::new(), // TODO: Add breakpoint_manager to ColecoVision
-            EmulatorSystem::SG1000(_) => Vec::new(),       // TODO: Add breakpoint_manager to SG1000
+            EmulatorSystem::ColecoVision(sys) => sys.get_breakpoint_manager().get_all(),
+            EmulatorSystem::SG1000(sys) => sys.get_breakpoint_manager().get_all(),
         }
     }
 

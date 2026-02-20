@@ -911,10 +911,27 @@ impl System for PcSystem {
                 break;
             }
 
+            // Capture linear PC before stepping (CS:IP -> physical address)
+            let pc_before = if self.instruction_tracer.is_enabled() {
+                let regs = self.cpu.get_registers();
+                Some(((regs.cs as u32) << 4).wrapping_add(regs.ip))
+            } else {
+                None
+            };
+
             let cycles = self.cpu.step();
             cycles_this_frame += cycles;
             self.cycles += cycles as u64;
             self.frame_cycles += cycles as u64;
+
+            // Record instruction if tracing is enabled
+            if let Some(pc) = pc_before {
+                use emu_core::debug::Debugger;
+                if let Some(instr) = self.disassemble_instruction(pc) {
+                    let cpu_state = self.get_cpu_state();
+                    self.instruction_tracer.trace(instr, cpu_state);
+                }
+            }
 
             // Clock the PIT with the cycles executed
             let timer_interrupt = self.cpu.bus_mut().pit.clock(cycles);

@@ -155,9 +155,18 @@ impl System for Sg1000System {
 
         while cycles_this_frame < self.cpu_cycles_per_frame {
             // Execute one CPU instruction
+            let pc_before = self.cpu.pc as u32;
             let cycles = self.cpu.step();
             cycles_this_frame += cycles;
             self.cycles += cycles as u64;
+
+            // Record instruction if tracing is enabled
+            if self.instruction_tracer.is_enabled() {
+                if let Some(instr) = self.disassemble_instruction(pc_before) {
+                    let cpu_state = self.get_cpu_state();
+                    self.instruction_tracer.trace(instr, cpu_state);
+                }
+            }
 
             // Update VDP scanline based on cycles executed (for interrupt timing)
             let current_scanline =
