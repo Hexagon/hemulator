@@ -140,6 +140,17 @@ impl Sg1000System {
     pub fn get_breakpoint_manager(&self) -> &emu_core::breakpoints::BreakpointManager {
         &self.breakpoint_manager
     }
+
+    /// Check if the current PC is at an execute breakpoint.
+    /// Returns `Some(pc)` if a breakpoint is hit, `None` otherwise.
+    pub fn check_breakpoint(&self) -> Option<u32> {
+        let pc = self.cpu.pc as u32;
+        if self.breakpoint_manager.should_break_execute(pc) {
+            Some(pc)
+        } else {
+            None
+        }
+    }
 }
 
 impl System for Sg1000System {

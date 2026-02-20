@@ -519,6 +519,18 @@ impl PcSystem {
     pub fn get_breakpoint_manager(&self) -> &emu_core::breakpoints::BreakpointManager {
         &self.breakpoint_manager
     }
+
+    /// Check if the current CS:IP (linear address) is at an execute breakpoint.
+    /// Returns `Some(linear_pc)` if a breakpoint is hit, `None` otherwise.
+    pub fn check_breakpoint(&self) -> Option<u32> {
+        let regs = self.cpu.get_registers();
+        let pc = ((regs.cs as u32) << 4).wrapping_add(regs.ip);
+        if self.breakpoint_manager.should_break_execute(pc) {
+            Some(pc)
+        } else {
+            None
+        }
+    }
 }
 
 /// BIOS Data Area values for PC system diagnostics
@@ -1135,6 +1147,14 @@ impl System for PcSystem {
             "HardDrive" => self.cpu.bus().hard_drive().is_some(),
             _ => false,
         }
+    }
+
+    fn debugger(&self) -> Option<&dyn emu_core::debug::Debugger> {
+        Some(self)
+    }
+
+    fn get_total_cycles(&self) -> u64 {
+        self.cycles
     }
 }
 

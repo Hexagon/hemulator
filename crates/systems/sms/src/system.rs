@@ -588,6 +588,17 @@ impl SmsSystem {
         &self.breakpoint_manager
     }
 
+    /// Check if the current PC is at an execute breakpoint.
+    /// Returns `Some(pc)` if a breakpoint is hit, `None` otherwise.
+    pub fn check_breakpoint(&self) -> Option<u32> {
+        let pc = self.cpu.pc as u32;
+        if self.breakpoint_manager.should_break_execute(pc) {
+            Some(pc)
+        } else {
+            None
+        }
+    }
+
     /// Get tile viewer data for debugging
     pub fn get_tile_viewer_data(&self) -> TileViewerData {
         self.vdp.borrow().get_tile_viewer_data()

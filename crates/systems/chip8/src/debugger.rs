@@ -181,4 +181,21 @@ mod tests {
         assert!(instr.is_some());
         assert_eq!(instr.unwrap().mnemonic, "LD V1, 23");
     }
+
+    #[test]
+    fn test_chip8_check_breakpoint() {
+        let mut system = Chip8System::new();
+
+        // Initially no breakpoint should fire
+        assert!(system.check_breakpoint().is_none());
+
+        // Add a breakpoint at the current PC (0x200 = program start)
+        system.add_breakpoint(0x200);
+        assert!(system.check_breakpoint().is_some());
+        assert_eq!(system.check_breakpoint().unwrap(), 0x200);
+
+        // Removing the breakpoint should stop it from firing
+        system.remove_breakpoint(0x200);
+        assert!(system.check_breakpoint().is_none());
+    }
 }
