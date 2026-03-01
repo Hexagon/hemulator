@@ -1101,6 +1101,17 @@ impl Chip8System {
     pub fn get_breakpoint_manager(&self) -> &emu_core::breakpoints::BreakpointManager {
         &self.breakpoint_manager
     }
+
+    /// Check if the current PC is at an execute breakpoint.
+    /// Returns `Some(pc)` if a breakpoint is hit, `None` otherwise.
+    pub fn check_breakpoint(&self) -> Option<u32> {
+        let pc = self.pc as u32;
+        if self.breakpoint_manager.should_break_execute(pc) {
+            Some(pc)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

@@ -519,6 +519,18 @@ impl PcSystem {
     pub fn get_breakpoint_manager(&self) -> &emu_core::breakpoints::BreakpointManager {
         &self.breakpoint_manager
     }
+
+    /// Check if the current CS:IP (linear address) is at an execute breakpoint.
+    /// Returns `Some(linear_pc)` if a breakpoint is hit, `None` otherwise.
+    pub fn check_breakpoint(&self) -> Option<u32> {
+        let regs = self.cpu.get_registers();
+        let pc = ((regs.cs as u32) << 4).wrapping_add(regs.ip);
+        if self.breakpoint_manager.should_break_execute(pc) {
+            Some(pc)
+        } else {
+            None
+        }
+    }
 }
 
 /// BIOS Data Area values for PC system diagnostics
@@ -911,10 +923,27 @@ impl System for PcSystem {
                 break;
             }
 
+            // Capture linear PC before stepping (CS:IP -> physical address)
+            let pc_before = if self.instruction_tracer.is_enabled() {
+                let regs = self.cpu.get_registers();
+                Some(((regs.cs as u32) << 4).wrapping_add(regs.ip))
+            } else {
+                None
+            };
+
             let cycles = self.cpu.step();
             cycles_this_frame += cycles;
             self.cycles += cycles as u64;
             self.frame_cycles += cycles as u64;
+
+            // Record instruction if tracing is enabled
+            if let Some(pc) = pc_before {
+                use emu_core::debug::Debugger;
+                if let Some(instr) = self.disassemble_instruction(pc) {
+                    let cpu_state = self.get_cpu_state();
+                    self.instruction_tracer.trace(instr, cpu_state);
+                }
+            }
 
             // Clock the PIT with the cycles executed
             let timer_interrupt = self.cpu.bus_mut().pit.clock(cycles);
@@ -1118,6 +1147,14 @@ impl System for PcSystem {
             "HardDrive" => self.cpu.bus().hard_drive().is_some(),
             _ => false,
         }
+    }
+
+    fn debugger(&self) -> Option<&dyn emu_core::debug::Debugger> {
+        Some(self)
+    }
+
+    fn get_total_cycles(&self) -> u64 {
+        self.cycles
     }
 }
 

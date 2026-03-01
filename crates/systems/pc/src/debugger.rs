@@ -419,4 +419,24 @@ mod tests {
 
         println!("\n=== All debugger features verified! ✓ ===\n");
     }
+
+    #[test]
+    fn test_pc_check_breakpoint() {
+        use emu_core::cpu_8086::Memory8086;
+        let mut system = PcSystem::new();
+
+        // Initially no breakpoint should fire
+        assert!(system.check_breakpoint().is_none());
+
+        // PC starts at linear address FFFF:0000 = 0xFFFF0
+        let regs = system.cpu.get_registers();
+        let linear_pc = ((regs.cs as u32) << 4).wrapping_add(regs.ip);
+        system.add_breakpoint(linear_pc);
+        assert!(system.check_breakpoint().is_some());
+        assert_eq!(system.check_breakpoint().unwrap(), linear_pc);
+
+        // Removing the breakpoint should stop it from firing
+        system.remove_breakpoint(linear_pc);
+        assert!(system.check_breakpoint().is_none());
+    }
 }

@@ -211,4 +211,22 @@ mod tests {
         let invalid = system.read_memory(0x10000, 1);
         assert!(invalid.is_none());
     }
+
+    #[test]
+    fn test_gb_check_breakpoint() {
+        let mut system = GbSystem::new();
+
+        // Initially no breakpoint should fire
+        assert!(system.check_breakpoint().is_none());
+
+        // Add a breakpoint at the current PC
+        let pc = system.cpu.pc as u32;
+        system.add_breakpoint(pc);
+        assert!(system.check_breakpoint().is_some());
+        assert_eq!(system.check_breakpoint().unwrap(), pc);
+
+        // Removing the breakpoint should stop it from firing
+        system.remove_breakpoint(pc);
+        assert!(system.check_breakpoint().is_none());
+    }
 }

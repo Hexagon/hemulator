@@ -253,4 +253,22 @@ mod tests {
 
         rom
     }
+
+    #[test]
+    fn test_nes_check_breakpoint() {
+        let mut system = NesSystem::default();
+
+        // Initially no breakpoint should fire
+        assert!(system.check_breakpoint().is_none());
+
+        // Add a breakpoint at the current PC (0 before ROM load)
+        let pc = system.cpu.pc() as u32;
+        system.add_breakpoint(pc);
+        assert!(system.check_breakpoint().is_some());
+        assert_eq!(system.check_breakpoint().unwrap(), pc);
+
+        // Removing the breakpoint should stop it from firing
+        system.remove_breakpoint(pc);
+        assert!(system.check_breakpoint().is_none());
+    }
 }
