@@ -807,6 +807,9 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
                 // Enable IME so interrupts can fire
                 self.memory.write_halfword(0x0400_0208, 1);
 
+                // Ensure IRQs are enabled in CPSR so we can wake from halt
+                self.cpsr &= !FLAG_I;
+
                 // Halt until an interrupt wakes us
                 self.halted = true;
                 true
@@ -823,6 +826,9 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
 
                 // Enable IME
                 self.memory.write_halfword(0x0400_0208, 1);
+
+                // Ensure IRQs are enabled in CPSR so we can wake from halt
+                self.cpsr &= !FLAG_I;
 
                 // Halt until interrupt
                 self.halted = true;
@@ -1863,7 +1869,8 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
                 let spsr = self.get_spsr();
                 let new_mode = ProcessorMode::from_bits(spsr).unwrap_or(ProcessorMode::System);
                 self.switch_mode(new_mode);
-                self.cpsr = spsr;
+                // Ensure CPSR has valid mode bits even if SPSR was corrupted
+                self.cpsr = (spsr & !MODE_MASK) | new_mode.to_bits();
             }
         } else {
             self.gpr[rd] = result;
@@ -2221,7 +2228,8 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
                             let new_mode =
                                 ProcessorMode::from_bits(spsr).unwrap_or(ProcessorMode::System);
                             self.switch_mode(new_mode);
-                            self.cpsr = spsr;
+                            // Ensure CPSR has valid mode bits even if SPSR was corrupted
+                            self.cpsr = (spsr & !MODE_MASK) | new_mode.to_bits();
                         }
                     } else {
                         self.gpr[i as usize] = val;
@@ -2333,12 +2341,16 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
             self.set_spsr((spsr & !mask) | (value & mask));
         } else {
             let old_cpsr = self.cpsr;
-            let new_cpsr = (old_cpsr & !mask) | (value & mask);
+            let mut new_cpsr = (old_cpsr & !mask) | (value & mask);
 
             // If mode bits changed, switch modes
             if (old_cpsr & MODE_MASK) != (new_cpsr & MODE_MASK) {
                 if let Some(new_mode) = ProcessorMode::from_bits(new_cpsr) {
                     self.switch_mode(new_mode);
+                } else {
+                    // Invalid mode bits: force System mode to prevent corruption
+                    new_cpsr = (new_cpsr & !MODE_MASK) | MODE_SYSTEM;
+                    self.switch_mode(ProcessorMode::System);
                 }
             }
             self.cpsr = new_cpsr;
