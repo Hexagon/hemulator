@@ -134,25 +134,46 @@ impl GbaBus {
         // MOVS PC, LR restores CPSR from SPSR and returns
         Self::write_arm_word(&mut bios, 0x08, 0xE1B0_F00E);
 
-        // 0x18-0x2C: IRQ handler stub
-        // This matches the real GBA BIOS IRQ handler behavior:
+        // 0x18: IRQ vector - branch to handler at 0x80
+        // (Vectors only have room for one instruction each; FIQ is at 0x1C)
+        Self::write_arm_word(&mut bios, 0x18, 0xEA00_0018); // B 0x80
+
+        // 0x80-0xB4: Full IRQ handler matching real GBA BIOS behavior:
         // 1. Save context on IRQ stack
-        // 2. Load game's IRQ handler from [0x03FFFFFC] (IWRAM mirror of 0x03007FFC)
-        // 3. Set return address and call handler
-        // 4. Restore context and return from exception
+        // 2. Read IE & IF, compute matched interrupts
+        // 3. Acknowledge matched bits in IF register
+        // 4. Update BIOS IF flags at [0x03007FF8] (mirrored at 0x03FFFFF8)
+        // 5. Call game's IRQ handler from [0x03FFFFFC]
+        // 6. Restore context and return from exception
         //
-        // 0x18: STMFD SP!, {R0-R3, R12, LR}  - save registers on IRQ stack
-        Self::write_arm_word(&mut bios, 0x18, 0xE92D_500F);
-        // 0x1C: MOV R0, #0x04000000           - load I/O base address
-        Self::write_arm_word(&mut bios, 0x1C, 0xE3A0_0301);
-        // 0x20: ADD LR, PC, #0                - set return address to 0x28
-        Self::write_arm_word(&mut bios, 0x20, 0xE28F_E000);
-        // 0x24: LDR PC, [R0, #-4]             - jump to handler at [0x03FFFFFC]
-        Self::write_arm_word(&mut bios, 0x24, 0xE510_F004);
-        // 0x28: LDMFD SP!, {R0-R3, R12, LR}  - restore registers
-        Self::write_arm_word(&mut bios, 0x28, 0xE8BD_500F);
-        // 0x2C: SUBS PC, LR, #4               - return from IRQ (restores CPSR)
-        Self::write_arm_word(&mut bios, 0x2C, 0xE25E_F004);
+        // 0x80: STMFD SP!, {R0-R3, R12, LR}
+        Self::write_arm_word(&mut bios, 0x80, 0xE92D_500F);
+        // 0x84: MOV R0, #0x04000000           - I/O base
+        Self::write_arm_word(&mut bios, 0x84, 0xE3A0_0301);
+        // 0x88: ADD R12, R0, #0x200           - R12 = 0x04000200
+        Self::write_arm_word(&mut bios, 0x88, 0xE280_CC02);
+        // 0x8C: LDRH R1, [R12, #0]            - R1 = IE
+        Self::write_arm_word(&mut bios, 0x8C, 0xE1DC_10B0);
+        // 0x90: LDRH R2, [R12, #2]            - R2 = IF
+        Self::write_arm_word(&mut bios, 0x90, 0xE1DC_20B2);
+        // 0x94: AND R1, R1, R2                - R1 = matched = IE & IF
+        Self::write_arm_word(&mut bios, 0x94, 0xE001_1002);
+        // 0x98: STRH R1, [R12, #2]            - Acknowledge IF (write 1s to clear)
+        Self::write_arm_word(&mut bios, 0x98, 0xE1CC_10B2);
+        // 0x9C: LDRH R3, [R0, #-8]            - R3 = BIOS IF at [0x03FFFFF8]
+        Self::write_arm_word(&mut bios, 0x9C, 0xE150_30B8);
+        // 0xA0: ORR R3, R3, R1                - R3 |= matched
+        Self::write_arm_word(&mut bios, 0xA0, 0xE183_3001);
+        // 0xA4: STRH R3, [R0, #-8]            - Write back BIOS IF
+        Self::write_arm_word(&mut bios, 0xA4, 0xE140_30B8);
+        // 0xA8: ADD LR, PC, #0                - LR = 0xB0 (return address)
+        Self::write_arm_word(&mut bios, 0xA8, 0xE28F_E000);
+        // 0xAC: LDR PC, [R0, #-4]             - Jump to game handler at [0x03FFFFFC]
+        Self::write_arm_word(&mut bios, 0xAC, 0xE510_F004);
+        // 0xB0: LDMFD SP!, {R0-R3, R12, LR}  - Restore context
+        Self::write_arm_word(&mut bios, 0xB0, 0xE8BD_500F);
+        // 0xB4: SUBS PC, LR, #4               - Return from IRQ (restores CPSR)
+        Self::write_arm_word(&mut bios, 0xB4, 0xE25E_F004);
 
         Self {
             bios,
