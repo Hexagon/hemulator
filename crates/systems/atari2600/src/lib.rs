@@ -297,6 +297,17 @@ impl Atari2600System {
         &self.breakpoint_manager
     }
 
+    /// Check if the current PC is at an execute breakpoint.
+    /// Returns `Some(pc)` if a breakpoint is hit, `None` otherwise.
+    pub fn check_breakpoint(&self) -> Option<u32> {
+        let pc = self.cpu.cpu.as_ref()?.pc as u32;
+        if self.breakpoint_manager.should_break_execute(pc) {
+            Some(pc)
+        } else {
+            None
+        }
+    }
+
     /// Get inspector data for the GUI
     pub fn get_inspector_data(&self) -> Option<InspectorData> {
         self.cpu.bus().map(|bus| InspectorData {

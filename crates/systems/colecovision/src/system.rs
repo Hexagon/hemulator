@@ -190,6 +190,17 @@ impl ColecoVisionSystem {
     pub fn get_breakpoint_manager(&self) -> &emu_core::breakpoints::BreakpointManager {
         &self.breakpoint_manager
     }
+
+    /// Check if the current PC is at an execute breakpoint.
+    /// Returns `Some(pc)` if a breakpoint is hit, `None` otherwise.
+    pub fn check_breakpoint(&self) -> Option<u32> {
+        let pc = self.cpu.pc as u32;
+        if self.breakpoint_manager.should_break_execute(pc) {
+            Some(pc)
+        } else {
+            None
+        }
+    }
 }
 
 impl Default for ColecoVisionSystem {
@@ -216,8 +227,17 @@ impl System for ColecoVisionSystem {
 
         while self.cycles < target_cycles {
             // Step CPU
+            let pc_before = self.cpu.pc as u32;
             let cpu_cycles = self.cpu.step();
             self.cycles += cpu_cycles as u64;
+
+            // Record instruction if tracing is enabled
+            if self.instruction_tracer.is_enabled() {
+                if let Some(instr) = self.disassemble_instruction(pc_before) {
+                    let cpu_state = self.get_cpu_state();
+                    self.instruction_tracer.trace(instr, cpu_state);
+                }
+            }
 
             // Update VDP scanline based on cycles
             let scanline = ((self.cycles % self.cpu_cycles_per_frame as u64)

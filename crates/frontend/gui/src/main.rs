@@ -829,17 +829,17 @@ impl EmulatorSystem {
     /// Returns Some(pc) if a breakpoint is hit, None otherwise
     fn check_breakpoint(&self) -> Option<u32> {
         match self {
-            EmulatorSystem::NES(_) => None, // NES: Debugger trait implementation needed
-            EmulatorSystem::GameBoy(_) => None, // GameBoy: Debugger trait implementation needed
+            EmulatorSystem::NES(sys) => sys.check_breakpoint(),
+            EmulatorSystem::GameBoy(sys) => sys.check_breakpoint(),
             EmulatorSystem::GBA(_) => None,
-            EmulatorSystem::Atari2600(_) => None,
-            EmulatorSystem::PC(_) => None,
+            EmulatorSystem::Atari2600(sys) => sys.check_breakpoint(),
+            EmulatorSystem::PC(sys) => sys.check_breakpoint(),
             EmulatorSystem::SNES(sys) => sys.check_breakpoint(),
-            EmulatorSystem::N64(_) => None,
-            EmulatorSystem::SMS(_) => None,
-            EmulatorSystem::Chip8(_) => None,
-            EmulatorSystem::ColecoVision(_) => None,
-            EmulatorSystem::SG1000(_) => None,
+            EmulatorSystem::N64(sys) => sys.check_breakpoint(),
+            EmulatorSystem::SMS(sys) => sys.check_breakpoint(),
+            EmulatorSystem::Chip8(sys) => sys.check_breakpoint(),
+            EmulatorSystem::ColecoVision(sys) => sys.check_breakpoint(),
+            EmulatorSystem::SG1000(sys) => sys.check_breakpoint(),
         }
     }
 
@@ -853,10 +853,10 @@ impl EmulatorSystem {
             EmulatorSystem::PC(sys) => sys.get_breakpoint_manager().get_all(),
             EmulatorSystem::SNES(sys) => sys.get_breakpoint_manager().get_all(),
             EmulatorSystem::N64(sys) => sys.get_breakpoint_manager().get_all(),
-            EmulatorSystem::SMS(_) => Vec::new(), // TODO: Add breakpoint_manager to SMS
+            EmulatorSystem::SMS(sys) => sys.get_breakpoint_manager().get_all(),
             EmulatorSystem::Chip8(sys) => sys.get_breakpoint_manager().get_all(),
-            EmulatorSystem::ColecoVision(_) => Vec::new(), // TODO: Add breakpoint_manager to ColecoVision
-            EmulatorSystem::SG1000(_) => Vec::new(),       // TODO: Add breakpoint_manager to SG1000
+            EmulatorSystem::ColecoVision(sys) => sys.get_breakpoint_manager().get_all(),
+            EmulatorSystem::SG1000(sys) => sys.get_breakpoint_manager().get_all(),
         }
     }
 
@@ -1815,8 +1815,7 @@ impl CliArgs {
         eprintln!();
         eprintln!("Instruction Tracing Options:");
         eprintln!("  --trace-instructions     Enable instruction tracing");
-        eprintln!("                           Fully functional for NES, Game Boy, Atari 2600, SMS, SNES, CHIP-8, and N64.");
-        eprintln!("                           PC requires Debugger trait implementation.");
+        eprintln!("                           Supported for all systems: NES, Game Boy, GBA, Atari 2600, SMS, SNES, CHIP-8, N64, ColecoVision, SG-1000, and PC.");
         eprintln!(
             "  --trace-limit <N>        Max instructions to keep in trace buffer (default: 10,000)"
         );
@@ -1827,7 +1826,7 @@ impl CliArgs {
         eprintln!(
             "  -b, --breakpoint <ADDR>  Set execution breakpoint at address (can be used multiple times)"
         );
-        eprintln!("                           Breakpoint checking is implemented for SNES. Stops execution and dumps trace when hit.");
+        eprintln!("                           Supported for all systems except GBA. Stops execution and dumps trace when hit.");
         eprintln!(
             "  -r, --read-breakpoint <ADDR>  Set read breakpoint at address (can be used multiple times)"
         );
@@ -2119,7 +2118,12 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
                     s.get_instruction_tracer_mut().set_max_history(limit);
                 }
             }
-            EmulatorSystem::GBA(_) => {}
+            EmulatorSystem::GBA(s) => {
+                s.set_instruction_tracing(true);
+                if let Some(limit) = cli_args.trace_limit {
+                    s.get_instruction_tracer_mut().set_max_history(limit);
+                }
+            }
             EmulatorSystem::Atari2600(s) => {
                 s.set_instruction_tracing(true);
                 if let Some(limit) = cli_args.trace_limit {

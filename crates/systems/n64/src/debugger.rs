@@ -346,4 +346,23 @@ mod tests {
             assert_eq!(instr.bytes.len(), 4); // MIPS instructions are always 4 bytes
         }
     }
+
+    #[test]
+    #[ignore] // Requires GL context
+    fn test_n64_check_breakpoint() {
+        let mut system = N64System::new_for_test();
+
+        // Initially no breakpoint should fire
+        assert!(system.check_breakpoint().is_none());
+
+        // Add a breakpoint at the current PC
+        let pc = system.cpu.cpu.pc as u32;
+        system.add_breakpoint(pc);
+        assert!(system.check_breakpoint().is_some());
+        assert_eq!(system.check_breakpoint().unwrap(), pc);
+
+        // Removing the breakpoint should stop it from firing
+        system.remove_breakpoint(pc);
+        assert!(system.check_breakpoint().is_none());
+    }
 }
