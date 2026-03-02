@@ -35,4 +35,22 @@ echo "Built test_sprite_overflow.sfc"
 ls -lh test_sprite_overflow.sfc
 
 echo ""
+echo "Building cputest-basic.sfc (65C816 CPU basic tests from gilyon/snes-tests)..."
+python3 make_cpu_tests.py --basic
+ca65 -D basic cputest_main.asm -o cputest-basic.o
+ld65 -C cputest_lorom.cfg -o cputest-basic.sfc cputest-basic.o
+rm -f cputest-basic.o
+echo "Built cputest-basic.sfc"
+ls -lh cputest-basic.sfc
+
+echo ""
+echo "Building cputest-full.sfc (65C816 CPU full tests from gilyon/snes-tests)..."
+python3 make_cpu_tests.py
+ca65 cputest_main.asm -o cputest-full.o
+ld65 -C cputest_lorom.cfg -o cputest-full.sfc cputest-full.o
+rm -f cputest-full.o
+echo "Built cputest-full.sfc"
+ls -lh cputest-full.sfc
+
+echo ""
 echo "All test ROMs built successfully!"

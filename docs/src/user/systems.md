@@ -18,7 +18,7 @@ This emulator supports 12 different retro gaming systems. **NES emulation is ful
 | **SMS** | 🚧 In Development | Z80 CPU, VDP, PSG, ROM banking | Not producing image, test ROM | Development only |
 | **ColecoVision** | 🚧 In Development | Z80 CPU, TMS9918A VDP, SN76489 PSG | Not producing image, audio output, BIOS required | Development only |
 | **SG-1000** | ⚠️ Experimental | Z80 CPU, TMS9918A VDP, SN76489 PSG | Audio output, test ROM | Development/testing |
-| **SNES** | ✅ Functional | CPU, all PPU modes 0-7, sprites, DMA/HDMA | Audio (DSP), some enhancement chips | Playing most games (silent) |
+| **SNES** | ✅ Functional | CPU, all PPU modes 0-7, sprites, DMA/HDMA, SPC700+DSP audio | Some enhancement chips | Playing most games with audio |
 | **N64** | 🚧 In Development | 3D rendering, CPU | Full graphics, audio, games | Development/testing |
 | **PS1** | 🚧 In Development | MIPS R3000A CPU, GPU (2D/3D), DMA, timers | Audio, CD-ROM, save states | Development/testing |
 | **PC/DOS** | 🧪 Experimental | Multi-slot mounts, disk controller, custom BIOS, CGA/EGA/VGA | Full disk I/O, boot | Development/testing |
@@ -538,8 +538,8 @@ For detailed technical information, see [crates/systems/sg1000/README.md](../../
 
 ### SNES (Super Nintendo Entertainment System)
 
-**Status**: ✅ Functional (Graphics Working!)  
-**Coverage**: Complete CPU, comprehensive PPU with all modes 0-7, full DMA/HDMA
+**Status**: ✅ Functional  
+**Coverage**: Complete CPU, comprehensive PPU with all modes 0-7, full DMA/HDMA, SPC700+DSP audio
 
 **ROM Format**: SMC/SFC (.smc, .sfc files) - automatically detected
 
@@ -558,13 +558,13 @@ For detailed technical information, see [crates/systems/sg1000/README.md](../../
   - Offset-per-tile scrolling (Modes 2, 4, 6)
   - Hi-res 512px modes (Modes 5-6)
 - ✅ **DMA/HDMA** - Complete 8-channel implementation, all transfer modes
-- ✅ **SPC700 APU CPU** - Full audio processor implementation:
+- ✅ **SPC700 APU + DSP** - Full audio implementation:
   - Complete SPC700 instruction set
   - 64KB audio RAM (ARAM)
   - IPL boot ROM with upload protocol
-  - Communication ports ($2140-$2143) working
-  - Games can upload and execute audio drivers
-  - ❌ DSP not implemented (no sound output)
+  - DSP with BRR sample playback and hardware-accurate interpolation
+  - 8-voice synthesis with ADPCM (BRR) sample support
+  - Audio output working — games play sound!
 - ✅ **Cartridge Support**:
   - LoROM, HiROM, and ExHiROM auto-detection
   - SRAM save support
@@ -573,9 +573,7 @@ For detailed technical information, see [crates/systems/sg1000/README.md](../../
 - ✅ **Save States** - F5-F9 for save, Shift+F5-F9 for load
 
 **Known Limitations**:
-- **Audio**: SPC700 CPU fully functional but DSP not implemented - **silent gameplay**
-  - Games can upload audio drivers and communicate with APU
-  - No 8-voice synthesis, ADPCM playback, or echo effects
+- **Audio**: Echo/reverb effects and some DSP flags not fully implemented
 - **Enhancement Chips**: 
   - DSP-1 partially implemented (missing some math operations)
   - SuperFX/SuperFX2 core functionality implemented
@@ -587,10 +585,9 @@ For detailed technical information, see [crates/systems/sg1000/README.md](../../
 - **Timing**: Frame-based rendering (not cycle-accurate), NTSC only
 
 **Recommended For**:
-- Playing most SNES games (silently)
+- Playing most SNES games — Super Mario World runs well
 - Games using Modes 0-1 (vast majority of commercial titles)
 - Testing enhancement chip games (DSP-1, SuperFX)
-- Not recommended if audio is essential
 
 **See Also**: [SNES Implementation README](../../../crates/systems/snes/README.md) for technical details
 

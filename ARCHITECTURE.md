@@ -11,9 +11,15 @@ This document describes the overall architecture of the Hemulator multi-system c
 **System-Specific Details**:
 - **[NES](https://github.com/Hexagon/hemulator/blob/master/crates/systems/nes/README.md)**: Nintendo Entertainment System implementation
 - **[Game Boy](https://github.com/Hexagon/hemulator/blob/master/crates/systems/gb/README.md)**: Game Boy / Game Boy Color implementation
+- **[GBA](https://github.com/Hexagon/hemulator/blob/master/crates/systems/gba/README.md)**: Game Boy Advance implementation
 - **[Atari 2600](https://github.com/Hexagon/hemulator/blob/master/crates/systems/atari2600/README.md)**: Atari 2600 implementation
+- **[CHIP-8](https://github.com/Hexagon/hemulator/blob/master/crates/systems/chip8/README.md)**: CHIP-8 / Super-CHIP / XO-CHIP / Mega-CHIP implementation
+- **[SMS](https://github.com/Hexagon/hemulator/blob/master/crates/systems/sms/README.md)**: Sega Master System implementation
+- **[ColecoVision](https://github.com/Hexagon/hemulator/blob/master/crates/systems/colecovision/README.md)**: ColecoVision implementation
+- **[SG-1000](https://github.com/Hexagon/hemulator/blob/master/crates/systems/sg1000/README.md)**: Sega SG-1000 implementation
 - **[SNES](https://github.com/Hexagon/hemulator/blob/master/crates/systems/snes/README.md)**: Super Nintendo Entertainment System implementation
 - **[N64](https://github.com/Hexagon/hemulator/blob/master/crates/systems/n64/README.md)**: Nintendo 64 implementation
+- **[PS1](https://github.com/Hexagon/hemulator/blob/master/crates/systems/ps1/README.md)**: Sony PlayStation 1 implementation
 - **[PC](https://github.com/Hexagon/hemulator/blob/master/crates/systems/pc/README.md)**: IBM PC/XT implementation
 
 
@@ -337,14 +343,7 @@ Each system crate combines core components with system-specific logic.
 
 ### Current Systems
 
-| System | Status | Description |
-|--------|--------|-------------|
-| **[NES](crates/systems/nes/README.md)** | ✅ Fully Working | ~90% game coverage, 14 mappers |
-| **[Game Boy](crates/systems/gb/README.md)** | 🚧 In Development | DMG mode, MBC0/1/2/3/5 support |
-| **[Atari 2600](crates/systems/atari2600/README.md)** | 🚧 In Development | Complete TIA/RIOT emulation |
-| **[SNES](crates/systems/snes/README.md)** | 🚧 Basic | CPU complete, minimal PPU |
-| **[N64](crates/systems/n64/README.md)** | 🚧 In Development | 3D rendering functional |
-| **[PC](crates/systems/pc/README.md)** | 🧪 Experimental | CGA/EGA/VGA modes, basic BIOS |
+For the current system status and coverage, see the **[System Status table in README.md](README.md#system-status)**.
 
 For detailed implementation information, see each system's README.md file.
 
@@ -574,7 +573,7 @@ The GUI frontend (`crates/frontend/gui/`) provides a modern cross-platform inter
 - **Cross-platform**: Works identically on Windows, macOS, and Linux
 - **No native dependencies**: Pure Rust + SDL2, no GTK/Win32/Cocoa required
 
-For user-facing controls and features, see [MANUAL.md](MANUAL.md).
+For user-facing controls and features, see the [User Manual](https://hemulator.56k.guru/user/).
 
 ## Design Principles
 
@@ -595,7 +594,7 @@ For user-facing controls and features, see [MANUAL.md](MANUAL.md).
 
 ## Related Documentation
 
-- **Implementation Guidelines**: See [AGENTS.md](../AGENTS.md) for detailed implementation patterns
+- **Implementation Guidelines**: See [AGENTS.md](AGENTS.md) for detailed implementation patterns
 - **System Details**: See individual system README files for implementation specifics
-- **User Guide**: See [MANUAL.md](MANUAL.md) for user-facing features and limitations
-- **Contributing**: See [CONTRIBUTING.md](CONTRIBUTING.md) for development workflow
+- **User Guide**: See the [User Manual](https://hemulator.56k.guru/user/) for user-facing features and limitations
+- **Contributing**: See the [Contributing Guide](https://hemulator.56k.guru/developer/contributing.html) for development workflow

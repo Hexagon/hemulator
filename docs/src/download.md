@@ -35,7 +35,7 @@ Visit the [GitHub Releases page](https://github.com/Hexagon/hemulator/releases) 
 - `hemu.exe` - Main emulator executable
 - `SDL2.dll` - Required SDL2 library
 - `LICENSE` - License information
-- `MANUAL.md` - User manual
+- `README.md` - Project overview and quick start
 
 ### Linux
 
