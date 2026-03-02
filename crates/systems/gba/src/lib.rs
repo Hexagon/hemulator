@@ -134,25 +134,30 @@ impl GbaBus {
         // MOVS PC, LR restores CPSR from SPSR and returns
         Self::write_arm_word(&mut bios, 0x08, 0xE1B0_F00E);
 
-        // 0x18-0x2C: IRQ handler stub
-        // This matches the real GBA BIOS IRQ handler behavior:
-        // 1. Save context on IRQ stack
-        // 2. Load game's IRQ handler from [0x03FFFFFC] (IWRAM mirror of 0x03007FFC)
-        // 3. Set return address and call handler
-        // 4. Restore context and return from exception
+        // 0x18: IRQ vector - branch to handler at 0x80
+        // (Vectors only have room for one instruction each; FIQ is at 0x1C)
+        Self::write_arm_word(&mut bios, 0x18, 0xEA00_0018); // B 0x80
+
+        // 0x80-0x98: IRQ handler matching real GBA BIOS behavior.
+        // The real BIOS IRQ handler is very simple: save registers, call
+        // the game's ISR at [0x03FFFFFC], restore registers, and return.
+        // The game's ISR runs in IRQ mode with interrupts disabled (I=1),
+        // and is responsible for reading IE/IF, acknowledging IF, and
+        // updating BIOS IF at [0x03007FF8] for IntrWait/VBlankIntrWait.
         //
-        // 0x18: STMFD SP!, {R0-R3, R12, LR}  - save registers on IRQ stack
-        Self::write_arm_word(&mut bios, 0x18, 0xE92D_500F);
-        // 0x1C: MOV R0, #0x04000000           - load I/O base address
-        Self::write_arm_word(&mut bios, 0x1C, 0xE3A0_0301);
-        // 0x20: ADD LR, PC, #0                - set return address to 0x28
-        Self::write_arm_word(&mut bios, 0x20, 0xE28F_E000);
-        // 0x24: LDR PC, [R0, #-4]             - jump to handler at [0x03FFFFFC]
-        Self::write_arm_word(&mut bios, 0x24, 0xE510_F004);
-        // 0x28: LDMFD SP!, {R0-R3, R12, LR}  - restore registers
-        Self::write_arm_word(&mut bios, 0x28, 0xE8BD_500F);
-        // 0x2C: SUBS PC, LR, #4               - return from IRQ (restores CPSR)
-        Self::write_arm_word(&mut bios, 0x2C, 0xE25E_F004);
+        // 0x80: STMFD SP!, {R0-R3, R12, LR} — Save registers on IRQ stack
+        Self::write_arm_word(&mut bios, 0x80, 0xE92D_500F);
+        // 0x84: MOV R0, #0x04000000         — I/O base for address calculation
+        Self::write_arm_word(&mut bios, 0x84, 0xE3A0_0301);
+        // 0x88: ADD LR, PC, #0              — LR = 0x90 (return address)
+        Self::write_arm_word(&mut bios, 0x88, 0xE28F_E000);
+        // 0x8C: LDR PC, [R0, #-4]           — Jump to game ISR at [0x03FFFFFC]
+        Self::write_arm_word(&mut bios, 0x8C, 0xE510_F004);
+        // --- Game ISR returns here (0x90) ---
+        // 0x90: LDMFD SP!, {R0-R3, R12, LR} — Restore registers
+        Self::write_arm_word(&mut bios, 0x90, 0xE8BD_500F);
+        // 0x94: SUBS PC, LR, #4             — Return from IRQ (restores CPSR)
+        Self::write_arm_word(&mut bios, 0x94, 0xE25E_F004);
 
         Self {
             bios,
@@ -572,6 +577,11 @@ impl MemoryArm7 for GbaBus {
 
     fn irq_pending(&self) -> bool {
         self.irq_pending
+    }
+
+    fn halt_irq_pending(&self) -> bool {
+        // HALT wakes when (IE & IF) != 0, regardless of IME
+        (self.ie & self.if_flags) != 0
     }
 }
 
