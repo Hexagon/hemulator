@@ -23,6 +23,7 @@
 - **[SG-1000](crates/systems/sg1000/README.md)**: Sega SG-1000
 - **[SNES](crates/systems/snes/README.md)**: Super Nintendo Entertainment System
 - **[N64](crates/systems/n64/README.md)**: Nintendo 64
+- **[PS1](crates/systems/ps1/README.md)**: Sony PlayStation 1
 - **[PC](crates/systems/pc/README.md)**: IBM PC/XT
 
 ---
@@ -235,6 +236,7 @@ For system-specific implementation details, see each system's README:
 - **[SMS](crates/systems/sms/README.md)** - Z80 CPU, VDP, PSG
 - **[SNES](crates/systems/snes/README.md)** - PPU modes, memory map
 - **[N64](crates/systems/n64/README.md)** - RDP renderer, RSP
+- **[PS1](crates/systems/ps1/README.md)** - MIPS R3000A CPU, GPU, SPU
 - **[PC](crates/systems/pc/README.md)** - Video adapters, BIOS
 
 **Core Components** (`crates/core/`):
