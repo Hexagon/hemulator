@@ -123,7 +123,7 @@ Hemulator provides three build profiles optimized for different use cases:
 ## Additional Guidelines
 
 - **Documentation**: 
-  - Update [MANUAL.md](MANUAL.md) for user-facing changes (controls, features, system limitations)
+  - Update the [User Manual](../user/) for user-facing changes (controls, features, system limitations)
   - Update [README.md](../README.md) for developer setup info and project overview
   - Update [AGENTS.md](../AGENTS.md) for architecture changes and implementation guidelines
   - **Update system README.md references**: When implementing or debugging system features, add all technical references (datasheets, wikis, development docs, technical manuals) to the system's README.md "References" section. This creates a valuable resource for future developers and documents the authoritative sources used for implementation decisions. See `crates/systems/pc/README.md` and `crates/systems/sms/README.md` for examples of comprehensive reference sections.
