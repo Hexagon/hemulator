@@ -762,7 +762,7 @@ def jsr_tests():
     # jsr (abs,x) (opcode=0xFC).  Reads from PBR bank. Target addr at $7E5000.
     test('jml $7e7000', ins_name='jsr ($F000,x)', mem_7e7000=0xFC, memw_7e7001=0xF000, mem_7e7003=OPCODE_STP, x=0x6000, memw_7e5000=0x8000,
          ememw_01ee=0x7002, es=0x1ed, dbr=0x7F, before_regs=before, after_ins=after)
-    # 8-bt index. Target at 7e0080
+    # 8-bit index. Target at 7e0080
     test('jml $7e7000', ins_name='jsr ($FFFF,x)', mem_7e7000=0xFC, memw_7e7001=0xFFFF, mem_7e7003=OPCODE_STP, x=0x81, memw_7e0080=0x8000, p='X',
          ememw_01ee=0x7002, es=0x1ed, dbr=0x7F, before_regs=before, after_ins=after)
     # With E=1, the stack pushes can write outside page 1
