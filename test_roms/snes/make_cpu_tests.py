@@ -106,7 +106,7 @@ def test(ins, a=0x1234, x=0x3456, y=0x5678, p=None, ea=None, ex=None, ey=None, e
       at specific points.
     - ins_name will be written instead of the ins in tests.txt if provided. It doesn't
       affect the ROM.
-    - comment wil be written to texts.txt.
+    - comment will be written to tests.txt.
     - advanced is true for an advanced test, i.e. for behavior not likely to be used in games.
       The default (when advanced is None) is that tests with E=1 are considered advanced.
     '''
