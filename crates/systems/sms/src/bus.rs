@@ -106,10 +106,13 @@ impl SmsMemory {
 
     /// Update banking configuration
     fn update_banking(&mut self) {
-        // Banking registers are at 0xFFFC, 0xFFFD, 0xFFFE in RAM
-        let frame_0 = self.ram[0x1FFC] as usize;
-        let frame_1 = self.ram[0x1FFD] as usize;
-        let frame_2 = self.ram[0x1FFE] as usize;
+        // Sega mapper banking registers in RAM:
+        // 0xFFFD (RAM[0x1FFD]) = page for slot 0 (0x0000-0x3FFF)
+        // 0xFFFE (RAM[0x1FFE]) = page for slot 1 (0x4000-0x7FFF)
+        // 0xFFFF (RAM[0x1FFF]) = page for slot 2 (0x8000-0xBFFF)
+        let frame_0 = self.ram[0x1FFD] as usize;
+        let frame_1 = self.ram[0x1FFE] as usize;
+        let frame_2 = self.ram[0x1FFF] as usize;
 
         // Map banks with wraparound
         self.rom_bank_0 = frame_0 % self.num_banks.max(1);
@@ -226,8 +229,8 @@ impl MemoryZ80 for SmsMemory {
                 let ram_addr = (addr & 0x1FFF) as usize;
                 self.ram[ram_addr] = val;
 
-                // Check if banking registers were updated
-                if matches!(ram_addr, 0x1FFC..=0x1FFE) {
+                // Check if banking registers were updated (0xFFFD, 0xFFFE, 0xFFFF)
+                if matches!(ram_addr, 0x1FFD..=0x1FFF) {
                     self.update_banking();
                 }
             }
@@ -370,8 +373,8 @@ mod tests {
         assert_eq!(mem.read(0x4000), 1);
         assert_eq!(mem.read(0x8000), 2);
 
-        // Switch bank 2 to bank 5
-        mem.write(0xFFFE, 5);
+        // Switch slot 2 (0x8000-0xBFFF) to bank 5 using 0xFFFF
+        mem.write(0xFFFF, 5);
         assert_eq!(mem.read(0x8000), 5);
     }
 }

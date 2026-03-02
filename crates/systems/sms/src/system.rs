@@ -268,12 +268,23 @@ impl System for SmsSystem {
 
             // Check for VDP interrupts (frame interrupt has priority over line interrupt)
             if self.vdp.borrow().frame_interrupt_pending() {
-                // Trigger Z80 interrupt (IM 1: RST 38h = jump to 0x0038)
-                // Data byte doesn't matter in IM 1, but pass 0xFF as default
+                // Trigger the CPU interrupt; do NOT clear frame_interrupt_pending here.
+                // The VDP status register bit 7 must remain set until the ISR reads it
+                // (via IN A, (0xBF)), which calls read_status() and clears the flag.
+                // Clearing it here would cause the ISR to misidentify every frame interrupt
+                // as a line interrupt (bit 7 = 0 → carry clear → JP NC to line handler).
+                let iff1_before = self.cpu.iff1;
                 self.cpu.interrupt(0xFF);
-                self.vdp.borrow_mut().clear_frame_interrupt();
+                log(LogCategory::CPU, LogLevel::Debug, || {
+                    format!(
+                        "SMS Frame interrupt: pending={} iff1_before={} pc_after={:04X}",
+                        true,
+                        iff1_before,
+                        self.cpu.pc
+                    )
+                });
             } else if self.vdp.borrow().line_interrupt_pending() {
-                // Trigger Z80 interrupt for line interrupt
+                // Line interrupt: no status-register bit, so clear it here after triggering.
                 self.cpu.interrupt(0xFF);
                 self.vdp.borrow_mut().clear_line_interrupt();
             }
@@ -1341,5 +1352,82 @@ mod tests {
         // Should read BIOS again
         assert!(system.cpu.memory.is_bios_enabled());
         assert_eq!(system.cpu.memory.read(0x0000), 0xAA);
+    }
+
+    /// Smoke test for the SMSTestSuite ROM (v0.37 by sverx).
+    /// This verifies that the ROM boots past initialization and produces a visible frame.
+    /// The test suite starts with its main menu, which uses multiple colors.
+    ///
+    /// ROM source: https://github.com/sverx/SMSTestSuite
+    #[test]
+    fn smoke_test_sms_test_suite() {
+        let rom = include_bytes!("../../../../test_roms/sms/SMSTestSuite.sms");
+        let mut system = SmsSystem::new();
+        system.load_rom(rom.to_vec());
+        system.reset();
+
+        // Run for enough frames to pass the initialization and display the main menu.
+        // The ROM performs hardware detection (V-counter type, sprite zoom, FM audio, etc.)
+        // before preparing the main menu, which may require several seconds of emulated time.
+        use std::collections::HashSet;
+        let mut first_multicolor_frame = None;
+        for i in 0..300 {
+            let frame = system.step_frame().unwrap();
+            let unique: HashSet<u32> = frame.pixels.iter().copied().collect();
+            if i % 60 == 0 {
+                println!(
+                    "Frame {:3}: PC={:04X} SP={:04X} halted={} banks={}/{}/{} colors={}",
+                    i,
+                    system.cpu.pc,
+                    system.cpu.sp,
+                    system.cpu.halted,
+                    system.cpu.memory.get_rom_bank_0(),
+                    system.cpu.memory.get_rom_bank_1(),
+                    system.cpu.memory.get_rom_bank_2(),
+                    unique.len()
+                );
+            }
+            if unique.len() >= 4 && first_multicolor_frame.is_none() {
+                first_multicolor_frame = Some(i);
+                println!(
+                    "First multi-color frame at frame {}: {} colors",
+                    i,
+                    unique.len()
+                );
+            }
+        }
+
+        // Get the final frame to check
+        let frame = system.step_frame().unwrap();
+
+        // Verify basic frame dimensions
+        assert_eq!(frame.width, 256);
+        assert_eq!(frame.height, 192);
+
+        let unique_colors: HashSet<u32> = frame.pixels.iter().copied().collect();
+        println!(
+            "Final frame: {} unique colors, PC={:04X}",
+            unique_colors.len(),
+            system.cpu.pc,
+        );
+        for c in unique_colors.iter().take(16) {
+            println!("  color: {c:#010X}");
+        }
+
+        // All pixels must have full alpha (0xFF in bits 31-24)
+        for &pixel in &frame.pixels {
+            assert_eq!(
+                pixel >> 24,
+                0xFF,
+                "Pixel {pixel:#010X} is missing alpha channel"
+            );
+        }
+
+        // At least 4 distinct colors expected (menu text + background + borders + etc.)
+        assert!(
+            unique_colors.len() >= 4,
+            "Expected at least 4 colors in SMSTestSuite main menu, got {}",
+            unique_colors.len()
+        );
     }
 }

@@ -60,10 +60,10 @@ def assemble_z80(rom):
     rom[pc] = 0xBF  # VDP control port
     pc += 1
     
-    # Register 1: Mode Control 2 - $20 (display on, frame interrupt enable, mode 4)
+    # Register 1: Mode Control 2 - $60 (display on = bit 6, frame interrupt enable = bit 5)
     rom[pc] = 0x3E  # LD A, n
     pc += 1
-    rom[pc] = 0x20  # Mode control value (bit 6 = 0 for display, bit 5 = 1 for frame interrupt)
+    rom[pc] = 0x60  # Mode control value (bit 6 = 1 for display enable, bit 5 = 1 for frame interrupt)
     pc += 1
     rom[pc] = 0xD3  # OUT (n), A
     pc += 1
