@@ -52,14 +52,12 @@ const BG0HOFS: usize = 0x010;
 
 // Affine background parameters (BG2/BG3)
 const BG2PA: usize = 0x020;
-#[allow(dead_code)] // Used in affine calculations
 const BG2PB: usize = 0x022;
 const BG2PC: usize = 0x024;
 const BG2PD: usize = 0x026;
 const BG2X: usize = 0x028;
 const BG2Y: usize = 0x02C;
 const BG3PA: usize = 0x030;
-#[allow(dead_code)] // Used in affine calculations
 const BG3PB: usize = 0x032;
 const BG3PC: usize = 0x034;
 const BG3PD: usize = 0x036;
@@ -305,12 +303,33 @@ impl Ppu {
     }
 
     /// Latch the affine reference points from I/O registers.
-    /// Called when BG2X/BG2Y/BG3X/BG3Y are written.
+    /// Called at VBlank and frame start to reload all reference points.
     pub fn latch_affine_registers(&mut self, io: &[u8]) {
         self.bg2_ref_x = read_io_28bit_signed(io, BG2X);
         self.bg2_ref_y = read_io_28bit_signed(io, BG2Y);
         self.bg3_ref_x = read_io_28bit_signed(io, BG3X);
         self.bg3_ref_y = read_io_28bit_signed(io, BG3Y);
+    }
+
+    /// Selectively update affine reference points based on dirty flags.
+    /// Called when the game writes to BG2X/BG2Y/BG3X/BG3Y registers
+    /// (via CPU or DMA). On real hardware these are write-only latches
+    /// that immediately update the internal reference point.
+    ///
+    /// dirty_bits: bit 0=BG2X, bit 1=BG2Y, bit 2=BG3X, bit 3=BG3Y
+    pub fn apply_affine_ref_writes(&mut self, io: &[u8], dirty_bits: u8) {
+        if dirty_bits & 1 != 0 {
+            self.bg2_ref_x = read_io_28bit_signed(io, BG2X);
+        }
+        if dirty_bits & 2 != 0 {
+            self.bg2_ref_y = read_io_28bit_signed(io, BG2Y);
+        }
+        if dirty_bits & 4 != 0 {
+            self.bg3_ref_x = read_io_28bit_signed(io, BG3X);
+        }
+        if dirty_bits & 8 != 0 {
+            self.bg3_ref_y = read_io_28bit_signed(io, BG3Y);
+        }
     }
 
     /// Get a reference to the current frame buffer
@@ -601,12 +620,13 @@ impl Ppu {
             (self.bg3_ref_x, self.bg3_ref_y)
         };
 
-        // Get affine parameters (PA, PB, PC for horizontal increments)
+        // Get affine parameters for per-pixel horizontal stepping
         // Affine matrix: [PA PB]   where PA/PB affect X coordinate
         //                [PC PD]   and   PC/PD affect Y coordinate
         let pa_offset = if bg_idx == 2 { BG2PA } else { BG3PA };
+        let pc_offset = if bg_idx == 2 { BG2PC } else { BG3PC };
         let pa = read_io_i16(io, pa_offset) as i32; // X increment per screen X
-        let pc = read_io_i16(io, pa_offset + 4) as i32; // Y increment per screen X
+        let pc = read_io_i16(io, pc_offset) as i32; // Y increment per screen X
 
         // Affine BGs are always 8bpp with a single 256-color palette
         for x in 0..SCREEN_WIDTH {
@@ -673,18 +693,23 @@ impl Ppu {
         }
     }
 
-    /// Increment affine reference points by PD/PC for the next scanline
+    /// Increment affine reference points by PB/PD for the next scanline.
+    ///
+    /// Per GBA hardware, after each scanline the internal reference points
+    /// are updated:
+    ///   ref_x += PB  (dmx: horizontal displacement per scanline)
+    ///   ref_y += PD  (dmy: vertical displacement per scanline)
     fn increment_affine_refs(&mut self, bg_idx: usize, io: &[u8]) {
+        let pb_offset = if bg_idx == 2 { BG2PB } else { BG3PB };
         let pd_offset = if bg_idx == 2 { BG2PD } else { BG3PD };
-        let pc_offset = if bg_idx == 2 { BG2PC } else { BG3PC };
-        let pc = read_io_i16(io, pc_offset) as i32;
+        let pb = read_io_i16(io, pb_offset) as i32;
         let pd = read_io_i16(io, pd_offset) as i32;
 
         if bg_idx == 2 {
-            self.bg2_ref_x += pc;
+            self.bg2_ref_x += pb;
             self.bg2_ref_y += pd;
         } else {
-            self.bg3_ref_x += pc;
+            self.bg3_ref_x += pb;
             self.bg3_ref_y += pd;
         }
     }

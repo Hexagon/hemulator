@@ -101,6 +101,10 @@ pub struct GbaBus {
     /// Bits: 0=A, 1=B, 2=Select, 3=Start, 4=Right, 5=Left, 6=Up, 7=Down, 8=R, 9=L
     /// 0 = pressed, 1 = released. Default: 0x03FF (all released)
     keyinput: u16,
+    /// Dirty flags for affine reference point writes.
+    /// Bit 0=BG2X, bit 1=BG2Y, bit 2=BG3X, bit 3=BG3Y.
+    /// Set when the game writes to these registers; cleared after the PPU latches them.
+    pub affine_ref_dirty: u8,
 }
 
 impl std::fmt::Debug for GbaBus {
@@ -179,6 +183,7 @@ impl GbaBus {
             ie: 0,
             if_flags: 0,
             keyinput: 0x03FF, // All buttons released
+            affine_ref_dirty: 0,
         }
     }
 
@@ -297,6 +302,37 @@ impl GbaBus {
             // HALTCNT (0x04000301) - Halt/Stop
             0x04000301 => {
                 // TODO: Implement halt/stop modes
+            }
+
+            // Affine reference point registers - writing immediately updates
+            // the PPU's internal reference point (they are write-only latches).
+            0x04000028..=0x0400002B => {
+                // BG2X
+                if offset < self.io.len() {
+                    self.io[offset] = val;
+                }
+                self.affine_ref_dirty |= 1;
+            }
+            0x0400002C..=0x0400002F => {
+                // BG2Y
+                if offset < self.io.len() {
+                    self.io[offset] = val;
+                }
+                self.affine_ref_dirty |= 2;
+            }
+            0x04000038..=0x0400003B => {
+                // BG3X
+                if offset < self.io.len() {
+                    self.io[offset] = val;
+                }
+                self.affine_ref_dirty |= 4;
+            }
+            0x0400003C..=0x0400003F => {
+                // BG3Y
+                if offset < self.io.len() {
+                    self.io[offset] = val;
+                }
+                self.affine_ref_dirty |= 8;
             }
 
             // Other I/O registers
@@ -596,6 +632,9 @@ const CPU_FREQ: u64 = 16_777_216;
 /// Cycles per scanline: 1232 (280896 cycles/frame ÷ 228 scanlines)
 const CYCLES_PER_SCANLINE: u64 = 1232;
 
+/// Cycle within a scanline where HBlank begins (after 1006 cycles of draw)
+const HBLANK_START: u64 = 1006;
+
 /// Visible scanlines: 160
 const VISIBLE_SCANLINES: u32 = 160;
 
@@ -611,7 +650,6 @@ const REG_VCOUNT: usize = 0x006;
 
 // DISPSTAT bits
 const DISPSTAT_VBLANK: u8 = 1 << 0;
-#[allow(dead_code)] // Will be used when HBlank timing is fully implemented
 const DISPSTAT_HBLANK: u8 = 1 << 1;
 const DISPSTAT_VCOUNT_MATCH: u8 = 1 << 2;
 const DISPSTAT_VBLANK_IRQ: u8 = 1 << 3;
@@ -662,6 +700,8 @@ pub struct GbaSystem {
     total_cycles: u64,
     scanline: u32,
     scanline_cycles: u64,
+    /// Whether HBlank events (IRQ, DMA, flag) have been triggered for the current scanline
+    hblank_triggered: bool,
     /// Parsed cartridge header (set on mount)
     header: Option<cartridge::GbaCartridgeHeader>,
     /// Instruction tracer for debugging
@@ -696,6 +736,7 @@ impl GbaSystem {
             total_cycles: 0,
             scanline: 0,
             scanline_cycles: 0,
+            hblank_triggered: false,
             header: None,
             instruction_tracer: emu_core::instruction_tracer::InstructionTracer::new(),
         }
@@ -830,34 +871,33 @@ impl GbaSystem {
         cycles
     }
 
-    /// Update DISPSTAT and VCOUNT I/O registers for current scanline
+    /// Update DISPSTAT and VCOUNT I/O registers for current scanline and dot position.
+    /// Called after every CPU step to keep display status accurate for polling games.
     fn update_display_status(&mut self) {
         // VCOUNT register
         self.cpu.memory.io[REG_VCOUNT] = self.scanline as u8;
 
-        // DISPSTAT register
+        // DISPSTAT register - preserve enable bits (bits 3-5) and VCount target (byte 1)
         let dispstat = self.cpu.memory.io[REG_DISPSTAT];
         let vcount_target = self.cpu.memory.io[REG_DISPSTAT + 1];
 
         let in_vblank = self.scanline >= VISIBLE_SCANLINES;
+        let in_hblank = self.scanline_cycles >= HBLANK_START;
         let vcount_match = self.scanline as u8 == vcount_target;
 
-        let mut new_dispstat = dispstat & !(DISPSTAT_VBLANK | DISPSTAT_VCOUNT_MATCH);
+        // Clear status bits (0-2) but preserve enable bits (3-5)
+        let mut new_dispstat =
+            dispstat & !(DISPSTAT_VBLANK | DISPSTAT_HBLANK | DISPSTAT_VCOUNT_MATCH);
         if in_vblank {
             new_dispstat |= DISPSTAT_VBLANK;
+        }
+        if in_hblank {
+            new_dispstat |= DISPSTAT_HBLANK;
         }
         if vcount_match {
             new_dispstat |= DISPSTAT_VCOUNT_MATCH;
         }
         self.cpu.memory.io[REG_DISPSTAT] = new_dispstat;
-
-        // Fire interrupts
-        if in_vblank && self.scanline == VISIBLE_SCANLINES && dispstat & DISPSTAT_VBLANK_IRQ != 0 {
-            self.cpu.memory.request_interrupt(IRQ_VBLANK);
-        }
-        if vcount_match && dispstat & DISPSTAT_VCOUNT_IRQ != 0 {
-            self.cpu.memory.request_interrupt(IRQ_VCOUNT);
-        }
     }
 }
 
@@ -872,6 +912,7 @@ impl System for GbaSystem {
         self.total_cycles = 0;
         self.scanline = 0;
         self.scanline_cycles = 0;
+        self.hblank_triggered = false;
         // header is preserved across resets (only cleared on unmount)
     }
 
@@ -918,27 +959,31 @@ impl System for GbaSystem {
                 self.scanline_cycles += dma_cycles;
             }
 
-            // Check if we've completed a scanline
-            if self.scanline_cycles >= CYCLES_PER_SCANLINE {
-                self.scanline_cycles -= CYCLES_PER_SCANLINE;
+            // Update DISPSTAT flags after every CPU step so polling games
+            // see accurate HBlank/VBlank/VCount status.
+            self.update_display_status();
 
-                // HBlank IRQ at end of each visible scanline
+            // HBlank start: fires once per scanline when we cross cycle 1006
+            if self.scanline_cycles >= HBLANK_START && !self.hblank_triggered {
+                self.hblank_triggered = true;
+
+                // Fire HBlank IRQ if enabled
+                let dispstat = self.cpu.memory.io[REG_DISPSTAT];
+                if dispstat & DISPSTAT_HBLANK_IRQ != 0 {
+                    self.cpu.memory.request_interrupt(IRQ_HBLANK);
+                }
+
                 if self.scanline < VISIBLE_SCANLINES {
-                    let dispstat = self.cpu.memory.io[REG_DISPSTAT];
-                    if dispstat & DISPSTAT_HBLANK_IRQ != 0 {
-                        self.cpu.memory.request_interrupt(IRQ_HBLANK);
+                    // Apply any pending affine reference point writes
+                    // (from CPU or DMA during the draw period)
+                    let dirty = self.cpu.memory.affine_ref_dirty;
+                    if dirty != 0 {
+                        self.ppu
+                            .apply_affine_ref_writes(&self.cpu.memory.io, dirty);
+                        self.cpu.memory.affine_ref_dirty = 0;
                     }
 
-                    // Trigger HBlank DMA
-                    self.cpu
-                        .memory
-                        .dma
-                        .notify_timing(dma::DmaStartTiming::HBlank);
-                    let dma_cycles = self.execute_dma();
-                    self.total_cycles += dma_cycles;
-                    self.scanline_cycles += dma_cycles;
-
-                    // Render this scanline via PPU
+                    // Render this scanline before entering HBlank
                     self.ppu.render_scanline(
                         self.scanline,
                         &self.cpu.memory.io,
@@ -946,14 +991,36 @@ impl System for GbaSystem {
                         &self.cpu.memory.vram,
                         &self.cpu.memory.oam,
                     );
+
+                    // Trigger HBlank DMA (only during visible scanlines)
+                    self.cpu
+                        .memory
+                        .dma
+                        .notify_timing(dma::DmaStartTiming::HBlank);
+                    let dma_cycles = self.execute_dma();
+                    self.total_cycles += dma_cycles;
+                    self.scanline_cycles += dma_cycles;
                 }
+            }
+
+            // Scanline boundary: advance to next scanline
+            if self.scanline_cycles >= CYCLES_PER_SCANLINE {
+                self.scanline_cycles -= CYCLES_PER_SCANLINE;
+                self.hblank_triggered = false;
 
                 // Advance to next scanline
                 self.scanline += 1;
 
-                // VBlank start
+                // VBlank start (scanline 160)
                 if self.scanline == VISIBLE_SCANLINES {
                     self.ppu.on_vblank(&self.cpu.memory.io);
+                    self.cpu.memory.affine_ref_dirty = 0; // VBlank latch overrides pending writes
+
+                    // VBlank IRQ
+                    let dispstat = self.cpu.memory.io[REG_DISPSTAT];
+                    if dispstat & DISPSTAT_VBLANK_IRQ != 0 {
+                        self.cpu.memory.request_interrupt(IRQ_VBLANK);
+                    }
 
                     // Trigger VBlank DMA
                     self.cpu
@@ -965,13 +1032,24 @@ impl System for GbaSystem {
                     self.scanline_cycles += dma_cycles;
                 }
 
+                // Frame wrap
                 if self.scanline >= TOTAL_SCANLINES {
                     self.scanline = 0;
                     // Re-latch affine registers at frame start
                     self.ppu.latch_affine_registers(&self.cpu.memory.io);
+                    self.cpu.memory.affine_ref_dirty = 0;
                 }
 
-                // Update display registers
+                // VCount match IRQ
+                let vcount_target = self.cpu.memory.io[REG_DISPSTAT + 1];
+                let dispstat = self.cpu.memory.io[REG_DISPSTAT];
+                if self.scanline as u8 == vcount_target
+                    && dispstat & DISPSTAT_VCOUNT_IRQ != 0
+                {
+                    self.cpu.memory.request_interrupt(IRQ_VCOUNT);
+                }
+
+                // Update display registers for the new scanline
                 self.update_display_status();
             }
         }
