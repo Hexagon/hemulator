@@ -14,7 +14,7 @@ nav_order: 3
 For detailed implementation information, see:
 - **[N64 System README](../crates/systems/n64/README.md)** - Complete implementation details
 - **[Architecture Documentation](ARCHITECTURE.md)** - Overall emulator architecture
-- **[User Manual](MANUAL.md)** - End-user features and limitations
+- **[User Manual](../user/)** - End-user features and limitations
 
 ## Current Implementation Status
 
@@ -138,7 +138,7 @@ cargo test --package emu_n64 -- --ignored
 
 ## Known Limitations
 
-See [MANUAL.md](MANUAL.md#n64-nintendo-64) for complete user-facing limitations.
+See [User Manual - N64 section](../user/systems.md#n64-nintendo-64) for complete user-facing limitations.
 
 **Critical blockers for commercial games**:
 1. **Incomplete RSP HLE** - Many F3DEX commands stubbed (G_MOVEWORD, G_MOVEMEM, G_SETOTHERMODE_*); audio microcode not implemented
@@ -199,7 +199,7 @@ cargo run --profile release-quick -- rom.z64 --log-ppu info
 ### Documentation
 - **[N64 System README](../crates/systems/n64/README.md)** - Detailed implementation docs
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** - Overall emulator architecture
-- **[MANUAL.md](MANUAL.md)** - User manual and features
+- **[User Manual](../user/)** - User manual and features
 - **[AGENTS.md](../AGENTS.md)** - Implementation guidelines
 
 ### Hardware Reference

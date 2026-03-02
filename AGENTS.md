@@ -231,9 +231,12 @@ For comprehensive architecture documentation, see **[ARCHITECTURE.md](ARCHITECTU
 For system-specific implementation details, see each system's README:
 - **[NES](crates/systems/nes/README.md)** - PPU, APU, mappers
 - **[Game Boy](crates/systems/gb/README.md)** - PPU, APU, MBCs
+- **[GBA](crates/systems/gba/README.md)** - ARM7TDMI CPU, PPU, saves
 - **[Atari 2600](crates/systems/atari2600/README.md)** - TIA, RIOT, cartridges
 - **[CHIP-8](crates/systems/chip8/README.md)** - VM architecture, display modes
 - **[SMS](crates/systems/sms/README.md)** - Z80 CPU, VDP, PSG
+- **[ColecoVision](crates/systems/colecovision/README.md)** - Z80 CPU, TMS9918A VDP, PSG
+- **[SG-1000](crates/systems/sg1000/README.md)** - Z80 CPU, TMS9918A VDP, PSG
 - **[SNES](crates/systems/snes/README.md)** - PPU modes, memory map
 - **[N64](crates/systems/n64/README.md)** - RDP renderer, RSP
 - **[PS1](crates/systems/ps1/README.md)** - MIPS R3000A CPU, GPU, SPU
@@ -245,11 +248,7 @@ For system-specific implementation details, see each system's README:
 - Graphics: ZBuffer, ColorOps, palette/tile utilities
 - Traits: System, Cpu, Renderer, AudioChip
 
-**System Modules** (`crates/systems/`):
-- ✅ NES (~90% game coverage), Game Boy (GB fully functional, GBC WIP), CHIP-8 (fully working)
-- 🚧 Atari 2600 (rendering issues), SMS (not producing image), ColecoVision (not producing image), SNES (no visible output), N64 (in development), PS1 (in development)
-- ⚠️ SG-1000 (experimental)
-- 🧪 PC (experimental)
+For current system status and coverage, see the **[System Status table in README.md](README.md#system-status)**.
 
 ## Implementation Guidelines
 
