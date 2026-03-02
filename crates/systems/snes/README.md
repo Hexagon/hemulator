@@ -506,7 +506,7 @@ SnesSystem
           │   ├── 64KB Audio RAM (ARAM)
           │   ├── IPL boot ROM
           │   ├── Communication ports ($2140-$2143)
-          │   └── DSP registers (stub - no audio output)
+          │   └── DSP (BRR sample playback, 8-voice synthesis, hardware-accurate interpolation)
           ├── DMA Controller (8 channels)
           │   ├── General-purpose DMA
           │   ├── HDMA (H-blank DMA)
