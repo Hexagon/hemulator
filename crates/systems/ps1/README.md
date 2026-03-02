@@ -99,7 +99,7 @@ println!("{}×{}", frame.width, frame.height);
 
 **GUI / command-line:**
 ```bash
-# Load via project file
+# Direct CLI launch with BIOS + PS-X EXE
 hemu --bios SCPH1001.BIN game.exe
 ```
 
