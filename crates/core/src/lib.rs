@@ -10,6 +10,7 @@ pub mod cpu_8086;
 pub mod cpu_8086_protected;
 pub mod cpu_arm7tdmi;
 pub mod cpu_lr35902;
+pub mod cpu_mips_r3000a;
 pub mod cpu_mips_r4300i;
 pub mod cpu_spc700;
 pub mod cpu_z80;

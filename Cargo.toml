@@ -13,6 +13,7 @@ members = [
   "crates/systems/chip8",
   "crates/systems/colecovision",
   "crates/systems/sg1000",
+  "crates/systems/ps1",
   "crates/frontend/gui",
 ]
 

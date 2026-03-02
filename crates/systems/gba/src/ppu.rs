@@ -960,9 +960,11 @@ impl Ppu {
                         tile_base_id + tile_offset as usize
                     }
                 } else {
-                    // 2D mapping: 32 tiles per row in VRAM
+                    // 2D mapping: 32 tile-IDs per row in VRAM regardless of BPP.
+                    // For 8bpp, each 8x8 tile spans 2 consecutive tile IDs,
+                    // but the row stride remains 32 tile-IDs.
                     if is_8bpp {
-                        tile_base_id + (tile_y as usize * 32 + tile_x as usize) * 2
+                        tile_base_id + tile_y as usize * 32 + tile_x as usize * 2
                     } else {
                         tile_base_id + tile_y as usize * 32 + tile_x as usize
                     }

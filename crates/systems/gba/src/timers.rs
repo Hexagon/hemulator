@@ -106,6 +106,9 @@ impl Timer {
 #[derive(Debug, Clone)]
 pub struct Timers {
     timers: [Timer; NUM_TIMERS],
+    /// Overflow counts from the most recent `tick()` call.
+    /// Used by the APU to drive DMA sound FIFO channels.
+    pub last_overflows: [u32; NUM_TIMERS],
 }
 
 impl Default for Timers {
@@ -119,6 +122,7 @@ impl Timers {
     pub fn new() -> Self {
         Self {
             timers: [Timer::new(), Timer::new(), Timer::new(), Timer::new()],
+            last_overflows: [0; NUM_TIMERS],
         }
     }
 
@@ -135,6 +139,7 @@ impl Timers {
     /// The caller is responsible for calling `request_interrupt()` with these bits.
     pub fn tick(&mut self, cycles: u32) -> u16 {
         let mut irq_flags: u16 = 0;
+        self.last_overflows = [0; NUM_TIMERS];
 
         // Process each timer. Cascaded timers are handled via overflow propagation.
         // We need to track overflows from the previous timer for cascade logic.
@@ -155,6 +160,8 @@ impl Timers {
                 // Normal mode: tick based on prescaler
                 self.tick_timer_prescaled(i, cycles)
             };
+
+            self.last_overflows[i] = overflows;
 
             // Fire IRQ if enabled and timer overflowed
             if overflows > 0 && self.timers[i].irq_enabled() {

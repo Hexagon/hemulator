@@ -165,6 +165,14 @@ pub trait MemoryArm7 {
     fn halt_irq_pending(&self) -> bool {
         self.irq_pending()
     }
+
+    /// Called before the CPU enters an IRQ exception.
+    ///
+    /// On the GBA, the real BIOS IRQ handler acknowledges IF and updates
+    /// BIOS IF at 0x03007FF8 before calling the game's ISR. Since we use
+    /// an HLE BIOS stub, this method allows the memory bus to perform
+    /// those critical bookkeeping steps.
+    fn pre_irq_acknowledge(&mut self) {}
 }
 
 // =============================================================================
@@ -980,7 +988,8 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
 
     fn bios_lz77_decompress(&mut self, src: u32, dst: u32, vram: bool) {
         let header = self.memory.read_byte(src);
-        if header != 0x10 {
+        // Header byte: bits 7-4 = compression type (1 = LZ77), bits 3-0 = reserved
+        if (header >> 4) != 1 {
             return;
         }
 
@@ -1029,7 +1038,8 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
 
     fn bios_rl_decompress(&mut self, src: u32, dst: u32, vram: bool) {
         let header = self.memory.read_byte(src);
-        if header != 0x30 {
+        // Header byte: bits 7-4 = compression type (3 = RLE), bits 3-0 = reserved
+        if (header >> 4) != 3 {
             return;
         }
 
@@ -1219,18 +1229,17 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
 
     /// Huffman decompression (BIOS SWI 0x13)
     ///
-    /// Format:
-    /// - Header [0]: Compression type (bit 7-4: data width 4/8, bit 3-0: 0x2 for Huffman)
-    /// - Header [1-3]: Decompressed size in bytes (24-bit little endian)
-    /// - Tree size: (tree_size+1)*2 bytes, aligned to 4 bytes
-    /// - Tree data: Binary tree nodes
-    /// - Compressed data: Bitstream referencing the tree
-    ///
-    /// The tree is encoded as: Each node is 1 byte:
-    /// - If bit 7 = 1: Internal node, bits 5-0 = offset to right child node
-    /// - If bit 7 = 0: Leaf node, bits 7-0 = data value (or 4 bits for 4-bit mode)
-    ///
-    /// Decompression walks the tree: 0 bit = left child, 1 bit = right child
+    /// Format (per GBATEK):
+    /// - Header word [0..3]: bits 0-3 = data width (4 or 8), bits 4-7 = type (2),
+    ///   bits 8-31 = decompressed size in bytes
+    /// - Tree size byte [4]: (tree_table_bytes / 2) - 1
+    /// - Tree table [5..]: Each non-leaf node is 1 byte:
+    ///   - Bit 7: Left child is a data/leaf node (1) or routing node (0)
+    ///   - Bit 6: Right child is a data/leaf node (1) or routing node (0)
+    ///   - Bits 0-5: Offset to next node data
+    ///     Left child at: (node_pos & ~1) + offset*2 + 2
+    ///     Right child at: (node_pos & ~1) + offset*2 + 3
+    /// - Compressed bitstream: 32-bit words, MSB first (0=left, 1=right)
     fn bios_huff_uncomp(&mut self, src: u32, dst: u32) {
         // Read header
         let header = self.memory.read_word(src);
@@ -1249,13 +1258,13 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
             return;
         }
 
-        // Tree size byte (number of tree nodes)
+        // Tree size byte: (tree_table_bytes / 2) - 1
         let tree_size = self.memory.read_byte(src + 4) as u32;
-        let tree_byte_size = (tree_size + 1) * 2; // Each node is 1 byte, pairs stored
-        let tree_offset = 5; // Header (4 bytes) + tree size (1 byte)
+        let tree_byte_size = (tree_size + 1) * 2; // Tree table size in bytes
+        let tree_base = src + 5; // Tree table starts after header (4) + tree_size (1)
 
-        // Calculate where compressed data starts (aligned to 4 bytes after tree)
-        let data_start = src + tree_offset + ((tree_byte_size + 3) & !3);
+        // Compressed data starts at next word-aligned position after tree table
+        let data_start = (tree_base + tree_byte_size + 3) & !3;
 
         let mut dst_addr = dst;
         let mut bytes_written = 0u32;
@@ -1265,73 +1274,91 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
         let mut bits_available = 0u32;
         let mut data_addr = data_start;
 
+        // Accumulator for building output words (VRAM-safe: write 32 bits at a time)
+        let mut out_word = 0u32;
+        let mut out_bits = 0u32;
+
         while bytes_written < decompressed_size {
-            // Start at root of tree (node 0)
-            let mut node_offset = 0u32;
+            // Start at root of tree (node 0 in tree table)
+            let mut node_pos = 0u32;
 
             loop {
-                // Read the current tree node
-                let node_addr = src + tree_offset + node_offset;
-                let node_byte = self.memory.read_byte(node_addr);
+                // Read the current routing node
+                let node_byte = self.memory.read_byte(tree_base + node_pos);
+                let offset = (node_byte & 0x3F) as u32;
+                let left_is_leaf = node_byte & 0x80 != 0;
+                let right_is_leaf = node_byte & 0x40 != 0;
 
-                // Check if this is an internal node (bit 7 = 1) or leaf (bit 7 = 0)
-                if node_byte & 0x80 != 0 {
-                    // Internal node - need to read a bit to decide left or right
-                    if bits_available == 0 {
-                        bit_buffer = self.memory.read_word(data_addr);
-                        data_addr += 4;
-                        bits_available = 32;
-                    }
+                // Read a bit from the compressed stream
+                if bits_available == 0 {
+                    bit_buffer = self.memory.read_word(data_addr);
+                    data_addr += 4;
+                    bits_available = 32;
+                }
 
-                    let bit = (bit_buffer >> 31) & 1;
-                    bit_buffer <<= 1;
-                    bits_available -= 1;
+                let bit = (bit_buffer >> 31) & 1;
+                bit_buffer <<= 1;
+                bits_available -= 1;
 
-                    // Calculate child node offset
-                    // Bit 6 indicates if offset is in upper or lower 6 bits
-                    let offset_data = (node_byte & 0x3F) as u32;
-                    if bit == 0 {
-                        // Left child - offset*2 + 2 from current node
-                        node_offset = node_offset + (offset_data * 2) + 2;
-                    } else {
-                        // Right child - offset*2 + 2 + 1 from current node
-                        node_offset = node_offset + (offset_data * 2) + 2 + 1;
-                    }
+                // Navigate to child node
+                let is_leaf;
+                if bit == 0 {
+                    // Left child
+                    is_leaf = left_is_leaf;
+                    node_pos = (node_pos & !1) + offset * 2 + 2;
                 } else {
-                    // Leaf node - extract data value
-                    let data_value = node_byte;
+                    // Right child
+                    is_leaf = right_is_leaf;
+                    node_pos = (node_pos & !1) + offset * 2 + 2 + 1;
+                }
+
+                if is_leaf {
+                    // Child is a data node: read the byte at the child position
+                    let data_value = self.memory.read_byte(tree_base + node_pos);
 
                     if data_width == 8 {
-                        // 8-bit mode: write the byte directly
-                        self.memory.write_byte(dst_addr, data_value);
-                        dst_addr += 1;
+                        // 8-bit mode: accumulate into 32-bit output word
+                        out_word |= (data_value as u32) << out_bits;
+                        out_bits += 8;
                         bytes_written += 1;
                     } else {
-                        // 4-bit mode: need to pack two 4-bit values into one byte
-                        // The node contains both nibbles: high nibble first, low nibble second
-                        let nibble1 = (data_value >> 4) & 0x0F;
-                        let nibble2 = data_value & 0x0F;
-
-                        self.memory.write_byte(dst_addr, nibble1);
-                        dst_addr += 1;
-                        bytes_written += 1;
-
-                        if bytes_written < decompressed_size {
-                            self.memory.write_byte(dst_addr, nibble2);
-                            dst_addr += 1;
+                        // 4-bit mode: each leaf contains one 4-bit value
+                        out_word |= (data_value as u32 & 0xF) << out_bits;
+                        out_bits += 4;
+                        // Two 4-bit values make one byte
+                        if out_bits.is_multiple_of(8) {
                             bytes_written += 1;
                         }
                     }
 
-                    // Done with this symbol, break inner loop to start at root again
+                    // Write a full 32-bit word when accumulated
+                    if out_bits >= 32 {
+                        self.memory.write_word(dst_addr, out_word);
+                        dst_addr += 4;
+                        out_word = 0;
+                        out_bits = 0;
+                    }
+
+                    // Done decoding this symbol, restart at root
                     break;
                 }
+                // Otherwise, continue navigating the tree from the child node
             }
+        }
+
+        // Write any remaining partial word
+        if out_bits > 0 {
+            self.memory.write_word(dst_addr, out_word);
         }
     }
 
     /// Handle an IRQ
     fn handle_irq(&mut self) {
+        // Acknowledge IF and update BIOS IF before entering the exception.
+        // On real hardware, the BIOS IRQ handler does this before calling
+        // the game's ISR. Since our BIOS stub is minimal, we do it here.
+        self.memory.pre_irq_acknowledge();
+
         // In our emulator, PC = address of next instruction to execute.
         // ARM7TDMI convention: LR_irq = next_instruction_addr + 4
         // The BIOS returns with SUBS PC, LR, #4 → PC = LR - 4 = next_instruction_addr

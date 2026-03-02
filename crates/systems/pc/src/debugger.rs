@@ -422,7 +422,6 @@ mod tests {
 
     #[test]
     fn test_pc_check_breakpoint() {
-        use emu_core::cpu_8086::Memory8086;
         let mut system = PcSystem::new();
 
         // Initially no breakpoint should fire
