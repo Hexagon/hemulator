@@ -1372,6 +1372,124 @@ mod tests {
     }
 }
 
+/// Tests using the 65C816 CPU test ROMs from https://github.com/gilyon/snes-tests
+///
+/// These ROMs perform comprehensive testing of the 65C816 instruction set.
+/// The ROM writes its result to VRAM: "Success" or "Failed" at VRAM word address $32.
+/// The current test number is stored in WRAM at address $0010 (zero-page offset $10).
+///
+/// Layout:
+/// - `cputest-basic.sfc`: Tests all opcodes, skips emulation-mode edge cases (~1107 tests)
+/// - `cputest-full.sfc`:  All tests including emulation-mode wrapping behavior (~1610 tests)
+///
+/// Result detection:
+/// - VRAM word addr $32 = byte addr $64: first byte is 'S' (0x53) for Success or 'F' (0x46) for Fail
+/// - WRAM address $0010: u16 LE = number of the last completed test
+#[cfg(test)]
+mod cpu_test_rom_tests {
+    use super::*;
+    use emu_core::debug::Debugger;
+
+    /// Read the current test_num from WRAM address $0010 (little-endian u16).
+    fn read_test_num(sys: &SnesSystem) -> u16 {
+        let bytes = sys.read_memory(0x0010, 2).unwrap_or_default();
+        u16::from_le_bytes([
+            bytes.first().copied().unwrap_or(0),
+            bytes.get(1).copied().unwrap_or(0),
+        ])
+    }
+
+    /// Read the result byte from VRAM at the position where the ROM writes "Success"/"Failed".
+    /// VRAM word address $32 → byte address $64 = 100.
+    fn read_vram_result_byte(sys: &SnesSystem) -> u8 {
+        sys.get_tile_viewer_data().vram[0x64]
+    }
+
+    /// Run `frames` frames and return `(test_num_reached, vram_result_byte)`.
+    fn run_cputest(rom: &[u8], frames: usize) -> (u16, u8) {
+        let mut sys = SnesSystem::new();
+        sys.mount("Cartridge", rom)
+            .expect("failed to mount cputest ROM");
+        for _ in 0..frames {
+            sys.step_frame().expect("step_frame failed during cputest");
+        }
+        (read_test_num(&sys), read_vram_result_byte(&sys))
+    }
+
+    /// Assert that `test_num >= min_passing`, used as a regression guard.
+    ///
+    /// If the ROM shows "Failed" (result_byte == b'F') we log the failure but
+    /// do not immediately panic — the regression guard below catches any reduction
+    /// in the number of tests that the emulator passes.  When a bug is fixed and
+    /// the emulator passes more tests, simply raise `min_passing` accordingly.
+    fn assert_no_regression(rom_name: &str, test_num: u16, result_byte: u8, min_passing: u16) {
+        if result_byte == b'F' {
+            // Log the known failure point so it stays visible in test output.
+            eprintln!(
+                "{}: ROM reported FAIL at test {:#06x} \
+                 (known CPU emulation issue — raise min_passing when fixed)",
+                rom_name, test_num
+            );
+        }
+
+        assert!(
+            test_num > 0,
+            "{}: ROM made no CPU test progress (test_num == 0)",
+            rom_name
+        );
+
+        assert!(
+            test_num >= min_passing,
+            "{}: regression detected — reached test {:#06x}, expected >= {:#06x}",
+            rom_name,
+            test_num,
+            min_passing
+        );
+    }
+
+    #[test]
+    fn test_cputest_basic_loads_and_runs() {
+        // cputest-basic has ~1107 tests; 10 tests run per vblank, so 200 frames
+        // is well over the minimum needed (~111) for all tests to finish.
+        //
+        // Baseline: the emulator currently reaches test 0x01b7 (jmp ($F000,x)
+        // indirect indexed addressing), where it stops with a "Failed" result.
+        // Tests 0x000–0x1b6 all pass.  Raise min_passing after fixing the bug.
+        const MIN_PASSING: u16 = 0x01b7;
+
+        let rom = include_bytes!("../../../../test_roms/snes/cputest-basic.sfc");
+        let (test_num, result_byte) = run_cputest(rom, 200);
+
+        if result_byte == b'S' {
+            // All basic CPU tests passed — ideal outcome, no further checks needed.
+            return;
+        }
+
+        assert_no_regression("cputest-basic", test_num, result_byte, MIN_PASSING);
+    }
+
+    #[test]
+    fn test_cputest_full_loads_and_runs() {
+        // cputest-full includes all tests from cputest-basic PLUS emulation-mode
+        // (6502 compatibility mode) tests.  300 frames gives plenty of headroom.
+        //
+        // Baseline: the emulator currently reaches test 0x0024 (adc ($EF,x) in
+        // emulation mode E=1), where it stops with a "Failed" result.  Tests
+        // 0x0000–0x0023 pass.  Raise min_passing after fixing the emulation-mode
+        // ADC indirect-indexed behavior.
+        const MIN_PASSING: u16 = 0x0024;
+
+        let rom = include_bytes!("../../../../test_roms/snes/cputest-full.sfc");
+        let (test_num, result_byte) = run_cputest(rom, 300);
+
+        if result_byte == b'S' {
+            return;
+        }
+
+        assert_no_regression("cputest-full", test_num, result_byte, MIN_PASSING);
+    }
+}
+
 #[cfg(test)]
 mod cartridge_info_tests {
     use super::*;
