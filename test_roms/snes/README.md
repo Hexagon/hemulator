@@ -153,6 +153,9 @@ ld65 -C snes.cfg test_enhanced.o -o test_enhanced.sfc
 # Build cputest-basic.sfc (basic 65C816 tests)
 # Note: cputest_font.bin is excluded from git (*.bin rule). Download it from
 # https://github.com/gilyon/snes-tests/blob/main/cputest/font.bin first.
+# Note: font.bin is excluded from git (*.bin rule). Download it from
+# https://github.com/gilyon/snes-tests/blob/main/cputest/font.bin and save it as
+# font.bin in this directory (test_roms/snes/) before building.
 python3 make_cpu_tests.py --basic
 ca65 -D basic cputest_main.asm -o cputest-basic.o
 ld65 -C cputest_lorom.cfg -o cputest-basic.sfc cputest-basic.o
