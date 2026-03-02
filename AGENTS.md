@@ -245,7 +245,8 @@ For system-specific implementation details, see each system's README:
 
 **System Modules** (`crates/systems/`):
 - ✅ NES (~90% game coverage), Game Boy (GB fully functional, GBC WIP), CHIP-8 (fully working)
-- 🚧 Atari 2600 (rendering issues), SMS (not producing image), ColecoVision (not producing image), SNES (no visible output), N64 (in development)
+- 🚧 Atari 2600 (rendering issues), SMS (not producing image), ColecoVision (not producing image), N64 (in development)
+- ✅ SNES (fully functional - Super Mario World runs well, audio output working)
 - ⚠️ SG-1000 (experimental)
 - 🧪 PC (experimental)
 

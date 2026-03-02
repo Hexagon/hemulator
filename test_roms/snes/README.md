@@ -49,6 +49,40 @@ SPRITE_TILE_DATA:
 
 ## Test ROMs
 
+### cputest-basic.sfc
+**Purpose**: Comprehensive 65C816 CPU instruction test (basic subset)
+
+**Source**: [gilyon/snes-tests](https://github.com/gilyon/snes-tests) — MIT license
+
+**Features tested** (~1107 tests):
+- All 65C816 opcodes (except STP and WAI)
+- Each instruction in all supported addressing modes
+- Edge cases and correct flag results
+- Does **not** include emulation-mode (6502 compatibility) wrapping edge cases
+
+**Result detection**:
+- ROM writes "Success" or "Failed" to VRAM word address `$32` (byte offset `$64`)
+  - `b'S'` (0x53) = all tests passed
+  - `b'F'` (0x46) = a test failed; the failing test number is in WRAM at `$0010`
+- Current test number stored as a little-endian `u16` at WRAM address `$0010`
+
+**Why this is important**: Verifies that the 65C816 CPU core executes every instruction
+correctly, catching subtle bugs in addressing modes, flag computation, and mode switching.
+
+---
+
+### cputest-full.sfc
+**Purpose**: Comprehensive 65C816 CPU instruction test (full suite)
+
+**Source**: [gilyon/snes-tests](https://github.com/gilyon/snes-tests) — MIT license
+
+**Features tested** (~1610 tests):
+- Everything in `cputest-basic.sfc`, plus
+- Emulation-mode (E=1) wrapping behavior
+- Undocumented addressing-mode quirks documented in the README
+
+---
+
 ### test.sfc
 **Purpose**: Basic smoke test for Mode 0 rendering
 
@@ -92,6 +126,7 @@ SPRITE_TILE_DATA:
 
 ### Requirements
 - `cc65` toolchain (includes `ca65` assembler and `ld65` linker)
+- Python 3 (for the cputest ROM generator)
 
 On Ubuntu/Debian:
 ```bash
@@ -103,7 +138,7 @@ sudo apt-get install cc65
 ./build.sh
 ```
 
-This will build both `test.sfc` and `test_enhanced.sfc`.
+This builds all ROMs including `cputest-basic.sfc` and `cputest-full.sfc`.
 
 ### Build individual ROMs
 ```bash
@@ -114,6 +149,16 @@ ld65 -C snes.cfg test.o -o test.sfc
 # Build test_enhanced.sfc only
 ca65 -t none --cpu 65816 test_enhanced.s -o test_enhanced.o
 ld65 -C snes.cfg test_enhanced.o -o test_enhanced.sfc
+
+# Build cputest-basic.sfc (basic 65C816 tests)
+python3 make_cpu_tests.py --basic
+ca65 -D basic cputest_main.asm -o cputest-basic.o
+ld65 -C cputest_lorom.cfg -o cputest-basic.sfc cputest-basic.o
+
+# Build cputest-full.sfc (full 65C816 tests including emulation mode)
+python3 make_cpu_tests.py
+ca65 cputest_main.asm -o cputest-full.o
+ld65 -C cputest_lorom.cfg -o cputest-full.sfc cputest-full.o
 ```
 
 ## Running Tests
@@ -129,6 +174,10 @@ cargo test --package emu_snes test_snes_smoke_test_rom
 cargo test --package emu_snes test_enhanced_rom
 cargo test --package emu_snes test_priority_rom
 cargo test --package emu_snes test_sprite_overflow_rom
+
+# Run 65C816 CPU instruction tests (gilyon/snes-tests)
+cargo test --package emu_snes test_cputest_basic_loads_and_runs
+cargo test --package emu_snes test_cputest_full_loads_and_runs
 ```
 
 ## ROM Format
@@ -211,6 +260,7 @@ Both ROMs use:
 Potential additions:
 - ~~Priority bit test ROM (test BG tile priority bits)~~ ✅ Done
 - ~~Sprite overflow test (>32 sprites per scanline)~~ ✅ Done
+- ~~65C816 CPU instruction tests~~ ✅ Done (cputest-basic/full from gilyon/snes-tests)
 - VRAM access timing test (access during/outside VBlank)
 - Controller serial I/O test
 - Mode 2-7 test ROMs (when implemented)
