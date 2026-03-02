@@ -159,6 +159,12 @@ pub trait MemoryArm7 {
     fn irq_pending(&self) -> bool {
         false
     }
+
+    /// Check if IE & IF match (for HALT wakeup, independent of IME/CPSR I flag)
+    /// On real hardware, HALT exits when (IE & IF) != 0 regardless of IME.
+    fn halt_irq_pending(&self) -> bool {
+        self.irq_pending()
+    }
 }
 
 // =============================================================================
@@ -944,20 +950,22 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
     }
 
     fn bios_cpu_fast_set(&mut self, mut src: u32, mut dst: u32, control: u32) {
+        // CpuFastSet transfers 32 bytes (8 words) at a time for efficiency.
+        // The count field (bits 0-20) is the number of words to transfer,
+        // and must be a multiple of 8. We don't multiply by 8 — count IS the word count.
         let count = control & 0x001F_FFFF;
         if count == 0 {
             return;
         }
 
         let fixed = (control & 0x0100_0000) != 0;
-        let total_words = count * 8;
 
         let mut value = 0u32;
         if fixed {
             value = self.memory.read_word(src & !3);
         }
 
-        for _ in 0..total_words {
+        for _ in 0..count {
             let v = if fixed {
                 value
             } else {
@@ -1591,9 +1599,15 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
     pub fn step(&mut self) -> u32 {
         let start_cycles = self.cycles;
 
-        // Check for pending interrupts
+        // Wake from halt when (IE & IF) != 0 — independent of IME and CPSR I flag
+        // On real hardware, HALT exits on this condition; the IRQ vector only fires
+        // if IME=1 and I=0 (checked separately by check_interrupts).
+        if self.halted && self.memory.halt_irq_pending() {
+            self.halted = false;
+        }
+
+        // Check for pending interrupts (requires CPSR I=0 and hardware irq_pending)
         if self.check_interrupts() {
-            self.halted = false; // IRQ wakes CPU from halt
             self.cycles += 3; // IRQ entry takes ~3 cycles
             return (self.cycles - start_cycles) as u32;
         }
@@ -1675,8 +1689,9 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
                 self.arm_halfword_transfer(instr);
             }
 
-            // MRS (transfer PSR to register)
-            (0b000, 0b0000) if bits_27_20 & 0x1F == 0x10 => {
+            // MRS (transfer PSR to register) — matches both CPSR (R=0) and SPSR (R=1)
+            // R bit is bit 22 which is bit 2 of bits_27_20, so mask with 0x1B to ignore it
+            (0b000, 0b0000) if bits_27_20 & 0x1B == 0x10 => {
                 self.arm_mrs(instr);
             }
 
@@ -1693,8 +1708,12 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
                 self.arm_data_processing(instr);
             }
 
-            // Single data transfer (LDR/STR)
-            (0b010, _) | (0b011, _) => {
+            // Single data transfer (LDR/STR) — immediate offset or register offset
+            // Note: bits 27:25 = 011 with bit 4 = 1 is UNDEFINED on ARM7TDMI
+            (0b010, _) => {
+                self.arm_single_data_transfer(instr);
+            }
+            (0b011, _) if bits_7_4 & 1 == 0 => {
                 self.arm_single_data_transfer(instr);
             }
 
