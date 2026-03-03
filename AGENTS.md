@@ -186,6 +186,20 @@ The `--system` flag accepts: `nes`, `gb`, `gba`, `atari2600`, `snes`, `n64`, `pc
 
 > **Note:** N64 requires an OpenGL context and does not support `--no-gui`. Use the full GUI for N64.
 
+**Quick reference — run a specific system**
+
+| System         | Load a ROM                                                | Start clean (no ROM)                                  |
+|----------------|-----------------------------------------------------------|-------------------------------------------------------|
+| NES            | `cargo run --profile release-quick -- --no-gui game.nes` | `... -- --no-gui --system nes`                        |
+| Game Boy / GBC | `cargo run --profile release-quick -- --no-gui game.gb`  | `... -- --no-gui --system gb`                         |
+| Game Boy Adv.  | `cargo run --profile release-quick -- --no-gui game.gba` | `... -- --no-gui --system gba`                        |
+| Atari 2600     | `cargo run --profile release-quick -- --no-gui game.a26` | `... -- --no-gui --system atari2600`                  |
+| SNES           | `cargo run --profile release-quick -- --no-gui game.sfc` | `... -- --no-gui --system snes`                       |
+| SMS            | `cargo run --profile release-quick -- --no-gui game.sms` | *(load via ROM only)*                                 |
+| CHIP-8         | `cargo run --profile release-quick -- --no-gui game.ch8` | *(load via ROM only)*                                 |
+| PC/DOS         | `cargo run --profile release-quick -- --no-gui boot.img` | `... -- --no-gui --system pc`                         |
+| N64            | *(use full GUI — requires OpenGL)*                        | *(use full GUI — requires OpenGL)*                    |
+
 - **Pre-commit checks** (REQUIRED before committing any code):
   1. **Formatting**: `cargo fmt --all -- --check` - Must pass with no diff
   2. **Clippy**: `cargo clippy --workspace --all-targets -- -D warnings` - Must pass with no warnings
