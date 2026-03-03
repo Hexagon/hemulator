@@ -3726,6 +3726,12 @@ fn main() {
     // ===== NO-GUI MODE =====
     // If --no-gui is requested, run in a plain SDL2 window without egui overhead
     if cli_args.no_gui {
+        // N64 requires an OpenGL context which --no-gui does not set up
+        if matches!(&sys, EmulatorSystem::N64(_)) {
+            eprintln!("Error: --no-gui does not support N64 (requires an OpenGL context). Use the full GUI instead.");
+            std::process::exit(1);
+        }
+
         let title = format!("Hemulator - {}", sys.system_name());
         let mut window =
             match window_backend::Sdl2Backend::new(&title, window_width, window_height, false) {
@@ -3740,8 +3746,8 @@ fn main() {
         let (_stream, stream_handle) = match OutputStream::try_default() {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("Warning: Failed to initialize audio: {}.", e);
-                return;
+                eprintln!("Error: Failed to initialize audio (exiting): {}.", e);
+                std::process::exit(1);
             }
         };
         let (audio_tx, audio_rx) = sync_channel::<i16>(44100 * 2);

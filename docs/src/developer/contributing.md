@@ -161,10 +161,10 @@ cargo run --profile release-quick -- --no-gui game.nes
 cargo run --profile release-quick -- --no-gui --system nes
 
 # No-GUI + benchmark mode (uncapped FPS)
-cargo run --profile release-quick -- --no-gui --benchmark game.snes
+cargo run --profile release-quick -- --no-gui --benchmark game.sfc
 ```
 
-The `--no-gui` mode supports full audio, controller input, and all systems — it just skips the egui UI layer. Note that the binary still compiles all systems; for compile-time savings, use per-crate builds above.
+The `--no-gui` mode supports full audio, controller input, and most systems — it just skips the egui UI layer. N64 is not supported in `--no-gui` mode because it requires an OpenGL context. Note that the binary still compiles all systems; for compile-time savings, use per-crate builds above.
 
 ## Additional Guidelines
 
