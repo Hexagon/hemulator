@@ -354,10 +354,12 @@ impl Sn76489Adapter {
     /// Set timing mode (NTSC/PAL).
     ///
     /// Resets the cycle accumulator to prevent fractional-cycle drift when
-    /// switching between clock rates.
+    /// switching between clock rates, and propagates the new mode to the
+    /// inner [`Sn76489Psg`] so that both fields stay in sync.
     pub fn set_timing(&mut self, timing: TimingMode) {
         if self.timing != timing {
             self.timing = timing;
+            self.psg.timing_mode = timing;
             self.cycle_accum = 0.0;
         }
     }
@@ -424,10 +426,13 @@ impl Sn76489Adapter {
             self.cycle_accum = acc;
         }
         if let Some(timing_str) = state.get("timing").and_then(|v| v.as_str()) {
-            self.timing = match timing_str {
+            let timing = match timing_str {
                 "pal" => TimingMode::Pal,
                 _ => TimingMode::Ntsc,
             };
+            // Keep both the adapter-level field and the inner PSG in sync.
+            self.timing = timing;
+            self.psg.timing_mode = timing;
         }
         Ok(())
     }
@@ -495,5 +500,78 @@ mod tests {
         // Volume 8 should be approximately -16dB
         let vol_8 = psg.volume_to_amplitude(8);
         assert!(vol_8 > 0.15 && vol_8 < 0.17);
+    }
+
+    // -------------------------------------------------------------------------
+    // Sn76489Adapter tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_adapter_generate_samples_length() {
+        let mut adapter = Sn76489Adapter::new(TimingMode::Ntsc, 3_579_545.0, 3_546_894.0);
+        let samples = adapter.generate_samples(100);
+        assert_eq!(samples.len(), 100);
+    }
+
+    #[test]
+    fn test_adapter_generate_samples_silent_by_default() {
+        let mut adapter = Sn76489Adapter::new(TimingMode::Ntsc, 3_579_545.0, 3_546_894.0);
+        let samples = adapter.generate_samples(100);
+        assert!(
+            samples.iter().all(|&s| s == 0),
+            "Expected silent output from a freshly created adapter (all channels muted)"
+        );
+    }
+
+    #[test]
+    fn test_adapter_set_timing_resets_accumulator() {
+        let mut adapter = Sn76489Adapter::new(TimingMode::Ntsc, 3_579_545.0, 3_546_894.0);
+
+        // Prime the accumulator with a few samples.
+        let _ = adapter.generate_samples(5);
+
+        // Switch timing — accumulator must be reset to 0.
+        adapter.set_timing(TimingMode::Pal);
+        assert_eq!(adapter.cycle_accum, 0.0);
+
+        // Switching to the same mode must not reset anything.
+        let _ = adapter.generate_samples(5); // advance accumulator again
+        let accum_before = adapter.cycle_accum;
+        adapter.set_timing(TimingMode::Pal); // same mode — no-op
+        assert_eq!(adapter.cycle_accum, accum_before);
+    }
+
+    #[test]
+    fn test_adapter_set_timing_keeps_psg_in_sync() {
+        let mut adapter = Sn76489Adapter::new(TimingMode::Ntsc, 3_579_545.0, 3_546_894.0);
+        adapter.set_timing(TimingMode::Pal);
+        assert_eq!(adapter.timing, TimingMode::Pal);
+        assert_eq!(adapter.psg.timing_mode, TimingMode::Pal);
+    }
+
+    #[test]
+    fn test_adapter_get_set_state_roundtrip() {
+        let mut adapter = Sn76489Adapter::new(TimingMode::Ntsc, 3_579_545.0, 3_546_894.0);
+
+        // Make some state changes so the round-trip is non-trivial.
+        adapter.write(0x90); // Channel 0 volume = 0 (max)
+        adapter.write(0x80 | 0x04); // Tone 0 low bits
+        adapter.write(0x01); // Tone 0 high bits
+        adapter.set_timing(TimingMode::Pal);
+        let _ = adapter.generate_samples(10); // advance cycle_accum
+
+        let state = adapter.get_state();
+
+        // Create a fresh adapter and restore state into it.
+        let mut restored = Sn76489Adapter::new(TimingMode::Ntsc, 3_579_545.0, 3_546_894.0);
+        restored.set_state(&state).unwrap();
+
+        // Timing must be restored and consistent between adapter and inner PSG.
+        assert_eq!(restored.timing, TimingMode::Pal);
+        assert_eq!(restored.psg.timing_mode, TimingMode::Pal);
+
+        // cycle_accum must match.
+        let cycle_accum_saved = state.get("cycle_accum").and_then(|v| v.as_f64()).unwrap();
+        assert!((restored.cycle_accum - cycle_accum_saved).abs() < 1e-9);
     }
 }
