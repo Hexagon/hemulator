@@ -120,6 +120,52 @@ Hemulator provides three build profiles optimized for different use cases:
 
 **Recommendation**: Use `release-quick` for most development work to get good performance with fast iteration times. Only use `release` for final testing before merging or creating distribution builds.
 
+## Single-System Builds (Fast Development Workflow)
+
+When working on a specific emulated system, you can build and test only that system crate without compiling the full frontend (egui, SDL2, all other systems). This is **~12× faster** than a full workspace build.
+
+### Build / Test a Single System
+
+```bash
+# Build only the NES system crate (~12s vs ~2.5min for full binary)
+cargo build -p emu_nes
+
+# Run only the NES unit tests
+cargo test -p emu_nes
+
+# Other systems follow the same pattern:
+cargo test -p emu_gb        # Game Boy
+cargo test -p emu_snes      # SNES
+cargo test -p hemu_gba      # GBA
+cargo test -p emu_pc        # PC/DOS
+cargo test -p emu_sms       # Sega Master System
+cargo test -p emu_chip8     # CHIP-8
+cargo test -p emu_n64       # N64
+cargo test -p emu_atari2600 # Atari 2600
+cargo test -p emu_colecovision
+cargo test -p emu_sg1000
+cargo test -p emu_ps1
+```
+
+These commands compile only `emu_core` and the target system, skipping egui and all unrelated systems.
+
+### Run With Visual Output (No egui Overlay)
+
+When you need a running window to see rendered frames, use the `--no-gui` flag. This uses a plain SDL2 window without the egui interface, giving faster startup and reduced overhead:
+
+```bash
+# Run a ROM with no GUI overlay (SDL2 window only)
+cargo run --profile release-quick -- --no-gui game.nes
+
+# Start a clean system (no ROM)
+cargo run --profile release-quick -- --no-gui --system nes
+
+# No-GUI + benchmark mode (uncapped FPS)
+cargo run --profile release-quick -- --no-gui --benchmark game.sfc
+```
+
+The `--no-gui` mode supports full audio, controller input, and most systems — it just skips the egui UI layer. N64 is not supported in `--no-gui` mode because it requires an OpenGL context. Note that the binary still compiles all systems; for compile-time savings, use per-crate builds above.
+
 ## Additional Guidelines
 
 - **Documentation**: 
