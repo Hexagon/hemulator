@@ -28,6 +28,12 @@ full disc (CD-ROM) game compatibility is not yet implemented.
 - ✅ **Memory Bus** — 2 MB main RAM, 1 KB scratchpad, 512 KB BIOS ROM, I/O ports
 - ✅ **BIOS Loading** — Required 512 KB BIOS ROM (`bin`/`rom`)
 - ✅ **PS-X EXE Loading** — Direct execution of PlayStation executable files
+- ✅ **GTE (COP2)** — Geometry Transform Engine; all commands implemented:
+  - RTPS/RTPT (perspective transform), NCLIP (back-face culling), AVSZ3/4 (Z-sort)
+  - MVMVA (general matrix×vector), OP (outer product), SQR (square)
+  - NCS/NCT, NCDS/NCDT, NCCS/NCCT (normal-color lighting pipelines)
+  - CC, CDP, DCPL (color operations), DPCS/DPCT (depth cue), INTPL, GPF, GPL
+  - Full FLAG register overflow/saturation tracking
 - ✅ **SPU (stub)** — 24-voice register file; audio output not yet implemented
 
 ### What's Missing
@@ -36,10 +42,9 @@ full disc (CD-ROM) game compatibility is not yet implemented.
 - ⏳ **SPU Audio** — Voice ADPCM decoding, ADSR envelopes, and reverb not implemented
 - ⏳ **Save States** — Serialization stubs present but not implemented
 - ⏳ **MDEC** — Motion Decoder (FMV) stubbed
-- ⏳ **GTE (COP2)** — Geometry Transform Engine not yet implemented
 - ⏳ **GPU Lines** — Polylines and Gouraud-shaded lines incomplete
 - ⏳ **24-bit Display Mode** — 24-bit pixel read path not implemented
-- ⏳ **Game Compatibility** — Real game discs require CD-ROM and GTE support
+- ⏳ **Game Compatibility** — Real game discs require CD-ROM support
 
 ## Hardware Overview
 
@@ -108,7 +113,6 @@ hemu --bios SCPH1001.BIN game.exe
 - **No CD-ROM disc support** — Real game discs cannot be run yet
 - **No audio** — SPU register file is present but ADPCM/reverb output is not implemented
 - **No save states** — State serialization is stubbed
-- **No GTE** — 3D math acceleration (COP2) is absent; 3D games will not compute geometry correctly
 - **No MDEC** — Full-motion video sequences will not play
 
 See the [User Manual](https://hemulator.56k.guru/user/systems.html#ps1-sony-playstation) for user-facing notes.
