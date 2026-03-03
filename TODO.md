@@ -60,15 +60,11 @@
 ## SNES
 
 ### High
-- [ ] **JMP absolute indexed indirect (`jmp ($addr,x)`) bug** — cputest-basic fails at test `0x01b7`
-  - Instruction: `jmp ($F000,x)` with `X=$6000`, `DBR=$7F`
-  - Indirect address should be read from bank 0 (`$007000`), not from DBR
-  - Fix: `jmp ($addr,x)` must use program bank (PBR), not data bank register (DBR), for the pointer fetch
-  - File: `crates/core/src/cpu_65c816/` (JMP indirect indexed opcode handler)
+- [x] **JMP/JSR absolute indexed indirect (`jmp ($addr,x)`) bank-wrap bug** — fixed: `ptr+X` now wraps within 16 bits (stays in PBR bank); cputest-basic advances from `0x01b7` → `0x025d`
+- [x] **`(dp,X)` indirect pointer read page-wrap in emulation mode (`E=1`)** — fixed: all 8 `(dp,X)` instructions (ORA/AND/EOR/ADC/STA/LDA/CMP/SBC) now use `read_word_dp_wrapped` which wraps the hi-byte read within the direct page in emulation mode; cputest-full advances from `0x0024` → `0x0025`
+- [ ] **cputest-basic fails at test `0x025d`** — next failing test after bank-wrap fix; needs investigation
+  - File: `crates/core/src/cpu_65c816.rs`
   - Raise `MIN_PASSING` in `test_cputest_basic_loads_and_runs` once resolved
-- [ ] **ADC indirect indexed in emulation mode (`E=1`) bug** — cputest-full fails at test `0x0024`
-  - Instruction: `adc ($EF,x)` with `E=1`, `D=$0100`, `X=$0010`, wrapping within stack page
-  - Emulation-mode `(direct,X)` indirect addressing does not correctly handle page wrapping when `D` low byte is non-zero
-  - Fix: in emulation mode, the high byte of the indirect address must wrap within the direct page (see gilyon/snes-tests README for full undocumented behavior spec)
-  - File: `crates/core/src/cpu_65c816/` (emulation-mode ADC indirect-indexed handler)
+- [ ] **cputest-full fails at test `0x0025`** — next failing emulation-mode test after dp-wrap fix; needs investigation
+  - File: `crates/core/src/cpu_65c816.rs`
   - Raise `MIN_PASSING` in `test_cputest_full_loads_and_runs` once resolved
