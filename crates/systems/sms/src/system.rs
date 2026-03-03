@@ -268,12 +268,14 @@ impl System for SmsSystem {
 
             // Check for VDP interrupts (frame interrupt has priority over line interrupt)
             if self.vdp.borrow().frame_interrupt_pending() {
-                // Trigger Z80 interrupt (IM 1: RST 38h = jump to 0x0038)
-                // Data byte doesn't matter in IM 1, but pass 0xFF as default
+                // Trigger the CPU interrupt; do NOT clear frame_interrupt_pending here.
+                // The VDP status register bit 7 must remain set until the ISR reads it
+                // (via IN A, (0xBF)), which calls read_status() and clears the flag.
+                // Clearing it here would cause the ISR to misidentify every frame interrupt
+                // as a line interrupt (bit 7 = 0 → carry clear → JP NC to line handler).
                 self.cpu.interrupt(0xFF);
-                self.vdp.borrow_mut().clear_frame_interrupt();
             } else if self.vdp.borrow().line_interrupt_pending() {
-                // Trigger Z80 interrupt for line interrupt
+                // Line interrupt: no status-register bit, so clear it here after triggering.
                 self.cpu.interrupt(0xFF);
                 self.vdp.borrow_mut().clear_line_interrupt();
             }
@@ -1341,5 +1343,50 @@ mod tests {
         // Should read BIOS again
         assert!(system.cpu.memory.is_bios_enabled());
         assert_eq!(system.cpu.memory.read(0x0000), 0xAA);
+    }
+
+    /// Smoke test for the SMSTestSuite ROM (v0.37 by sverx).
+    /// Verifies the ROM boots, executes past crt0/SMS_init, and produces valid frames.
+    ///
+    /// ROM source: https://github.com/sverx/SMSTestSuite
+    ///
+    /// TODO: The ROM's main-menu rendering requires correct VDP frame-interrupt delivery
+    /// during SMS_waitForVBlank(). The frame interrupt never fires during the wait loop —
+    /// likely because frame_interrupt_pending is not being set when the scanline crosses 192
+    /// while the ROM is executing. Further investigation needed into the set_scanline
+    /// timing vs. VDP register initialization ordering.
+    #[test]
+    fn smoke_test_sms_test_suite() {
+        let rom = include_bytes!("../../../../test_roms/sms/SMSTestSuite.sms");
+        let mut system = SmsSystem::new();
+        system.load_rom(rom.to_vec());
+        system.reset();
+
+        // Run enough frames to get past crt0 + SMS_init
+        for _ in 0..10 {
+            let _ = system.step_frame();
+        }
+
+        let frame = system.step_frame().unwrap();
+
+        // Verify basic frame dimensions
+        assert_eq!(frame.width, 256);
+        assert_eq!(frame.height, 192);
+
+        // All pixels must carry a fully-opaque alpha channel (0xFF in bits 31-24)
+        for &pixel in &frame.pixels {
+            assert_eq!(
+                pixel >> 24,
+                0xFF,
+                "Pixel {pixel:#010X} is missing alpha channel"
+            );
+        }
+
+        // CPU must have advanced past reset vector and be executing game code
+        assert!(
+            system.cpu.pc > 0x0010,
+            "CPU PC={:04X} — looks like crt0 never ran",
+            system.cpu.pc
+        );
     }
 }
