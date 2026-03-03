@@ -1315,7 +1315,10 @@ mod tests {
         // Vdp::new() starts at scanline 262; set_scanline(192) wraps (new frame) and
         // ends at scanline 192 >= display_height(192), so in_vblank becomes true.
         vdp.set_scanline(192);
-        assert!(vdp.in_vblank, "in_vblank should be true after crossing display_height");
+        assert!(
+            vdp.in_vblank,
+            "in_vblank should be true after crossing display_height"
+        );
 
         // Frame interrupt enable is NOT yet set
         assert_eq!(vdp.registers[1] & 0x20, 0);
@@ -1342,7 +1345,10 @@ mod tests {
         // From initial scanline 262, set_scanline(100) wraps to a new frame and
         // ends at scanline 100 < display_height(192), so in_vblank becomes false.
         vdp.set_scanline(100);
-        assert!(!vdp.in_vblank, "in_vblank should be false inside active display");
+        assert!(
+            !vdp.in_vblank,
+            "in_vblank should be false inside active display"
+        );
 
         // Write R1 = 0x20 (frame interrupt enable)
         vdp.write_control(0x20);

@@ -16,6 +16,21 @@
 - [ ] `bus` — Run with bus logging (`--log-bus`)
 - [ ] `all-logs` — Run with all log categories enabled
 
+## Ignored Tests
+
+All tests below are marked `#[ignore]` because they require an OpenGL context that is
+not available in CI or in headless `cargo test` runs.  They can be run manually with
+`cargo test --package <pkg> -- --ignored`.
+
+### N64 — Requires OpenGL context
+
+#### Low
+- [ ] **Enable N64 system tests** (18 tests): Remove `#[ignore]` once a headless GL context is available in CI — `crates/systems/n64/src/lib.rs`
+- [ ] **Enable N64 debugger tests** (5 tests): Remove `#[ignore]` once a headless GL context is available in CI — `crates/systems/n64/src/debugger.rs`
+- [ ] **Enable RDP tests** (38 tests): Remove `#[ignore]` once a headless GL context is available in CI — `crates/systems/n64/src/rdp.rs`
+- [ ] **Enable RSP HLE tests** (20 tests): Remove `#[ignore]` once a headless GL context is available in CI — `crates/systems/n64/src/rsp_hle.rs`
+- [ ] **Enable GUI logging integration test** (1 test, `test_logging_n64_rdp_unknown_command`): Remove `#[ignore]` once a headless GL context is available in CI — `crates/frontend/gui/tests/logging_integration.rs`
+
 ## N64
 
 ### Critical

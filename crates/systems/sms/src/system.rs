@@ -205,10 +205,7 @@ impl System for SmsSystem {
         self.cpu.reset();
         {
             let mut vdp = self.vdp.borrow_mut();
-            vdp.set_pal(matches!(
-                self.timing_mode,
-                emu_core::apu::TimingMode::Pal
-            ));
+            vdp.set_pal(matches!(self.timing_mode, emu_core::apu::TimingMode::Pal));
             vdp.reset();
         }
         self.psg.borrow_mut().reset();
@@ -404,10 +401,9 @@ impl System for SmsSystem {
             };
             // Sync VDP timing so that old save states (without is_pal in VDP JSON)
             // still produce correct V-counter reads after restore.
-            self.vdp.borrow_mut().set_pal(matches!(
-                self.timing_mode,
-                emu_core::apu::TimingMode::Pal
-            ));
+            self.vdp
+                .borrow_mut()
+                .set_pal(matches!(self.timing_mode, emu_core::apu::TimingMode::Pal));
         }
 
         // Load CPU state
