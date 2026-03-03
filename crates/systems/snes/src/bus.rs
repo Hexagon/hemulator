@@ -1372,6 +1372,11 @@ impl Memory65c816 for SnesBus {
                                         if val == 0xFF {
                                             self.apu_out_ports[0] = 0xAA;
                                             self.apu_out_ports[1] = 0xBB;
+                                            // Mirror boot-handshake initialization for a new ready state:
+                                            // clear ports 2/3 and reset the per-session transfer counter.
+                                            self.apu_out_ports[2] = 0x00;
+                                            self.apu_out_ports[3] = 0x00;
+                                            self.apu_transfer_counter = 0;
                                             self.apu_state = ApuState::BootReady;
                                             self.apu_response_delay = 10;
                                         } else {
