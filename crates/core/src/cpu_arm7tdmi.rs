@@ -650,6 +650,17 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
     /// Emulate GBA BIOS SWI calls (when BIOS ROM is not present).
     /// Returns true if the SWI was handled here and no exception is needed.
     fn handle_bios_swi(&mut self, imm: u32) -> bool {
+        // Log all SWI calls for debugging
+        log(LogCategory::Stubs, LogLevel::Debug, || {
+            format!(
+                "SWI 0x{:02X} called at PC=${:08X} R0={:08X} R1={:08X} R2={:08X}",
+                imm,
+                self.gpr[15],
+                self.gpr[0],
+                self.gpr[1],
+                self.gpr[2]
+            )
+        });
         match imm {
             0x06 => {
                 // Div (signed) - R0 / R1
@@ -734,6 +745,33 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
                 let src = self.gpr[0];
                 let dst = self.gpr[1];
                 self.bios_rl_decompress(src, dst, true);
+                true
+            }
+            0x16 => {
+                // Diff8bitUnFilterWram
+                let src = self.gpr[0];
+                let dst = self.gpr[1];
+                self.bios_diff_filter(src, dst, 1, false);
+                true
+            }
+            0x17 => {
+                // Diff8bitUnFilterVram
+                let src = self.gpr[0];
+                let dst = self.gpr[1];
+                self.bios_diff_filter(src, dst, 1, true);
+                true
+            }
+            0x18 => {
+                // Diff16bitUnFilter
+                let src = self.gpr[0];
+                let dst = self.gpr[1];
+                self.bios_diff_filter(src, dst, 2, true);
+                true
+            }
+            0x25 => {
+                // MultiBoot - link cable boot, stub as no-op for single player
+                // Return error in r0 (1 = failure, no linked GBA)
+                self.gpr[0] = 1;
                 true
             }
             0x00 => {
@@ -1104,6 +1142,50 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
         }
     }
 
+    /// Differential unfilter (SWI 0x16/0x17/0x18)
+    ///
+    /// Reverses delta encoding: each output value = previous output + current input.
+    /// `unit_size`: 1 for 8-bit (SWI 0x16/0x17), 2 for 16-bit (SWI 0x18).
+    /// `vram`: if true, write in 16-bit units (required for VRAM).
+    fn bios_diff_filter(&mut self, src: u32, dst: u32, unit_size: u32, vram: bool) {
+        let header = self.memory.read_byte(src);
+        // Header byte: bits 7-4 = compression type (8 = diff), bits 3-0 = data size
+        if (header >> 4) != 8 {
+            return;
+        }
+
+        let len = (self.memory.read_byte(src + 1) as u32)
+            | ((self.memory.read_byte(src + 2) as u32) << 8)
+            | ((self.memory.read_byte(src + 3) as u32) << 16);
+
+        let mut src_ptr = src + 4;
+        let mut out: Vec<u8> = Vec::with_capacity(len as usize);
+
+        if unit_size == 1 {
+            // 8-bit differential unfilter
+            let mut prev: u8 = 0;
+            while out.len() < len as usize {
+                let b = self.memory.read_byte(src_ptr);
+                src_ptr = src_ptr.wrapping_add(1);
+                prev = prev.wrapping_add(b);
+                out.push(prev);
+            }
+        } else {
+            // 16-bit differential unfilter
+            let mut prev: u16 = 0;
+            while out.len() + 1 < len as usize {
+                let lo = self.memory.read_byte(src_ptr) as u16;
+                let hi = self.memory.read_byte(src_ptr.wrapping_add(1)) as u16;
+                src_ptr = src_ptr.wrapping_add(2);
+                prev = prev.wrapping_add(lo | (hi << 8));
+                out.push(prev as u8);
+                out.push((prev >> 8) as u8);
+            }
+        }
+
+        self.bios_write_decompressed(dst, &out, vram);
+    }
+
     fn bios_bg_affine_set(&mut self, mut src: u32, mut dst: u32, count: u32) {
         for _ in 0..count {
             // Source: 20 bytes per entry
@@ -1230,15 +1312,20 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
     /// Huffman decompression (BIOS SWI 0x13)
     ///
     /// Format (per GBATEK):
-    /// - Header word [0..3]: bits 0-3 = data width (4 or 8), bits 4-7 = type (2),
+    /// - Header word `[0..3]`: bits 0-3 = data width (4 or 8), bits 4-7 = type (2),
     ///   bits 8-31 = decompressed size in bytes
-    /// - Tree size byte [4]: (tree_table_bytes / 2) - 1
-    /// - Tree table [5..]: Each non-leaf node is 1 byte:
+    /// - Tree table `[(tree_size+1)*2 bytes, starting at header+4]`:
+    ///   - Byte 0: Tree size = (tree\_table\_bytes / 2) - 1
+    ///   - Byte 1: Root node
+    ///   - Bytes 2+: Child/leaf nodes
+    ///
+    ///   Each non-leaf node byte:
     ///   - Bit 7: Left child is a data/leaf node (1) or routing node (0)
     ///   - Bit 6: Right child is a data/leaf node (1) or routing node (0)
-    ///   - Bits 0-5: Offset to next node data
-    ///     Left child at: (node_pos & ~1) + offset*2 + 2
-    ///     Right child at: (node_pos & ~1) + offset*2 + 3
+    ///   - Bits 0-5: Offset to next node pair
+    ///
+    ///   Child positions: `left = (pos & !1) + offset*2 + 2`,
+    ///   `right = left + 1`, where pos is within the tree table (root=1).
     /// - Compressed bitstream: 32-bit words, MSB first (0=left, 1=right)
     fn bios_huff_uncomp(&mut self, src: u32, dst: u32) {
         // Read header
@@ -1246,8 +1333,10 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
         let compression_type = (header & 0xFF) as u8;
         let decompressed_size = (header >> 8) & 0x00FF_FFFF;
 
-        // Extract data width (4 or 8 bits)
-        let data_width = (compression_type >> 4) & 0x0F;
+        // Extract data width (4 or 8 bits) from the low nibble
+        // Header byte format: bits 4-7 = type (2=Huffman), bits 0-3 = data width (4 or 8)
+        let data_width = compression_type & 0x0F;
+
         if data_width != 4 && data_width != 8 {
             log(LogCategory::Stubs, LogLevel::Warn, || {
                 format!(
@@ -1259,9 +1348,12 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
         }
 
         // Tree size byte: (tree_table_bytes / 2) - 1
+        // Per GBATEK, the tree table includes the tree_size byte at position 0.
+        // The root node is at position 1 (first byte to skip is the tree_size).
+        // "CurrentAddr" in the GBATEK offset formula is relative to this base.
         let tree_size = self.memory.read_byte(src + 4) as u32;
-        let tree_byte_size = (tree_size + 1) * 2; // Tree table size in bytes
-        let tree_base = src + 5; // Tree table starts after header (4) + tree_size (1)
+        let tree_byte_size = (tree_size + 1) * 2; // Total tree table size (incl. tree_size byte)
+        let tree_base = src + 4; // Tree table base (position 0 = tree_size byte)
 
         // Compressed data starts at next word-aligned position after tree table
         let data_start = (tree_base + tree_byte_size + 3) & !3;
@@ -1279,8 +1371,8 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
         let mut out_bits = 0u32;
 
         while bytes_written < decompressed_size {
-            // Start at root of tree (node 0 in tree table)
-            let mut node_pos = 0u32;
+            // Start at root of tree (position 1, skipping tree_size byte at position 0)
+            let mut node_pos = 1u32;
 
             loop {
                 // Read the current routing node
@@ -1300,16 +1392,20 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
                 bit_buffer <<= 1;
                 bits_available -= 1;
 
-                // Navigate to child node
+                // Navigate to child node per GBATEK:
+                //   disp = (CurrentAddr AND NOT 1) + Offset*2 + 2
+                //   child node0 (bit=0, left) at disp
+                //   child node1 (bit=1, right) at disp + 1
+                let disp = (node_pos & !1) + offset * 2 + 2;
                 let is_leaf;
                 if bit == 0 {
-                    // Left child
+                    // Left child (node0)
                     is_leaf = left_is_leaf;
-                    node_pos = (node_pos & !1) + offset * 2 + 2;
+                    node_pos = disp;
                 } else {
-                    // Right child
+                    // Right child (node1)
                     is_leaf = right_is_leaf;
-                    node_pos = (node_pos & !1) + offset * 2 + 2 + 1;
+                    node_pos = disp + 1;
                 }
 
                 if is_leaf {

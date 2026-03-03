@@ -1004,6 +1004,7 @@ impl System for GbaSystem {
             }
 
             // Feed APU FIFOs from timer overflows (Timer 0 and Timer 1 drive DMA sound)
+            let mut sound_dma_requested = false;
             for timer_idx in 0..2u8 {
                 let overflows = self.cpu.memory.timers.last_overflows[timer_idx as usize];
                 for _ in 0..overflows {
@@ -1014,17 +1015,29 @@ impl System for GbaSystem {
                             .memory
                             .dma
                             .notify_timing(dma::DmaStartTiming::Special);
+                        sound_dma_requested = true;
                     }
                 }
             }
 
+            // Execute sound DMA immediately so FIFO has fresh samples.
+            // On real hardware, sound DMA fires as soon as the timer overflows
+            // and the FIFO requests a refill — not at the next HBlank/VBlank.
+            // Without this, the FIFO runs dry during VBlank (68 scanlines with
+            // no HBlank DMA), causing audio freezes every frame.
+            if sound_dma_requested {
+                let dma_cycles = self.execute_dma();
+                self.total_cycles += dma_cycles;
+                self.scanline_cycles += dma_cycles;
+            }
+
             // Clock APU and generate output samples in real-time.
-            // Must happen AFTER timer ticks and FIFO pops so mix_channels
-            // reads the correct current FIFO sample.
+            // Must happen AFTER timer ticks, FIFO pops, AND sound DMA refills
+            // so mix_channels reads the current FIFO sample.
             self.cpu.memory.apu.tick(cycles as u32);
 
-            // Execute any pending immediate DMA transfers
-            if self.cpu.memory.dma.has_pending_immediate() {
+            // Execute any other pending DMA transfers (immediate or queued)
+            if self.cpu.memory.dma.is_transferring() {
                 let dma_cycles = self.execute_dma();
                 self.total_cycles += dma_cycles;
                 self.scanline_cycles += dma_cycles;

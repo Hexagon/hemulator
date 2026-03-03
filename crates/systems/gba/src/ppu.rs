@@ -454,9 +454,11 @@ impl Ppu {
         self.composite_scanline(line, dispcnt, io, palette);
 
         // Update affine reference points for next scanline
-        if bg_mode == 2 || bg_mode == 1 {
+        // BG2 affine refs are used in modes 1-5 (affine + all bitmap modes)
+        if (1..=5).contains(&bg_mode) {
             self.increment_affine_refs(2, io);
         }
+        // BG3 affine refs are only used in mode 2
         if bg_mode == 2 {
             self.increment_affine_refs(3, io);
         }
@@ -718,12 +720,28 @@ impl Ppu {
     // Bitmap mode rendering (Modes 3, 4, 5)
     // =========================================================================
 
-    fn render_bitmap_mode3(&mut self, line: u32, io: &[u8], vram: &[u8]) {
+    fn render_bitmap_mode3(&mut self, _line: u32, io: &[u8], vram: &[u8]) {
         let bgcnt = read_io_u16(io, BG0CNT + 2 * 2); // BG2CNT
         let priority = (bgcnt & BGCNT_PRIORITY_MASK) as u8;
 
+        // Use BG2 affine parameters for rotation/scaling
+        let ref_x = self.bg2_ref_x;
+        let ref_y = self.bg2_ref_y;
+        let pa = read_io_i16(io, BG2PA) as i32;
+        let pc = read_io_i16(io, BG2PC) as i32;
+
         for x in 0..SCREEN_WIDTH {
-            let offset = (line as usize * SCREEN_WIDTH + x) * 2;
+            let src_x = ref_x + pa * x as i32;
+            let src_y = ref_y + pc * x as i32;
+            let tex_x = src_x >> 8;
+            let tex_y = src_y >> 8;
+
+            // Clamp to screen bounds (no wrapping for bitmap modes)
+            if tex_x < 0 || tex_y < 0 || tex_x >= SCREEN_WIDTH as i32 || tex_y >= SCREEN_HEIGHT as i32 {
+                continue;
+            }
+
+            let offset = (tex_y as usize * SCREEN_WIDTH + tex_x as usize) * 2;
             if offset + 1 < vram.len() {
                 let color = vram[offset] as u16 | ((vram[offset + 1] as u16) << 8);
                 self.bg_lines[2][x] = LayerPixel {
@@ -739,7 +757,7 @@ impl Ppu {
 
     fn render_bitmap_mode4(
         &mut self,
-        line: u32,
+        _line: u32,
         dispcnt: u16,
         io: &[u8],
         palette: &[u8],
@@ -753,8 +771,23 @@ impl Ppu {
             0
         };
 
+        // Use BG2 affine parameters for rotation/scaling
+        let ref_x = self.bg2_ref_x;
+        let ref_y = self.bg2_ref_y;
+        let pa = read_io_i16(io, BG2PA) as i32;
+        let pc = read_io_i16(io, BG2PC) as i32;
+
         for x in 0..SCREEN_WIDTH {
-            let offset = page + line as usize * SCREEN_WIDTH + x;
+            let src_x = ref_x + pa * x as i32;
+            let src_y = ref_y + pc * x as i32;
+            let tex_x = src_x >> 8;
+            let tex_y = src_y >> 8;
+
+            if tex_x < 0 || tex_y < 0 || tex_x >= SCREEN_WIDTH as i32 || tex_y >= SCREEN_HEIGHT as i32 {
+                continue;
+            }
+
+            let offset = page + tex_y as usize * SCREEN_WIDTH + tex_x as usize;
             if offset < vram.len() {
                 let idx = vram[offset] as usize;
                 if idx != 0 {
@@ -771,7 +804,7 @@ impl Ppu {
         }
     }
 
-    fn render_bitmap_mode5(&mut self, line: u32, dispcnt: u16, io: &[u8], vram: &[u8]) {
+    fn render_bitmap_mode5(&mut self, _line: u32, dispcnt: u16, io: &[u8], vram: &[u8]) {
         let bgcnt = read_io_u16(io, BG0CNT + 2 * 2);
         let priority = (bgcnt & BGCNT_PRIORITY_MASK) as u8;
         let page = if dispcnt & DISPCNT_FRAME_SELECT != 0 {
@@ -780,12 +813,27 @@ impl Ppu {
             0
         };
 
-        if line >= 128 {
-            return;
-        }
+        // Mode 5: 160x128 resolution
+        const MODE5_WIDTH: i32 = 160;
+        const MODE5_HEIGHT: i32 = 128;
 
-        for x in 0..160 {
-            let offset = page + (line as usize * 160 + x) * 2;
+        // Use BG2 affine parameters for rotation/scaling
+        let ref_x = self.bg2_ref_x;
+        let ref_y = self.bg2_ref_y;
+        let pa = read_io_i16(io, BG2PA) as i32;
+        let pc = read_io_i16(io, BG2PC) as i32;
+
+        for x in 0..SCREEN_WIDTH {
+            let src_x = ref_x + pa * x as i32;
+            let src_y = ref_y + pc * x as i32;
+            let tex_x = src_x >> 8;
+            let tex_y = src_y >> 8;
+
+            if tex_x < 0 || tex_y < 0 || tex_x >= MODE5_WIDTH || tex_y >= MODE5_HEIGHT {
+                continue;
+            }
+
+            let offset = page + (tex_y as usize * MODE5_WIDTH as usize + tex_x as usize) * 2;
             if offset + 1 < vram.len() {
                 let color = vram[offset] as u16 | ((vram[offset + 1] as u16) << 8);
                 self.bg_lines[2][x] = LayerPixel {

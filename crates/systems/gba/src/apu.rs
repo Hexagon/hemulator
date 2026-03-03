@@ -339,16 +339,18 @@ impl GbaApu {
                 self.wave_length.clock();
                 self.noise_length.clock();
 
-                if !self.pulse1_length.is_active() {
+                // Only disable channels when the length counter IS enabled and has expired.
+                // When the length counter is disabled, the channel plays indefinitely.
+                if self.pulse1_length.is_enabled() && !self.pulse1_length.is_active() {
                     self.pulse1.enabled = false;
                 }
-                if !self.pulse2_length.is_active() {
+                if self.pulse2_length.is_enabled() && !self.pulse2_length.is_active() {
                     self.pulse2.enabled = false;
                 }
-                if !self.wave_length.is_active() {
+                if self.wave_length.is_enabled() && !self.wave_length.is_active() {
                     self.wave.enabled = false;
                 }
-                if !self.noise_length.is_active() {
+                if self.noise_length.is_enabled() && !self.noise_length.is_active() {
                     self.noise.enabled = false;
                 }
 
@@ -433,12 +435,21 @@ impl GbaApu {
     /// Drain buffered stereo samples, returning them and clearing the buffer.
     ///
     /// Returns interleaved L, R, L, R, ... i16 samples at 44,100 Hz.
-    /// If `target_stereo_count` is specified, pads with silence or truncates.
+    /// Excess samples beyond `target_stereo_count` are preserved for the next
+    /// drain call, preventing audio drift and clicks between frames.
     pub fn drain_samples(&mut self, target_stereo_count: usize) -> Vec<i16> {
-        let mut samples = std::mem::take(&mut self.sample_buffer);
-        self.sample_buffer = Vec::with_capacity(1600);
-        samples.resize(target_stereo_count, 0);
-        samples
+        if self.sample_buffer.len() >= target_stereo_count {
+            // We have enough: return exactly the requested count,
+            // keep the excess for next frame
+            let remainder = self.sample_buffer.split_off(target_stereo_count);
+            std::mem::replace(&mut self.sample_buffer, remainder)
+        } else {
+            // Not enough: take all accumulated samples and pad
+            let mut samples = std::mem::take(&mut self.sample_buffer);
+            self.sample_buffer = Vec::with_capacity(1600);
+            samples.resize(target_stereo_count, 0);
+            samples
+        }
     }
 
     /// Mix all channels into a stereo sample pair.

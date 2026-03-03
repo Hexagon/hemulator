@@ -2408,7 +2408,7 @@ fn generate_debug_dump(
 
             if region.readable {
                 // Dump memory in hex format (16 bytes per line)
-                let size = region.size().min(65536) as usize; // Limit to 64KB per region
+                let size = region.size().min(256 * 1024) as usize; // Limit to 256KB per region
                 if let Some(data) = debugger.read_memory(region.start, size) {
                     for (offset, chunk) in data.chunks(16).enumerate() {
                         let addr: u32 = region.start + (offset * 16) as u32;
