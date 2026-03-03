@@ -83,6 +83,8 @@ pub struct N64System {
 
 // Re-export controller types for convenience
 pub use pif::{ControllerButtons, ControllerState};
+// Re-export save type for use by the frontend
+pub use cartridge::SaveType;
 
 impl N64System {
     /// Create a new N64 system with OpenGL renderer
@@ -267,6 +269,36 @@ impl N64System {
                 (cycles as f64 * 60.0) / 1_000_000.0
             )
         });
+    }
+
+    /// Export the cartridge save data (SRAM, EEPROM, or FlashRAM) for persistence.
+    ///
+    /// Returns `None` when no save storage is configured for the loaded cartridge.
+    /// The format matches what [`Self::set_save_data`] expects, making round-trips
+    /// lossless:
+    ///
+    /// ```no_run
+    /// # use emu_n64::N64System;
+    /// # fn f(sys: &mut N64System, saved: Vec<u8>) {
+    /// // Save
+    /// if let Some(data) = sys.get_save_data() {
+    ///     std::fs::write("save.bin", &data).ok();
+    /// }
+    /// // Load
+    /// if let Ok(data) = std::fs::read("save.bin") {
+    ///     sys.set_save_data(data).ok();
+    /// }
+    /// # }
+    /// ```
+    pub fn get_save_data(&self) -> Option<Vec<u8>> {
+        self.cpu.bus().get_save_data()
+    }
+
+    /// Import previously persisted save data.
+    ///
+    /// Returns `Err` when the data length does not match the configured save storage.
+    pub fn set_save_data(&mut self, data: Vec<u8>) -> Result<(), String> {
+        self.cpu.bus_mut().set_save_data(data)
     }
 }
 
