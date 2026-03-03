@@ -174,6 +174,28 @@ The `--system` flag accepts: `nes`, `gb`, `gba`, `atari2600`, `snes`, `n64`, `pc
 
 > **Note:** N64 requires an OpenGL context and does not support `--no-gui`. Use the full GUI for N64.
 
+**Recommended debug/trace workflow (e.g. when working with AI)**
+
+When iterating on a single system's code, use this two-step cycle to stay fast:
+
+1. **Iterate quickly** — use `-p` builds to verify each change compiles (~12s):
+   ```bash
+   cargo build -p emu_nes
+   cargo test -p emu_nes
+   ```
+
+2. **Run a debug dump** — once the logic looks right, run the full binary to capture a trace or dump.
+   The first build is slow (~2.5min), but subsequent runs only recompile the changed crate (incremental):
+   ```bash
+   # Dump CPU state and memory when PC reaches a specific address
+   cargo run --profile release-quick -- --debug-dump-pc 0x8000 game.nes
+
+   # Capture an instruction trace and dump at a breakpoint
+   cargo run --profile release-quick -- --trace-instructions --breakpoint 0x8000 game.nes
+   ```
+
+   See the [Command-Line Debug Dump](#command-line-debug-dump) section for full options.
+
 - **Pre-commit checks** (REQUIRED before committing any code):
   1. **Formatting**: `cargo fmt --all -- --check` - Must pass with no diff
   2. **Clippy**: `cargo clippy --workspace --all-targets -- -D warnings` - Must pass with no warnings
