@@ -339,11 +339,6 @@ impl Vdp {
         self.frame_interrupt_pending
     }
 
-    /// Clear frame interrupt
-    pub fn clear_frame_interrupt(&mut self) {
-        self.frame_interrupt_pending = false;
-    }
-
     /// Check if line interrupt is pending
     pub fn line_interrupt_pending(&self) -> bool {
         self.line_interrupt_pending
@@ -1106,7 +1101,7 @@ mod tests {
 
         // Enable display (bit 6 of register 1 = 1 enables display in TMS mode used here)
         // Note: registers[0] = 0 means TMS mode (not Mode 4), so bit 6 = 1 enables display
-        vdp.registers[1] = 0x40 | 0x08;
+        vdp.registers[1] = 0x40;
 
         // Set sprite attribute table at 0x3F00 (register 5)
         vdp.registers[5] = 0x7E; // (0x7E << 7) = 0x3F00
@@ -1137,7 +1132,7 @@ mod tests {
         let mut vdp = Vdp::new();
 
         // Enable display (bit 6 = 1 in TMS mode, used by these tests)
-        vdp.registers[1] = 0x40 | 0x08;
+        vdp.registers[1] = 0x40;
 
         // Set sprite attribute table
         vdp.registers[5] = 0x7E; // 0x3F00

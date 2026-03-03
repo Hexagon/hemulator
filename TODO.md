@@ -26,9 +26,6 @@
 - [ ] **Line interrupt counter reload timing**: The line counter is reloaded from R10 at scanline 192 (start of VBlank). Verify correct reload behavior for games that change R10 mid-frame. — `crates/systems/sms/src/vdp.rs`
 - [ ] **`SMS_waitForVBlank()` V-counter polling**: SMSlib polls port 0x7E until the V-counter wraps from 0xF2/0xDA back to a low value. Ensure the V-counter wraps correctly at the end of each frame (NTSC: wraps at 0xF3→0x00, PAL: 0xF3→0x00 with jump at 0xF2). — `crates/systems/sms/src/vdp.rs`
 
-### Low
-- [ ] **`clear_frame_interrupt` is now dead code**: After the frame-interrupt-ISR-delivery fix, `Vdp::clear_frame_interrupt()` is no longer called from `system.rs` (it is now cleared by `read_status()`). Remove or suppress the dead-code warning. — `crates/systems/sms/src/vdp.rs`
-
 ## GBA
 
 ### High
