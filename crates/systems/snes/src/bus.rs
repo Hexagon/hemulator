@@ -1364,10 +1364,27 @@ impl Memory65c816 for SnesBus {
                                     //
                                     // Model that by acknowledging the last port-0 value *after* a port-1 write.
                                     if port == 0 {
-                                        // Many commercial boot loaders poll $2140 immediately after writing it.
-                                        // Acknowledge port-0 writes right away to avoid deadlocks.
-                                        self.apu_out_ports[0] = val;
-                                        self.apu_response_delay = 1;
+                                        // $FF to port 0 signals end-of-upload: the SPC700 should now
+                                        // jump to the uploaded entry point and execute it.  Simulate
+                                        // the uploaded code running by restoring the $BBAA ready
+                                        // signature so the SNES CPU can proceed to a second upload or
+                                        // continue execution.
+                                        if val == 0xFF {
+                                            self.apu_out_ports[0] = 0xAA;
+                                            self.apu_out_ports[1] = 0xBB;
+                                            // Mirror boot-handshake initialization for a new ready state:
+                                            // clear ports 2/3 and reset the per-session transfer counter.
+                                            self.apu_out_ports[2] = 0x00;
+                                            self.apu_out_ports[3] = 0x00;
+                                            self.apu_transfer_counter = 0;
+                                            self.apu_state = ApuState::BootReady;
+                                            self.apu_response_delay = 10;
+                                        } else {
+                                            // Many commercial boot loaders poll $2140 immediately after writing it.
+                                            // Acknowledge port-0 writes right away to avoid deadlocks.
+                                            self.apu_out_ports[0] = val;
+                                            self.apu_response_delay = 1;
+                                        }
                                     } else if port == 1 {
                                         self.apu_transfer_counter =
                                             self.apu_transfer_counter.wrapping_add(1);
@@ -1653,6 +1670,9 @@ mod tests {
         // Set controller 1 state: B button (bit 15)
         bus.set_controller(0, 0x8000);
 
+        // Simulate VBlank auto-joypad latch (normally triggered by PPU)
+        bus.start_auto_joypad_read();
+
         // Read auto-joypad registers
         let joy1l = bus.read(0x4218);
         let joy1h = bus.read(0x4219);
@@ -1708,6 +1728,9 @@ mod tests {
         // Set different states for both controllers
         bus.set_controller(0, 0xAAAA);
         bus.set_controller(1, 0x5555);
+
+        // Simulate VBlank auto-joypad latch (normally triggered by PPU)
+        bus.start_auto_joypad_read();
 
         // Read auto-joypad registers
         assert_eq!(bus.read(0x4218), 0xAA); // JOY1L

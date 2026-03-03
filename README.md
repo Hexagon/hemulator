@@ -1,10 +1,10 @@
 # Hemulator — Multi-System Console Emulator
 
-A cross-platform, multi-system console emulator written in Rust. **NES emulation is fully working** with ~90% game coverage. Other systems (Game Boy, GBA, CHIP-8, SMS, ColecoVision, SG-1000, Atari 2600, SNES, N64, PC/DOS) are in various stages of development.
+A cross-platform, multi-system console emulator written in Rust. **NES emulation is fully working** with ~90% game coverage. Other systems (Game Boy, GBA, CHIP-8, SMS, ColecoVision, SG-1000, Atari 2600, SNES, N64, PS1, PC/DOS) are in various stages of development.
 
 ## Features
 
-- 🎮 **Multiple Systems**: NES, Game Boy, GBA, CHIP-8, SMS, ColecoVision, SG-1000, Atari 2600, SNES, N64, PC/DOS
+- 🎮 **Multiple Systems**: NES, Game Boy, GBA, CHIP-8, SMS, ColecoVision, SG-1000, Atari 2600, SNES, N64, PS1, PC/DOS
 - 💾 **Save States**: 5 slots per game with menu-based save/load (Ctrl+1-5 / Ctrl+Shift+1-5)
 - ⚙️ **Persistent Settings**: Customizable controls, window scaling, and project files
 - 🖥️ **Cross-Platform GUI**: Built with SDL2 for Windows, Linux, and macOS
@@ -27,6 +27,7 @@ A cross-platform, multi-system console emulator written in Rust. **NES emulation
 | **Atari 2600** | 🚧 In Development | Most cartridge formats; rendering WIP |
 | **SNES** | 🚧 In Development | Graphics working; modes 0-1 complete; no audio |
 | **N64** | 🚧 In Development | 3D rendering works; limited game support |
+| **PS1** | 🚧 In Development | MIPS R3000A CPU, GPU (2D/3D), DMA, timers; Audio/CD-ROM WIP |
 | **PC/DOS** | ⚠️ Experimental | COM/EXE loading; CGA/EGA/VGA modes |
 
 **Legend:**
@@ -122,6 +123,7 @@ hemulator/
 │   │   ├── atari2600/     # Atari 2600
 │   │   ├── snes/          # Super Nintendo
 │   │   ├── n64/           # Nintendo 64
+│   │   ├── ps1/           # Sony PlayStation 1
 │   │   └── pc/            # IBM PC/XT
 │   └── frontend/gui/      # GUI frontend (SDL2 + egui) - builds as 'hemu'
 ├── docs/                  # Documentation site source (Lumocs)

@@ -1521,6 +1521,7 @@ struct CliArgs {
     show_help: bool,           // Show help message
     show_version: bool,        // Show version
     benchmark: bool,           // Benchmark mode: disable frame limiter to measure raw performance
+    no_gui: bool,              // No-GUI mode: run in a plain SDL2 window without egui overlay
     // Logging configuration
     log_level: Option<String>,      // Global log level
     log_cpu: Option<String>,        // CPU log level
@@ -1560,6 +1561,9 @@ impl CliArgs {
                 }
                 "--benchmark" => {
                     args.benchmark = true;
+                }
+                "--no-gui" => {
+                    args.no_gui = true;
                 }
                 "--system" | "-S" => {
                     if let Some(system) = arg_iter.next() {
@@ -1822,6 +1826,9 @@ impl CliArgs {
             "  --benchmark              Disable frame limiter to measure raw emulation performance"
         );
         eprintln!(
+            "  --no-gui                 Run in a plain SDL2 window without the egui overlay (faster startup, minimal UI)"
+        );
+        eprintln!(
             "  -S, --system <SYSTEM>    Start clean system (pc, nes, gb, gba, atari2600, snes, n64)"
         );
         eprintln!("  --bios <file>            Load BIOS file (for PS1, ColecoVision, SMS, PC)");
@@ -1880,6 +1887,9 @@ impl CliArgs {
         eprintln!();
         eprintln!("Examples:");
         eprintln!("  hemu game.nes                                  # Load NES ROM (auto-detect)");
+        eprintln!(
+            "  hemu --no-gui game.nes                         # Load NES ROM without GUI overlay"
+        );
         eprintln!(
             "  hemu --benchmark game.nes                      # Benchmark mode (no frame limiter)"
         );
@@ -3712,6 +3722,140 @@ fn main() {
         }
     }
     // ===== END HEADLESS MODE =====
+
+    // ===== NO-GUI MODE =====
+    // If --no-gui is requested, run in a plain SDL2 window without egui overhead
+    if cli_args.no_gui {
+        // N64 requires an OpenGL context which --no-gui does not set up
+        if matches!(&sys, EmulatorSystem::N64(_)) {
+            eprintln!("Error: --no-gui does not support N64 (requires an OpenGL context). Use the full GUI instead.");
+            std::process::exit(1);
+        }
+
+        let title = format!("Hemulator - {}", sys.system_name());
+        let mut window =
+            match window_backend::Sdl2Backend::new(&title, window_width, window_height, false) {
+                Ok(w) => w,
+                Err(e) => {
+                    eprintln!("Failed to create window: {}", e);
+                    return;
+                }
+            };
+
+        // Initialize audio output
+        let (_stream, stream_handle) = match OutputStream::try_default() {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Error: Failed to initialize audio (exiting): {}.", e);
+                std::process::exit(1);
+            }
+        };
+        let (audio_tx, audio_rx) = sync_channel::<i16>(44100 * 2);
+        if let Err(e) = stream_handle.play_raw(
+            StreamSource {
+                rx: audio_rx,
+                sample_rate: 44100,
+                channels: 2,
+            }
+            .convert_samples(),
+        ) {
+            eprintln!("Warning: Failed to start audio playback: {}", e);
+        }
+
+        const SAMPLE_RATE: usize = 44100;
+        let mut audio_sample_remainder: f64 = 0.0;
+        let mut last_frame = Instant::now();
+
+        loop {
+            window.poll_events();
+            if !window.is_open() {
+                break;
+            }
+
+            let timing = sys.timing();
+            let frame_rate = timing.frame_rate_hz();
+            let target_frame_duration = Duration::from_secs_f64(1.0 / frame_rate);
+
+            match sys.step_frame() {
+                Ok(frame) => {
+                    // Handle audio
+                    let samples_per_frame_f =
+                        (SAMPLE_RATE as f64 / frame_rate) + audio_sample_remainder;
+                    let samples_per_frame = samples_per_frame_f.floor() as usize;
+                    audio_sample_remainder = samples_per_frame_f - samples_per_frame as f64;
+                    let audio_samples = sys.get_audio_samples(samples_per_frame);
+                    let expected_stereo = samples_per_frame * 2;
+                    if audio_samples.len() == expected_stereo {
+                        for sample in audio_samples {
+                            let _ = audio_tx.try_send(sample);
+                        }
+                    } else {
+                        for i in 0..samples_per_frame {
+                            let sample = audio_samples.get(i).copied().unwrap_or(0);
+                            let _ = audio_tx.try_send(sample);
+                            let _ = audio_tx.try_send(sample);
+                        }
+                    }
+
+                    // Render frame
+                    if let Err(e) = window.update_with_buffer(
+                        &frame.pixels,
+                        frame.width as usize,
+                        frame.height as usize,
+                    ) {
+                        eprintln!("Render error: {}", e);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Emulation error: {}", e);
+                    break;
+                }
+            }
+
+            // Handle controller input
+            if !matches!(&sys, EmulatorSystem::PC(_)) {
+                let controller_state = get_controller_state(&window, &settings.input.player1);
+                let snes_state = get_snes_controller_state(&window, &settings.input.player1);
+                let chip8_state = get_chip8_controller_state(&window);
+                let coleco_p1_state =
+                    get_colecovision_controller_state(&window, &settings.input.player1);
+                let coleco_p2_state =
+                    get_colecovision_controller_state(&window, &settings.input.player2);
+
+                match &mut sys {
+                    EmulatorSystem::SNES(s) => s.set_controller(0, snes_state),
+                    EmulatorSystem::Chip8(s) => s.set_controller(chip8_state),
+                    EmulatorSystem::ColecoVision(s) => {
+                        s.set_controller(1, coleco_p1_state);
+                        s.set_controller(2, coleco_p2_state);
+                    }
+                    _ => sys.set_controller(0, controller_state),
+                }
+            } else {
+                let pressed = window.get_sdl2_scancodes_pressed().clone();
+                let released = window.get_sdl2_scancodes_released().clone();
+                if let EmulatorSystem::PC(pc_sys) = &mut sys {
+                    for scancode in &pressed {
+                        pc_sys.key_press_sdl2(*scancode);
+                    }
+                    for scancode in &released {
+                        pc_sys.key_release_sdl2(*scancode);
+                    }
+                }
+            }
+
+            // Frame timing
+            if !cli_args.benchmark {
+                let elapsed = last_frame.elapsed();
+                if elapsed < target_frame_duration {
+                    std::thread::sleep(target_frame_duration - elapsed);
+                }
+            }
+            last_frame = Instant::now();
+        }
+        return;
+    }
+    // ===== END NO-GUI MODE =====
 
     // Create egui backend
     let mut egui_backend = match Sdl2EguiBackend::new(

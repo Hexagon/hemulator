@@ -1244,6 +1244,8 @@ mod tests {
 
         // Trigger DMA from $C000 to OAM
         sys.cpu.memory.write(0xFF46, 0xC0);
+        // DMA transfers 160 bytes at 4 cycles each = 640 cycles
+        sys.cpu.memory.step_oam_dma(640);
 
         // Verify OAM was updated
         assert_eq!(
@@ -1286,6 +1288,8 @@ mod tests {
 
         // Trigger DMA from $C000 to OAM
         sys.cpu.memory.write(0xFF46, 0xC0);
+        // DMA transfers 160 bytes at 4 cycles each = 640 cycles
+        sys.cpu.memory.step_oam_dma(640);
 
         // Verify all 160 bytes copied correctly
         for i in 0..160 {

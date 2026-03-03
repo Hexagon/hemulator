@@ -1,7 +1,7 @@
 //! SMS PSG (Programmable Sound Generator) implementation.
 //!
 //! This module provides the SMS-specific PSG interface while using
-//! the reusable SN76489 component from the core module.
+//! the reusable SN76489 adapter from the core module.
 //!
 //! ## Current Implementation
 //!
@@ -18,174 +18,69 @@
 //! - Latch/Data byte format: 1cctdddd (c=channel, t=type, d=data)
 //! - Data byte format: 0ddddddd (d=data)
 //!
-//! Channel types:
-//! - 0: Tone frequency
-//! - 1: Volume
-//!
 //! ## Audio Output
 //!
-//! The PSG generates 44.1 kHz stereo audio by:
-//!
-//! 1. Clocking the PSG at SMS CPU speed (3.579545 MHz NTSC or 3.546894 MHz PAL)
-//! 2. Mixing all 4 channels using exponential volume curve
-//! 3. Downsampling to the target sample rate (44.1 kHz)
-//!
-//! The implementation uses cycle accumulation for precise timing,
-//! similar to the NES APU approach.
+//! The PSG generates 44.1 kHz audio by clocking the SN76489 at SMS CPU speed
+//! (3.579545 MHz NTSC or 3.546894 MHz PAL) and downsampling via cycle
+//! accumulation.
 
-use emu_core::apu::{AudioChip, Sn76489Psg, TimingMode};
+use emu_core::apu::{sn76489::Sn76489Adapter, TimingMode};
 use emu_core::logging::{log, LogCategory, LogLevel};
 
-/// SMS PSG with proper CPU-cycle-based audio generation
-///
-/// This wrapper provides cycle-accurate PSG emulation by clocking
-/// the underlying SN76489 chip at SMS CPU speed and downsampling to
-/// the target audio sample rate.
-///
-/// # Timing
-///
-/// The PSG runs at SMS CPU clock speed:
-///
-/// - NTSC: 3.579545 MHz
-/// - PAL: 3.546894 MHz
-///
-/// Note: These are different from NES clock speeds (~1.79 MHz).
-/// The SMS runs at exactly double the NES clock rate.
-///
-/// Audio is downsampled to 44.1 kHz by accumulating CPU cycles
-/// and clocking the PSG multiple times per audio sample.
-pub struct SmsPsg {
-    /// Core SN76489 PSG implementation
-    psg: Sn76489Psg,
+/// SMS NTSC CPU clock rate (Hz).
+const CPU_HZ_NTSC: f64 = 3_579_545.0;
 
-    /// Cycle accumulator for downsampling
-    /// Tracks fractional CPU cycles to generate precise audio timing
-    cycle_accum: f64,
+/// SMS PAL CPU clock rate (Hz).
+const CPU_HZ_PAL: f64 = 3_546_894.0;
 
-    /// Current timing mode (NTSC/PAL)
-    timing: TimingMode,
-}
+/// SMS PSG with proper CPU-cycle-based audio generation.
+pub struct SmsPsg(Sn76489Adapter);
 
 impl SmsPsg {
-    /// Create a new SMS PSG
+    /// Create a new SMS PSG with NTSC timing.
     pub fn new() -> Self {
         Self::new_with_timing(TimingMode::Ntsc)
     }
 
-    /// Create a new SMS PSG with specific timing mode
+    /// Create a new SMS PSG with the specified timing mode.
     pub fn new_with_timing(timing: TimingMode) -> Self {
-        Self {
-            psg: Sn76489Psg::new(timing),
-            cycle_accum: 0.0,
-            timing,
-        }
+        Self(Sn76489Adapter::new(timing, CPU_HZ_NTSC, CPU_HZ_PAL))
     }
 
-    /// Set timing mode (NTSC/PAL)
-    ///
-    /// This updates the timing used for CPU-cycle-to-sample conversion
-    /// without recreating the underlying PSG, so audio state (registers,
-    /// phase, LFSR, etc.) is preserved.
+    /// Set timing mode (NTSC/PAL).
     pub fn set_timing(&mut self, timing: TimingMode) {
-        if self.timing != timing {
-            self.timing = timing;
-            // Reset cycle accumulator so fractional cycles don't carry across
-            // between different CPU clock rates (e.g., NTSC <-> PAL).
-            self.cycle_accum = 0.0;
-        }
+        self.0.set_timing(timing);
     }
 
-    /// Write a byte to the PSG
-    ///
-    /// This handles both latch/data and continuation data bytes
+    /// Write a byte to the PSG.
     pub fn write(&mut self, data: u8) {
         log(LogCategory::APU, LogLevel::Debug, || {
             format!("SMS PSG: Write 0x{:02X}", data)
         });
-
-        self.psg.write(data);
+        self.0.write(data);
     }
 
-    /// Reset the PSG to initial state
+    /// Reset the PSG to its initial state.
     pub fn reset(&mut self) {
         log(LogCategory::APU, LogLevel::Info, || {
             "SMS PSG: Reset".to_string()
         });
-
-        self.psg.reset();
-        self.cycle_accum = 0.0;
+        self.0.reset();
     }
 
-    /// Generate audio samples for a given count, stepping PSG in CPU-cycle time
-    /// using the configured timing mode and sample rate of 44.1 kHz.
-    ///
-    /// This method follows the same pattern as the NES APU:
-    /// 1. Calculate how many CPU cycles correspond to each audio sample
-    /// 2. Clock the PSG that many times per sample
-    /// 3. Average the output over those cycles
+    /// Generate `sample_count` audio samples at 44.1 kHz.
     pub fn generate_samples(&mut self, sample_count: usize) -> Vec<i16> {
-        const SAMPLE_HZ: f64 = 44_100.0;
-        // SMS CPU clock rates (not the same as NES!)
-        let cpu_hz = match self.timing {
-            TimingMode::Ntsc => 3_579_545.0, // SMS NTSC
-            TimingMode::Pal => 3_546_894.0,  // SMS PAL
-        };
-        let cycles_per_sample = cpu_hz / SAMPLE_HZ;
-
-        let mut out = Vec::with_capacity(sample_count);
-        for _ in 0..sample_count {
-            self.cycle_accum += cycles_per_sample;
-            let mut cycles = self.cycle_accum as u32;
-            if cycles == 0 {
-                cycles = 1; // Ensure we advance state even if timing slips
-            }
-            self.cycle_accum -= cycles as f64;
-
-            // Clock PSG for all cycles and accumulate output
-            let mut acc = 0i32;
-            for _ in 0..cycles {
-                let sample = self.psg.clock() as i32;
-                acc += sample;
-            }
-
-            // Average over all cycles
-            let avg = acc / cycles as i32;
-            out.push(avg.clamp(-32768, 32767) as i16);
-        }
-
-        out
+        self.0.generate_samples(sample_count)
     }
 
-    /// Get PSG state for save state
+    /// Serialise PSG state for save states.
     pub fn get_state(&self) -> serde_json::Value {
-        serde_json::json!({
-            "cycle_accum": self.cycle_accum,
-            "timing": match self.timing {
-                TimingMode::Ntsc => "ntsc",
-                TimingMode::Pal => "pal",
-            },
-            "psg": self.psg.get_state(),
-        })
+        self.0.get_state()
     }
 
-    /// Set PSG state from save state
+    /// Restore PSG state from a save state.
     pub fn set_state(&mut self, state: &serde_json::Value) -> Result<(), serde_json::Error> {
-        if let Some(cycle_accum) = state.get("cycle_accum").and_then(|v| v.as_f64()) {
-            self.cycle_accum = cycle_accum;
-        }
-
-        if let Some(timing_str) = state.get("timing").and_then(|v| v.as_str()) {
-            self.timing = match timing_str {
-                "pal" => TimingMode::Pal,
-                _ => TimingMode::Ntsc,
-            };
-        }
-
-        if let Some(psg_state) = state.get("psg") {
-            self.psg.set_state(psg_state)?;
-        }
-
-        Ok(())
+        self.0.set_state(state)
     }
 }
 
@@ -201,8 +96,14 @@ mod tests {
 
     #[test]
     fn test_psg_creation() {
-        let psg = SmsPsg::new();
-        assert_eq!(psg.timing, TimingMode::Ntsc);
+        let mut psg = SmsPsg::new();
+        // NTSC default: all channels muted, so samples should be silent
+        let samples = psg.generate_samples(10);
+        assert_eq!(samples.len(), 10);
+        assert!(
+            samples.iter().all(|&s| s == 0),
+            "Expected silent output from a freshly created PSG"
+        );
     }
 
     #[test]
@@ -212,11 +113,14 @@ mod tests {
         // Write some data
         psg.write(0x80); // Latch tone 0, data 0
 
-        // Reset should clear everything
+        // Reset should restore initial state; output must be silent again
         psg.reset();
-
-        // Cycle accumulator should be reset
-        assert_eq!(psg.cycle_accum, 0.0);
+        let samples = psg.generate_samples(10);
+        assert_eq!(samples.len(), 10);
+        assert!(
+            samples.iter().all(|&s| s == 0),
+            "Expected silent output after PSG reset (all channels muted)"
+        );
     }
 
     #[test]
@@ -301,9 +205,6 @@ mod tests {
         // Generate a few samples
         let samples1 = psg.generate_samples(10);
         assert_eq!(samples1.len(), 10);
-
-        // Cycle accumulator should have some fractional value
-        // (unless it happens to be exactly 0, which is unlikely)
 
         // Generate more samples - should continue from previous accumulator state
         let samples2 = psg.generate_samples(10);

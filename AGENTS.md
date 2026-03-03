@@ -23,6 +23,7 @@
 - **[SG-1000](crates/systems/sg1000/README.md)**: Sega SG-1000
 - **[SNES](crates/systems/snes/README.md)**: Super Nintendo Entertainment System
 - **[N64](crates/systems/n64/README.md)**: Nintendo 64
+- **[PS1](crates/systems/ps1/README.md)**: Sony PlayStation 1
 - **[PC](crates/systems/pc/README.md)**: IBM PC/XT
 
 ---
@@ -133,6 +134,20 @@ The project uses a **Lumocs-based documentation site** hosted at https://hemulat
   - Run unit/integration tests (`cargo test --workspace`).
   - Optionally run benchmarks in a separate job.
 
+- **Fast single-system builds (for development/debugging)**:
+  Each system crate compiles independently in ~12s vs ~2.5min for the full workspace binary. Use these commands when working on a specific system:
+  - **Build one system**: `cargo build -p emu_nes` (or `emu_gb`, `emu_snes`, `emu_pc`, `hemu_gba`, etc.)
+  - **Test one system**: `cargo test -p emu_nes`
+  - **Run only that system's benchmarks**: `cargo bench -p emu_nes`
+  - This compiles `emu_core` + the target system only — skipping egui, SDL2, and all other systems.
+
+  When you need a running window (visual output), build and run the full binary with `--no-gui` to skip the egui overlay:
+  ```bash
+  cargo run --profile release-quick -- --no-gui game.nes
+  cargo run --profile release-quick -- --no-gui --system nes
+  ```
+  The `--no-gui` flag uses a plain SDL2 window with no egui initialization, giving faster startup and reduced overhead while still providing audio and controller input.
+
 - **Pre-commit checks** (REQUIRED before committing any code):
   1. **Formatting**: `cargo fmt --all -- --check` - Must pass with no diff
   2. **Clippy**: `cargo clippy --workspace --all-targets -- -D warnings` - Must pass with no warnings
@@ -230,11 +245,15 @@ For comprehensive architecture documentation, see **[ARCHITECTURE.md](ARCHITECTU
 For system-specific implementation details, see each system's README:
 - **[NES](crates/systems/nes/README.md)** - PPU, APU, mappers
 - **[Game Boy](crates/systems/gb/README.md)** - PPU, APU, MBCs
+- **[GBA](crates/systems/gba/README.md)** - ARM7TDMI CPU, PPU, saves
 - **[Atari 2600](crates/systems/atari2600/README.md)** - TIA, RIOT, cartridges
 - **[CHIP-8](crates/systems/chip8/README.md)** - VM architecture, display modes
 - **[SMS](crates/systems/sms/README.md)** - Z80 CPU, VDP, PSG
+- **[ColecoVision](crates/systems/colecovision/README.md)** - Z80 CPU, TMS9918A VDP, PSG
+- **[SG-1000](crates/systems/sg1000/README.md)** - Z80 CPU, TMS9918A VDP, PSG
 - **[SNES](crates/systems/snes/README.md)** - PPU modes, memory map
 - **[N64](crates/systems/n64/README.md)** - RDP renderer, RSP
+- **[PS1](crates/systems/ps1/README.md)** - MIPS R3000A CPU, GPU, SPU
 - **[PC](crates/systems/pc/README.md)** - Video adapters, BIOS
 
 **Core Components** (`crates/core/`):
@@ -243,11 +262,7 @@ For system-specific implementation details, see each system's README:
 - Graphics: ZBuffer, ColorOps, palette/tile utilities
 - Traits: System, Cpu, Renderer, AudioChip
 
-**System Modules** (`crates/systems/`):
-- ✅ NES (~90% game coverage), Game Boy (GB fully functional, GBC WIP), CHIP-8 (fully working)
-- 🚧 Atari 2600 (rendering issues), SMS (not producing image), ColecoVision (not producing image), SNES (no visible output), N64 (in development)
-- ⚠️ SG-1000 (experimental)
-- 🧪 PC (experimental)
+For current system status and coverage, see the **[System Status table in README.md](README.md#system-status)**.
 
 ## Implementation Guidelines
 

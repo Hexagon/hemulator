@@ -203,7 +203,11 @@ impl System for SmsSystem {
             "SMS: System reset".to_string()
         });
         self.cpu.reset();
-        self.vdp.borrow_mut().reset();
+        {
+            let mut vdp = self.vdp.borrow_mut();
+            vdp.set_pal(matches!(self.timing_mode, emu_core::apu::TimingMode::Pal));
+            vdp.reset();
+        }
         self.psg.borrow_mut().reset();
         self.cycles = 0;
         self.total_cycles = 0;
@@ -268,12 +272,14 @@ impl System for SmsSystem {
 
             // Check for VDP interrupts (frame interrupt has priority over line interrupt)
             if self.vdp.borrow().frame_interrupt_pending() {
-                // Trigger Z80 interrupt (IM 1: RST 38h = jump to 0x0038)
-                // Data byte doesn't matter in IM 1, but pass 0xFF as default
+                // Trigger the CPU interrupt; do NOT clear frame_interrupt_pending here.
+                // The VDP status register bit 7 must remain set until the ISR reads it
+                // (via IN A, (0xBF)), which calls read_status() and clears the flag.
+                // Clearing it here would cause the ISR to misidentify every frame interrupt
+                // as a line interrupt (bit 7 = 0 → carry clear → JP NC to line handler).
                 self.cpu.interrupt(0xFF);
-                self.vdp.borrow_mut().clear_frame_interrupt();
             } else if self.vdp.borrow().line_interrupt_pending() {
-                // Trigger Z80 interrupt for line interrupt
+                // Line interrupt: no status-register bit, so clear it here after triggering.
                 self.cpu.interrupt(0xFF);
                 self.vdp.borrow_mut().clear_line_interrupt();
             }
@@ -393,6 +399,11 @@ impl System for SmsSystem {
                 "pal" => emu_core::apu::TimingMode::Pal,
                 _ => emu_core::apu::TimingMode::Ntsc,
             };
+            // Sync VDP timing so that old save states (without is_pal in VDP JSON)
+            // still produce correct V-counter reads after restore.
+            self.vdp
+                .borrow_mut()
+                .set_pal(matches!(self.timing_mode, emu_core::apu::TimingMode::Pal));
         }
 
         // Load CPU state
@@ -562,6 +573,9 @@ impl SmsSystem {
     pub fn set_timing(&mut self, timing: emu_core::apu::TimingMode) {
         self.timing_mode = timing;
         self.psg.borrow_mut().set_timing(timing);
+        self.vdp
+            .borrow_mut()
+            .set_pal(matches!(timing, emu_core::apu::TimingMode::Pal));
     }
 
     /// Get current timing mode
@@ -1263,6 +1277,52 @@ mod tests {
         // Load state - should restore PAL
         system.load_state(&state).unwrap();
         assert_eq!(system.get_timing(), TimingMode::Pal);
+        // VDP is_pal must match the restored timing mode
+        assert!(
+            system.vdp.borrow().get_pal(),
+            "VDP is_pal should be true after restoring PAL save state"
+        );
+    }
+
+    /// Verifies that is_pal round-trips correctly through get_state()/set_state() and
+    /// that an old save state (without is_pal in VDP JSON) falls back correctly to the
+    /// system timing_mode when loading.
+    #[test]
+    fn test_save_load_state_vdp_is_pal_roundtrip() {
+        use emu_core::apu::TimingMode;
+        let mut system = SmsSystem::new();
+        system.load_rom(vec![0; 0x8000]);
+
+        // Switch to PAL so is_pal=true propagates to VDP
+        system.set_timing(TimingMode::Pal);
+        assert!(system.vdp.borrow().get_pal());
+
+        // Full round-trip: save → NTSC → load
+        let state = system.save_state();
+        system.set_timing(TimingMode::Ntsc);
+        assert!(!system.vdp.borrow().get_pal());
+        system.load_state(&state).unwrap();
+        assert!(
+            system.vdp.borrow().get_pal(),
+            "VDP is_pal must be restored to true after load"
+        );
+
+        // Simulate an old save state that lacks is_pal in the vdp sub-object
+        let mut old_state = state.clone();
+        if let Some(vdp_obj) = old_state.get_mut("vdp") {
+            if let Some(obj) = vdp_obj.as_object_mut() {
+                obj.remove("is_pal");
+                obj.remove("in_vblank");
+            }
+        }
+        system.set_timing(TimingMode::Ntsc);
+        assert!(!system.vdp.borrow().get_pal());
+        system.load_state(&old_state).unwrap();
+        // timing_mode="pal" in the old state must still restore VDP is_pal correctly
+        assert!(
+            system.vdp.borrow().get_pal(),
+            "VDP is_pal must be derived from timing_mode when is_pal is absent from old save state"
+        );
     }
 
     #[test]
@@ -1341,5 +1401,44 @@ mod tests {
         // Should read BIOS again
         assert!(system.cpu.memory.is_bios_enabled());
         assert_eq!(system.cpu.memory.read(0x0000), 0xAA);
+    }
+
+    /// Smoke test for the SMSTestSuite ROM (v0.37 by sverx).
+    /// Verifies the ROM boots, executes past crt0/SMS_init, and produces valid frames.
+    ///
+    /// ROM source: https://github.com/sverx/SMSTestSuite
+    #[test]
+    fn smoke_test_sms_test_suite() {
+        let rom = include_bytes!("../../../../test_roms/sms/SMSTestSuite.sms");
+        let mut system = SmsSystem::new();
+        system.load_rom(rom.to_vec());
+        system.reset();
+
+        // Run enough frames to get past crt0 + SMS_init
+        for _ in 0..10 {
+            let _ = system.step_frame();
+        }
+
+        let frame = system.step_frame().unwrap();
+
+        // Verify basic frame dimensions
+        assert_eq!(frame.width, 256);
+        assert_eq!(frame.height, 192);
+
+        // All pixels must carry a fully-opaque alpha channel (0xFF in bits 31-24)
+        for &pixel in &frame.pixels {
+            assert_eq!(
+                pixel >> 24,
+                0xFF,
+                "Pixel {pixel:#010X} is missing alpha channel"
+            );
+        }
+
+        // CPU must have advanced past reset vector and be executing game code
+        assert!(
+            system.cpu.pc > 0x0010,
+            "CPU PC={:04X} — looks like crt0 never ran",
+            system.cpu.pc
+        );
     }
 }

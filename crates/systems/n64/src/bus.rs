@@ -20,6 +20,11 @@ pub struct N64Bus {
     pif: Pif,
     /// Cartridge (optional)
     cartridge: Option<Cartridge>,
+    /// Cartridge save storage (32 KB for SRAM, 128 KB for FlashRAM placeholder).
+    /// Named `cart_save` because it holds both SRAM and the FlashRAM byte-array
+    /// stand-in; the two are physically different chips with different access
+    /// protocols, but share the same address space at 0x08000000.
+    cart_save: Option<Vec<u8>>,
     /// RDP (Reality Display Processor)
     rdp: Rdp,
     /// RSP (Reality Signal Processor)
@@ -46,6 +51,7 @@ impl N64Bus {
             rdram: vec![0; 4 * 1024 * 1024], // 4MB
             pif: Pif::new(),
             cartridge: None,
+            cart_save: None,
             rdp,
             rsp: Rsp::new(),
             vi: VideoInterface::new(),
@@ -86,6 +92,13 @@ impl N64Bus {
         // Load the cartridge
         let cart = Cartridge::load(data)?;
 
+        // Auto-detect and configure save type
+        let save_type = cart.save_type();
+        log(LogCategory::Bus, LogLevel::Info, || {
+            format!("N64 Bus: Detected save type: {:?}", save_type)
+        });
+        self.configure_save_type(save_type);
+
         // Perform IPL3 boot sequence - copy ROM to RDRAM and get entry point
         let rom_data = cart.read_range(0, cart.size());
         let entry_point = self.pif.perform_ipl3_boot(&mut self.rdram, &rom_data);
@@ -107,6 +120,74 @@ impl N64Bus {
         Ok(())
     }
 
+    /// Configure the save storage for the given save type.
+    ///
+    /// Calling this resets both cart save storage and EEPROM to their blank (all-0xFF) state.
+    pub fn configure_save_type(&mut self, save_type: crate::cartridge::SaveType) {
+        use crate::cartridge::SaveType;
+        use crate::pif::EepromType;
+
+        // Reset any existing save storage
+        self.cart_save = None;
+        self.pif.set_eeprom_type(EepromType::None);
+
+        match save_type {
+            SaveType::None => {}
+            SaveType::Eeprom4K => {
+                self.pif.set_eeprom_type(EepromType::Eeprom4K);
+            }
+            SaveType::Eeprom16K => {
+                self.pif.set_eeprom_type(EepromType::Eeprom16K);
+            }
+            SaveType::Sram => {
+                // 32 KB SRAM, initialised to all-0xFF (blank)
+                self.cart_save = Some(vec![0xFF; 32768]);
+            }
+            SaveType::FlashRam => {
+                // 128 KB FlashRAM, initialised to all-0xFF (blank).
+                // The Macronix MX29L1100 command protocol (erase/write commands) is not yet
+                // implemented — games will not save correctly until it is.
+                // See TODO.md N64 section: "FlashRAM command protocol"
+                self.cart_save = Some(vec![0xFF; 131072]);
+            }
+        }
+    }
+
+    /// Export save data for persistence.
+    ///
+    /// Returns `None` when no save storage is configured for the current cartridge.
+    pub fn get_save_data(&self) -> Option<Vec<u8>> {
+        if let Some(ref buf) = self.cart_save {
+            return Some(buf.clone());
+        }
+        self.pif.save_eeprom()
+    }
+
+    /// Import previously persisted save data.
+    ///
+    /// Returns `Err` if the data length does not match the configured save storage,
+    /// if no save storage is configured for the current cartridge, or if another
+    /// underlying error occurs (e.g. EEPROM type not set).
+    pub fn set_save_data(&mut self, data: Vec<u8>) -> Result<(), String> {
+        // SRAM / FlashRAM
+        if let Some(ref mut buf) = self.cart_save {
+            if data.len() != buf.len() {
+                return Err(format!(
+                    "Save data size mismatch: expected {} bytes, got {}",
+                    buf.len(),
+                    data.len()
+                ));
+            }
+            buf.copy_from_slice(&data);
+            return Ok(());
+        }
+        // EEPROM — or no save storage configured at all
+        if self.pif.save_eeprom().is_none() {
+            return Err("No save storage configured for this cartridge".to_string());
+        }
+        self.pif.load_eeprom(data)
+    }
+
     /// Get the entry point from the loaded cartridge (for CPU initialization)
     pub fn get_entry_point(&self) -> Option<u64> {
         self.entry_point
@@ -114,6 +195,7 @@ impl N64Bus {
 
     pub fn unload_cartridge(&mut self) {
         self.cartridge = None;
+        self.cart_save = None;
     }
 
     pub fn has_cartridge(&self) -> bool {
@@ -247,6 +329,15 @@ impl MemoryMips for N64Bus {
                 let offset = phys_addr & 0xFFF;
                 self.rsp.read_imem(offset)
             }
+            // Cartridge SRAM / FlashRAM (0x08000000 - 0x0FFFFFFF, cartridge domain 2)
+            0x0800_0000..=0x0FFF_FFFF => {
+                if let Some(ref sram) = self.cart_save {
+                    let offset = (phys_addr - 0x0800_0000) as usize;
+                    *sram.get(offset).unwrap_or(&0xFF)
+                } else {
+                    0xFF
+                }
+            }
             // PIF RAM (0x1FC00000 - 0x1FC007FF)
             0x1FC0_0000..=0x1FC0_07FF => {
                 let offset = phys_addr & 0x7FF;
@@ -316,6 +407,20 @@ impl MemoryMips for N64Bus {
                 let offset = phys_addr & 0x1F;
                 self.ai.read_register(offset)
             }
+            // Cartridge SRAM / FlashRAM (0x08000000 - 0x0FFFFFFF, cartridge domain 2)
+            0x0800_0000..=0x0FFF_FFFF => {
+                if let Some(ref sram) = self.cart_save {
+                    let offset = (phys_addr - 0x0800_0000) as usize;
+                    u32::from_be_bytes([
+                        *sram.get(offset).unwrap_or(&0xFF),
+                        *sram.get(offset + 1).unwrap_or(&0xFF),
+                        *sram.get(offset + 2).unwrap_or(&0xFF),
+                        *sram.get(offset + 3).unwrap_or(&0xFF),
+                    ])
+                } else {
+                    0xFFFF_FFFF
+                }
+            }
             // Cartridge ROM
             0x1000_0000..=0x1FBF_FFFF => {
                 if let Some(ref cart) = self.cartridge {
@@ -370,6 +475,15 @@ impl MemoryMips for N64Bus {
             0x0400_1000..=0x0400_1FFF => {
                 let offset = phys_addr & 0xFFF;
                 self.rsp.write_imem(offset, val);
+            }
+            // Cartridge SRAM / FlashRAM (0x08000000 - 0x0FFFFFFF)
+            0x0800_0000..=0x0FFF_FFFF => {
+                if let Some(ref mut sram) = self.cart_save {
+                    let offset = (phys_addr - 0x0800_0000) as usize;
+                    if offset < sram.len() {
+                        sram[offset] = val;
+                    }
+                }
             }
             // PIF RAM
             0x1FC0_0000..=0x1FC0_07FF => {
@@ -448,6 +562,19 @@ impl MemoryMips for N64Bus {
                     log(LogCategory::Interrupts, LogLevel::Info, || {
                         "N64 Bus: AI interrupt triggered".to_string()
                     });
+                }
+            }
+            // Cartridge SRAM / FlashRAM (0x08000000 - 0x0FFFFFFF)
+            0x0800_0000..=0x0FFF_FFFF => {
+                if let Some(ref mut sram) = self.cart_save {
+                    let offset = (phys_addr - 0x0800_0000) as usize;
+                    if offset + 3 < sram.len() {
+                        let bytes = val.to_be_bytes();
+                        sram[offset] = bytes[0];
+                        sram[offset + 1] = bytes[1];
+                        sram[offset + 2] = bytes[2];
+                        sram[offset + 3] = bytes[3];
+                    }
                 }
             }
             _ => {
