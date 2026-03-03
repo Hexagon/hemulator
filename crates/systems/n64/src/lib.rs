@@ -296,7 +296,9 @@ impl N64System {
 
     /// Import previously persisted save data.
     ///
-    /// Returns `Err` when the data length does not match the configured save storage.
+    /// Returns `Err` if the data length does not match the configured save storage,
+    /// if no save storage is configured for the current cartridge, or if another
+    /// underlying error occurs.
     pub fn set_save_data(&mut self, data: Vec<u8>) -> Result<(), String> {
         self.cpu.bus_mut().set_save_data(data)
     }

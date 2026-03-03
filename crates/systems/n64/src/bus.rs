@@ -20,9 +20,11 @@ pub struct N64Bus {
     pif: Pif,
     /// Cartridge (optional)
     cartridge: Option<Cartridge>,
-    /// SRAM (32 KB battery-backed RAM at cartridge domain 2, physical 0x08000000).
-    /// Present only for cartridges that use SRAM saves (e.g. Super Mario 64).
-    sram: Option<Vec<u8>>,
+    /// Cartridge save storage (32 KB for SRAM, 128 KB for FlashRAM placeholder).
+    /// Named `cart_save` because it holds both SRAM and the FlashRAM byte-array
+    /// stand-in; the two are physically different chips with different access
+    /// protocols, but share the same address space at 0x08000000.
+    cart_save: Option<Vec<u8>>,
     /// RDP (Reality Display Processor)
     rdp: Rdp,
     /// RSP (Reality Signal Processor)
@@ -49,7 +51,7 @@ impl N64Bus {
             rdram: vec![0; 4 * 1024 * 1024], // 4MB
             pif: Pif::new(),
             cartridge: None,
-            sram: None,
+            cart_save: None,
             rdp,
             rsp: Rsp::new(),
             vi: VideoInterface::new(),
@@ -120,13 +122,13 @@ impl N64Bus {
 
     /// Configure the save storage for the given save type.
     ///
-    /// Calling this resets both SRAM and EEPROM to their blank (all-0xFF) state.
+    /// Calling this resets both cart save storage and EEPROM to their blank (all-0xFF) state.
     pub fn configure_save_type(&mut self, save_type: crate::cartridge::SaveType) {
         use crate::cartridge::SaveType;
         use crate::pif::EepromType;
 
         // Reset any existing save storage
-        self.sram = None;
+        self.cart_save = None;
         self.pif.set_eeprom_type(EepromType::None);
 
         match save_type {
@@ -139,14 +141,14 @@ impl N64Bus {
             }
             SaveType::Sram => {
                 // 32 KB SRAM, initialised to all-0xFF (blank)
-                self.sram = Some(vec![0xFF; 32768]);
+                self.cart_save = Some(vec![0xFF; 32768]);
             }
             SaveType::FlashRam => {
                 // 128 KB FlashRAM, initialised to all-0xFF (blank).
                 // The Macronix MX29L1100 command protocol (erase/write commands) is not yet
                 // implemented — games will not save correctly until it is.
                 // See TODO.md N64 section: "FlashRAM command protocol"
-                self.sram = Some(vec![0xFF; 131072]);
+                self.cart_save = Some(vec![0xFF; 131072]);
             }
         }
     }
@@ -155,29 +157,34 @@ impl N64Bus {
     ///
     /// Returns `None` when no save storage is configured for the current cartridge.
     pub fn get_save_data(&self) -> Option<Vec<u8>> {
-        if let Some(ref sram) = self.sram {
-            return Some(sram.clone());
+        if let Some(ref buf) = self.cart_save {
+            return Some(buf.clone());
         }
         self.pif.save_eeprom()
     }
 
     /// Import previously persisted save data.
     ///
-    /// Returns `Err` when the data length does not match the configured save storage.
+    /// Returns `Err` if the data length does not match the configured save storage,
+    /// if no save storage is configured for the current cartridge, or if another
+    /// underlying error occurs (e.g. EEPROM type not set).
     pub fn set_save_data(&mut self, data: Vec<u8>) -> Result<(), String> {
         // SRAM / FlashRAM
-        if let Some(ref mut sram) = self.sram {
-            if data.len() != sram.len() {
+        if let Some(ref mut buf) = self.cart_save {
+            if data.len() != buf.len() {
                 return Err(format!(
                     "Save data size mismatch: expected {} bytes, got {}",
-                    sram.len(),
+                    buf.len(),
                     data.len()
                 ));
             }
-            sram.copy_from_slice(&data);
+            buf.copy_from_slice(&data);
             return Ok(());
         }
-        // EEPROM
+        // EEPROM — or no save storage configured at all
+        if self.pif.save_eeprom().is_none() {
+            return Err("No save storage configured for this cartridge".to_string());
+        }
         self.pif.load_eeprom(data)
     }
 
@@ -188,7 +195,7 @@ impl N64Bus {
 
     pub fn unload_cartridge(&mut self) {
         self.cartridge = None;
-        self.sram = None;
+        self.cart_save = None;
     }
 
     pub fn has_cartridge(&self) -> bool {
@@ -324,7 +331,7 @@ impl MemoryMips for N64Bus {
             }
             // Cartridge SRAM / FlashRAM (0x08000000 - 0x0FFFFFFF, cartridge domain 2)
             0x0800_0000..=0x0FFF_FFFF => {
-                if let Some(ref sram) = self.sram {
+                if let Some(ref sram) = self.cart_save {
                     let offset = (phys_addr - 0x0800_0000) as usize;
                     *sram.get(offset).unwrap_or(&0xFF)
                 } else {
@@ -402,7 +409,7 @@ impl MemoryMips for N64Bus {
             }
             // Cartridge SRAM / FlashRAM (0x08000000 - 0x0FFFFFFF, cartridge domain 2)
             0x0800_0000..=0x0FFF_FFFF => {
-                if let Some(ref sram) = self.sram {
+                if let Some(ref sram) = self.cart_save {
                     let offset = (phys_addr - 0x0800_0000) as usize;
                     u32::from_be_bytes([
                         *sram.get(offset).unwrap_or(&0xFF),
@@ -471,7 +478,7 @@ impl MemoryMips for N64Bus {
             }
             // Cartridge SRAM / FlashRAM (0x08000000 - 0x0FFFFFFF)
             0x0800_0000..=0x0FFF_FFFF => {
-                if let Some(ref mut sram) = self.sram {
+                if let Some(ref mut sram) = self.cart_save {
                     let offset = (phys_addr - 0x0800_0000) as usize;
                     if offset < sram.len() {
                         sram[offset] = val;
@@ -559,7 +566,7 @@ impl MemoryMips for N64Bus {
             }
             // Cartridge SRAM / FlashRAM (0x08000000 - 0x0FFFFFFF)
             0x0800_0000..=0x0FFF_FFFF => {
-                if let Some(ref mut sram) = self.sram {
+                if let Some(ref mut sram) = self.cart_save {
                     let offset = (phys_addr - 0x0800_0000) as usize;
                     if offset + 3 < sram.len() {
                         let bytes = val.to_be_bytes();

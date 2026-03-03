@@ -10,8 +10,8 @@ pub const N64_ROM_MAGIC: [u8; 4] = [0x80, 0x37, 0x12, 0x40];
 ///
 /// N64 games use different non-volatile storage chips for save data:
 /// - EEPROM (4Kbit or 16Kbit): Most common; accessed via PIF serial commands
-/// - SRAM (256Kbit): Used by games like Super Mario 64; battery-backed RAM at 0x08000000
-/// - FlashRAM (1Mbit): Used by games like Pokémon Stadium; larger storage via serial commands
+/// - SRAM (256Kbit): Battery-backed RAM at 0x08000000
+/// - FlashRAM (1Mbit): Larger storage accessed via serial commands
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SaveType {
     /// No save chip present (game has no saves or uses password system)
@@ -170,38 +170,14 @@ fn detect_save_type(id: &[u8; 4]) -> SaveType {
 
     match id_str {
         // --- SRAM (256Kbit = 32 KB) ---
-        // Super Mario 64 (all regions)
-        "NSME" | "NSMJ" | "NSMP" | "NSMF" => SaveType::Sram,
-        // Banjo-Kazooie (all regions)
-        "NBKE" | "NBKJ" | "NBKP" => SaveType::Sram,
-        // Banjo-Tooie (all regions)
-        "NB8E" | "NB8J" | "NB8P" => SaveType::Sram,
-        // Conker's Bad Fur Day
-        "NFUE" | "NFUJ" | "NFUP" => SaveType::Sram,
-        // Diddy Kong Racing (all regions)
-        "NDYE" | "NDYJ" | "NDYP" => SaveType::Sram,
-        // Yoshi's Story (all regions)
-        "NYSE" | "NYSJ" | "NYSP" => SaveType::Sram,
-        // Kirby 64: The Crystal Shards
-        "NK4E" | "NK4J" | "NK4P" => SaveType::Sram,
-        // Paper Mario
-        "NMQE" | "NMQJ" | "NMQP" => SaveType::Sram,
         // Star Wars: Shadows of the Empire
         "NSWE" | "NSWJ" | "NSWP" => SaveType::Sram,
-        // Goldeneye 007
-        "NGEE" | "NGEJ" | "NGEP" => SaveType::Sram,
-        // Perfect Dark
-        "NPDE" | "NPDJ" | "NPDP" => SaveType::Sram,
+        // Paper Mario
+        "NMQE" | "NMQJ" | "NMQP" => SaveType::Sram,
         // Doom 64 — uses SRAM (note: NDME is NOT Dr. Mario 64; that game is NM7E)
         "NDME" | "NDMJ" | "NDMP" => SaveType::Sram,
-        // Quake 64
-        "NQKE" => SaveType::Sram,
         // Duke Nukem 64
         "NDNE" => SaveType::Sram,
-        // Turok: Dinosaur Hunter
-        "NTUE" | "NTUJ" | "NTUP" => SaveType::Sram,
-        // Turok 2: Seeds of Evil
-        "NT2E" | "NT2J" | "NT2P" => SaveType::Sram,
 
         // --- EEPROM 16 Kbit (2 KB) ---
         // The Legend of Zelda: Ocarina of Time (all regions)
@@ -212,6 +188,8 @@ fn detect_save_type(id: &[u8; 4]) -> SaveType {
         "NDOE" | "NDOJ" | "NDOP" => SaveType::Eeprom16K,
         // F-Zero X
         "NFZE" | "NFZJ" | "NFZP" => SaveType::Eeprom16K,
+        // Perfect Dark
+        "NPDE" | "NPDJ" | "NPDP" => SaveType::Eeprom16K,
         // Pokemon Snap
         "NPPE" | "NPPJ" | "NPPP" => SaveType::Eeprom16K,
         // Pokemon Puzzle League
@@ -222,6 +200,20 @@ fn detect_save_type(id: &[u8; 4]) -> SaveType {
         "NOBE" => SaveType::Eeprom16K,
 
         // --- EEPROM 4 Kbit (512 bytes) ---
+        // Super Mario 64 (all regions)
+        "NSME" | "NSMJ" | "NSMP" | "NSMF" => SaveType::Eeprom4K,
+        // Banjo-Kazooie (all regions)
+        "NBKE" | "NBKJ" | "NBKP" => SaveType::Eeprom4K,
+        // Diddy Kong Racing (all regions)
+        "NDYE" | "NDYJ" | "NDYP" => SaveType::Eeprom4K,
+        // Yoshi's Story (all regions)
+        "NYSE" | "NYSJ" | "NYSP" => SaveType::Eeprom4K,
+        // Kirby 64: The Crystal Shards
+        "NK4E" | "NK4J" | "NK4P" => SaveType::Eeprom4K,
+        // Goldeneye 007
+        "NGEE" | "NGEJ" | "NGEP" => SaveType::Eeprom4K,
+        // Turok: Dinosaur Hunter
+        "NTUE" | "NTUJ" | "NTUP" => SaveType::Eeprom4K,
         // Mario Kart 64
         "NM8E" | "NM8J" | "NM8P" => SaveType::Eeprom4K,
         // Star Fox 64 / Lylat Wars
@@ -256,6 +248,12 @@ fn detect_save_type(id: &[u8; 4]) -> SaveType {
         "NNHE" => SaveType::Eeprom4K,
 
         // --- FlashRAM (1 Mbit = 128 KB) ---
+        // Banjo-Tooie (all regions)
+        "NB8E" | "NB8J" | "NB8P" => SaveType::FlashRam,
+        // Conker's Bad Fur Day
+        "NFUE" | "NFUJ" | "NFUP" => SaveType::FlashRam,
+        // Turok 2: Seeds of Evil
+        "NT2E" | "NT2J" | "NT2P" => SaveType::FlashRam,
         // Pokémon Stadium (all regions)
         "NPSE" | "NPSJ" | "NPSP" => SaveType::FlashRam,
         // Pokémon Stadium 2 (Gold and Silver)
@@ -328,11 +326,11 @@ mod tests {
 
     #[test]
     fn test_game_id_short_rom() {
-        // ROM that is big enough to load (0x1000) but shorter than header field
+        // Minimum-sized loadable ROM (0x1000 bytes) — the game ID bytes at 0x38–0x3B
+        // are within range and default to 0x00.
         let mut data = vec![0u8; 0x1000];
         data[0..4].copy_from_slice(&N64_ROM_MAGIC);
         let cart = Cartridge::load(&data).unwrap();
-        // ROM is 0x1000 bytes which is >= 0x3C, so game_id should succeed with zero bytes
         let id = cart.game_id().unwrap();
         assert_eq!(id, [0, 0, 0, 0]);
     }
@@ -341,13 +339,26 @@ mod tests {
     fn test_game_id_known_game() {
         let mut data = vec![0u8; 0x1000];
         data[0..4].copy_from_slice(&N64_ROM_MAGIC);
-        // Write Super Mario 64 US game ID at 0x38
+        // Write Super Mario 64 US game ID at 0x38 (uses EEPROM 4K)
         data[0x38] = b'N';
         data[0x39] = b'S';
         data[0x3A] = b'M';
         data[0x3B] = b'E';
         let cart = Cartridge::load(&data).unwrap();
         assert_eq!(cart.game_id(), Some([b'N', b'S', b'M', b'E']));
+        assert_eq!(cart.save_type(), SaveType::Eeprom4K);
+    }
+
+    #[test]
+    fn test_save_type_sram() {
+        let mut data = vec![0u8; 0x1000];
+        data[0..4].copy_from_slice(&N64_ROM_MAGIC);
+        // Paper Mario US (uses SRAM)
+        data[0x38] = b'N';
+        data[0x39] = b'M';
+        data[0x3A] = b'Q';
+        data[0x3B] = b'E';
+        let cart = Cartridge::load(&data).unwrap();
         assert_eq!(cart.save_type(), SaveType::Sram);
     }
 
