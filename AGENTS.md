@@ -136,12 +136,12 @@ The project uses a **Lumocs-based documentation site** hosted at https://hemulat
 
 ### Building and Running a Single System
 
-There are two complementary workflows for iterating on a single system without building the entire workspace:
+There are two complementary workflows depending on your goal:
 
-**Approach 1 — Separate crate (fastest; no SDL2, no egui, no other systems)**
+**Approach 1 — Separate crate (builds only that system; no SDL2, no egui)**
 
 Each system crate compiles independently in ~12s vs ~2.5min for the full workspace binary.
-Use this approach for compilation checks, tests, and benchmarks:
+Use this approach for compilation checks, tests, and benchmarks — it does **not** produce a runnable emulator window:
 
 ```bash
 # Build only the system crate (+ emu_core)
@@ -154,28 +154,16 @@ cargo test -p emu_nes
 cargo bench -p emu_nes
 ```
 
-| System             | Cargo package (`-p`)  |
-|--------------------|-----------------------|
-| NES                | `emu_nes`             |
-| Game Boy / GBC     | `emu_gb`              |
-| Game Boy Advance   | `hemu_gba`            |
-| Atari 2600         | `emu_atari2600`       |
-| CHIP-8             | `emu_chip8`           |
-| Sega Master System | `emu_sms`             |
-| Sega SG-1000       | `emu_sg1000`          |
-| ColecoVision       | `emu_colecovision`    |
-| SNES               | `emu_snes`            |
-| N64                | `emu_n64`             |
-| PS1                | `emu_ps1`             |
-| PC/DOS             | `emu_pc`              |
+The `-p` package name follows the pattern `emu_<system>` (e.g. `emu_gb`, `emu_snes`, `emu_pc`).
+Exception: Game Boy Advance uses `hemu_gba`.
 
-**Approach 2 — Full binary with `--no-gui` (run with visual output, audio, and controllers)**
+**Approach 2 — Full binary with `--no-gui` (visual output, audio, and controllers)**
 
-When you need a running window, build and run the full binary with `--no-gui` to skip the egui
-overlay. This still compiles the full workspace binary but starts faster and uses fewer resources:
+`cargo run` always builds the **entire workspace** regardless of which ROM you pass. The `--no-gui`
+flag skips the egui overlay at runtime, giving a lighter SDL2 window:
 
 ```bash
-# Load a ROM directly (format auto-detected)
+# Load a ROM (system auto-detected from file format)
 cargo run --profile release-quick -- --no-gui game.nes
 
 # Start a specific system without a ROM
@@ -185,20 +173,6 @@ cargo run --profile release-quick -- --no-gui --system nes
 The `--system` flag accepts: `nes`, `gb`, `gba`, `atari2600`, `snes`, `n64`, `pc`.
 
 > **Note:** N64 requires an OpenGL context and does not support `--no-gui`. Use the full GUI for N64.
-
-**Quick reference — run a specific system**
-
-| System         | Load a ROM                                                | Start clean (no ROM)                                  |
-|----------------|-----------------------------------------------------------|-------------------------------------------------------|
-| NES            | `cargo run --profile release-quick -- --no-gui game.nes` | `... -- --no-gui --system nes`                        |
-| Game Boy / GBC | `cargo run --profile release-quick -- --no-gui game.gb`  | `... -- --no-gui --system gb`                         |
-| Game Boy Adv.  | `cargo run --profile release-quick -- --no-gui game.gba` | `... -- --no-gui --system gba`                        |
-| Atari 2600     | `cargo run --profile release-quick -- --no-gui game.a26` | `... -- --no-gui --system atari2600`                  |
-| SNES           | `cargo run --profile release-quick -- --no-gui game.sfc` | `... -- --no-gui --system snes`                       |
-| SMS            | `cargo run --profile release-quick -- --no-gui game.sms` | *(load via ROM only)*                                 |
-| CHIP-8         | `cargo run --profile release-quick -- --no-gui game.ch8` | *(load via ROM only)*                                 |
-| PC/DOS         | `cargo run --profile release-quick -- --no-gui boot.img` | `... -- --no-gui --system pc`                         |
-| N64            | *(use full GUI — requires OpenGL)*                        | *(use full GUI — requires OpenGL)*                    |
 
 - **Pre-commit checks** (REQUIRED before committing any code):
   1. **Formatting**: `cargo fmt --all -- --check` - Must pass with no diff
