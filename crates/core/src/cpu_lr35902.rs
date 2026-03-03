@@ -132,13 +132,15 @@ impl<M: MemoryLr35902> CpuLr35902<M> {
             return 4;
         }
 
-        let opcode = self.read_pc();
-        let cycles = self.execute(opcode);
-
+        // EI enables IME after the instruction following EI, so apply the pending
+        // flag before fetching the next opcode (one-instruction delay).
         if self.ime_enable_pending {
             self.ime = true;
             self.ime_enable_pending = false;
         }
+
+        let opcode = self.read_pc();
+        let cycles = self.execute(opcode);
 
         cycles
     }
