@@ -203,7 +203,14 @@ impl System for SmsSystem {
             "SMS: System reset".to_string()
         });
         self.cpu.reset();
-        self.vdp.borrow_mut().reset();
+        {
+            let mut vdp = self.vdp.borrow_mut();
+            vdp.set_pal(matches!(
+                self.timing_mode,
+                emu_core::apu::TimingMode::Pal
+            ));
+            vdp.reset();
+        }
         self.psg.borrow_mut().reset();
         self.cycles = 0;
         self.total_cycles = 0;
@@ -395,6 +402,12 @@ impl System for SmsSystem {
                 "pal" => emu_core::apu::TimingMode::Pal,
                 _ => emu_core::apu::TimingMode::Ntsc,
             };
+            // Sync VDP timing so that old save states (without is_pal in VDP JSON)
+            // still produce correct V-counter reads after restore.
+            self.vdp.borrow_mut().set_pal(matches!(
+                self.timing_mode,
+                emu_core::apu::TimingMode::Pal
+            ));
         }
 
         // Load CPU state
@@ -564,6 +577,9 @@ impl SmsSystem {
     pub fn set_timing(&mut self, timing: emu_core::apu::TimingMode) {
         self.timing_mode = timing;
         self.psg.borrow_mut().set_timing(timing);
+        self.vdp
+            .borrow_mut()
+            .set_pal(matches!(timing, emu_core::apu::TimingMode::Pal));
     }
 
     /// Get current timing mode
@@ -1265,6 +1281,52 @@ mod tests {
         // Load state - should restore PAL
         system.load_state(&state).unwrap();
         assert_eq!(system.get_timing(), TimingMode::Pal);
+        // VDP is_pal must match the restored timing mode
+        assert!(
+            system.vdp.borrow().get_pal(),
+            "VDP is_pal should be true after restoring PAL save state"
+        );
+    }
+
+    /// Verifies that is_pal round-trips correctly through get_state()/set_state() and
+    /// that an old save state (without is_pal in VDP JSON) falls back correctly to the
+    /// system timing_mode when loading.
+    #[test]
+    fn test_save_load_state_vdp_is_pal_roundtrip() {
+        use emu_core::apu::TimingMode;
+        let mut system = SmsSystem::new();
+        system.load_rom(vec![0; 0x8000]);
+
+        // Switch to PAL so is_pal=true propagates to VDP
+        system.set_timing(TimingMode::Pal);
+        assert!(system.vdp.borrow().get_pal());
+
+        // Full round-trip: save → NTSC → load
+        let state = system.save_state();
+        system.set_timing(TimingMode::Ntsc);
+        assert!(!system.vdp.borrow().get_pal());
+        system.load_state(&state).unwrap();
+        assert!(
+            system.vdp.borrow().get_pal(),
+            "VDP is_pal must be restored to true after load"
+        );
+
+        // Simulate an old save state that lacks is_pal in the vdp sub-object
+        let mut old_state = state.clone();
+        if let Some(vdp_obj) = old_state.get_mut("vdp") {
+            if let Some(obj) = vdp_obj.as_object_mut() {
+                obj.remove("is_pal");
+                obj.remove("in_vblank");
+            }
+        }
+        system.set_timing(TimingMode::Ntsc);
+        assert!(!system.vdp.borrow().get_pal());
+        system.load_state(&old_state).unwrap();
+        // timing_mode="pal" in the old state must still restore VDP is_pal correctly
+        assert!(
+            system.vdp.borrow().get_pal(),
+            "VDP is_pal must be derived from timing_mode when is_pal is absent from old save state"
+        );
     }
 
     #[test]
@@ -1349,12 +1411,6 @@ mod tests {
     /// Verifies the ROM boots, executes past crt0/SMS_init, and produces valid frames.
     ///
     /// ROM source: https://github.com/sverx/SMSTestSuite
-    ///
-    /// TODO: The ROM's main-menu rendering requires correct VDP frame-interrupt delivery
-    /// during SMS_waitForVBlank(). The frame interrupt never fires during the wait loop —
-    /// likely because frame_interrupt_pending is not being set when the scanline crosses 192
-    /// while the ROM is executing. Further investigation needed into the set_scanline
-    /// timing vs. VDP register initialization ordering.
     #[test]
     fn smoke_test_sms_test_suite() {
         let rom = include_bytes!("../../../../test_roms/sms/SMSTestSuite.sms");
