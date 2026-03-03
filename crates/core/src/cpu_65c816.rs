@@ -3833,10 +3833,12 @@ impl<M: Memory65c816> Cpu65c816<M> {
             0x7C => {
                 // JMP (absolute,X indirect)
                 // Pointer fetch uses PBR; the ptr+X sum wraps within the bank (16-bit).
+                // Both pointer bytes must be read from the same bank; hi wraps at 16 bits.
                 let ptr = self.fetch_word();
-                let addr = ((self.pbr as u32) << 16) | ((ptr as u32 + self.x as u32) & 0xFFFF);
+                let bank = (self.pbr as u32) << 16;
+                let addr = bank | ((ptr as u32 + self.x as u32) & 0xFFFF);
                 let lo = self.read(addr) as u16;
-                let hi = self.read(addr + 1) as u16;
+                let hi = self.read(bank | ((addr + 1) & 0xFFFF)) as u16;
                 self.pc = (hi << 8) | lo;
                 self.cycles += 6;
             }
@@ -3873,10 +3875,12 @@ impl<M: Memory65c816> Cpu65c816<M> {
             0xFC => {
                 // JSR (absolute,X indirect)
                 // Pointer fetch uses PBR; the ptr+X sum wraps within the bank (16-bit).
+                // Both pointer bytes must be read from the same bank; hi wraps at 16 bits.
                 let ptr = self.fetch_word();
-                let addr = ((self.pbr as u32) << 16) | ((ptr as u32 + self.x as u32) & 0xFFFF);
+                let bank = (self.pbr as u32) << 16;
+                let addr = bank | ((ptr as u32 + self.x as u32) & 0xFFFF);
                 let lo = self.read(addr) as u16;
-                let hi = self.read(addr + 1) as u16;
+                let hi = self.read(bank | ((addr + 1) & 0xFFFF)) as u16;
                 let ret_addr = self.pc.wrapping_sub(1);
                 self.push_word(ret_addr);
                 self.pc = (hi << 8) | lo;
