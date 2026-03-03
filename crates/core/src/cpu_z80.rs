@@ -289,11 +289,17 @@ impl<M: MemoryZ80> CpuZ80<M> {
         (self.f & flag) != 0
     }
 
-    // Update S, Z, P flags based on result
+    // Update S, Z, P flags based on result (P = parity; for logical ops AND/OR/XOR)
     fn update_flags_szp(&mut self, val: u8) {
         self.set_flag(0x80, (val & 0x80) != 0); // Sign
         self.set_flag(0x40, val == 0); // Zero
         self.set_flag(0x04, val.count_ones().is_multiple_of(2)); // Parity
+    }
+
+    // Update S and Z flags only (used for arithmetic where P/V = overflow, already set)
+    fn update_flags_sz(&mut self, val: u8) {
+        self.set_flag(0x80, (val & 0x80) != 0); // Sign
+        self.set_flag(0x40, val == 0); // Zero
     }
 
     // Arithmetic operations with flag updates
@@ -311,7 +317,7 @@ impl<M: MemoryZ80> CpuZ80<M> {
 
         self.a = result as u8;
         self.set_flag(0x02, false); // N flag
-        self.update_flags_szp(self.a);
+        self.update_flags_sz(self.a); // S and Z only; P/V = overflow (already set above)
     }
 
     fn sub_a(&mut self, val: u8, carry: bool) {
@@ -328,7 +334,7 @@ impl<M: MemoryZ80> CpuZ80<M> {
 
         self.a = result as u8;
         self.set_flag(0x02, true); // N flag
-        self.update_flags_szp(self.a);
+        self.update_flags_sz(self.a); // S and Z only; P/V = overflow (already set above)
     }
 
     fn and_a(&mut self, val: u8) {
@@ -336,7 +342,7 @@ impl<M: MemoryZ80> CpuZ80<M> {
         self.set_flag(0x01, false); // Carry
         self.set_flag(0x02, false); // N
         self.set_flag(0x10, true); // H (always set for AND)
-        self.update_flags_szp(self.a);
+        self.update_flags_szp(self.a); // S, Z, and P = parity
     }
 
     fn xor_a(&mut self, val: u8) {
@@ -344,7 +350,7 @@ impl<M: MemoryZ80> CpuZ80<M> {
         self.set_flag(0x01, false);
         self.set_flag(0x02, false);
         self.set_flag(0x10, false);
-        self.update_flags_szp(self.a);
+        self.update_flags_szp(self.a); // S, Z, and P = parity
     }
 
     fn or_a(&mut self, val: u8) {
@@ -352,7 +358,7 @@ impl<M: MemoryZ80> CpuZ80<M> {
         self.set_flag(0x01, false);
         self.set_flag(0x02, false);
         self.set_flag(0x10, false);
-        self.update_flags_szp(self.a);
+        self.update_flags_szp(self.a); // S, Z, and P = parity
     }
 
     fn cp_a(&mut self, val: u8) {
@@ -364,24 +370,24 @@ impl<M: MemoryZ80> CpuZ80<M> {
         self.set_flag(0x04, overflow);
 
         self.set_flag(0x02, true);
-        self.update_flags_szp(result as u8);
+        self.update_flags_sz(result as u8); // S and Z only; P/V = overflow (already set above)
     }
 
     fn inc(&mut self, val: u8) -> u8 {
         let result = val.wrapping_add(1);
         self.set_flag(0x10, (val & 0x0F) == 0x0F);
-        self.set_flag(0x04, val == 0x7F);
+        self.set_flag(0x04, val == 0x7F); // P/V = overflow (0x7F+1 = 0x80 overflows signed)
         self.set_flag(0x02, false);
-        self.update_flags_szp(result);
+        self.update_flags_sz(result); // S and Z only; P/V = overflow (already set above)
         result
     }
 
     fn dec(&mut self, val: u8) -> u8 {
         let result = val.wrapping_sub(1);
         self.set_flag(0x10, (val & 0x0F) == 0);
-        self.set_flag(0x04, val == 0x80);
+        self.set_flag(0x04, val == 0x80); // P/V = overflow (0x80-1 = 0x7F overflows signed)
         self.set_flag(0x02, true);
-        self.update_flags_szp(result);
+        self.update_flags_sz(result); // S and Z only; P/V = overflow (already set above)
         result
     }
 

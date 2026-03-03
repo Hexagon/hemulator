@@ -339,11 +339,6 @@ impl Vdp {
         self.frame_interrupt_pending
     }
 
-    /// Clear frame interrupt
-    pub fn clear_frame_interrupt(&mut self) {
-        self.frame_interrupt_pending = false;
-    }
-
     /// Check if line interrupt is pending
     pub fn line_interrupt_pending(&self) -> bool {
         self.line_interrupt_pending
@@ -496,37 +491,29 @@ impl Vdp {
             self.line_counter = self.registers[10];
         }
 
-        // Clear scanline to backdrop color
-        let backdrop_color = self.decode_color(self.cram[16] & 0x3F);
+        // Clear scanline to backdrop color (RGB only; alpha restored at end of scanline)
+        let backdrop_color = self.decode_color(self.cram[16] & 0x3F) & RGB_MASK;
         let line_offset = (line as usize) * 256;
         for x in 0..256 {
             self.frame.pixels[line_offset + x] = backdrop_color;
         }
 
-        // Check if Mode 4 is enabled (register 0, bit 2)
-        let mode_4_enabled = (self.registers[0] & 0x04) != 0;
+        // Register 1 bit 6 (0x40) is the screen enable bit for both Mode 4 and TMS modes:
+        // - 1 = display active, 0 = display blanked
+        // This matches SMSlib VDPFEATURE_SHOWDISPLAY (0x0140) which ORs bit 6 to enable display.
+        let display_enabled = (self.registers[1] & 0x40) != 0;
 
-        // Display enable logic differs between Mode 4 and TMS modes
-        let display_enabled = if mode_4_enabled {
-            // In Mode 4 (SMS mode):
-            // - Bit 6 of register 1 is BLK (blank bit): 1=blank, 0=display
-            (self.registers[1] & 0x40) == 0 // Display when BLK=0
-        } else {
-            // In TMS modes (0-3) for backward compatibility:
-            // - Bit 6 of register 1 controls display: 1=display, 0=blank
-            // - TMS9918A uses opposite polarity from Mode 4
-            (self.registers[1] & 0x40) != 0 // Display when bit 6=1
-        };
-
-        // Render background if display enabled
+        // Render background and sprites if display is enabled
         if display_enabled {
             self.render_background(line, line_offset);
+            // Sprites in Mode 4 are always active when display is on (no separate enable bit)
+            self.render_sprites(line, line_offset);
         }
 
-        // Render sprites if enabled (bit 3 of register 1) and display is on
-        let sprites_enabled = (self.registers[1] & 0x08) != 0;
-        if display_enabled && sprites_enabled {
-            self.render_sprites(line, line_offset);
+        // Restore alpha for all pixels in this scanline (priority bit and intermediate state cleared)
+        for x in 0..256 {
+            self.frame.pixels[line_offset + x] =
+                (self.frame.pixels[line_offset + x] & RGB_MASK) | 0xFF00_0000;
         }
     }
 
@@ -618,11 +605,11 @@ impl Vdp {
             // Pixel 0 is transparent
             if pixel != 0 {
                 let color_index = palette * 16 + pixel as usize;
-                let color = self.decode_color(self.cram[color_index] & 0x3F);
-                // Store both the color and priority bit for sprite rendering
-                // Priority: if bit 12 is set, sprites should render behind this pixel
+                // Strip alpha during rendering so PRIORITY_BIT (bit 24) is unambiguous
+                let color = self.decode_color(self.cram[color_index] & 0x3F) & RGB_MASK;
+                // Store the color and priority bit; alpha is restored at end of render_scanline
                 let pixel_data = if priority != 0 {
-                    color | PRIORITY_BIT // Set priority bit (sprite behind bg)
+                    color | PRIORITY_BIT // Bit 24 set = sprite renders behind this tile
                 } else {
                     color
                 };
@@ -742,16 +729,12 @@ impl Vdp {
                     if bg_is_backdrop || !bg_has_priority {
                         // Sprites always use palette 1 (colors 16-31 in CRAM)
                         let color_index = 16 + pixel as usize;
-                        let color = self.decode_color(self.cram[color_index] & 0x3F);
+                        // Strip alpha; render_scanline restores it after all rendering
+                        let color = self.decode_color(self.cram[color_index] & 0x3F) & RGB_MASK;
                         self.frame.pixels[line_offset + x_index] = color;
                     }
                 }
             }
-        }
-
-        // Clean up priority bits from final frame (keep only RGB, clear metadata)
-        for x in 0..256 {
-            self.frame.pixels[line_offset + x] &= RGB_MASK;
         }
     }
 
@@ -1003,16 +986,9 @@ impl Renderer for Vdp {
     fn get_frame(&self) -> &Frame {
         // Log every time frame is retrieved
         let backdrop = self.decode_color(self.cram[16] & 0x3F);
-        // Check if Mode 4 is enabled to determine display enable logic
-        let mode_4_enabled = (self.registers[0] & 0x04) != 0;
-        let display_enabled = if mode_4_enabled {
-            // In Mode 4: bit 6 is BLK (blank bit), 1=blank, 0=display
-            (self.registers[1] & 0x40) == 0
-        } else {
-            // In TMS modes: bit 6 controls display, 1=display, 0=blank
-            (self.registers[1] & 0x40) != 0
-        };
-        let sprite_enabled = (self.registers[1] & 0x08) != 0;
+        // Register 1 bit 6: screen enable (1=on, 0=blank) — same for Mode 4 and TMS
+        let display_enabled = (self.registers[1] & 0x40) != 0;
+        let sprite_enabled = display_enabled; // Sprites are active whenever display is on
         let mut non_backdrop = 0;
         for &pixel in &self.frame.pixels {
             if pixel != backdrop {
@@ -1123,8 +1099,9 @@ mod tests {
     fn test_sprite_overflow_detection() {
         let mut vdp = Vdp::new();
 
-        // Enable display and sprites (bit 6 for display, bit 3 for sprites in register 1)
-        vdp.registers[1] = 0x40 | 0x08;
+        // Enable display (bit 6 of register 1 = 1 enables display in TMS mode used here)
+        // Note: registers[0] = 0 means TMS mode (not Mode 4), so bit 6 = 1 enables display
+        vdp.registers[1] = 0x40;
 
         // Set sprite attribute table at 0x3F00 (register 5)
         vdp.registers[5] = 0x7E; // (0x7E << 7) = 0x3F00
@@ -1154,8 +1131,8 @@ mod tests {
     fn test_sprite_collision_detection() {
         let mut vdp = Vdp::new();
 
-        // Enable display and sprites
-        vdp.registers[1] = 0x40 | 0x08;
+        // Enable display (bit 6 = 1 in TMS mode, used by these tests)
+        vdp.registers[1] = 0x40;
 
         // Set sprite attribute table
         vdp.registers[5] = 0x7E; // 0x3F00
