@@ -54,6 +54,12 @@ pub struct Vdp {
 
     // Timing mode (PAL vs NTSC)
     is_pal: bool,
+
+    // True once set_scanline() has crossed the display-height boundary this frame.
+    // Used by the retroactive frame-interrupt logic so that an early R1 write
+    // (before any set_scanline call) at the sentinel value 262 does not falsely
+    // trigger an interrupt before VBlank has actually been reached.
+    in_vblank: bool,
 }
 
 impl Vdp {
@@ -75,12 +81,19 @@ impl Vdp {
             sprite_collision: false,
             scanline: 262, // Start at end of frame so first set_scanline(0) wraps around
             is_pal: false,
+            in_vblank: false,
         }
     }
 
     /// Set PAL/NTSC timing mode
     pub fn set_pal(&mut self, pal: bool) {
         self.is_pal = pal;
+    }
+
+    /// Get current PAL/NTSC timing mode (used in tests)
+    #[cfg(test)]
+    pub fn get_pal(&self) -> bool {
+        self.is_pal
     }
 
     /// Get the current video mode
@@ -192,12 +205,13 @@ impl Vdp {
 
                         // If the frame-interrupt-enable bit (R1 bit 5) transitions 0→1
                         // while we are already in VBlank, fire the interrupt retroactively.
-                        // This fixes SMS_waitForVBlank() when SMS_init writes R1=0x20 after
-                        // the VBlank scanline boundary has already been crossed.
+                        // Use the in_vblank latch (set by set_scanline) rather than the raw
+                        // scanline value, so that the startup sentinel (262) does not cause a
+                        // spurious interrupt before any real VBlank has been reached.
                         if reg == 1
                             && (old_value & 0x20) == 0
                             && (value & 0x20) != 0
-                            && self.scanline >= self.get_display_height() as u16
+                            && self.in_vblank
                         {
                             self.frame_interrupt_pending = true;
                         }
@@ -357,6 +371,9 @@ impl Vdp {
             if (self.registers[1] & 0x20) != 0 {
                 self.frame_interrupt_pending = true;
             }
+            // New frame: reset the VBlank latch, then set it if we're already past the
+            // active display area (e.g. set_scanline jumped straight to scanline 192+).
+            self.in_vblank = scanline >= display_height;
         } else {
             // Normal forward progress within same frame
             // Render all scanlines from old_scanline+1 up to and including scanline
@@ -364,11 +381,11 @@ impl Vdp {
                 self.render_scanline(line as u8);
             }
             // Check for frame interrupt when crossing into VBlank
-            if old_scanline < display_height
-                && scanline >= display_height
-                && (self.registers[1] & 0x20) != 0
-            {
-                self.frame_interrupt_pending = true;
+            if old_scanline < display_height && scanline >= display_height {
+                if (self.registers[1] & 0x20) != 0 {
+                    self.frame_interrupt_pending = true;
+                }
+                self.in_vblank = true;
             }
         }
     }
@@ -426,6 +443,7 @@ impl Vdp {
             "sprite_collision": self.sprite_collision,
             "scanline": self.scanline,
             "is_pal": self.is_pal,
+            "in_vblank": self.in_vblank,
         })
     }
 
@@ -506,6 +524,7 @@ impl Vdp {
         load_bool!(state, "sprite_collision", self.sprite_collision);
         load_u16!(state, "scanline", self.scanline);
         load_bool!(state, "is_pal", self.is_pal);
+        load_bool!(state, "in_vblank", self.in_vblank);
 
         Ok(())
     }
@@ -1068,6 +1087,9 @@ impl Renderer for Vdp {
         self.sprite_collision = false;
         // Set to end of frame so first set_scanline(0) will properly render frame
         self.scanline = 262;
+        // in_vblank starts false: the startup sentinel (262) must not be treated as VBlank
+        // so that early R1 writes don't fire a spurious retroactive interrupt.
+        self.in_vblank = false;
         self.clear(0xFF000000);
     }
 
@@ -1289,8 +1311,11 @@ mod tests {
     fn test_frame_interrupt_retroactive_when_already_in_vblank() {
         let mut vdp = Vdp::new();
 
-        // Place the VDP inside VBlank (scanline 192, display height 192)
-        vdp.scanline = 192;
+        // Advance into VBlank via set_scanline so the in_vblank latch is set.
+        // Vdp::new() starts at scanline 262; set_scanline(192) wraps (new frame) and
+        // ends at scanline 192 >= display_height(192), so in_vblank becomes true.
+        vdp.set_scanline(192);
+        assert!(vdp.in_vblank, "in_vblank should be true after crossing display_height");
 
         // Frame interrupt enable is NOT yet set
         assert_eq!(vdp.registers[1] & 0x20, 0);
@@ -1313,8 +1338,11 @@ mod tests {
     fn test_frame_interrupt_not_retroactive_outside_vblank() {
         let mut vdp = Vdp::new();
 
-        // Place the VDP in the active display area
-        vdp.scanline = 100;
+        // Advance into active display via set_scanline.
+        // From initial scanline 262, set_scanline(100) wraps to a new frame and
+        // ends at scanline 100 < display_height(192), so in_vblank becomes false.
+        vdp.set_scanline(100);
+        assert!(!vdp.in_vblank, "in_vblank should be false inside active display");
 
         // Write R1 = 0x20 (frame interrupt enable)
         vdp.write_control(0x20);
@@ -1324,6 +1352,26 @@ mod tests {
         assert!(
             !vdp.frame_interrupt_pending,
             "frame_interrupt_pending must not be set when scanline is inside active display"
+        );
+    }
+
+    /// Verifies that the startup sentinel value (scanline = 262) does NOT cause a
+    /// spurious retroactive interrupt before any real VBlank has been entered.
+    #[test]
+    fn test_frame_interrupt_no_spurious_at_startup() {
+        let mut vdp = Vdp::new();
+
+        // VDP just created: scanline = 262 (sentinel), in_vblank = false
+        assert!(!vdp.in_vblank, "in_vblank must be false at startup");
+
+        // Write R1 = 0x20 without calling set_scanline first
+        vdp.write_control(0x20);
+        vdp.write_control(0x81);
+
+        // No interrupt should fire — we haven't actually entered VBlank yet
+        assert!(
+            !vdp.frame_interrupt_pending,
+            "startup sentinel scanline must not trigger a spurious retroactive interrupt"
         );
     }
 
