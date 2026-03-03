@@ -318,6 +318,121 @@ impl AudioChip for Sn76489Psg {
     }
 }
 
+/// Generic adapter wrapping [`Sn76489Psg`] with CPU-clock-rate-based sample generation.
+///
+/// The SN76489 is used in several systems that run at different CPU clock rates.
+/// This adapter handles cycle accumulation and downsampling to 44.1 kHz so that
+/// each system only needs to provide its NTSC and PAL CPU frequencies.
+///
+/// Used by the SMS (`SmsPsg`), SG-1000 (`Sg1000Psg`), and ColecoVision
+/// (`ColecoVisionPsg`) to avoid duplicating the sample-generation loop.
+pub struct Sn76489Adapter {
+    psg: Sn76489Psg,
+    cycle_accum: f64,
+    timing: TimingMode,
+    cpu_hz_ntsc: f64,
+    cpu_hz_pal: f64,
+}
+
+impl Sn76489Adapter {
+    /// Create a new adapter with the given initial timing mode and CPU clock rates.
+    pub fn new(timing: TimingMode, cpu_hz_ntsc: f64, cpu_hz_pal: f64) -> Self {
+        Self {
+            psg: Sn76489Psg::new(timing),
+            cycle_accum: 0.0,
+            timing,
+            cpu_hz_ntsc,
+            cpu_hz_pal,
+        }
+    }
+
+    /// Write a byte to the PSG.
+    pub fn write(&mut self, data: u8) {
+        self.psg.write(data);
+    }
+
+    /// Set timing mode (NTSC/PAL).
+    ///
+    /// Resets the cycle accumulator to prevent fractional-cycle drift when
+    /// switching between clock rates.
+    pub fn set_timing(&mut self, timing: TimingMode) {
+        if self.timing != timing {
+            self.timing = timing;
+            self.cycle_accum = 0.0;
+        }
+    }
+
+    /// Reset the PSG and cycle accumulator to their initial states.
+    pub fn reset(&mut self) {
+        self.psg.reset();
+        self.cycle_accum = 0.0;
+    }
+
+    /// Generate `sample_count` audio samples at 44.1 kHz by clocking the PSG at
+    /// CPU speed and averaging the output over accumulated cycles.
+    pub fn generate_samples(&mut self, sample_count: usize) -> Vec<i16> {
+        const SAMPLE_HZ: f64 = 44_100.0;
+        let cpu_hz = match self.timing {
+            TimingMode::Ntsc => self.cpu_hz_ntsc,
+            TimingMode::Pal => self.cpu_hz_pal,
+        };
+        let cycles_per_sample = cpu_hz / SAMPLE_HZ;
+
+        let mut out = Vec::with_capacity(sample_count);
+        for _ in 0..sample_count {
+            self.cycle_accum += cycles_per_sample;
+            let mut cycles = self.cycle_accum as u32;
+            if cycles == 0 {
+                cycles = 1; // Ensure we advance state even if timing slips
+            }
+            self.cycle_accum -= cycles as f64;
+
+            let mut acc = 0i32;
+            for _ in 0..cycles {
+                acc += self.psg.clock() as i32;
+            }
+
+            out.push((acc / cycles as i32).clamp(-32768, 32767) as i16);
+        }
+
+        out
+    }
+
+    /// Serialise PSG state for save states.
+    pub fn get_state(&self) -> serde_json::Value {
+        serde_json::json!({
+            "psg": self.psg.get_state(),
+            "cycle_accum": self.cycle_accum,
+            "timing": match self.timing {
+                TimingMode::Ntsc => "ntsc",
+                TimingMode::Pal => "pal",
+            },
+        })
+    }
+
+    /// Restore PSG state from a save state.
+    ///
+    /// Note: the CPU clock rates (`cpu_hz_ntsc`/`cpu_hz_pal`) are **not** stored
+    /// in the save state; they are preserved from the current adapter instance.
+    /// This is intentional — the clock rates are system constants baked in at
+    /// construction time and must not change across a save/load cycle.
+    pub fn set_state(&mut self, state: &serde_json::Value) -> Result<(), serde_json::Error> {
+        if let Some(psg_state) = state.get("psg") {
+            self.psg.set_state(psg_state)?;
+        }
+        if let Some(acc) = state.get("cycle_accum").and_then(|v| v.as_f64()) {
+            self.cycle_accum = acc;
+        }
+        if let Some(timing_str) = state.get("timing").and_then(|v| v.as_str()) {
+            self.timing = match timing_str {
+                "pal" => TimingMode::Pal,
+                _ => TimingMode::Ntsc,
+            };
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
