@@ -134,19 +134,57 @@ The project uses a **Lumocs-based documentation site** hosted at https://hemulat
   - Run unit/integration tests (`cargo test --workspace`).
   - Optionally run benchmarks in a separate job.
 
-- **Fast single-system builds (for development/debugging)**:
-  Each system crate compiles independently in ~12s vs ~2.5min for the full workspace binary. Use these commands when working on a specific system:
-  - **Build one system**: `cargo build -p emu_nes` (or `emu_gb`, `emu_snes`, `emu_pc`, `hemu_gba`, etc.)
-  - **Test one system**: `cargo test -p emu_nes`
-  - **Run only that system's benchmarks**: `cargo bench -p emu_nes`
-  - This compiles `emu_core` + the target system only — skipping egui, SDL2, and all other systems.
+### Building and Running a Single System
 
-  When you need a running window (visual output), build and run the full binary with `--no-gui` to skip the egui overlay:
-  ```bash
-  cargo run --profile release-quick -- --no-gui game.nes
-  cargo run --profile release-quick -- --no-gui --system nes
-  ```
-  The `--no-gui` flag uses a plain SDL2 window with no egui initialization, giving faster startup and reduced overhead while still providing audio and controller input.
+There are two complementary workflows for iterating on a single system without building the entire workspace:
+
+**Approach 1 — Separate crate (fastest; no SDL2, no egui, no other systems)**
+
+Each system crate compiles independently in ~12s vs ~2.5min for the full workspace binary.
+Use this approach for compilation checks, tests, and benchmarks:
+
+```bash
+# Build only the system crate (+ emu_core)
+cargo build -p emu_nes
+
+# Run tests for a single system
+cargo test -p emu_nes
+
+# Run benchmarks for a single system
+cargo bench -p emu_nes
+```
+
+| System             | Cargo package (`-p`)  |
+|--------------------|-----------------------|
+| NES                | `emu_nes`             |
+| Game Boy / GBC     | `emu_gb`              |
+| Game Boy Advance   | `hemu_gba`            |
+| Atari 2600         | `emu_atari2600`       |
+| CHIP-8             | `emu_chip8`           |
+| Sega Master System | `emu_sms`             |
+| Sega SG-1000       | `emu_sg1000`          |
+| ColecoVision       | `emu_colecovision`    |
+| SNES               | `emu_snes`            |
+| N64                | `emu_n64`             |
+| PS1                | `emu_ps1`             |
+| PC/DOS             | `emu_pc`              |
+
+**Approach 2 — Full binary with `--no-gui` (run with visual output, audio, and controllers)**
+
+When you need a running window, build and run the full binary with `--no-gui` to skip the egui
+overlay. This still compiles the full workspace binary but starts faster and uses fewer resources:
+
+```bash
+# Load a ROM directly (format auto-detected)
+cargo run --profile release-quick -- --no-gui game.nes
+
+# Start a specific system without a ROM
+cargo run --profile release-quick -- --no-gui --system nes
+```
+
+The `--system` flag accepts: `nes`, `gb`, `gba`, `atari2600`, `snes`, `n64`, `pc`.
+
+> **Note:** N64 requires an OpenGL context and does not support `--no-gui`. Use the full GUI for N64.
 
 - **Pre-commit checks** (REQUIRED before committing any code):
   1. **Formatting**: `cargo fmt --all -- --check` - Must pass with no diff
