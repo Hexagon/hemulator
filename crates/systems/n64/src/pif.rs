@@ -175,7 +175,6 @@ pub struct ControllerState {
 
 /// EEPROM type and size
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)] // Public API for N64 system save persistence
 pub enum EepromType {
     /// No EEPROM present
     None,
@@ -229,7 +228,6 @@ impl Pif {
     }
 
     /// Set EEPROM type and initialize storage
-    #[allow(dead_code)] // Will be used by N64 system for save persistence
     pub fn set_eeprom_type(&mut self, eeprom_type: EepromType) {
         self.eeprom_type = eeprom_type;
 
@@ -243,8 +241,7 @@ impl Pif {
         self.eeprom_data = vec![0xFF; size]; // EEPROM defaults to all 1s when blank
     }
 
-    /// Load EEPROM data from file
-    #[allow(dead_code)] // Will be used by N64 system for save persistence
+    /// Load EEPROM data from a previously saved buffer
     pub fn load_eeprom(&mut self, data: Vec<u8>) -> Result<(), String> {
         if self.eeprom_type == EepromType::None {
             return Err("No EEPROM configured".to_string());
@@ -268,8 +265,7 @@ impl Pif {
         Ok(())
     }
 
-    /// Save EEPROM data to buffer (for persistence)
-    #[allow(dead_code)] // Will be used by N64 system for save persistence
+    /// Return the current EEPROM data for persistence (returns `None` when no EEPROM is present)
     pub fn save_eeprom(&self) -> Option<Vec<u8>> {
         if self.eeprom_type != EepromType::None {
             Some(self.eeprom_data.clone())
