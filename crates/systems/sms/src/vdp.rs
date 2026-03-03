@@ -51,6 +51,9 @@ pub struct Vdp {
 
     // Current scanline
     scanline: u16,
+
+    // Timing mode (PAL vs NTSC)
+    is_pal: bool,
 }
 
 impl Vdp {
@@ -71,7 +74,13 @@ impl Vdp {
             sprite_overflow: false,
             sprite_collision: false,
             scanline: 262, // Start at end of frame so first set_scanline(0) wraps around
+            is_pal: false,
         }
+    }
+
+    /// Set PAL/NTSC timing mode
+    pub fn set_pal(&mut self, pal: bool) {
+        self.is_pal = pal;
     }
 
     /// Get the current video mode
@@ -169,6 +178,7 @@ impl Vdp {
                     let reg = data & 0x0F;
                     if (reg as usize) < self.registers.len() {
                         let value = (self.address_register & 0xFF) as u8;
+                        let old_value = self.registers[reg as usize];
                         self.registers[reg as usize] = value;
                         log(LogCategory::PPU, LogLevel::Info, || {
                             format!("SMS VDP: Register R{} = ${:02X}", reg, value)
@@ -178,6 +188,18 @@ impl Vdp {
                         // Registers 0 and 1 contain mode bits
                         if reg == 0 || reg == 1 {
                             self.update_frame_size();
+                        }
+
+                        // If the frame-interrupt-enable bit (R1 bit 5) transitions 0→1
+                        // while we are already in VBlank, fire the interrupt retroactively.
+                        // This fixes SMS_waitForVBlank() when SMS_init writes R1=0x20 after
+                        // the VBlank scanline boundary has already been crossed.
+                        if reg == 1
+                            && (old_value & 0x20) == 0
+                            && (value & 0x20) != 0
+                            && self.scanline >= self.get_display_height() as u16
+                        {
+                            self.frame_interrupt_pending = true;
                         }
                     }
                 }
@@ -255,8 +277,25 @@ impl Vdp {
 
     /// Read vertical counter
     pub fn read_vcounter(&self) -> u8 {
-        // Return current scanline (simplified)
-        let vcounter = (self.scanline & 0xFF) as u8;
+        // The SMS V-counter does not directly expose the raw scanline number.
+        // NTSC (262 lines): scanlines 0-218 (0x00-0xDA) map 1:1; scanlines 219-261
+        //   jump to 0xD5-0xFF (subtract 6 from the scanline number).
+        // PAL  (313 lines): scanlines 0-242 (0x00-0xF2) map 1:1; scanlines 243-312
+        //   jump to 0xBA-0xFF (subtract 57 from the scanline number).
+        let vcounter = if self.is_pal {
+            if self.scanline <= 0xF2 {
+                self.scanline as u8
+            } else {
+                self.scanline.wrapping_sub(57) as u8
+            }
+        } else {
+            // NTSC
+            if self.scanline <= 0xDA {
+                self.scanline as u8
+            } else {
+                self.scanline.wrapping_sub(6) as u8
+            }
+        };
         log(LogCategory::PPU, LogLevel::Debug, || {
             format!(
                 "SMS VDP: V-counter read = ${:02X} (scanline={})",
@@ -386,6 +425,7 @@ impl Vdp {
             "sprite_overflow": self.sprite_overflow,
             "sprite_collision": self.sprite_collision,
             "scanline": self.scanline,
+            "is_pal": self.is_pal,
         })
     }
 
@@ -465,6 +505,7 @@ impl Vdp {
         load_bool!(state, "sprite_overflow", self.sprite_overflow);
         load_bool!(state, "sprite_collision", self.sprite_collision);
         load_u16!(state, "scanline", self.scanline);
+        load_bool!(state, "is_pal", self.is_pal);
 
         Ok(())
     }
@@ -1238,5 +1279,104 @@ mod tests {
         // Second read should return 0
         let status2 = vdp.read_status();
         assert_eq!(status2 & 0xE0, 0);
+    }
+
+    /// Enabling the frame-interrupt bit (R1 bit 5) while the scanline is already inside
+    /// VBlank must immediately set frame_interrupt_pending (retroactive fire).
+    /// This mirrors what SMS_init does: it writes R1=0x20 after the VBlank boundary has
+    /// been crossed, so without the retroactive check the first interrupt would never fire.
+    #[test]
+    fn test_frame_interrupt_retroactive_when_already_in_vblank() {
+        let mut vdp = Vdp::new();
+
+        // Place the VDP inside VBlank (scanline 192, display height 192)
+        vdp.scanline = 192;
+
+        // Frame interrupt enable is NOT yet set
+        assert_eq!(vdp.registers[1] & 0x20, 0);
+        assert!(!vdp.frame_interrupt_pending);
+
+        // Write R1 = 0x20 (frame interrupt enable) via the control port
+        vdp.write_control(0x20); // First byte: value
+        vdp.write_control(0x81); // Second byte: register 1 write
+
+        // The interrupt must have fired retroactively
+        assert!(
+            vdp.frame_interrupt_pending,
+            "frame_interrupt_pending should be set retroactively when R1 bit 5 is enabled during VBlank"
+        );
+    }
+
+    /// Setting frame-interrupt enable while still in the active display must NOT
+    /// fire the interrupt — it should only fire when VBlank is entered.
+    #[test]
+    fn test_frame_interrupt_not_retroactive_outside_vblank() {
+        let mut vdp = Vdp::new();
+
+        // Place the VDP in the active display area
+        vdp.scanline = 100;
+
+        // Write R1 = 0x20 (frame interrupt enable)
+        vdp.write_control(0x20);
+        vdp.write_control(0x81);
+
+        // Must NOT fire yet — we are not in VBlank
+        assert!(
+            !vdp.frame_interrupt_pending,
+            "frame_interrupt_pending must not be set when scanline is inside active display"
+        );
+    }
+
+    #[test]
+    fn test_vcounter_ntsc_mapping() {
+        let mut vdp = Vdp::new();
+        vdp.is_pal = false;
+
+        // Active display: direct mapping
+        vdp.scanline = 0;
+        assert_eq!(vdp.read_vcounter(), 0x00);
+        vdp.scanline = 0xDA; // last direct-mapped scanline
+        assert_eq!(vdp.read_vcounter(), 0xDA);
+
+        // After the jump: scanline 219 (0xDB) → 0xD5
+        vdp.scanline = 219;
+        assert_eq!(vdp.read_vcounter(), 0xD5);
+
+        // Last scanline before wrap: 261 → 0xFF
+        vdp.scanline = 261;
+        assert_eq!(vdp.read_vcounter(), 0xFF);
+    }
+
+    #[test]
+    fn test_vcounter_pal_mapping() {
+        let mut vdp = Vdp::new();
+        vdp.is_pal = true;
+
+        // Active display: direct mapping
+        vdp.scanline = 0;
+        assert_eq!(vdp.read_vcounter(), 0x00);
+        vdp.scanline = 0xF2; // last direct-mapped PAL scanline
+        assert_eq!(vdp.read_vcounter(), 0xF2);
+
+        // After the jump: scanline 243 → 0xBA
+        vdp.scanline = 243;
+        assert_eq!(vdp.read_vcounter(), 0xBA);
+
+        // Last PAL scanline before wrap: 312 → 0xFF
+        vdp.scanline = 312;
+        assert_eq!(vdp.read_vcounter(), 0xFF);
+    }
+
+    #[test]
+    fn test_set_pal_switches_vcounter_mapping() {
+        let mut vdp = Vdp::new();
+        // Place scanline in the diverging range (scanline 250 is past both thresholds)
+        vdp.scanline = 250;
+
+        vdp.set_pal(false); // NTSC: 250 - 6 = 244 = 0xF4
+        assert_eq!(vdp.read_vcounter(), 0xF4);
+
+        vdp.set_pal(true); // PAL: 250 - 57 = 193 = 0xC1
+        assert_eq!(vdp.read_vcounter(), 0xC1);
     }
 }

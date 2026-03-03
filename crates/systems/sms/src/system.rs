@@ -204,6 +204,10 @@ impl System for SmsSystem {
         });
         self.cpu.reset();
         self.vdp.borrow_mut().reset();
+        self.vdp.borrow_mut().set_pal(matches!(
+            self.timing_mode,
+            emu_core::apu::TimingMode::Pal
+        ));
         self.psg.borrow_mut().reset();
         self.cycles = 0;
         self.total_cycles = 0;
@@ -1349,12 +1353,6 @@ mod tests {
     /// Verifies the ROM boots, executes past crt0/SMS_init, and produces valid frames.
     ///
     /// ROM source: https://github.com/sverx/SMSTestSuite
-    ///
-    /// TODO: The ROM's main-menu rendering requires correct VDP frame-interrupt delivery
-    /// during SMS_waitForVBlank(). The frame interrupt never fires during the wait loop —
-    /// likely because frame_interrupt_pending is not being set when the scanline crosses 192
-    /// while the ROM is executing. Further investigation needed into the set_scanline
-    /// timing vs. VDP register initialization ordering.
     #[test]
     fn smoke_test_sms_test_suite() {
         let rom = include_bytes!("../../../../test_roms/sms/SMSTestSuite.sms");

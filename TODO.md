@@ -18,13 +18,8 @@
 
 ## SMS
 
-### High
-- [ ] **Frame interrupt not firing in `SMS_waitForVBlank()`**: CPU gets stuck in the VDP V-counter polling loop at the `SMS_waitForVBlank()` call (PC≈0x757D in SMSTestSuite). The `frame_interrupt_pending` flag is never set during this phase. Root cause: `set_scanline()` is called via cycle-count interpolation in `step_frame`; if VDP registers are written (enabling the frame interrupt) *after* the scanline has already crossed the VBlank boundary in the same frame, the interrupt enable check in `set_scanline` happens before the flag is set in `registers[1]`. This means `SMS_init` sets R1=0x20 (frame-int enable) just after the VBlank crossing has been missed, so the first real interrupt never fires. Fix: track the state of `registers[1]` frame-interrupt-enable bit transitions and fire the interrupt retroactively if already in VBlank, or use a separate `frame_interrupt_enabled` latch. — `crates/systems/sms/src/vdp.rs`, `crates/systems/sms/src/system.rs`
-- [ ] **SMSTestSuite main menu not rendered**: Depends on the frame interrupt fix above. Once `SMS_waitForVBlank()` returns correctly, `SMS_init` will complete and the main menu should display. Validate using `test_roms/sms/SMSTestSuite.sms` smoke test (`smoke_test_sms_test_suite` — currently asserts only alpha channel and PC advancement). — `crates/systems/sms/src/system.rs`
-
 ### Medium
 - [ ] **Line interrupt counter reload timing**: The line counter is reloaded from R10 at scanline 192 (start of VBlank). Verify correct reload behavior for games that change R10 mid-frame. — `crates/systems/sms/src/vdp.rs`
-- [ ] **`SMS_waitForVBlank()` V-counter polling**: SMSlib polls port 0x7E until the V-counter wraps from 0xF2/0xDA back to a low value. Ensure the V-counter wraps correctly at the end of each frame (NTSC: wraps at 0xF3→0x00, PAL: 0xF3→0x00 with jump at 0xF2). — `crates/systems/sms/src/vdp.rs`
 
 ## GBA
 
