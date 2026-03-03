@@ -377,7 +377,7 @@ impl<M: Memory65c816> Cpu65c816<M> {
             0x01 => {
                 // ORA (dp,X)
                 let dp = (self.fetch_byte() as u32 + self.d as u32 + self.x as u32) & 0xFFFF;
-                let ptr_addr = self.read_word(dp) as u32;
+                let ptr_addr = self.read_word_dp_wrapped(dp) as u32;
                 let addr = ((self.dbr as u32) << 16) + ptr_addr;
                 if self.is_8bit_a() {
                     let val = self.read(addr);
@@ -840,7 +840,7 @@ impl<M: Memory65c816> Cpu65c816<M> {
             0x21 => {
                 // AND (dp,X)
                 let dp = (self.fetch_byte() as u32 + self.d as u32 + self.x as u32) & 0xFFFF;
-                let ptr_addr = self.read_word(dp) as u32;
+                let ptr_addr = self.read_word_dp_wrapped(dp) as u32;
                 let addr = ((self.dbr as u32) << 16) + ptr_addr;
                 if self.is_8bit_a() {
                     let val = self.read(addr);
@@ -1284,7 +1284,7 @@ impl<M: Memory65c816> Cpu65c816<M> {
             0x41 => {
                 // EOR (dp,X)
                 let dp = (self.fetch_byte() as u32 + self.d as u32 + self.x as u32) & 0xFFFF;
-                let ptr_addr = self.read_word(dp) as u32;
+                let ptr_addr = self.read_word_dp_wrapped(dp) as u32;
                 let addr = ((self.dbr as u32) << 16) + ptr_addr;
                 if self.is_8bit_a() {
                     let val = self.read(addr);
@@ -1680,7 +1680,7 @@ impl<M: Memory65c816> Cpu65c816<M> {
             0x61 => {
                 // ADC (dp,X)
                 let dp = (self.fetch_byte() as u32 + self.d as u32 + self.x as u32) & 0xFFFF;
-                let ptr_addr = self.read_word(dp) as u32;
+                let ptr_addr = self.read_word_dp_wrapped(dp) as u32;
                 let addr = ((self.dbr as u32) << 16) + ptr_addr;
                 if self.is_8bit_a() {
                     let val = self.read(addr);
@@ -2057,7 +2057,7 @@ impl<M: Memory65c816> Cpu65c816<M> {
             0x81 => {
                 // STA (dp,X)
                 let dp = (self.fetch_byte() as u32 + self.d as u32 + self.x as u32) & 0xFFFF;
-                let ptr_addr = self.read_word(dp) as u32;
+                let ptr_addr = self.read_word_dp_wrapped(dp) as u32;
                 let addr = ((self.dbr as u32) << 16) + ptr_addr;
                 if self.is_8bit_a() {
                     self.write(addr, (self.c & 0xFF) as u8);
@@ -2650,7 +2650,7 @@ impl<M: Memory65c816> Cpu65c816<M> {
             0xA1 => {
                 // LDA (dp,X)
                 let dp = (self.fetch_byte() as u32 + self.d as u32 + self.x as u32) & 0xFFFF;
-                let ptr_addr = self.read_word(dp) as u32;
+                let ptr_addr = self.read_word_dp_wrapped(dp) as u32;
                 let addr = ((self.dbr as u32) << 16) + ptr_addr;
                 if self.is_8bit_a() {
                     let val = self.read(addr);
@@ -3111,7 +3111,7 @@ impl<M: Memory65c816> Cpu65c816<M> {
             0xC1 => {
                 // CMP (dp,X)
                 let dp = (self.fetch_byte() as u32 + self.d as u32 + self.x as u32) & 0xFFFF;
-                let ptr_addr = self.read_word(dp) as u32;
+                let ptr_addr = self.read_word_dp_wrapped(dp) as u32;
                 let addr = ((self.dbr as u32) << 16) + ptr_addr;
                 if self.is_8bit_a() {
                     let val = self.read(addr);
@@ -3428,7 +3428,7 @@ impl<M: Memory65c816> Cpu65c816<M> {
             0xE1 => {
                 // SBC (dp,X)
                 let dp = (self.fetch_byte() as u32 + self.d as u32 + self.x as u32) & 0xFFFF;
-                let ptr_addr = self.read_word(dp) as u32;
+                let ptr_addr = self.read_word_dp_wrapped(dp) as u32;
                 let addr = ((self.dbr as u32) << 16) + ptr_addr;
                 if self.is_8bit_a() {
                     let val = self.read(addr);
@@ -3832,8 +3832,9 @@ impl<M: Memory65c816> Cpu65c816<M> {
             }
             0x7C => {
                 // JMP (absolute,X indirect)
+                // Pointer fetch uses PBR; the ptr+X sum wraps within the bank (16-bit).
                 let ptr = self.fetch_word();
-                let addr = ((self.pbr as u32) << 16) + ptr as u32 + self.x as u32;
+                let addr = ((self.pbr as u32) << 16) | ((ptr as u32 + self.x as u32) & 0xFFFF);
                 let lo = self.read(addr) as u16;
                 let hi = self.read(addr + 1) as u16;
                 self.pc = (hi << 8) | lo;
@@ -3871,8 +3872,9 @@ impl<M: Memory65c816> Cpu65c816<M> {
             }
             0xFC => {
                 // JSR (absolute,X indirect)
+                // Pointer fetch uses PBR; the ptr+X sum wraps within the bank (16-bit).
                 let ptr = self.fetch_word();
-                let addr = ((self.pbr as u32) << 16) + ptr as u32 + self.x as u32;
+                let addr = ((self.pbr as u32) << 16) | ((ptr as u32 + self.x as u32) & 0xFFFF);
                 let lo = self.read(addr) as u16;
                 let hi = self.read(addr + 1) as u16;
                 let ret_addr = self.pc.wrapping_sub(1);
@@ -4479,6 +4481,23 @@ impl<M: Memory65c816> Cpu65c816<M> {
     fn read_word(&self, addr: u32) -> u16 {
         let lo = self.read(addr) as u16;
         let hi = self.read(addr + 1) as u16;
+        (hi << 8) | lo
+    }
+
+    /// Read a 16-bit pointer from a direct-page address, with emulation-mode page wrapping.
+    ///
+    /// In 6502 emulation mode (E=1) the `(dp,X)` indirect pointer read wraps within the
+    /// direct page: the high byte is fetched from the same page as the low byte (the upper
+    /// 8 bits of `addr` are kept fixed, and only the lower 8 bits increment with wrap).
+    /// This mirrors the 6502 zero-page indexed indirect wrap behaviour.
+    fn read_word_dp_wrapped(&self, addr: u32) -> u16 {
+        let lo = self.read(addr) as u16;
+        let hi_addr = if self.emulation {
+            (addr & 0xFF00) | ((addr + 1) & 0xFF)
+        } else {
+            addr + 1
+        };
+        let hi = self.read(hi_addr) as u16;
         (hi << 8) | lo
     }
 
