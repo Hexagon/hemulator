@@ -195,8 +195,9 @@ const FUNCT_SLTU: u32 = 0x2B;
 // ============================================================================
 
 /// UNR reciprocal approximation table (257 bytes).
-/// Used by the hardware perspective divide; index = (d − 0x7FC0) >> 7
-/// where d is the normalised 16-bit denominator (MSB always set).
+/// Kept for future hardware-accurate perspective divide implementation.
+/// The hardware uses this table for Newton-Raphson 1/D approximation;
+/// `unr_divide` currently uses exact integer division instead.
 /// Reference: nocash PSX-SPX "GTE Division Inaccuracy"
 #[allow(dead_code)]
 const UNR_TABLE: [u8; 257] = [
@@ -240,7 +241,8 @@ impl GteRegisters {
     // UNR approximation for correctly-set-up geometry).
     // ========================================================================
     fn unr_divide(&mut self, lhs: u32, rhs: u32) -> u32 {
-        if rhs * 2 <= lhs {
+        // Use saturating_mul to avoid u32 overflow in the 2× comparison
+        if rhs.saturating_mul(2) <= lhs {
             self.control[31] |= 1 << 17;
             return 0x1FFFF;
         }
@@ -297,7 +299,8 @@ impl GteRegisters {
         if clamped != val {
             self.control[31] |= 1 << (25 - i); // bits 24/23/22 for IR1/2/3
         }
-        self.data[8 + i] = clamped as i16 as u32;
+        // Store only the lower 16 bits; upper bits are zero per register spec
+        self.data[8 + i] = (clamped as u16) as u32;
     }
 
     // ========================================================================
@@ -320,7 +323,8 @@ impl GteRegisters {
         self.data[16] = self.data[17];
         self.data[17] = self.data[18];
         self.data[18] = self.data[19];
-        self.data[19] = (val as u32) & 0xFFFF;
+        // Clamp negative values to 0 before storing (SZ is unsigned 16-bit)
+        self.data[19] = val.clamp(0, 0xFFFF) as u32;
     }
 
     // ========================================================================
