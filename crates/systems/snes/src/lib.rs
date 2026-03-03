@@ -1452,10 +1452,10 @@ mod cpu_test_rom_tests {
         // cputest-basic has ~1107 tests; 10 tests run per vblank, so 200 frames
         // is well over the minimum needed (~111) for all tests to finish.
         //
-        // Baseline: the emulator currently reaches test 0x01b7 (jmp ($F000,x)
-        // indirect indexed addressing), where it stops with a "Failed" result.
-        // Tests 0x000–0x1b6 all pass.  Raise min_passing after fixing the bug.
-        const MIN_PASSING: u16 = 0x01b7;
+        // Baseline: the emulator currently reaches test 0x025d, where it stops with
+        // a "Failed" result.  Tests 0x000–0x25c all pass.  Raise min_passing after
+        // fixing the next failing test.
+        const MIN_PASSING: u16 = 0x025d;
 
         let rom = include_bytes!("../../../../test_roms/snes/cputest-basic.sfc");
         let (test_num, result_byte) = run_cputest(rom, 200);
@@ -1473,11 +1473,10 @@ mod cpu_test_rom_tests {
         // cputest-full includes all tests from cputest-basic PLUS emulation-mode
         // (6502 compatibility mode) tests.  300 frames gives plenty of headroom.
         //
-        // Baseline: the emulator currently reaches test 0x0024 (adc ($EF,x) in
-        // emulation mode E=1), where it stops with a "Failed" result.  Tests
-        // 0x0000–0x0023 pass.  Raise min_passing after fixing the emulation-mode
-        // ADC indirect-indexed behavior.
-        const MIN_PASSING: u16 = 0x0024;
+        // Baseline: the emulator currently reaches test 0x0025, where it stops with
+        // a "Failed" result.  Tests 0x0000–0x0024 pass.  Raise min_passing after
+        // fixing the next failing emulation-mode test.
+        const MIN_PASSING: u16 = 0x0025;
 
         let rom = include_bytes!("../../../../test_roms/snes/cputest-full.sfc");
         let (test_num, result_byte) = run_cputest(rom, 300);
