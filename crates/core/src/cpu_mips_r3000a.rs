@@ -194,6 +194,32 @@ const FUNCT_SLTU: u32 = 0x2B;
 // GTE (Geometry Transform Engine) — COP2
 // ============================================================================
 
+/// UNR reciprocal approximation table (257 bytes).
+/// Kept for future hardware-accurate perspective divide implementation.
+/// The hardware uses this table for Newton-Raphson 1/D approximation;
+/// `unr_divide` currently uses exact integer division instead.
+/// Reference: nocash PSX-SPX "GTE Division Inaccuracy"
+#[allow(dead_code)]
+const UNR_TABLE: [u8; 257] = [
+    0xFF, 0xFD, 0xFB, 0xF9, 0xF7, 0xF5, 0xF3, 0xF1, 0xEF, 0xEE, 0xEC, 0xEA, 0xE8, 0xE6, 0xE4, 0xE3,
+    0xE1, 0xDF, 0xDD, 0xDC, 0xDA, 0xD8, 0xD6, 0xD5, 0xD3, 0xD1, 0xD0, 0xCE, 0xCC, 0xCB, 0xC9, 0xC7,
+    0xC6, 0xC4, 0xC3, 0xC1, 0xBF, 0xBE, 0xBC, 0xBB, 0xB9, 0xB8, 0xB6, 0xB4, 0xB3, 0xB1, 0xB0, 0xAE,
+    0xAD, 0xAB, 0xAA, 0xA8, 0xA7, 0xA5, 0xA4, 0xA2, 0xA1, 0x9F, 0x9E, 0x9C, 0x9B, 0x99, 0x98, 0x97,
+    0x95, 0x94, 0x92, 0x91, 0x90, 0x8E, 0x8D, 0x8C, 0x8A, 0x89, 0x87, 0x86, 0x85, 0x83, 0x82, 0x81,
+    0x7F, 0x7E, 0x7D, 0x7B, 0x7A, 0x79, 0x77, 0x76, 0x75, 0x74, 0x72, 0x71, 0x70, 0x6E, 0x6D, 0x6C,
+    0x6B, 0x69, 0x68, 0x67, 0x66, 0x64, 0x63, 0x62, 0x61, 0x5F, 0x5E, 0x5D, 0x5C, 0x5A, 0x59, 0x58,
+    0x57, 0x56, 0x54, 0x53, 0x52, 0x51, 0x50, 0x4E, 0x4D, 0x4C, 0x4B, 0x4A, 0x48, 0x47, 0x46, 0x45,
+    0x44, 0x43, 0x41, 0x40, 0x3F, 0x3E, 0x3D, 0x3C, 0x3A, 0x39, 0x38, 0x37, 0x36, 0x35, 0x34, 0x32,
+    0x31, 0x30, 0x2F, 0x2E, 0x2D, 0x2C, 0x2B, 0x29, 0x28, 0x27, 0x26, 0x25, 0x24, 0x23, 0x22, 0x21,
+    0x20, 0x1F, 0x1E, 0x1D, 0x1C, 0x1B, 0x1A, 0x19, 0x18, 0x17, 0x16, 0x15, 0x14, 0x13, 0x12, 0x11,
+    0x10, 0x0F, 0x0E, 0x0D, 0x0C, 0x0B, 0x0A, 0x09, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01,
+    0x00, // index 192
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+];
+
 /// GTE data registers (32 × 32-bit)
 #[derive(Debug, Clone, Default)]
 pub struct GteRegisters {
@@ -208,48 +234,180 @@ impl GteRegisters {
         Self::default()
     }
 
-    /// Execute a GTE command.
-    /// `command` is bits 0-24 of the COP2 instruction.
+    // ========================================================================
+    // Helper: perspective divide H/SZ3 → quotient in [0, 0x1FFFF]
+    // Sets FLAG bit 17 (divide overflow) when SZ3*2 ≤ H.
+    // Uses exact integer division (mathematically equivalent to the hardware
+    // UNR approximation for correctly-set-up geometry).
+    // ========================================================================
+    fn unr_divide(&mut self, lhs: u32, rhs: u32) -> u32 {
+        // Use saturating_mul to avoid u32 overflow in the 2× comparison
+        if rhs.saturating_mul(2) <= lhs {
+            self.control[31] |= 1 << 17;
+            return 0x1FFFF;
+        }
+        let result = ((lhs as u64) << 16) / (rhs as u64);
+        result.min(0x1FFFF) as u32
+    }
+
+    // ========================================================================
+    // Helper: set MAC1/MAC2/MAC3 (44-bit arithmetic)
+    //   i   = 1, 2, or 3
+    //   val = raw 44-bit signed accumulator value (i64)
+    //   sf  = shift amount: 0 or 12  (extracted from command as sf_bit * 12)
+    // Sets overflow flags in FLAG (control[31]) and stores the shifted i32.
+    // ========================================================================
+    fn set_mac(&mut self, i: usize, val: i64, sf: u32) {
+        const MAC_MAX: i64 = (1i64 << 43) - 1;
+        const MAC_MIN: i64 = -(1i64 << 43);
+        if val > MAC_MAX {
+            self.control[31] |= 1 << (31 - i); // bits 30/29/28 for MAC1/2/3
+        }
+        if val < MAC_MIN {
+            self.control[31] |= 1 << (28 - i); // bits 27/26/25
+        }
+        self.data[24 + i] = (val >> sf) as i32 as u32;
+    }
+
+    // ========================================================================
+    // Helper: set MAC0 (32-bit accumulator for MAC0-specific ops)
+    // Sets FLAG bits 17 (positive) / 16 (negative) on overflow.
+    // ========================================================================
+    fn set_mac0(&mut self, val: i64) {
+        if val > i32::MAX as i64 {
+            self.control[31] |= 1 << 17;
+        }
+        if val < i32::MIN as i64 {
+            self.control[31] |= 1 << 16;
+        }
+        self.data[24] = val as i32 as u32;
+    }
+
+    // ========================================================================
+    // Helper: set IR1/IR2/IR3 with saturation
+    //   i   = 1, 2, or 3  →  stored in data[8+i]
+    //   lm  = 1 → clamp to [0, 0x7FFF];  0 → clamp to [-0x8000, 0x7FFF]
+    // Sets FLAG bit 24/23/22 for IR1/2/3.
+    // ========================================================================
+    fn set_ir(&mut self, i: usize, val: i32, lm: u32) {
+        let (lo, hi) = if lm != 0 {
+            (0i32, 0x7FFF)
+        } else {
+            (-0x8000i32, 0x7FFF)
+        };
+        let clamped = val.clamp(lo, hi);
+        if clamped != val {
+            self.control[31] |= 1 << (25 - i); // bits 24/23/22 for IR1/2/3
+        }
+        // Store only the lower 16 bits; upper bits are zero per register spec
+        self.data[8 + i] = (clamped as u16) as u32;
+    }
+
+    // ========================================================================
+    // Helper: set IR0 (depth-cue factor), clamped to [0, 0x1000]
+    // Sets FLAG bit 13 on saturation.
+    // ========================================================================
+    fn set_ir0(&mut self, val: i32) {
+        let clamped = val.clamp(0, 0x1000);
+        if clamped != val {
+            self.control[31] |= 1 << 13;
+        }
+        self.data[8] = clamped as u32;
+    }
+
+    // ========================================================================
+    // Helper: push to the SZ (screen Z) FIFO: [SZ0,SZ1,SZ2,SZ3] ← [SZ1,SZ2,SZ3,new]
+    // New value is clamped to [0, 0xFFFF].
+    // ========================================================================
+    fn push_sz(&mut self, val: i32) {
+        self.data[16] = self.data[17];
+        self.data[17] = self.data[18];
+        self.data[18] = self.data[19];
+        // Clamp negative values to 0 before storing (SZ is unsigned 16-bit)
+        self.data[19] = val.clamp(0, 0xFFFF) as u32;
+    }
+
+    // ========================================================================
+    // Helper: push to the SXY (screen XY) FIFO: [SXY0,SXY1,SXY2] ← [SXY1,SXY2,new]
+    // x and y are saturated to [-0x400, 0x3FF]; flags bits 15 (SX2) / 14 (SY2).
+    // ========================================================================
+    fn push_sxy(&mut self, x: i64, y: i64) {
+        let sx = if !(-0x400..=0x3FF).contains(&x) {
+            self.control[31] |= 1 << 15;
+            x.clamp(-0x400, 0x3FF) as i32
+        } else {
+            x as i32
+        };
+        let sy = if !(-0x400..=0x3FF).contains(&y) {
+            self.control[31] |= 1 << 14;
+            y.clamp(-0x400, 0x3FF) as i32
+        } else {
+            y as i32
+        };
+        self.data[12] = self.data[13];
+        self.data[13] = self.data[14];
+        // Pack: SY in upper 16 bits, SX in lower 16 bits (each treated as i16)
+        self.data[14] = ((sy as u16 as u32) << 16) | (sx as u16 as u32);
+    }
+
+    // ========================================================================
+    // Helper: push to the RGB FIFO: [RGB0,RGB1,RGB2] ← [RGB1,RGB2,new]
+    // R/G/B are saturated to [0, 255]; flag bits 21/20/19.
+    // ========================================================================
+    fn push_rgb(&mut self, r: i32, g: i32, b: i32, code: u32) {
+        let mut sat = |v: i32, bit: u32| -> u32 {
+            if !(0..=0xFF).contains(&v) {
+                self.control[31] |= 1 << bit;
+                v.clamp(0, 0xFF) as u32
+            } else {
+                v as u32
+            }
+        };
+        let r = sat(r, 21);
+        let g = sat(g, 20);
+        let b = sat(b, 19);
+        self.data[20] = self.data[21];
+        self.data[21] = self.data[22];
+        self.data[22] = ((code & 0xFF) << 24) | (b << 16) | (g << 8) | r;
+    }
+
+    // ========================================================================
+    // Execute a GTE command.
+    // `command` is bits 0–24 of the COP2 instruction word.
+    // ========================================================================
     pub fn execute(&mut self, command: u32) {
         let opcode = command & 0x3F;
-        let _sf = (command >> 19) & 1; // Shift fraction
-        let _mx = (command >> 17) & 3; // Matrix selection
-        let _v = (command >> 15) & 3; // Vector selection
-        let _cv = (command >> 13) & 3; // Translation vector
-        let _lm = (command >> 10) & 1; // Limiter
 
-        // Clear FLAG register (control register 31) error bits for new command
+        // Clear FLAG register error bits before each new command
         self.control[31] &= 0x7FFFF000;
 
         match opcode {
-            0x01 => self.cmd_rtps(),         // Perspective transform single
-            0x06 => self.cmd_nclip(),        // Normal clipping
-            0x0C => self.cmd_op(),           // Outer product
-            0x10 => self.cmd_dpcs(),         // Depth cue single
-            0x11 => self.cmd_intpl(),        // Interpolation
-            0x12 => self.cmd_mvmva(command), // Multiply vector by matrix and add
-            0x13 => self.cmd_ncds(),         // Normal color depth single
-            0x14 => self.cmd_cdp(),          // Color depth cue
-            0x16 => self.cmd_ncdt(),         // Normal color depth triple
-            0x1B => self.cmd_nccs(),         // Normal color color single
-            0x1C => self.cmd_cc(),           // Color color
-            0x1E => self.cmd_ncs(),          // Normal color single
-            0x20 => self.cmd_nct(),          // Normal color triple
-            0x28 => self.cmd_sqr(),          // Square of vector
-            0x29 => self.cmd_dcpl(),         // Depth cue color light
-            0x2A => self.cmd_dpct(),         // Depth cue triple
-            0x2D => self.cmd_avsz3(),        // Average Z (3 values)
-            0x2E => self.cmd_avsz4(),        // Average Z (4 values)
-            0x30 => self.cmd_rtpt(),         // Perspective transform triple
-            0x3D => self.cmd_gpf(),          // General purpose interpolation
-            0x3E => self.cmd_gpl(),          // General purpose interpolation with base
-            0x3F => self.cmd_ncct(),         // Normal color color triple
-            _ => {
-                // Unknown GTE command — no-op
-            }
+            0x01 => self.cmd_rtps(command),
+            0x06 => self.cmd_nclip(),
+            0x0C => self.cmd_op(command),
+            0x10 => self.cmd_dpcs(command),
+            0x11 => self.cmd_intpl(command),
+            0x12 => self.cmd_mvmva(command),
+            0x13 => self.cmd_ncds(command),
+            0x14 => self.cmd_cdp(command),
+            0x16 => self.cmd_ncdt(command),
+            0x1B => self.cmd_nccs(command),
+            0x1C => self.cmd_cc(command),
+            0x1E => self.cmd_ncs(command),
+            0x20 => self.cmd_nct(command),
+            0x28 => self.cmd_sqr(command),
+            0x29 => self.cmd_dcpl(command),
+            0x2A => self.cmd_dpct(command),
+            0x2D => self.cmd_avsz3(),
+            0x2E => self.cmd_avsz4(),
+            0x30 => self.cmd_rtpt(command),
+            0x3D => self.cmd_gpf(command),
+            0x3E => self.cmd_gpl(command),
+            0x3F => self.cmd_ncct(command),
+            _ => {}
         }
 
-        // Update FLAG register bit 31 (error summary)
+        // Update FLAG bit 31: error summary (OR of bits 30..13)
         let flag = self.control[31];
         if flag & 0x7F87E000 != 0 {
             self.control[31] = flag | (1 << 31);
@@ -257,27 +415,236 @@ impl GteRegisters {
     }
 
     // ========================================================================
-    // GTE command stubs — each needs full implementation for accurate 3D
+    // Internal helpers shared by multiple commands
     // ========================================================================
 
-    fn cmd_rtps(&mut self) {
-        // TODO: Rotate, translate, perspective transform single vertex
-        // This is the most critical GTE command — transforms a 3D vertex
-        // to 2D screen coordinates with depth.
+    /// Extract sf shift amount (0 or 12) and lm flag from command word.
+    #[inline(always)]
+    fn sf_lm(command: u32) -> (u32, u32) {
+        (((command >> 19) & 1) * 12, (command >> 10) & 1)
     }
 
-    fn cmd_rtpt(&mut self) {
-        // TODO: Like RTPS but for 3 vertices at once
-        // Used heavily by 3D games to transform triangle vertices.
-        self.cmd_rtps();
-        self.cmd_rtps();
-        self.cmd_rtps();
+    /// Read vertex n (0/1/2): returns (vx, vy, vz) as i64.
+    fn read_vertex(&self, n: usize) -> (i64, i64, i64) {
+        let vxy = self.data[n * 2];
+        let vx = vxy as i16 as i64;
+        let vy = (vxy >> 16) as i16 as i64;
+        let vz = self.data[n * 2 + 1] as i16 as i64;
+        (vx, vy, vz)
     }
 
+    /// Apply the rotation matrix to vertex n and store MAC1/2/3 + IR1/2/3.
+    /// Returns the raw (pre-sf) MAC3 value for the SZ push.
+    fn rtps_vertex(&mut self, command: u32, n: usize) {
+        let (sf, lm) = Self::sf_lm(command);
+        let (vx, vy, vz) = self.read_vertex(n);
+
+        let rt11 = self.control[0] as i16 as i64;
+        let rt12 = (self.control[0] >> 16) as i16 as i64;
+        let rt13 = self.control[1] as i16 as i64;
+        let rt21 = (self.control[1] >> 16) as i16 as i64;
+        let rt22 = self.control[2] as i16 as i64;
+        let rt23 = (self.control[2] >> 16) as i16 as i64;
+        let rt31 = self.control[3] as i16 as i64;
+        let rt32 = (self.control[3] >> 16) as i16 as i64;
+        let rt33 = self.control[4] as i16 as i64;
+
+        let trx = self.control[5] as i32 as i64;
+        let try_ = self.control[6] as i32 as i64;
+        let trz = self.control[7] as i32 as i64;
+
+        // Multiply translation by 0x1000 to align with the 12-bit fractional format
+        let mac1 = trx * 0x1000 + rt11 * vx + rt12 * vy + rt13 * vz;
+        let mac2 = try_ * 0x1000 + rt21 * vx + rt22 * vy + rt23 * vz;
+        let mac3 = trz * 0x1000 + rt31 * vx + rt32 * vy + rt33 * vz;
+
+        self.set_mac(1, mac1, sf);
+        self.set_mac(2, mac2, sf);
+        self.set_mac(3, mac3, sf);
+
+        self.set_ir(1, self.data[25] as i32, lm);
+        self.set_ir(2, self.data[26] as i32, lm);
+        self.set_ir(3, self.data[27] as i32, lm);
+
+        // SZ FIFO uses MAC3 >> 12 (always 12, independent of sf)
+        let sz = (mac3 >> 12) as i32;
+        self.push_sz(sz);
+
+        // Perspective divide
+        let h = self.control[26] & 0xFFFF;
+        let sz3 = self.data[19] & 0xFFFF;
+        let div = self.unr_divide(h, sz3);
+
+        let ofx = self.control[24] as i32 as i64;
+        let ofy = self.control[25] as i32 as i64;
+        let ir1 = self.data[9] as i16 as i64;
+        let ir2 = self.data[10] as i16 as i64;
+
+        let sx = ofx + ir1 * div as i64;
+        let sy = ofy + ir2 * div as i64;
+        self.push_sxy(sx >> 16, sy >> 16);
+
+        // Depth cueing: MAC0 = DQB + DQA * div
+        let dqa = self.control[27] as i16 as i64;
+        let dqb = self.control[28] as i32 as i64;
+        let mac0 = dqb + dqa * div as i64;
+        self.set_mac0(mac0);
+        let ir0 = self.data[24] as i32 >> 12;
+        self.set_ir0(ir0);
+    }
+
+    /// Apply light matrix (LLM) to vertex n → MAC1/2/3 + IR1/2/3.
+    fn apply_llm(&mut self, n: usize, sf: u32, lm: u32) {
+        let (vx, vy, vz) = self.read_vertex(n);
+
+        let l11 = self.control[8] as i16 as i64;
+        let l12 = (self.control[8] >> 16) as i16 as i64;
+        let l13 = self.control[9] as i16 as i64;
+        let l21 = (self.control[9] >> 16) as i16 as i64;
+        let l22 = self.control[10] as i16 as i64;
+        let l23 = (self.control[10] >> 16) as i16 as i64;
+        let l31 = self.control[11] as i16 as i64;
+        let l32 = (self.control[11] >> 16) as i16 as i64;
+        let l33 = self.control[12] as i16 as i64;
+
+        let mac1 = l11 * vx + l12 * vy + l13 * vz;
+        let mac2 = l21 * vx + l22 * vy + l23 * vz;
+        let mac3 = l31 * vx + l32 * vy + l33 * vz;
+
+        self.set_mac(1, mac1, sf);
+        self.set_mac(2, mac2, sf);
+        self.set_mac(3, mac3, sf);
+        self.set_ir(1, self.data[25] as i32, lm);
+        self.set_ir(2, self.data[26] as i32, lm);
+        self.set_ir(3, self.data[27] as i32, lm);
+    }
+
+    /// Apply color matrix (LCM) with background color → MAC1/2/3 + IR1/2/3.
+    fn apply_lcm(&mut self, sf: u32, lm: u32) {
+        let lr1 = self.control[16] as i16 as i64;
+        let lr2 = (self.control[16] >> 16) as i16 as i64;
+        let lr3 = self.control[17] as i16 as i64;
+        let lg1 = (self.control[17] >> 16) as i16 as i64;
+        let lg2 = self.control[18] as i16 as i64;
+        let lg3 = (self.control[18] >> 16) as i16 as i64;
+        let lb1 = self.control[19] as i16 as i64;
+        let lb2 = (self.control[19] >> 16) as i16 as i64;
+        let lb3 = self.control[20] as i16 as i64;
+
+        let rbk = self.control[13] as i32 as i64;
+        let gbk = self.control[14] as i32 as i64;
+        let bbk = self.control[15] as i32 as i64;
+
+        let ir1 = self.data[9] as i16 as i64;
+        let ir2 = self.data[10] as i16 as i64;
+        let ir3 = self.data[11] as i16 as i64;
+
+        let mac1 = rbk * 0x1000 + lr1 * ir1 + lr2 * ir2 + lr3 * ir3;
+        let mac2 = gbk * 0x1000 + lg1 * ir1 + lg2 * ir2 + lg3 * ir3;
+        let mac3 = bbk * 0x1000 + lb1 * ir1 + lb2 * ir2 + lb3 * ir3;
+
+        self.set_mac(1, mac1, sf);
+        self.set_mac(2, mac2, sf);
+        self.set_mac(3, mac3, sf);
+        self.set_ir(1, self.data[25] as i32, lm);
+        self.set_ir(2, self.data[26] as i32, lm);
+        self.set_ir(3, self.data[27] as i32, lm);
+    }
+
+    /// Multiply RGBC color by current IR1/2/3 and accumulate into MAC1/2/3.
+    /// Per nocash: [MAC] = [R,G,B]*256 * [IR1,IR2,IR3]  SAR (sf*12).
+    /// Returns raw (pre-sf) MAC values for optional subsequent depth-cue use.
+    fn color_multiply(&mut self, sf: u32, lm: u32) -> (i64, i64, i64) {
+        let r = (self.data[6] & 0xFF) as i64;
+        let g = ((self.data[6] >> 8) & 0xFF) as i64;
+        let b = ((self.data[6] >> 16) & 0xFF) as i64;
+        let ir1 = self.data[9] as i16 as i64;
+        let ir2 = self.data[10] as i16 as i64;
+        let ir3 = self.data[11] as i16 as i64;
+        let mac1 = (r << 8) * ir1;
+        let mac2 = (g << 8) * ir2;
+        let mac3 = (b << 8) * ir3;
+        self.set_mac(1, mac1, sf);
+        self.set_mac(2, mac2, sf);
+        self.set_mac(3, mac3, sf);
+        self.set_ir(1, self.data[25] as i32, lm);
+        self.set_ir(2, self.data[26] as i32, lm);
+        self.set_ir(3, self.data[27] as i32, lm);
+        (mac1, mac2, mac3)
+    }
+
+    /// Depth-cue interpolation: MAC += IR0 * (FC − IR)
+    /// Adds far-color contribution to existing raw MAC values (mac1/2/3).
+    fn depth_cue_mac(&mut self, mac1: i64, mac2: i64, mac3: i64, sf: u32, lm: u32) {
+        let ir0 = self.data[8] as i16 as i64;
+        let rfc = self.control[21] as i32 as i64;
+        let gfc = self.control[22] as i32 as i64;
+        let bfc = self.control[23] as i32 as i64;
+        // IR1/2/3 were set by the preceding color_multiply / set_ir call
+        let ir1 = self.data[9] as i16 as i64;
+        let ir2 = self.data[10] as i16 as i64;
+        let ir3 = self.data[11] as i16 as i64;
+        let m1 = mac1 + ir0 * (rfc - ir1);
+        let m2 = mac2 + ir0 * (gfc - ir2);
+        let m3 = mac3 + ir0 * (bfc - ir3);
+        self.set_mac(1, m1, sf);
+        self.set_mac(2, m2, sf);
+        self.set_mac(3, m3, sf);
+        self.set_ir(1, self.data[25] as i32, lm);
+        self.set_ir(2, self.data[26] as i32, lm);
+        self.set_ir(3, self.data[27] as i32, lm);
+    }
+
+    /// Push current MAC1/2/3 (data[25-27]) to the RGB FIFO.
+    /// Output color = MAC >> 4, clamped to [0, 255].
+    fn push_color_from_mac(&mut self) {
+        let code = (self.data[6] >> 24) & 0xFF;
+        let r = self.data[25] as i32 >> 4;
+        let g = self.data[26] as i32 >> 4;
+        let b = self.data[27] as i32 >> 4;
+        self.push_rgb(r, g, b, code);
+    }
+
+    // ========================================================================
+    // DPCS helper: single depth-cue-from-RGBC operation (used by DPCS & DPCT)
+    // ========================================================================
+    fn dpcs_color(&mut self, r_in: i64, g_in: i64, b_in: i64, sf: u32, lm: u32) {
+        let ir0 = self.data[8] as i16 as i64;
+        let rfc = self.control[21] as i32 as i64;
+        let gfc = self.control[22] as i32 as i64;
+        let bfc = self.control[23] as i32 as i64;
+        // Formula (nocash): MAC = (FC − R×16) × IR0 + R × 65536
+        let mac1 = (rfc - r_in * 0x10) * ir0 + r_in * 0x10000;
+        let mac2 = (gfc - g_in * 0x10) * ir0 + g_in * 0x10000;
+        let mac3 = (bfc - b_in * 0x10) * ir0 + b_in * 0x10000;
+        self.set_mac(1, mac1, sf);
+        self.set_mac(2, mac2, sf);
+        self.set_mac(3, mac3, sf);
+        self.set_ir(1, self.data[25] as i32, lm);
+        self.set_ir(2, self.data[26] as i32, lm);
+        self.set_ir(3, self.data[27] as i32, lm);
+        self.push_color_from_mac();
+    }
+
+    // ========================================================================
+    // GTE commands
+    // ========================================================================
+
+    /// RTPS (0x01): Rotate, Translate, Perspective-transform — single vertex V0.
+    fn cmd_rtps(&mut self, command: u32) {
+        self.rtps_vertex(command, 0);
+    }
+
+    /// RTPT (0x30): Rotate/Translate/Perspective — all three vertices V0/V1/V2.
+    fn cmd_rtpt(&mut self, command: u32) {
+        self.rtps_vertex(command, 0);
+        self.rtps_vertex(command, 1);
+        self.rtps_vertex(command, 2);
+    }
+
+    /// NCLIP (0x06): Normal clipping — 2D cross product to detect face orientation.
+    /// MAC0 = SX0*(SY1−SY2) + SX1*(SY2−SY0) + SX2*(SY0−SY1)
     fn cmd_nclip(&mut self) {
-        // Normal clipping: calculates cross product of 2D screen coords
-        // to determine if a triangle is front- or back-facing.
-        // MAC0 = SX0*(SY1-SY2) + SX1*(SY2-SY0) + SX2*(SY0-SY1)
         let sx0 = self.data[12] as i16 as i64;
         let sy0 = (self.data[12] >> 16) as i16 as i64;
         let sx1 = self.data[13] as i16 as i64;
@@ -285,100 +652,323 @@ impl GteRegisters {
         let sx2 = self.data[14] as i16 as i64;
         let sy2 = (self.data[14] >> 16) as i16 as i64;
         let mac0 = sx0 * (sy1 - sy2) + sx1 * (sy2 - sy0) + sx2 * (sy0 - sy1);
-        self.data[24] = mac0 as i32 as u32; // MAC0
+        // MAC0 overflow flags
+        if mac0 > i32::MAX as i64 {
+            self.control[31] |= 1 << 17;
+        }
+        if mac0 < i32::MIN as i64 {
+            self.control[31] |= 1 << 16;
+        }
+        self.data[24] = mac0 as i32 as u32;
     }
 
-    fn cmd_op(&mut self) {
-        // TODO: Outer product of two vectors
+    /// OP (0x0C): Outer product of IR vectors vs rotation matrix diagonal.
+    /// [MAC1,MAC2,MAC3] = [IR3×D2 − IR2×D3,  IR1×D3 − IR3×D1,  IR2×D1 − IR1×D2]
+    fn cmd_op(&mut self, command: u32) {
+        let (sf, lm) = Self::sf_lm(command);
+        let d1 = self.control[0] as i16 as i64; // RT11
+        let d2 = self.control[2] as i16 as i64; // RT22
+        let d3 = self.control[4] as i16 as i64; // RT33
+        let ir1 = self.data[9] as i16 as i64;
+        let ir2 = self.data[10] as i16 as i64;
+        let ir3 = self.data[11] as i16 as i64;
+        self.set_mac(1, ir3 * d2 - ir2 * d3, sf);
+        self.set_mac(2, ir1 * d3 - ir3 * d1, sf);
+        self.set_mac(3, ir2 * d1 - ir1 * d2, sf);
+        self.set_ir(1, self.data[25] as i32, lm);
+        self.set_ir(2, self.data[26] as i32, lm);
+        self.set_ir(3, self.data[27] as i32, lm);
     }
 
-    fn cmd_dpcs(&mut self) {
-        // TODO: Depth cue single
+    /// DPCS (0x10): Depth Cue Single — interpolate RGBC toward far color via IR0.
+    fn cmd_dpcs(&mut self, command: u32) {
+        let (sf, lm) = Self::sf_lm(command);
+        let r = (self.data[6] & 0xFF) as i64;
+        let g = ((self.data[6] >> 8) & 0xFF) as i64;
+        let b = ((self.data[6] >> 16) & 0xFF) as i64;
+        self.dpcs_color(r, g, b, sf, lm);
     }
 
-    fn cmd_intpl(&mut self) {
-        // TODO: Interpolation
+    /// INTPL (0x11): Interpolate IR1/2/3 toward far color via IR0.
+    fn cmd_intpl(&mut self, command: u32) {
+        let (sf, lm) = Self::sf_lm(command);
+        let ir0 = self.data[8] as i16 as i64;
+        let rfc = self.control[21] as i32 as i64;
+        let gfc = self.control[22] as i32 as i64;
+        let bfc = self.control[23] as i32 as i64;
+        let ir1 = self.data[9] as i16 as i64;
+        let ir2 = self.data[10] as i16 as i64;
+        let ir3 = self.data[11] as i16 as i64;
+        // MAC = IR * 0x1000 + IR0 * (FC − IR)
+        let mac1 = ir1 * 0x1000 + ir0 * (rfc - ir1);
+        let mac2 = ir2 * 0x1000 + ir0 * (gfc - ir2);
+        let mac3 = ir3 * 0x1000 + ir0 * (bfc - ir3);
+        self.set_mac(1, mac1, sf);
+        self.set_mac(2, mac2, sf);
+        self.set_mac(3, mac3, sf);
+        self.set_ir(1, self.data[25] as i32, lm);
+        self.set_ir(2, self.data[26] as i32, lm);
+        self.set_ir(3, self.data[27] as i32, lm);
+        self.push_color_from_mac();
     }
 
-    fn cmd_mvmva(&mut self, _command: u32) {
-        // TODO: Multiply vector by matrix and add vector
-        // This is the general-purpose matrix*vector+vector operation
+    /// MVMVA (0x12): Multiply Vector by Matrix and Vector Add.
+    /// Selects matrix (mx), input vector (v), and translation (cv) from command.
+    fn cmd_mvmva(&mut self, command: u32) {
+        let (sf, lm) = Self::sf_lm(command);
+        let mx = (command >> 17) & 3;
+        let v = (command >> 15) & 3;
+        let cv = (command >> 13) & 3;
+
+        // Select matrix elements
+        let (m11, m12, m13, m21, m22, m23, m31, m32, m33) = match mx {
+            0 => (
+                self.control[0] as i16 as i64,
+                (self.control[0] >> 16) as i16 as i64,
+                self.control[1] as i16 as i64,
+                (self.control[1] >> 16) as i16 as i64,
+                self.control[2] as i16 as i64,
+                (self.control[2] >> 16) as i16 as i64,
+                self.control[3] as i16 as i64,
+                (self.control[3] >> 16) as i16 as i64,
+                self.control[4] as i16 as i64,
+            ),
+            1 => (
+                self.control[8] as i16 as i64,
+                (self.control[8] >> 16) as i16 as i64,
+                self.control[9] as i16 as i64,
+                (self.control[9] >> 16) as i16 as i64,
+                self.control[10] as i16 as i64,
+                (self.control[10] >> 16) as i16 as i64,
+                self.control[11] as i16 as i64,
+                (self.control[11] >> 16) as i16 as i64,
+                self.control[12] as i16 as i64,
+            ),
+            2 => (
+                self.control[16] as i16 as i64,
+                (self.control[16] >> 16) as i16 as i64,
+                self.control[17] as i16 as i64,
+                (self.control[17] >> 16) as i16 as i64,
+                self.control[18] as i16 as i64,
+                (self.control[18] >> 16) as i16 as i64,
+                self.control[19] as i16 as i64,
+                (self.control[19] >> 16) as i16 as i64,
+                self.control[20] as i16 as i64,
+            ),
+            _ => (0i64, 0, 0, 0, 0, 0, 0, 0, 0), // reserved / garbage
+        };
+
+        // Select input vector
+        let (v1, v2, v3) = match v {
+            0 => self.read_vertex(0),
+            1 => self.read_vertex(1),
+            2 => self.read_vertex(2),
+            _ => (
+                self.data[9] as i16 as i64,
+                self.data[10] as i16 as i64,
+                self.data[11] as i16 as i64,
+            ),
+        };
+
+        // Select translation vector
+        let (cv1, cv2, cv3) = match cv {
+            0 => (
+                self.control[5] as i32 as i64,
+                self.control[6] as i32 as i64,
+                self.control[7] as i32 as i64,
+            ),
+            1 => (
+                self.control[13] as i32 as i64,
+                self.control[14] as i32 as i64,
+                self.control[15] as i32 as i64,
+            ),
+            2 => (
+                self.control[21] as i32 as i64,
+                self.control[22] as i32 as i64,
+                self.control[23] as i32 as i64,
+            ),
+            _ => (0i64, 0, 0),
+        };
+
+        let mac1 = cv1 * 0x1000 + m11 * v1 + m12 * v2 + m13 * v3;
+        let mac2 = cv2 * 0x1000 + m21 * v1 + m22 * v2 + m23 * v3;
+        let mac3 = cv3 * 0x1000 + m31 * v1 + m32 * v2 + m33 * v3;
+        self.set_mac(1, mac1, sf);
+        self.set_mac(2, mac2, sf);
+        self.set_mac(3, mac3, sf);
+        self.set_ir(1, self.data[25] as i32, lm);
+        self.set_ir(2, self.data[26] as i32, lm);
+        self.set_ir(3, self.data[27] as i32, lm);
     }
 
-    fn cmd_ncds(&mut self) {
-        // TODO: Normal color depth single
+    /// NCS (0x1E): Normal Color Single — light + color matrices, V0.
+    fn cmd_ncs(&mut self, command: u32) {
+        let (sf, lm) = Self::sf_lm(command);
+        self.apply_llm(0, sf, lm);
+        self.apply_lcm(sf, lm);
+        self.push_color_from_mac();
     }
 
-    fn cmd_cdp(&mut self) {
-        // TODO: Color depth cue
+    /// NCT (0x20): Normal Color Triple — NCS applied to V0, V1, V2.
+    fn cmd_nct(&mut self, command: u32) {
+        let (sf, lm) = Self::sf_lm(command);
+        for v in 0..3 {
+            self.apply_llm(v, sf, lm);
+            self.apply_lcm(sf, lm);
+            self.push_color_from_mac();
+        }
     }
 
-    fn cmd_ncdt(&mut self) {
-        // TODO: Normal color depth triple
+    /// NCCS (0x1B): Normal Color Color Single — light + color matrices + RGBC multiply, V0.
+    fn cmd_nccs(&mut self, command: u32) {
+        let (sf, lm) = Self::sf_lm(command);
+        self.apply_llm(0, sf, lm);
+        self.apply_lcm(sf, lm);
+        self.color_multiply(sf, lm);
+        self.push_color_from_mac();
     }
 
-    fn cmd_nccs(&mut self) {
-        // TODO: Normal color color single
+    /// NCCT (0x3F): Normal Color Color Triple — NCCS applied to V0, V1, V2.
+    fn cmd_ncct(&mut self, command: u32) {
+        let (sf, lm) = Self::sf_lm(command);
+        for v in 0..3 {
+            self.apply_llm(v, sf, lm);
+            self.apply_lcm(sf, lm);
+            self.color_multiply(sf, lm);
+            self.push_color_from_mac();
+        }
     }
 
-    fn cmd_cc(&mut self) {
-        // TODO: Color color
+    /// NCDS (0x13): Normal Color Depth Single — NCCS + far-color depth cue, V0.
+    fn cmd_ncds(&mut self, command: u32) {
+        let (sf, lm) = Self::sf_lm(command);
+        self.apply_llm(0, sf, lm);
+        self.apply_lcm(sf, lm);
+        let (mac1, mac2, mac3) = self.color_multiply(sf, lm);
+        self.depth_cue_mac(mac1, mac2, mac3, sf, lm);
+        self.push_color_from_mac();
     }
 
-    fn cmd_ncs(&mut self) {
-        // TODO: Normal color single
+    /// NCDT (0x16): Normal Color Depth Triple — NCDS applied to V0, V1, V2.
+    fn cmd_ncdt(&mut self, command: u32) {
+        let (sf, lm) = Self::sf_lm(command);
+        for v in 0..3 {
+            self.apply_llm(v, sf, lm);
+            self.apply_lcm(sf, lm);
+            let (mac1, mac2, mac3) = self.color_multiply(sf, lm);
+            self.depth_cue_mac(mac1, mac2, mac3, sf, lm);
+            self.push_color_from_mac();
+        }
     }
 
-    fn cmd_nct(&mut self) {
-        // TODO: Normal color triple
+    /// CDP (0x14): Color Depth cue Primitive — LCM on current IR + RGBC multiply + depth cue.
+    fn cmd_cdp(&mut self, command: u32) {
+        let (sf, lm) = Self::sf_lm(command);
+        self.apply_lcm(sf, lm);
+        let (mac1, mac2, mac3) = self.color_multiply(sf, lm);
+        self.depth_cue_mac(mac1, mac2, mac3, sf, lm);
+        self.push_color_from_mac();
     }
 
-    fn cmd_sqr(&mut self) {
-        // TODO: Square of vector components
+    /// CC (0x1C): Color Color — apply LCM to current IR, then RGBC multiply.
+    fn cmd_cc(&mut self, command: u32) {
+        let (sf, lm) = Self::sf_lm(command);
+        self.apply_lcm(sf, lm);
+        self.color_multiply(sf, lm);
+        self.push_color_from_mac();
     }
 
-    fn cmd_dcpl(&mut self) {
-        // TODO: Depth cue color light
+    /// DCPL (0x29): Depth Cue Color Light — RGBC×IR depth-cued toward far color.
+    fn cmd_dcpl(&mut self, command: u32) {
+        let (sf, lm) = Self::sf_lm(command);
+        let (mac1, mac2, mac3) = self.color_multiply(sf, lm);
+        self.depth_cue_mac(mac1, mac2, mac3, sf, lm);
+        self.push_color_from_mac();
     }
 
-    fn cmd_dpct(&mut self) {
-        // TODO: Depth cue triple
+    /// DPCT (0x2A): Depth Cue Triple — DPCS applied to RGB0, RGB1, RGB2 in the FIFO.
+    fn cmd_dpct(&mut self, command: u32) {
+        let (sf, lm) = Self::sf_lm(command);
+        for i in 0..3 {
+            let rgb = self.data[20 + i];
+            let r = (rgb & 0xFF) as i64;
+            let g = ((rgb >> 8) & 0xFF) as i64;
+            let b = ((rgb >> 16) & 0xFF) as i64;
+            self.dpcs_color(r, g, b, sf, lm);
+        }
     }
 
+    /// SQR (0x28): Square of IR vector — [MAC1,MAC2,MAC3] = [IR1²,IR2²,IR3²].
+    fn cmd_sqr(&mut self, command: u32) {
+        let (sf, lm) = Self::sf_lm(command);
+        let ir1 = self.data[9] as i16 as i64;
+        let ir2 = self.data[10] as i16 as i64;
+        let ir3 = self.data[11] as i16 as i64;
+        self.set_mac(1, ir1 * ir1, sf);
+        self.set_mac(2, ir2 * ir2, sf);
+        self.set_mac(3, ir3 * ir3, sf);
+        self.set_ir(1, self.data[25] as i32, lm);
+        self.set_ir(2, self.data[26] as i32, lm);
+        self.set_ir(3, self.data[27] as i32, lm);
+    }
+
+    /// GPF (0x3D): General Purpose interpolation — [MAC] = IR0 × [IR1,IR2,IR3].
+    fn cmd_gpf(&mut self, command: u32) {
+        let (sf, lm) = Self::sf_lm(command);
+        let ir0 = self.data[8] as i16 as i64;
+        let ir1 = self.data[9] as i16 as i64;
+        let ir2 = self.data[10] as i16 as i64;
+        let ir3 = self.data[11] as i16 as i64;
+        self.set_mac(1, ir0 * ir1, sf);
+        self.set_mac(2, ir0 * ir2, sf);
+        self.set_mac(3, ir0 * ir3, sf);
+        self.set_ir(1, self.data[25] as i32, lm);
+        self.set_ir(2, self.data[26] as i32, lm);
+        self.set_ir(3, self.data[27] as i32, lm);
+        self.push_color_from_mac();
+    }
+
+    /// GPL (0x3E): General Purpose interpolation with base — [MAC] += IR0 × [IR1,IR2,IR3].
+    fn cmd_gpl(&mut self, command: u32) {
+        let (sf, lm) = Self::sf_lm(command);
+        let ir0 = self.data[8] as i16 as i64;
+        let ir1 = self.data[9] as i16 as i64;
+        let ir2 = self.data[10] as i16 as i64;
+        let ir3 = self.data[11] as i16 as i64;
+        // Use existing MAC values as base (shift back up by sf to get raw, then add)
+        let mac1_base = (self.data[25] as i32 as i64) << sf;
+        let mac2_base = (self.data[26] as i32 as i64) << sf;
+        let mac3_base = (self.data[27] as i32 as i64) << sf;
+        self.set_mac(1, mac1_base + ir0 * ir1, sf);
+        self.set_mac(2, mac2_base + ir0 * ir2, sf);
+        self.set_mac(3, mac3_base + ir0 * ir3, sf);
+        self.set_ir(1, self.data[25] as i32, lm);
+        self.set_ir(2, self.data[26] as i32, lm);
+        self.set_ir(3, self.data[27] as i32, lm);
+        self.push_color_from_mac();
+    }
+
+    /// AVSZ3 (0x2D): Average of SZ1, SZ2, SZ3 → OTZ.
     fn cmd_avsz3(&mut self) {
-        // Average Z value (3 vertices)
-        // MAC0 = ZSF3 * (SZ1 + SZ2 + SZ3)
         let zsf3 = self.control[29] as i16 as i64;
         let sz1 = (self.data[17] & 0xFFFF) as i64;
         let sz2 = (self.data[18] & 0xFFFF) as i64;
         let sz3 = (self.data[19] & 0xFFFF) as i64;
         let mac0 = zsf3 * (sz1 + sz2 + sz3);
-        self.data[24] = mac0 as i32 as u32; // MAC0
+        self.set_mac0(mac0);
         self.data[7] = (mac0 >> 12).clamp(0, 0xFFFF) as u32; // OTZ
     }
 
+    /// AVSZ4 (0x2E): Average of SZ0, SZ1, SZ2, SZ3 → OTZ.
     fn cmd_avsz4(&mut self) {
-        // Average Z value (4 vertices)
         let zsf4 = self.control[30] as i16 as i64;
         let sz0 = (self.data[16] & 0xFFFF) as i64;
         let sz1 = (self.data[17] & 0xFFFF) as i64;
         let sz2 = (self.data[18] & 0xFFFF) as i64;
         let sz3 = (self.data[19] & 0xFFFF) as i64;
         let mac0 = zsf4 * (sz0 + sz1 + sz2 + sz3);
-        self.data[24] = mac0 as i32 as u32; // MAC0
+        self.set_mac0(mac0);
         self.data[7] = (mac0 >> 12).clamp(0, 0xFFFF) as u32; // OTZ
-    }
-
-    fn cmd_gpf(&mut self) {
-        // TODO: General purpose interpolation
-    }
-
-    fn cmd_gpl(&mut self) {
-        // TODO: General purpose interpolation with base
-    }
-
-    fn cmd_ncct(&mut self) {
-        // TODO: Normal color color triple
     }
 }
 
