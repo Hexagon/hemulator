@@ -134,6 +134,20 @@ The project uses a **Lumocs-based documentation site** hosted at https://hemulat
   - Run unit/integration tests (`cargo test --workspace`).
   - Optionally run benchmarks in a separate job.
 
+- **Fast single-system builds (for development/debugging)**:
+  Each system crate compiles independently in ~12s vs ~2.5min for the full workspace binary. Use these commands when working on a specific system:
+  - **Build one system**: `cargo build -p emu_nes` (or `emu_gb`, `emu_snes`, `emu_pc`, `hemu_gba`, etc.)
+  - **Test one system**: `cargo test -p emu_nes`
+  - **Run only that system's benchmarks**: `cargo bench -p emu_nes`
+  - This compiles `emu_core` + the target system only — skipping egui, SDL2, and all other systems.
+
+  When you need a running window (visual output), build and run the full binary with `--no-gui` to skip the egui overlay:
+  ```bash
+  cargo run --profile release-quick -- --no-gui game.nes
+  cargo run --profile release-quick -- --no-gui --system nes
+  ```
+  The `--no-gui` flag uses a plain SDL2 window with no egui initialization, giving faster startup and reduced overhead while still providing audio and controller input.
+
 - **Pre-commit checks** (REQUIRED before committing any code):
   1. **Formatting**: `cargo fmt --all -- --check` - Must pass with no diff
   2. **Clippy**: `cargo clippy --workspace --all-targets -- -D warnings` - Must pass with no warnings
