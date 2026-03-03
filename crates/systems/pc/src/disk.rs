@@ -134,7 +134,7 @@ impl DiskController {
 
             // Validate cylinder number
             if (request.cylinder as u32) >= max_cylinders {
-                self.status = 0x01; // Invalid parameter
+                self.status = 0x04; // Sector not found (cylinder beyond disk capacity)
                 return self.status;
             }
         }

@@ -140,9 +140,7 @@ impl<M: MemoryLr35902> CpuLr35902<M> {
         }
 
         let opcode = self.read_pc();
-        let cycles = self.execute(opcode);
-
-        cycles
+        self.execute(opcode)
     }
 
     /// Check for pending interrupts and handle them if enabled
