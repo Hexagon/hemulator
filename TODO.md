@@ -31,6 +31,21 @@
 - [ ] **Implement halt/stop modes** (`HALTCNT` at `0x04000301`) — `crates/systems/gba/src/lib.rs`
 - [ ] **HBlank OAM access restriction** (`DISPCNT` bit 5) — `crates/systems/gba/src/ppu.rs`
 
+## PS1
+
+### High
+- [ ] **SPU ADPCM Audio** — 24-voice ADPCM decoding, ADSR envelopes, and reverb not yet implemented. `generate_sample()` currently returns silence. — `crates/systems/ps1/src/spu.rs`
+- [ ] **CD-ROM command handling** — Only GetStat/GetID stubs; no disc data streaming or sector reads. Required for running real game discs. — `crates/systems/ps1/src/lib.rs`
+
+### Medium
+- [ ] **Save States** — `save_state()` / `load_state()` are stubs (return empty/no-op). Need full serialization of CPU, GPU, SPU, RAM, and DMA state. — `crates/systems/ps1/src/lib.rs`
+- [ ] **MDEC** — Motion Decoder (FMV) stubbed; no macroblock decoding. — `crates/systems/ps1/src/lib.rs`
+
+### Low
+- [ ] **GPU Polylines** — Polyline (multi-segment line) commands with termination-code detection and Gouraud shading not implemented. — `crates/systems/ps1/src/gpu.rs`
+- [ ] **VRAM→CPU read transfer** — GP0 command to initiate VRAM read transfer not fully implemented. — `crates/systems/ps1/src/gpu.rs`
+- [ ] **24-bit display mode** — 24-bit pixel readback path not implemented (reads 16-bit pixels instead). — `crates/systems/ps1/src/gpu.rs`
+
 ## SNES
 
 ### High
