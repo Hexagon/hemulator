@@ -641,7 +641,7 @@ mod tests {
 
     /// A corrupted/hand-edited prescaler value (> 15) loaded from a save state
     /// must not cause a panic or wrap-around.  After loading, `clock_once` must
-    /// still behave correctly (fire after at most 15 more calls, never panic).
+    /// still behave correctly (prescaler fires again within 16 calls, never panics).
     #[test]
     fn test_prescaler_clamped_after_state_load() {
         let mut adapter = Sn76489Adapter::new(TimingMode::Ntsc, 3_579_545.0, 3_546_894.0);
