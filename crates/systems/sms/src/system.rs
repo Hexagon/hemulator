@@ -896,8 +896,12 @@ mod tests {
         system.load_rom(rom);
         system.reset();
 
-        system.cpu.step(); // EI
-        assert!(system.cpu.iff1, "Interrupts should be enabled");
+        system.cpu.step(); // EI (sets delay, doesn't enable yet)
+        system.cpu.step(); // HALT (EI delay expires, iff1/iff2 now enabled)
+        assert!(
+            system.cpu.iff1,
+            "Interrupts should be enabled after EI delay"
+        );
 
         let initial_pc = system.cpu.pc;
 

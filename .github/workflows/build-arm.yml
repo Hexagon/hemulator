@@ -15,7 +15,7 @@ jobs:
           - aarch64-unknown-linux-gnu
     
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -39,7 +39,7 @@ jobs:
           tar -czf ../hemu-arm64-linux.tar.gz *
       
       - name: Upload ARM64 artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: hemu-arm64-linux
           path: hemu-arm64-linux.tar.gz
@@ -85,7 +85,7 @@ jobs:
           mv debian-arm64.deb hemu_${VERSION}_arm64.deb
       
       - name: Upload Debian package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: hemu-arm64-deb
           path: hemu_*_arm64.deb

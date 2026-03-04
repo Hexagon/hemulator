@@ -374,6 +374,10 @@ impl Vdp {
             // New frame: reset the VBlank latch, then set it if we're already past the
             // active display area (e.g. set_scanline jumped straight to scanline 192+).
             self.in_vblank = scanline >= display_height;
+            // Reload line counter if in VBlank area
+            if scanline >= display_height {
+                self.line_counter = self.registers[10];
+            }
         } else {
             // Normal forward progress within same frame
             // Render all scanlines from old_scanline+1 up to and including scanline
@@ -386,6 +390,12 @@ impl Vdp {
                     self.frame_interrupt_pending = true;
                 }
                 self.in_vblank = true;
+                // Reload line counter at start of VBlank (every VBlank scanline)
+                self.line_counter = self.registers[10];
+            }
+            // Continue reloading line counter on every VBlank scanline
+            if scanline >= display_height {
+                self.line_counter = self.registers[10];
             }
         }
     }
@@ -546,9 +556,6 @@ impl Vdp {
             } else {
                 self.line_counter = self.line_counter.wrapping_sub(1);
             }
-        } else if line == display_height {
-            // Reset line counter at start of VBlank
-            self.line_counter = self.registers[10];
         }
 
         // Clear scanline to backdrop color (RGB only; alpha restored at end of scanline)
@@ -568,6 +575,13 @@ impl Vdp {
             self.render_background(line, line_offset);
             // Sprites in Mode 4 are always active when display is on (no separate enable bit)
             self.render_sprites(line, line_offset);
+        }
+
+        // Register 0 bit 5: Left column blank - mask leftmost 8 pixels with backdrop color
+        if (self.registers[0] & 0x20) != 0 {
+            for x in 0..8 {
+                self.frame.pixels[line_offset + x] = backdrop_color;
+            }
         }
 
         // Restore alpha for all pixels in this scanline (priority bit and intermediate state cleared)
@@ -602,21 +616,32 @@ impl Vdp {
         let name_table_addr = ((self.registers[2] as u16) & 0x0E) << 10;
 
         // Get scroll values
-        let scroll_x = self.registers[8];
-        let scroll_y = if line < 16 && (self.registers[0] & 0x40) != 0 {
-            0 // Vertical scroll lock for top 2 rows
+        // Register 0 bit 6: Horizontal scroll inhibit for top 2 tile rows (lines 0-15)
+        let scroll_x = if line < 16 && (self.registers[0] & 0x40) != 0 {
+            0 // H-scroll lock for top 2 tile rows
         } else {
-            self.registers[9]
+            self.registers[8]
         };
+        let scroll_y = self.registers[9];
 
-        let y = line.wrapping_add(scroll_y);
-        let tile_row = (y >> 3) as u16;
-        let pixel_y = (y & 7) as u16;
+        // Register 0 bit 7: Vertical scroll inhibit for rightmost 8 columns (24-31)
+        let vscroll_inhibit = (self.registers[0] & 0x80) != 0;
 
         for x in 0..256u16 {
             let adj_x = (x as u8).wrapping_sub(scroll_x);
             let tile_col = (adj_x >> 3) as u16;
             let pixel_x = (adj_x & 7) as u16;
+
+            // Apply vertical scroll (inhibited for rightmost 8 columns if bit 7 set)
+            let (tile_row, pixel_y) = if vscroll_inhibit && tile_col >= 24 {
+                // No vertical scroll for columns 24-31
+                let y = line as u16;
+                (y >> 3, y & 7)
+            } else {
+                // Vertical scroll wraps at 224 (28 rows * 8 pixels) in 192-line mode
+                let y = ((line as u16) + (scroll_y as u16)) % 224;
+                (y >> 3, y & 7)
+            };
 
             // Read name table entry (2 bytes per tile)
             let name_addr = name_table_addr + (tile_row * 32 + tile_col) * 2;
@@ -681,65 +706,73 @@ impl Vdp {
     /// Render sprites for a scanline
     fn render_sprites(&mut self, line: u8, line_offset: usize) {
         let sprite_attr_table = ((self.registers[5] as u16) & 0x7E) << 7;
-        let sprite_size = if (self.registers[1] & 0x02) != 0 {
-            16 // 16x16 sprites (zoomed/double-size mode)
-        } else {
-            8 // 8x8 sprites
-        };
+        // Register 6 bit 2 selects sprite pattern generator base: 0=$0000, 1=$2000
+        let sprite_pattern_base = ((self.registers[6] as u16) & 0x04) << 11;
+        let tall_sprites = (self.registers[1] & 0x02) != 0;
+        let sprite_height: u8 = if tall_sprites { 16 } else { 8 };
 
         let mut sprites_on_line = 0;
 
         // Track which pixels have sprites for collision detection
         let mut sprite_pixels = [false; 256];
 
-        // Sprites are rendered in reverse order (sprite 0 has highest priority)
-        for i in (0..64).rev() {
+        // First pass: scan forward to find visible sprites on this line (respects $D0 terminator)
+        let mut visible_sprites: Vec<u16> = Vec::new();
+        for i in 0..64u16 {
             let y = self.vram[(sprite_attr_table + i) as usize];
 
-            // Check for end marker (Y = 0xD0 terminates sprite list)
+            // Check for end marker (Y = 0xD0 terminates sprite list in 192-line mode)
             if y == 0xD0 {
                 break;
             }
 
             // Y position is offset by 1
             let y_pos = y.wrapping_add(1);
-            if line < y_pos || line >= y_pos + sprite_size {
+            if line < y_pos || line >= y_pos.wrapping_add(sprite_height) {
                 continue;
             }
 
             sprites_on_line += 1;
             if sprites_on_line > 8 {
-                // Sprite overflow - set the flag and stop rendering
                 self.sprite_overflow = true;
                 break;
             }
 
+            visible_sprites.push(i);
+        }
+
+        // Second pass: render in reverse order so lower-numbered sprites have priority
+        for &i in visible_sprites.iter().rev() {
+            let y = self.vram[(sprite_attr_table + i) as usize];
+            let y_pos = y.wrapping_add(1);
+
             // Get sprite X position and tile number
             let x_pos = self.vram[(sprite_attr_table + 128 + i * 2) as usize];
-            let tile_num = self.vram[(sprite_attr_table + 128 + i * 2 + 1) as usize];
+            let mut tile_num = self.vram[(sprite_attr_table + 128 + i * 2 + 1) as usize];
 
-            // Calculate sprite row within the sprite (0-7 for 8x8, 0-15 for 16x16)
+            // In 8x16 (tall) mode, bit 0 of tile number is forced to 0
+            if tall_sprites {
+                tile_num &= 0xFE;
+            }
+
+            // Calculate sprite row within the sprite (0-7 for 8x8, 0-15 for 8x16)
             let sprite_y = line - y_pos;
 
-            // For 16x16 sprites in Mode 4:
+            // For 8x16 (tall) sprites in Mode 4:
             // - Uses 2 tiles vertically (tile N and tile N+1)
             // - Each tile is still 8 pixels wide
-            // - Pattern reads from consecutive tiles
-            let (actual_tile, actual_y) = if sprite_size == 16 {
-                // 16x16 mode: sprite_y can be 0-15
-                // Rows 0-7: use tile N, rows 8-15: use tile N+1
+            let (actual_tile, actual_y) = if tall_sprites {
                 if sprite_y < 8 {
                     (tile_num, sprite_y)
                 } else {
                     (tile_num.wrapping_add(1), sprite_y - 8)
                 }
             } else {
-                // 8x8 mode: sprite_y is already 0-7
                 (tile_num, sprite_y)
             };
 
-            // Read tile pattern for this row
-            let tile_addr = (actual_tile as u16) * 32 + (actual_y as u16) * 4;
+            // Read tile pattern for this row (using sprite pattern generator base from Register 6)
+            let tile_addr = sprite_pattern_base + (actual_tile as u16) * 32 + (actual_y as u16) * 4;
             if tile_addr >= 0x3FFC {
                 continue;
             }
@@ -749,9 +782,8 @@ impl Vdp {
             let byte2 = self.vram[(tile_addr + 2) as usize];
             let byte3 = self.vram[(tile_addr + 3) as usize];
 
-            // Render sprite pixels (always 8 pixels wide per tile, even in 16x16 mode)
-            // For 16x16 sprites, this renders one 8x16 column
-            // SMS hardware vertically doubles sprites but keeps them 8 pixels wide
+            // Render sprite pixels (always 8 pixels wide)
+            // For 8x16 sprites, this renders one 8-pixel-wide row of the tall sprite
             for px in 0..8u8 {
                 let x = x_pos.wrapping_add(px);
                 if x as u16 >= 256 {
