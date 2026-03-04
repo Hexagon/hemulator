@@ -36,7 +36,7 @@ jobs:
       - name: Install Deno
         uses: denoland/setup-deno@v2
         with:
-          deno-version: "v2.0.2"
+          deno-version: "2.7.3"
 
       - name: Run Lume
         run: deno task lume
