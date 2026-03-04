@@ -106,11 +106,10 @@ impl Sn76489Psg {
     fn clock_once(&mut self) {
         // The SN76489 has an internal ÷16 prescaler: tone and noise counters
         // are only updated every 16 input clock cycles.
-        self.prescaler += 1;
-        if self.prescaler < 16 {
+        self.prescaler = (self.prescaler + 1) % 16;
+        if self.prescaler != 0 {
             return;
         }
-        self.prescaler = 0;
 
         // Clock tone generators
         for i in 0..3 {
@@ -296,6 +295,8 @@ impl Sn76489Psg {
         load_u16!(state, "noise_counter", self.noise_counter);
         load_bool!(state, "noise_output", self.noise_output);
         load_u8!(state, "prescaler", self.prescaler);
+        // Clamp to valid range in case the save state was corrupted or hand-edited.
+        self.prescaler = self.prescaler.min(15);
 
         // Load volumes
         if let Some(volume) = state.get("volume").and_then(|v| v.as_array()) {
@@ -597,5 +598,70 @@ mod tests {
         // cycle_accum must match.
         let cycle_accum_saved = state.get("cycle_accum").and_then(|v| v.as_f64()).unwrap();
         assert!((restored.cycle_accum - cycle_accum_saved).abs() < 1e-9);
+    }
+
+    /// Verify that the ÷16 prescaler correctly gates the tone counters.
+    ///
+    /// With a non-zero frequency register, the tone output must not toggle
+    /// before 16 `clock_once()` calls have been made (prescaler has not fired
+    /// yet), and must toggle exactly on the 16th call (first prescaler fire
+    /// hits a zero-initialized counter → reload + toggle).
+    #[test]
+    fn test_prescaler_tone_advances_every_16_clocks() {
+        let mut psg = Sn76489Psg::new(TimingMode::Ntsc);
+
+        // Set tone 0 to frequency register = 1, unmute channel 0.
+        psg.write(0x81); // latch tone 0, low 4 bits = 1
+        psg.write(0x00); // high bits = 0 → freq register = 1
+        psg.write(0x90); // channel 0 volume = 0 (max)
+
+        let initial_output = psg.tone_output[0];
+
+        // Clocks 1–15: prescaler counter advances from 0 to 15 but has not
+        // wrapped back to 0, so tone counters are never decremented and the
+        // output must stay unchanged.
+        for i in 0..15 {
+            psg.clock_once();
+            assert_eq!(
+                psg.tone_output[0],
+                initial_output,
+                "output must not toggle before the prescaler fires (call {})",
+                i + 1
+            );
+        }
+
+        // Clock 16: prescaler fires (counter wraps to 0). tone_counter[0] == 0
+        // → reload to 1 and toggle the output.
+        psg.clock_once();
+        assert_ne!(
+            psg.tone_output[0], initial_output,
+            "output must toggle on the 16th clock() call (first prescaler fire)"
+        );
+    }
+
+    /// A corrupted/hand-edited prescaler value (> 15) loaded from a save state
+    /// must not cause a panic or wrap-around.  After loading, `clock_once` must
+    /// still behave correctly (fire after at most 15 more calls, never panic).
+    #[test]
+    fn test_prescaler_clamped_after_state_load() {
+        let mut adapter = Sn76489Adapter::new(TimingMode::Ntsc, 3_579_545.0, 3_546_894.0);
+
+        // Build a state JSON with an out-of-range prescaler.
+        let mut state = adapter.get_state();
+        let psg_state = state.get_mut("psg").unwrap();
+        *psg_state.get_mut("prescaler").unwrap() = serde_json::json!(200u8);
+
+        // Loading must not panic.
+        adapter.set_state(&state).unwrap();
+
+        // After clamping, prescaler must be in [0, 15].
+        assert!(
+            adapter.psg.prescaler <= 15,
+            "prescaler should be clamped to 0..=15, got {}",
+            adapter.psg.prescaler
+        );
+
+        // Clocking must work normally after the load.
+        let _ = adapter.generate_samples(5);
     }
 }

@@ -14,7 +14,7 @@
 pub struct WaveChannel {
     /// Wave RAM: 32 samples, each 4 bits (0-15)
     pub wave_ram: [u8; 32],
-    /// 11-bit timer reload value (NES); up to 12-bit for GB/GBA
+    /// 11-bit timer reload value (GB); up to 12-bit for GBA
     pub timer_reload: u16,
     /// Timer counter
     timer: u16,
@@ -74,8 +74,8 @@ impl WaveChannel {
     ///
     /// Accepts values up to 12 bits (0–4095) to support Game Boy / GBA
     /// frequency calculations, which can produce timer-reload values up to
-    /// 4095.  NES-family channels never exceed 11 bits (0–2047) and are
-    /// unaffected by this change.
+    /// 4095.  GB/GBA-family channels use this full range for low-frequency
+    /// notes.
     pub fn set_timer(&mut self, t: u16) {
         self.timer_reload = t & 0x0FFF;
     }
@@ -215,5 +215,78 @@ mod tests {
         assert_eq!(wave.wave_ram[3], 0x04);
         assert_eq!(wave.wave_ram[4], 0x05);
         assert_eq!(wave.wave_ram[5], 0x06);
+    }
+
+    /// Verify that set_timer preserves 12-bit values (needed for GB/GBA low-frequency notes).
+    ///
+    /// The GB/GBA wave-timer reload formula `(2048 - freq) * 2 - 1` can yield
+    /// values up to 4095 (0x0FFF).  The old 11-bit mask would have corrupted
+    /// these, making bass notes play at wrong (typically very high) frequencies.
+    #[test]
+    fn wave_set_timer_accepts_12_bit_value() {
+        let mut wave = WaveChannel::new();
+
+        // Maximum 12-bit value
+        wave.set_timer(0x0FFF);
+        assert_eq!(
+            wave.timer_reload, 0x0FFF,
+            "timer_reload should preserve 12-bit value 0x0FFF"
+        );
+
+        // A value that would have been truncated by the old 11-bit mask:
+        // 0x0800 → old mask gave 0, new mask gives 0x0800.
+        wave.set_timer(0x0800);
+        assert_eq!(
+            wave.timer_reload, 0x0800,
+            "timer_reload should preserve bit 11 (0x0800)"
+        );
+
+        // Values in the 11-bit range must be preserved unchanged.
+        wave.set_timer(0x07FF);
+        assert_eq!(wave.timer_reload, 0x07FF);
+
+        // Values above 12 bits must be masked.
+        wave.set_timer(0x1234);
+        assert_eq!(wave.timer_reload, 0x0234);
+    }
+
+    /// Verify that a 12-bit reload produces the correct position-advance period.
+    ///
+    /// `WaveChannel::set_timer(N)` stores N in `timer_reload` without touching the
+    /// live `timer` counter.  Since `timer` is initialised to 0, the very first
+    /// `clock()` call advances position and reloads `timer` to `timer_reload`.
+    /// After that reload, position advances again every `timer_reload + 1` clocks:
+    /// the timer counts down from `timer_reload` to 0 (= `timer_reload` decrements,
+    /// each without an advance) and the advance fires on the next clock when
+    /// `timer == 0`.  With `timer_reload = 0x0FFF = 4095` the period is 4096 clocks.
+    #[test]
+    fn wave_12_bit_timer_period() {
+        let mut wave = WaveChannel::new();
+        wave.enabled = true;
+        wave.volume_shift = 1;
+        wave.wave_ram.fill(7); // non-zero so position increments are visible
+        wave.set_timer(0x0FFF); // timer_reload = 4095
+
+        // First clock: timer == 0 → position advances (to 1) and timer reloads to 4095.
+        wave.clock();
+        let baseline_pos = wave.position;
+
+        // Next 4095 clocks: timer decrements from 4095 down to 0 on the final
+        // step, but no position advance occurs during a decrement.
+        for _ in 0..4095 {
+            wave.clock();
+        }
+        assert_eq!(
+            wave.position, baseline_pos,
+            "position must not advance while timer is counting down (4095 clocks)"
+        );
+
+        // One more clock: timer is 0 at the start → position advances, timer reloads.
+        wave.clock();
+        assert_eq!(
+            wave.position,
+            (baseline_pos + 1) & 31,
+            "position must advance after 4096 clocks from the last reload"
+        );
     }
 }

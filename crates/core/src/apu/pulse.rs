@@ -217,4 +217,73 @@ mod tests {
         let sample = pulse.clock();
         assert_eq!(sample, 0); // Should be muted when disabled
     }
+
+    /// Verify that set_timer accepts 12-bit values (needed for GB/GBA low-frequency notes).
+    ///
+    /// The GB/GBA reload formula `(2048 - freq) * 2 - 1` can produce values up to
+    /// 4095 (0x0FFF).  The old 11-bit mask would have truncated these, causing
+    /// bass notes to play at the wrong frequency.
+    #[test]
+    fn pulse_set_timer_accepts_12_bit_value() {
+        let mut pulse = PulseChannel::new();
+
+        // Maximum 12-bit value (0x0FFF = 4095)
+        pulse.set_timer(0x0FFF);
+        assert_eq!(
+            pulse.timer_reload, 0x0FFF,
+            "timer_reload should preserve 12-bit value 0x0FFF"
+        );
+
+        // A value that would have been truncated by the old 11-bit mask:
+        // 0x0800 (2048) → old mask gives 0, new mask gives 0x0800.
+        pulse.set_timer(0x0800);
+        assert_eq!(
+            pulse.timer_reload, 0x0800,
+            "timer_reload should preserve bit 11 (0x0800)"
+        );
+
+        // Values <= 0x07FF must be preserved unchanged (NES range).
+        pulse.set_timer(0x07FF);
+        assert_eq!(pulse.timer_reload, 0x07FF);
+
+        // Values above 12 bits must be masked to 12 bits.
+        pulse.set_timer(0x1234);
+        assert_eq!(pulse.timer_reload, 0x0234);
+    }
+
+    /// Verify that a 12-bit reload actually produces the correct output period.
+    ///
+    /// set_timer(N) sets `timer = (N+1)*2`, so the phase advances every `(N+1)*2`
+    /// clocks.  With N = 0x0FFF = 4095, the timer is initialised to 8192.  The
+    /// timer counts down to 0 over 8192 clocks (the 8192nd decrement reaches 0
+    /// without advancing), and the phase advances on the 8193rd clock when the
+    /// timer is found to be 0.
+    #[test]
+    fn pulse_12_bit_timer_period() {
+        let mut pulse = PulseChannel::new();
+        pulse.enabled = true;
+        pulse.length_counter = 255;
+        pulse.envelope = 15;
+        pulse.set_timer(0x0FFF); // timer_reload=4095 → timer=(4095+1)*2=8192
+
+        let initial_phase = pulse.phase;
+
+        // 8192 clocks: timer decrements from 8192 down to 0 on the final step,
+        // but the phase does not advance during a decrement.
+        for _ in 0..8192 {
+            pulse.clock();
+        }
+        assert_eq!(
+            pulse.phase, initial_phase,
+            "phase must not advance while timer is counting down (clocks 1-8192)"
+        );
+
+        // 8193rd clock: timer is 0 at the start → phase advances, timer reloads.
+        pulse.clock();
+        assert_eq!(
+            pulse.phase,
+            (initial_phase + 1) & 7,
+            "phase must advance on the 8193rd clock (first timer expiry)"
+        );
+    }
 }
