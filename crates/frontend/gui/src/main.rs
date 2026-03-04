@@ -464,11 +464,32 @@ impl EmulatorSystem {
             }
             EmulatorSystem::SMS(sys) => {
                 // SMS has 2 controller ports
-                // Map standard button layout to SMS controller
+                // Remap from NES-format (active-high) to SMS port $DC format (active-low)
+                // NES bits: A(0) B(1) Select(2) Start(3) Up(4) Down(5) Left(6) Right(7)
+                // SMS bits: Up(0) Down(1) Left(2) Right(3) B1(4) B2(5) [6-7 unused for port 1]
+                let mut sms_state: u8 = 0xFF; // All released (active-low)
+                if state & 0x10 != 0 {
+                    sms_state &= !0x01;
+                } // Up
+                if state & 0x20 != 0 {
+                    sms_state &= !0x02;
+                } // Down
+                if state & 0x40 != 0 {
+                    sms_state &= !0x04;
+                } // Left
+                if state & 0x80 != 0 {
+                    sms_state &= !0x08;
+                } // Right
+                if state & 0x02 != 0 {
+                    sms_state &= !0x10;
+                } // B -> Button 1 (fire)
+                if state & 0x01 != 0 {
+                    sms_state &= !0x20;
+                } // A -> Button 2
                 if port == 0 {
-                    sys.set_controller_1(state);
+                    sys.set_controller_1(sms_state);
                 } else if port == 1 {
-                    sys.set_controller_2(state);
+                    sys.set_controller_2(sms_state);
                 }
             }
             EmulatorSystem::Chip8(_) => {

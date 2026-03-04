@@ -737,7 +737,11 @@ impl Ppu {
             let tex_y = src_y >> 8;
 
             // Clamp to screen bounds (no wrapping for bitmap modes)
-            if tex_x < 0 || tex_y < 0 || tex_x >= SCREEN_WIDTH as i32 || tex_y >= SCREEN_HEIGHT as i32 {
+            if tex_x < 0
+                || tex_y < 0
+                || tex_x >= SCREEN_WIDTH as i32
+                || tex_y >= SCREEN_HEIGHT as i32
+            {
                 continue;
             }
 
@@ -783,7 +787,11 @@ impl Ppu {
             let tex_x = src_x >> 8;
             let tex_y = src_y >> 8;
 
-            if tex_x < 0 || tex_y < 0 || tex_x >= SCREEN_WIDTH as i32 || tex_y >= SCREEN_HEIGHT as i32 {
+            if tex_x < 0
+                || tex_y < 0
+                || tex_x >= SCREEN_WIDTH as i32
+                || tex_y >= SCREEN_HEIGHT as i32
+            {
                 continue;
             }
 

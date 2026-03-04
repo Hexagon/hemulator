@@ -654,11 +654,7 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
         log(LogCategory::Stubs, LogLevel::Debug, || {
             format!(
                 "SWI 0x{:02X} called at PC=${:08X} R0={:08X} R1={:08X} R2={:08X}",
-                imm,
-                self.gpr[15],
-                self.gpr[0],
-                self.gpr[1],
-                self.gpr[2]
+                imm, self.gpr[15], self.gpr[0], self.gpr[1], self.gpr[2]
             )
         });
         match imm {

@@ -80,6 +80,9 @@ pub struct CpuZ80<M: MemoryZ80> {
     pub halted: bool,
     pub cycles: u64,
 
+    /// EI delay counter - interrupts are not enabled until after the instruction following EI
+    pub ei_delay: u8,
+
     /// Memory interface
     pub memory: M,
 }
@@ -115,6 +118,7 @@ impl<M: MemoryZ80> CpuZ80<M> {
             im: 0,
             halted: false,
             cycles: 0,
+            ei_delay: 0,
             memory,
         }
     }
@@ -136,10 +140,20 @@ impl<M: MemoryZ80> CpuZ80<M> {
         self.im = 0;
         self.halted = false;
         self.cycles = 0;
+        self.ei_delay = 0;
     }
 
     /// Execute one instruction
     pub fn step(&mut self) -> u32 {
+        // Handle EI delay: after EI, interrupts are enabled after the NEXT instruction
+        if self.ei_delay > 0 {
+            self.ei_delay -= 1;
+            if self.ei_delay == 0 {
+                self.iff1 = true;
+                self.iff2 = true;
+            }
+        }
+
         if self.halted {
             return 4;
         }
@@ -625,6 +639,17 @@ impl<M: MemoryZ80> CpuZ80<M> {
                 7
             }
 
+            // EX AF,AF' (exchange AF with shadow AF')
+            0x08 => {
+                let a = self.a;
+                let f = self.f;
+                self.a = self.a_prime;
+                self.f = self.f_prime;
+                self.a_prime = a;
+                self.f_prime = f;
+                4
+            }
+
             // Rotate and shift instructions
             0x07 => {
                 // RLCA
@@ -704,6 +729,70 @@ impl<M: MemoryZ80> CpuZ80<M> {
                 self.set_flag(0x01, (hl as u32 + sp as u32) > 0xFFFF);
                 self.set_hl(result);
                 11
+            }
+
+            // DAA (Decimal Adjust Accumulator)
+            0x27 => {
+                // Based on the Z80 DAA algorithm:
+                // If N flag is clear (after ADD/ADC):
+                //   If lower nibble > 9 or H flag set, add 0x06
+                //   If result > 0x99 or C flag set, add 0x60 and set C
+                // If N flag is set (after SUB/SBC):
+                //   If lower nibble > 9 or H flag set, subtract 0x06
+                //   If result > 0x99 or C flag set, subtract 0x60 and set C
+                let mut correction: u8 = 0;
+                let mut carry = self.get_flag(0x01);
+
+                if (self.a & 0x0F) > 0x09 || self.get_flag(0x10) {
+                    correction |= 0x06;
+                }
+
+                if self.a > 0x99 || carry {
+                    correction |= 0x60;
+                    carry = true;
+                }
+
+                if self.get_flag(0x02) {
+                    // After subtraction
+                    let half = self.get_flag(0x10) && (self.a & 0x0F) < 0x06;
+                    self.a = self.a.wrapping_sub(correction);
+                    self.set_flag(0x10, half);
+                } else {
+                    // After addition
+                    self.set_flag(0x10, (self.a & 0x0F) > 0x09);
+                    self.a = self.a.wrapping_add(correction);
+                }
+
+                self.set_flag(0x80, (self.a & 0x80) != 0); // S
+                self.set_flag(0x40, self.a == 0); // Z
+                self.set_flag(0x04, self.a.count_ones().is_multiple_of(2)); // P
+                self.set_flag(0x01, carry); // C
+                4
+            }
+
+            // CPL (complement A - flip all bits)
+            0x2F => {
+                self.a = !self.a;
+                self.set_flag(0x02, true); // N = 1
+                self.set_flag(0x10, true); // H = 1
+                4
+            }
+
+            // SCF (set carry flag)
+            0x37 => {
+                self.set_flag(0x01, true); // C = 1
+                self.set_flag(0x02, false); // N = 0
+                self.set_flag(0x10, false); // H = 0
+                4
+            }
+
+            // CCF (complement carry flag)
+            0x3F => {
+                let old_carry = self.get_flag(0x01);
+                self.set_flag(0x10, old_carry); // H = old C
+                self.set_flag(0x01, !old_carry); // C = ~C
+                self.set_flag(0x02, false); // N = 0
+                4
             }
 
             // JR cc,e (conditional relative jumps)
@@ -990,6 +1079,31 @@ impl<M: MemoryZ80> CpuZ80<M> {
                 17
             }
 
+            // EXX (exchange BC,DE,HL with shadow BC',DE',HL')
+            0xD9 => {
+                let b = self.b;
+                let c = self.c;
+                let d = self.d;
+                let e = self.e;
+                let h = self.h;
+                let l = self.l;
+
+                self.b = self.b_prime;
+                self.c = self.c_prime;
+                self.d = self.d_prime;
+                self.e = self.e_prime;
+                self.h = self.h_prime;
+                self.l = self.l_prime;
+
+                self.b_prime = b;
+                self.c_prime = c;
+                self.d_prime = d;
+                self.e_prime = e;
+                self.h_prime = h;
+                self.l_prime = l;
+                4
+            }
+
             // OUT (n),A
             0xD3 => {
                 let port = self.read_pc();
@@ -1031,13 +1145,14 @@ impl<M: MemoryZ80> CpuZ80<M> {
             0xF3 => {
                 self.iff1 = false;
                 self.iff2 = false;
+                self.ei_delay = 0; // Cancel any pending EI
                 4
             }
 
-            // EI (Enable interrupts)
+            // EI (Enable interrupts) - delayed by 1 instruction
             0xFB => {
-                self.iff1 = true;
-                self.iff2 = true;
+                // Don't enable immediately; set delay counter so step() enables after next instruction
+                self.ei_delay = 1; // Will decrement to 0 at start of next step, enabling interrupts
                 4
             }
 
@@ -1094,6 +1209,8 @@ impl<M: MemoryZ80> CpuZ80<M> {
             let bit_val = (val >> bit) & 1;
 
             self.set_flag(FLAG_Z, bit_val == 0);
+            self.set_flag(FLAG_S, bit == 7 && bit_val != 0); // S set if testing bit 7 and it's set
+            self.set_flag(FLAG_P, bit_val == 0); // P/V mirrors Z for BIT
             self.set_flag(FLAG_N, false);
             self.set_flag(FLAG_H, true);
 
@@ -1482,6 +1599,11 @@ impl<M: MemoryZ80> CpuZ80<M> {
             // LD A,I
             0x57 => {
                 self.a = self.i;
+                self.set_flag(FLAG_S, (self.a & 0x80) != 0);
+                self.set_flag(FLAG_Z, self.a == 0);
+                self.set_flag(FLAG_H, false);
+                self.set_flag(FLAG_P, self.iff2); // P/V = IFF2
+                self.set_flag(FLAG_N, false);
                 9
             }
 
@@ -1494,6 +1616,11 @@ impl<M: MemoryZ80> CpuZ80<M> {
             // LD A,R
             0x5F => {
                 self.a = self.r;
+                self.set_flag(FLAG_S, (self.a & 0x80) != 0);
+                self.set_flag(FLAG_Z, self.a == 0);
+                self.set_flag(FLAG_H, false);
+                self.set_flag(FLAG_P, self.iff2); // P/V = IFF2
+                self.set_flag(FLAG_N, false);
                 9
             }
 
@@ -1539,11 +1666,13 @@ impl<M: MemoryZ80> CpuZ80<M> {
                 16
             }
 
-            // CPI - Compare and increment
+            // CPI - Compare and increment (carry flag preserved)
             0xA1 => {
                 let hl = self.hl();
                 let val = self.memory.read(hl);
+                let old_carry = self.get_flag(FLAG_C);
                 self.cp_a(val);
+                self.set_flag(FLAG_C, old_carry); // CPI does not affect carry
                 self.set_hl(hl.wrapping_add(1));
                 let bc = self.bc().wrapping_sub(1);
                 self.set_bc(bc);
@@ -1591,11 +1720,13 @@ impl<M: MemoryZ80> CpuZ80<M> {
                 16
             }
 
-            // CPD - Compare and decrement
+            // CPD - Compare and decrement (carry flag preserved)
             0xA9 => {
                 let hl = self.hl();
                 let val = self.memory.read(hl);
+                let old_carry = self.get_flag(FLAG_C);
                 self.cp_a(val);
+                self.set_flag(FLAG_C, old_carry); // CPD does not affect carry
                 self.set_hl(hl.wrapping_sub(1));
                 let bc = self.bc().wrapping_sub(1);
                 self.set_bc(bc);
@@ -1648,20 +1779,22 @@ impl<M: MemoryZ80> CpuZ80<M> {
                 }
             }
 
-            // CPIR - Compare, increment, repeat
+            // CPIR - Compare, increment, repeat (carry flag preserved)
             0xB1 => {
                 let hl = self.hl();
                 let val = self.memory.read(hl);
+                let old_carry = self.get_flag(FLAG_C);
                 self.cp_a(val);
+                self.set_flag(FLAG_C, old_carry); // CPIR does not affect carry
                 self.set_hl(hl.wrapping_add(1));
                 let bc = self.bc().wrapping_sub(1);
                 self.set_bc(bc);
+                self.set_flag(FLAG_P, bc != 0);
                 let z = self.get_flag(FLAG_Z);
                 if bc != 0 && !z {
                     self.pc = self.pc.wrapping_sub(2);
                     21
                 } else {
-                    self.set_flag(FLAG_P, bc != 0);
                     16
                 }
             }
@@ -1721,20 +1854,22 @@ impl<M: MemoryZ80> CpuZ80<M> {
                 }
             }
 
-            // CPDR - Compare, decrement, repeat
+            // CPDR - Compare, decrement, repeat (carry flag preserved)
             0xB9 => {
                 let hl = self.hl();
                 let val = self.memory.read(hl);
+                let old_carry = self.get_flag(FLAG_C);
                 self.cp_a(val);
+                self.set_flag(FLAG_C, old_carry); // CPDR does not affect carry
                 self.set_hl(hl.wrapping_sub(1));
                 let bc = self.bc().wrapping_sub(1);
                 self.set_bc(bc);
+                self.set_flag(FLAG_P, bc != 0);
                 let z = self.get_flag(FLAG_Z);
                 if bc != 0 && !z {
                     self.pc = self.pc.wrapping_sub(2);
                     21
                 } else {
-                    self.set_flag(FLAG_P, bc != 0);
                     16
                 }
             }
@@ -1788,7 +1923,7 @@ impl<M: MemoryZ80> CpuZ80<M> {
         self.set_flag(FLAG_H, (hl & 0x0FFF) < (val & 0x0FFF) + carry);
         self.set_flag(FLAG_P, ((hl ^ val) & (hl ^ result) & 0x8000) != 0);
         self.set_flag(FLAG_N, true);
-        self.set_flag(FLAG_C, hl < val.wrapping_add(carry));
+        self.set_flag(FLAG_C, (hl as u32) < (val as u32) + (carry as u32));
 
         self.set_hl(result);
     }
@@ -1804,7 +1939,7 @@ impl<M: MemoryZ80> CpuZ80<M> {
         self.set_flag(FLAG_H, ((hl & 0x0FFF) + (val & 0x0FFF) + carry) > 0x0FFF);
         self.set_flag(
             FLAG_P,
-            (!((hl ^ val) & 0x8000) != 0) && (((hl ^ result) & 0x8000) != 0),
+            ((hl ^ val) & 0x8000 == 0) && ((hl ^ result) & 0x8000 != 0),
         );
         self.set_flag(FLAG_N, false);
         self.set_flag(
@@ -1981,7 +2116,15 @@ impl<M: MemoryZ80> CpuZ80<M> {
                 let cb_opcode = self.read_pc();
                 self.execute_ddcb(offset, cb_opcode)
             }
-            _ => 8,
+            // Any other DD opcode: execute as base instruction (DD prefix ignored)
+            _ => {
+                // The real Z80 treats unrecognized DD-prefixed opcodes as base opcodes.
+                // We already consumed the sub-opcode via read_pc() above, so execute it.
+                let cycles = self.execute(opcode);
+                // Undo the extra R increment from read_pc() since exec already increments R
+                self.r = (self.r & 0x80) | (self.r.wrapping_sub(1) & 0x7F);
+                cycles
+            }
         }
     }
 
@@ -2151,7 +2294,13 @@ impl<M: MemoryZ80> CpuZ80<M> {
                 let cb_opcode = self.read_pc();
                 self.execute_fdcb(offset, cb_opcode)
             }
-            _ => 8,
+            // Any other FD opcode: execute as base instruction (FD prefix ignored)
+            _ => {
+                // The real Z80 treats unrecognized FD-prefixed opcodes as base opcodes.
+                let cycles = self.execute(opcode);
+                self.r = (self.r & 0x80) | (self.r.wrapping_sub(1) & 0x7F);
+                cycles
+            }
         }
     }
 
@@ -2444,15 +2593,40 @@ mod tests {
 
     #[test]
     fn test_ei_instruction() {
-        let program = [0xFB]; // EI instruction
+        let program = [0xFB, 0x00]; // EI followed by NOP
         let memory = TestMemory::with_program(&program);
         let mut cpu = CpuZ80::new(memory);
         cpu.reset();
 
-        cpu.step();
+        cpu.step(); // Execute EI - interrupts not yet enabled (delayed by 1 instruction)
+        assert!(!cpu.iff1); // Should still be disabled after EI
+        assert!(!cpu.iff2);
+        assert_eq!(cpu.ei_delay, 1);
 
-        assert!(cpu.iff1); // Interrupts should be enabled
+        cpu.step(); // Execute NOP - EI delay expires, interrupts now enabled
+        assert!(cpu.iff1); // Interrupts should be enabled after the next instruction
         assert!(cpu.iff2);
+        assert_eq!(cpu.ei_delay, 0);
+    }
+
+    #[test]
+    fn test_ei_di_cancels_pending() {
+        let program = [0xFB, 0xF3, 0x00]; // EI, DI, NOP
+        let memory = TestMemory::with_program(&program);
+        let mut cpu = CpuZ80::new(memory);
+        cpu.reset();
+
+        cpu.step(); // EI - sets delay
+        assert_eq!(cpu.ei_delay, 1);
+
+        cpu.step(); // DI - should cancel pending EI and disable
+        assert!(!cpu.iff1);
+        assert!(!cpu.iff2);
+        assert_eq!(cpu.ei_delay, 0); // DI clears pending EI
+
+        cpu.step(); // NOP - interrupts should still be disabled
+        assert!(!cpu.iff1);
+        assert!(!cpu.iff2);
     }
 
     #[test]
