@@ -21,7 +21,7 @@ emu_chip8 = { path = "../../systems/chip8" }
 emu_colecovision = { path = "../../systems/colecovision" }
 emu_sg1000 = { path = "../../systems/sg1000" }
 emu_ps1 = { path = "../../systems/ps1" }
-rodio = "0.17"
+rodio = "0.22"
 log = "0.4"
 env_logger = "0.11"
 serde = { version = "1.0", features = ["derive"] }
