@@ -36,7 +36,7 @@ rand = "0.10"
 chrono = "0.4"
 
 # Window and rendering support
-sdl2 = { version = "0.37", features = ["bundled"] }
+sdl2 = { version = "0.38", features = ["bundled"] }
 glow = "0.16"
 bytemuck = "1.14"
 
