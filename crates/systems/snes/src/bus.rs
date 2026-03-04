@@ -132,9 +132,6 @@ pub struct SnesBus {
     apu_session_id: u8,
     /// Hardware-accurate SPC700 APU (always enabled for audio output)
     spc700: Option<RefCell<Spc700>>,
-    /// Track pending SPC700 cycles for synchronization
-    /// This ensures the SPC700 gets enough time to process writes before reads
-    spc700_pending_cycles: Cell<u32>,
     /// Fractional accumulator for SPC700 cycle conversion to prevent rounding error drift
     /// Stores the remainder from integer division (in units of 1/3580)
     spc700_cycle_accumulator: Cell<u64>,
@@ -221,7 +218,6 @@ impl SnesBus {
             apu_state: ApuState::BootReady, // Start in BootReady state with $BBAA signature
             apu_session_id: 0,
             spc700: None,
-            spc700_pending_cycles: Cell::new(0),
             spc700_cycle_accumulator: Cell::new(0),
 
             open_bus: Cell::new(0),
@@ -377,30 +373,19 @@ impl SnesBus {
         // Store remainder for next calculation to prevent drift
         self.spc700_cycle_accumulator.set(remainder);
 
-        // Accumulate cycles for SPC700 instead of running immediately
-        // This allows us to synchronize before port access
-        // Use saturating_add to prevent overflow
-        let current = self.spc700_pending_cycles.get() as u64;
-        let total_pending = current.saturating_add(spc700_cycles);
-        let clamped = u32::try_from(total_pending).unwrap_or(u32::MAX);
-        self.spc700_pending_cycles.set(clamped);
+        // Run SPC700 immediately for the computed cycles (Option B: tight lockstep sync).
+        // Running inline here — rather than accumulating and flushing on port access — prevents
+        // the split-read race condition where the SPC700 could read stale port values between
+        // two main-CPU writes to adjacent ports (e.g. the block-header dest address at $2142/$2143).
+        if spc700_cycles > 0 {
+            if let Some(ref spc700_cell) = self.spc700 {
+                spc700_cell.borrow_mut().run_cycles(spc700_cycles as u32);
+            }
+        }
 
         // Decrement APU response delay for simulating processing time
         if self.apu_response_delay > 0 {
             self.apu_response_delay = self.apu_response_delay.saturating_sub(cycles);
-        }
-    }
-
-    /// Synchronize SPC700 to current cycle count
-    /// Called before APU port reads/writes to ensure proper timing
-    #[inline]
-    fn sync_spc700(&self) {
-        if let Some(ref spc700_cell) = self.spc700 {
-            let pending = self.spc700_pending_cycles.get();
-            if pending > 0 {
-                spc700_cell.borrow_mut().run_cycles(pending);
-                self.spc700_pending_cycles.set(0);
-            }
         }
     }
 
@@ -904,10 +889,6 @@ impl Memory65c816 for SnesBus {
                     0x2140..=0x2143 => {
                         let port = (offset - 0x2140) as u8;
 
-                        // Synchronize SPC700 before reading to ensure it has processed any pending writes
-                        // This matches Mesen2's approach of calling Run() before port access
-                        self.sync_spc700();
-
                         // Simply read the current port value - no latching needed
                         // Real SNES hardware has no latching for APU port reads
                         let val = if let Some(ref spc700_cell) = self.spc700 {
@@ -1252,12 +1233,8 @@ impl Memory65c816 for SnesBus {
                     0x2140..=0x2143 => {
                         let port = (offset - 0x2140) as u8;
 
-                        // Synchronize SPC700 before writing to ensure proper timing
-                        self.sync_spc700();
-
                         // Use real SPC700 if available
                         if let Some(ref spc700_cell) = self.spc700 {
-                            // Hot path optimization: Remove trace logging from APU port writes
                             spc700_cell.borrow_mut().write_port(port, val);
                         } else {
                             // Use stub protocol
@@ -1266,8 +1243,6 @@ impl Memory65c816 for SnesBus {
                             // Defensive bounds check: the match range 0x2140..=0x2143 guarantees port is 0-3,
                             // but we verify explicitly before array indexing for clarity and safety
                             debug_assert!(port < 4, "APU port index must be 0-3, got {}", port);
-
-                            // Hot path optimization: Remove trace logging from APU port writes
 
                             // Enhanced APU communication protocol stub with state machine
                             // The SPC700 boot ROM implements a multi-round handshake protocol
