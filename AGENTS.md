@@ -158,6 +158,20 @@ The project uses a **Lumocs-based documentation site** hosted at https://hemulat
   - These same checks run in CI, so ensuring they pass locally prevents CI failures
   - **Build Performance**: Always use `--profile release-quick` for development builds (18x faster incremental builds than `--release`, optimized for fast iteration)
 
+- **Development shell** (`dev.ps1` — Windows/PowerShell convenience wrapper):
+  - Wraps common cargo commands for quick use on Windows:
+    - `.\dev.ps1 build` — Build workspace with `release-quick`
+    - `.\dev.ps1 run game.rom` — Build and run the emulator
+    - `.\dev.ps1 test` — Run all workspace tests
+    - `.\dev.ps1 clippy` — Clippy with `-D warnings`
+    - `.\dev.ps1 fmt` — Format all code
+    - `.\dev.ps1 check` — Full CI pipeline (fmt + clippy + build + test)
+    - `.\dev.ps1 trace game.rom` — Run with instruction tracing
+    - `.\dev.ps1 dump game.rom --debug-dump-pc 0x8000` — Headless debug dump
+    - `.\dev.ps1 cpu game.rom` — Run with CPU trace logging
+    - `.\dev.ps1 gpu game.rom` — Run with PPU trace logging
+  - On Linux/macOS, use the equivalent `cargo` commands directly (documented above)
+
 - **Implementation philosophy**:
   - **Always prefer full, tested implementations** of each module/component, even if all parts aren't immediately used
   - **Especially important** when other not-yet-implemented systems will use the features
