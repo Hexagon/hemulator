@@ -6,4 +6,4 @@ edition = "2021"
 [dependencies]
 emu_core = { path = "../../core" }
 serde_json = "1.0"
-thiserror = "1.0"
+thiserror = "2.0"
