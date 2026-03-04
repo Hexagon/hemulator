@@ -80,25 +80,7 @@ impl N64Cpu {
     }
 
     pub fn step(&mut self) -> u32 {
-        let old_pc = self.cpu.pc;
-
-        log(LogCategory::CPU, LogLevel::Trace, || {
-            format!("N64 CPU: PC=0x{:016X}", old_pc)
-        });
-
-        let cycles = self.cpu.step();
-
-        // Log if we jumped to a new location (not just PC+4)
-        if self.cpu.pc != old_pc.wrapping_add(4) {
-            log(LogCategory::CPU, LogLevel::Debug, || {
-                format!(
-                    "N64 CPU: Jump/Branch from 0x{:016X} to 0x{:016X}",
-                    old_pc, self.cpu.pc
-                )
-            });
-        }
-
-        cycles
+        self.cpu.step()
     }
 
     pub fn bus(&self) -> &N64Bus {

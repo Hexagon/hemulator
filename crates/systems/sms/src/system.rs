@@ -113,6 +113,15 @@ impl SmsSystem {
 
         // Load ROM into existing memory (preserves BIOS)
         self.cpu.memory.load_rom(rom_data);
+
+        // Log detected mapper
+        log(LogCategory::CPU, LogLevel::Info, || {
+            format!(
+                "SMS: Mapper={}",
+                self.cpu.memory.mapper_type().name()
+            )
+        });
+
         self.reset();
     }
 
@@ -270,18 +279,13 @@ impl System for SmsSystem {
                 (self.cycles * total_scanlines / target_cycles) % total_scanlines;
             self.vdp.borrow_mut().set_scanline(current_scanline as u16);
 
-            // Check for VDP interrupts (frame interrupt has priority over line interrupt)
-            if self.vdp.borrow().frame_interrupt_pending() {
-                // Trigger the CPU interrupt; do NOT clear frame_interrupt_pending here.
-                // The VDP status register bit 7 must remain set until the ISR reads it
-                // (via IN A, (0xBF)), which calls read_status() and clears the flag.
-                // Clearing it here would cause the ISR to misidentify every frame interrupt
-                // as a line interrupt (bit 7 = 0 → carry clear → JP NC to line handler).
+            // Check if VDP /INT line is active (any enabled interrupt pending).
+            // On real SMS hardware, the Z80 has a single /IRQ line driven by
+            // the VDP:  /INT = (frame_pending AND IE0) OR (line_pending AND IE1).
+            // The ISR reads the status register to identify the interrupt type,
+            // which clears ALL pending flags and de-asserts /INT.
+            if self.vdp.borrow().irq_line_active() {
                 self.cpu.interrupt(0xFF);
-            } else if self.vdp.borrow().line_interrupt_pending() {
-                // Line interrupt: no status-register bit, so clear it here after triggering.
-                self.cpu.interrupt(0xFF);
-                self.vdp.borrow_mut().clear_line_interrupt();
             }
         }
 
@@ -346,6 +350,7 @@ impl System for SmsSystem {
                 "controller_1": self.cpu.memory.get_controller_1(),
                 "controller_2": self.cpu.memory.get_controller_2(),
                 "memory_control": self.cpu.memory.get_memory_control(),
+                "mapper": self.cpu.memory.get_mapper_state(),
             },
             "vdp": vdp.get_state(),
             "psg": psg.get_state(),
@@ -462,6 +467,10 @@ impl System for SmsSystem {
             }
             if let Some(mem_ctrl) = mem_state.get("memory_control").and_then(|v| v.as_u64()) {
                 self.cpu.memory.set_memory_control(mem_ctrl as u8);
+            }
+            // Restore full mapper state (new format, backward-compatible)
+            if let Some(mapper_state) = mem_state.get("mapper") {
+                self.cpu.memory.set_mapper_state(mapper_state);
             }
         }
 
