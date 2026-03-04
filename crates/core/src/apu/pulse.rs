@@ -7,14 +7,14 @@
 ///
 /// The pulse channel produces a variable-width pulse signal with support for:
 /// - 4 duty cycle modes (12.5%, 25%, 50%, 75%)
-/// - 11-bit timer for frequency control
+/// - Up to 12-bit timer for frequency control (NES uses 11-bit, GB/GBA use up to 12-bit)
 /// - Length counter for note duration
 /// - Envelope generator for volume control
 #[derive(Debug, Clone)]
 pub struct PulseChannel {
     /// Duty cycle (0-3): 12.5%, 25%, 50%, 75%
     pub duty: u8,
-    /// 11-bit timer reload value from registers
+    /// 11-bit timer reload value from registers (NES); up to 12-bit for GB/GBA
     pub timer_reload: u16,
     /// Timer counter (counts down to 0, then resets)
     timer: u16,
@@ -91,8 +91,12 @@ impl PulseChannel {
     }
 
     /// Set timer reload value
+    ///
+    /// Accepts values up to 12 bits (0–4095) to support Game Boy / GBA
+    /// frequency calculations, which can produce timer-reload values up to
+    /// 4095.  NES timer registers are 11-bit (0–2047) and are unaffected.
     pub fn set_timer(&mut self, t: u16) {
-        self.timer_reload = t & 0x07FF;
+        self.timer_reload = t & 0x0FFF;
         self.timer = self.timer_reload.wrapping_add(1).saturating_mul(2);
     }
 

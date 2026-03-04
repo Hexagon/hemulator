@@ -9,6 +9,13 @@
 //! - 4-bit volume control per channel
 //! - 10-bit frequency control for tone channels
 //!
+//! # Clock Prescaler
+//! The SN76489 contains an internal ÷16 clock prescaler. All tone and noise
+//! counters are clocked at `CLK/16`, not at the raw input clock rate. The
+//! tone frequency formula is therefore: `f = CLK / (32 × N)` (÷16 prescaler
+//! × ÷2 flip-flop × N counter). When emulating, `clock()` is called at the
+//! full CPU clock rate and the prescaler fires every 16th call.
+//!
 //! # Sega Variant (SN76496)
 //! The Sega variant uses a 16-bit LFSR for noise (instead of 15-bit)
 
@@ -35,6 +42,11 @@ pub struct Sn76489Psg {
 
     // Clock rate and timing
     timing_mode: TimingMode,
+
+    // Internal ÷16 clock prescaler.
+    // The SN76489 divides its input clock by 16 before feeding the tone/noise
+    // counters, so `clock_once` only advances those counters every 16th call.
+    prescaler: u8,
 }
 
 impl Sn76489Psg {
@@ -54,6 +66,7 @@ impl Sn76489Psg {
             volume: [0x0F; 4], // All channels muted initially
             latched_reg: 0,
             timing_mode,
+            prescaler: 0,
         }
     }
 
@@ -91,6 +104,14 @@ impl Sn76489Psg {
 
     /// Clock the PSG and generate samples
     fn clock_once(&mut self) {
+        // The SN76489 has an internal ÷16 prescaler: tone and noise counters
+        // are only updated every 16 input clock cycles.
+        self.prescaler += 1;
+        if self.prescaler < 16 {
+            return;
+        }
+        self.prescaler = 0;
+
         // Clock tone generators
         for i in 0..3 {
             if self.tone_counter[i] > 0 {
@@ -185,6 +206,7 @@ impl Sn76489Psg {
         self.noise_output = false;
         self.volume.fill(0x0F);
         self.latched_reg = 0;
+        self.prescaler = 0;
     }
 
     /// Get PSG state for save state
@@ -199,6 +221,7 @@ impl Sn76489Psg {
             "noise_output": self.noise_output,
             "volume": self.volume.to_vec(),
             "latched_reg": self.latched_reg,
+            "prescaler": self.prescaler,
             "timing_mode": match self.timing_mode {
                 TimingMode::Ntsc => "ntsc",
                 TimingMode::Pal => "pal",
@@ -272,6 +295,7 @@ impl Sn76489Psg {
         load_u16!(state, "noise_lfsr", self.noise_lfsr);
         load_u16!(state, "noise_counter", self.noise_counter);
         load_bool!(state, "noise_output", self.noise_output);
+        load_u8!(state, "prescaler", self.prescaler);
 
         // Load volumes
         if let Some(volume) = state.get("volume").and_then(|v| v.as_array()) {

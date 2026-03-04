@@ -14,7 +14,7 @@
 pub struct WaveChannel {
     /// Wave RAM: 32 samples, each 4 bits (0-15)
     pub wave_ram: [u8; 32],
-    /// 11-bit timer reload value
+    /// 11-bit timer reload value (NES); up to 12-bit for GB/GBA
     pub timer_reload: u16,
     /// Timer counter
     timer: u16,
@@ -71,8 +71,13 @@ impl WaveChannel {
     }
 
     /// Set timer reload value
+    ///
+    /// Accepts values up to 12 bits (0–4095) to support Game Boy / GBA
+    /// frequency calculations, which can produce timer-reload values up to
+    /// 4095.  NES-family channels never exceed 11 bits (0–2047) and are
+    /// unaffected by this change.
     pub fn set_timer(&mut self, t: u16) {
-        self.timer_reload = t & 0x07FF;
+        self.timer_reload = t & 0x0FFF;
     }
 
     /// Write a byte to wave RAM (Game Boy format: 2 samples per byte)
