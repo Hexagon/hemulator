@@ -397,11 +397,12 @@ impl<M: MemorySpc700> CpuSpc700<M> {
                 3
             }
 
-            // MOV dp, X (direct page)
+            // MOV dp+X, A (direct page indexed by X)
             0xD4 => {
-                let addr = self.direct_page() | (self.fetch_byte() as u16);
-                self.write(addr, self.x);
-                4
+                let dp = self.fetch_byte();
+                let addr = dp.wrapping_add(self.x) as u16;
+                self.write(addr, self.a);
+                5
             }
 
             // MOV X, dp (direct page)
@@ -512,9 +513,10 @@ impl<M: MemorySpc700> CpuSpc700<M> {
                 2
             }
 
-            // MOV (X), A - Store A at address in X (indirect X)
+            // MOV (X), A - Store A at direct page address X
             0xC6 => {
-                self.memory.write(self.x as u16, self.a);
+                let addr = self.direct_page() | (self.x as u16);
+                self.write(addr, self.a);
                 4
             }
 
@@ -587,14 +589,15 @@ impl<M: MemorySpc700> CpuSpc700<M> {
                 3
             }
 
-            // MOV ($00)+Y, A - Move A to (direct page + Y)
+            // MOV [dp]+Y, A - indirect indexed store
             0xD7 => {
                 let dp = self.fetch_byte() as u16;
-                let addr_lo = self.memory.read(dp);
-                let addr_hi = self.memory.read(dp.wrapping_add(1));
+                let ptr_addr = self.direct_page() | dp;
+                let addr_lo = self.read(ptr_addr);
+                let addr_hi = self.read((self.direct_page() | ((dp.wrapping_add(1)) & 0xFF)));
                 let base_addr = ((addr_hi as u16) << 8) | (addr_lo as u16);
                 let addr = base_addr.wrapping_add(self.y as u16);
-                self.memory.write(addr, self.a);
+                self.write(addr, self.a);
                 7
             }
 
@@ -1220,7 +1223,10 @@ impl<M: MemorySpc700> CpuSpc700<M> {
                 let addr = self.direct_page() | (self.fetch_byte() as u16);
                 self.a = self.read(addr);
                 self.y = self.read(addr.wrapping_add(1));
-                self.update_nz(self.y); // Only Y affects flags
+                // N flag from bit 15 (Y bit 7), Z flag from full 16-bit YA
+                let ya = ((self.y as u16) << 8) | (self.a as u16);
+                self.set_flag(psw_flags::NEGATIVE, ya & 0x8000 != 0);
+                self.set_flag(psw_flags::ZERO, ya == 0);
                 5
             }
 
@@ -1822,12 +1828,12 @@ impl<M: MemorySpc700> CpuSpc700<M> {
                 }
             }
 
-            // More MOV variants and other critical opcodes
-            // MOV A, (dp)+Y
+            // MOV A, [dp]+Y - indirect indexed load
             0xF7 => {
                 let dp = self.fetch_byte() as u16;
-                let addr_lo = self.read(dp);
-                let addr_hi = self.read(dp.wrapping_add(1));
+                let ptr_addr = self.direct_page() | dp;
+                let addr_lo = self.read(ptr_addr);
+                let addr_hi = self.read(self.direct_page() | ((dp.wrapping_add(1)) & 0xFF));
                 let base_addr = ((addr_hi as u16) << 8) | (addr_lo as u16);
                 let addr = base_addr.wrapping_add(self.y as u16);
                 self.a = self.read(addr);
@@ -1835,9 +1841,10 @@ impl<M: MemorySpc700> CpuSpc700<M> {
                 6
             }
 
-            // MOV A, (X)
+            // MOV A, (X) - load A from direct page address X
             0xE6 => {
-                self.a = self.read(self.x as u16);
+                let addr = self.direct_page() | (self.x as u16);
+                self.a = self.read(addr);
                 self.update_nz(self.a);
                 3
             }
@@ -1846,8 +1853,8 @@ impl<M: MemorySpc700> CpuSpc700<M> {
             0xFA => {
                 let src_dp = self.fetch_byte();
                 let dst_dp = self.fetch_byte();
-                let val = self.read(src_dp as u16);
-                self.write(dst_dp as u16, val);
+                let val = self.read(self.direct_page() | (src_dp as u16));
+                self.write(self.direct_page() | (dst_dp as u16), val);
                 5
             }
 
@@ -2734,25 +2741,22 @@ impl<M: MemorySpc700> CpuSpc700<M> {
 
             // MOV A, (dp)
             0xE7 => {
-                let dp = self.fetch_byte() as u16;
-                let addr_lo = self.read(dp);
-                let addr_hi = self.read(dp.wrapping_add(1));
+                let dp = self.fetch_byte();
+                let ptr_addr = self.direct_page() | (dp.wrapping_add(self.x) as u16);
+                let addr_lo = self.read(ptr_addr);
+                let addr_hi = self.read(ptr_addr.wrapping_add(1));
                 let addr = ((addr_hi as u16) << 8) | (addr_lo as u16);
                 self.a = self.read(addr);
                 self.update_nz(self.a);
-                4
+                6
             }
 
-            // EOR dp, dp (not bit operation - simple EOR)
+            // MOV X, !abs
             0xE9 => {
-                let src = self.fetch_byte();
-                let dst = self.fetch_byte();
-                let src_val = self.read(src as u16);
-                let dst_val = self.read(dst as u16);
-                let result = dst_val ^ src_val;
-                self.write(dst as u16, result);
-                self.update_nz(result);
-                6
+                let addr = self.fetch_word();
+                self.x = self.read(addr);
+                self.update_nz(self.x);
+                4
             }
 
             // NOT1 mem.bit
@@ -2774,20 +2778,18 @@ impl<M: MemorySpc700> CpuSpc700<M> {
                 4
             }
 
-            // MOV dp+Y, A
+            // MOV dp+Y, X
             0xD9 => {
                 let dp = self.fetch_byte();
                 let addr = dp.wrapping_add(self.y) as u16;
-                self.write(addr, self.a);
+                self.write(addr, self.x);
                 5
             }
             // MOVW dp, YA (duplicate removed - already implemented)
             0xDB => {
                 let dp = self.fetch_byte();
-                let addr = self.direct_page() | (dp as u16);
-                self.x = self.read(addr);
-                self.y = self.read(addr.wrapping_add(1));
-                self.update_nz(self.y);
+                let addr = dp.wrapping_add(self.x) as u16;
+                self.write(addr, self.y);
                 5
             }
             // MOV Y, dp+X
@@ -2838,26 +2840,15 @@ impl<M: MemorySpc700> CpuSpc700<M> {
                     4
                 }
             }
-            // MOV (dp), Y
+            // MOV dp, X
             0xD8 => {
-                let dp = self.fetch_byte() as u16;
-                let addr_lo = self.read(dp);
-                let addr_hi = self.read(dp.wrapping_add(1));
-                let addr = ((addr_hi as u16) << 8) | (addr_lo as u16);
-                self.write(addr, self.y);
-                5
+                let dp = self.fetch_byte();
+                let addr = self.direct_page() | (dp as u16);
+                self.write(addr, self.x);
+                4
             }
-            // MOV1 C, mem.bit (duplicate removed - already implemented)
+            // MOV1 mem.bit, C - store carry flag to memory bit
             0xCA => {
-                let src = self.fetch_byte();
-                let dst = self.fetch_byte();
-                let val = self.read(src as u16);
-                self.write(dst as u16, val);
-                self.update_nz(val);
-                5
-            }
-            // MOV1 mem.bit, C
-            0xC7 => {
                 let addr_low = self.fetch_byte();
                 let addr_high_and_bit = self.fetch_byte();
                 let addr = ((addr_high_and_bit as u16 & 0x1F) << 8) | addr_low as u16;
@@ -2871,26 +2862,35 @@ impl<M: MemorySpc700> CpuSpc700<M> {
                 self.write(addr, result);
                 6
             }
-            // CMP X, dp
-            0xC9 => {
+            // MOV [dp+X], A - indexed indirect store
+            0xC7 => {
                 let dp = self.fetch_byte();
-                let val = self.read(dp as u16);
-                let result = self.x.wrapping_sub(val);
-                self.update_nz(result);
-                self.set_flag(psw_flags::CARRY, self.x >= val);
-                3
+                let ptr_addr = self.direct_page() | (dp.wrapping_add(self.x) as u16);
+                let addr_lo = self.read(ptr_addr);
+                let addr_hi = self.read(ptr_addr.wrapping_add(1));
+                let addr = ((addr_hi as u16) << 8) | (addr_lo as u16);
+                self.write(addr, self.a);
+                7
             }
             // MOV !abs, X
-            0xCC => {
+            0xC9 => {
                 let addr = self.fetch_word();
                 self.write(addr, self.x);
                 5
             }
-            // MOV Y, X
+            // MOV !abs, Y
+            0xCC => {
+                let addr = self.fetch_word();
+                self.write(addr, self.y);
+                5
+            }
+            // MOV X, dp+Y
             0xF9 => {
-                self.y = self.x;
-                self.update_nz(self.y);
-                2
+                let dp = self.fetch_byte();
+                let addr = self.direct_page() | (dp.wrapping_add(self.y) as u16);
+                self.x = self.read(addr);
+                self.update_nz(self.x);
+                4
             }
         }
     }

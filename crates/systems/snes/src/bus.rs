@@ -398,6 +398,9 @@ impl SnesBus {
         if let Some(ref spc700_cell) = self.spc700 {
             let pending = self.spc700_pending_cycles.get();
             if pending > 0 {
+                log(emu_core::logging::LogCategory::APU, emu_core::logging::LogLevel::Trace, || {
+                    format!("sync_spc700: running {} pending cycles", pending)
+                });
                 spc700_cell.borrow_mut().run_cycles(pending);
                 self.spc700_pending_cycles.set(0);
             }
@@ -906,6 +909,7 @@ impl Memory65c816 for SnesBus {
 
                         // Synchronize SPC700 before reading to ensure it has processed any pending writes
                         // This matches Mesen2's approach of calling Run() before port access
+                        let pending_before = self.spc700_pending_cycles.get();
                         self.sync_spc700();
 
                         // Simply read the current port value - no latching needed
@@ -923,6 +927,12 @@ impl Memory65c816 for SnesBus {
                             );
                             self.apu_out_ports[port_idx]
                         };
+
+                        // Temporary debug: log ALL reads from APU ports
+                        log(emu_core::logging::LogCategory::APU, emu_core::logging::LogLevel::Info, || {
+                            format!("MAIN CPU READ: $214{} = ${:02X} (CPU PC=${:04X}, synced {} SPC cycles)",
+                                port, val, self.last_cpu_pc, pending_before)
+                        });
 
                         val
                     }
@@ -1254,6 +1264,12 @@ impl Memory65c816 for SnesBus {
 
                         // Synchronize SPC700 before writing to ensure proper timing
                         self.sync_spc700();
+
+                        // Temporary debug: log ALL writes to APU ports to trace $CC origin
+                        log(emu_core::logging::LogCategory::APU, emu_core::logging::LogLevel::Info, || {
+                            format!("MAIN CPU WRITE: $214{} = ${:02X} (CPU PC=${:04X})",
+                                port, val, self.last_cpu_pc)
+                        });
 
                         // Use real SPC700 if available
                         if let Some(ref spc700_cell) = self.spc700 {

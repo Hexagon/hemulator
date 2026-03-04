@@ -93,3 +93,22 @@ not available in CI or in headless `cargo test` runs.  They can be run manually 
 - [ ] **cputest-full fails at test `0x0025`** — next failing emulation-mode test after dp-wrap fix; needs investigation
   - File: `crates/core/src/cpu_65c816.rs`
   - Raise `MIN_PASSING` in `test_cputest_full_loads_and_runs` once resolved
+
+### Critical
+- [ ] **SPC700 second upload self-corruption**: N-SPC upload handler at $1315 (`MOV [$14]+Y, A`) writes uploaded data to $1300 (itself) because ZP $14-$15 gets set to $1300 instead of $8100. Root cause is likely a port read timing / synchronization issue between main CPU and SPC700 during the block header read at $1325. — `crates/core/src/apu/spc700.rs`, `crates/systems/snes/src/bus.rs`
+  - See `SPC_ANALYSIS.md` for full disassembly and trace evidence
+  - Investigate block transition timing (stale port values at $1325 MOVW)
+  - Compare SPC700/CPU clock sync with reference emulator (ares/bsnes)
+
+### High
+- [ ] **Clean up SPC700 debug infrastructure**: Remove all temporary tracing after the upload bug is resolved — `crates/core/src/apu/spc700.rs`, `crates/core/src/cpu_spc700.rs`, `crates/systems/snes/src/bus.rs`
+  - Remove `trace_ports`, `last_pc`, `port_trace_count` fields from `Spc700Memory`
+  - Remove PORT-READ/PORT-WRITE/CTRL-WRITE file tracing to `spc700_diag.txt`
+  - Remove DIAG snapshots every 5000 cycles
+  - Remove SPC700-TRACE for N-SPC addresses
+  - Remove watchpoint on $1308–$130C
+  - Remove jump detection RAM dump
+  - Remove timer counter `eprintln!` in COUNTER0 read handler
+  - Remove per-instruction logging ($0100–$0FFF) in `cpu_spc700.rs` step()
+  - Remove port read/write tracing at $2140–$2143 in `bus.rs`
+  - Restore `config.json` `log_rate_limit` from 10000000 to 20
