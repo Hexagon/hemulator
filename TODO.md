@@ -79,20 +79,20 @@ not available in CI or in headless `cargo test` runs.  They can be run manually 
   - Raise `MIN_PASSING` in `test_cputest_full_loads_and_runs` once resolved
 
 ### Critical
-- [ ] **SPC700 second upload self-corruption**: N-SPC upload handler at $1315 (`MOV [$14]+Y, A`) writes uploaded data to $1300 (itself) because ZP $14-$15 gets set to $1300 instead of $8100. Root cause is likely a port read timing / synchronization issue between main CPU and SPC700 during the block header read at $1325. — `crates/core/src/apu/spc700.rs`, `crates/systems/snes/src/bus.rs`
-  - See `SPC_ANALYSIS.md` for full disassembly and trace evidence
-  - Investigate block transition timing (stale port values at $1325 MOVW)
-  - Compare SPC700/CPU clock sync with reference emulator (ares/bsnes)
+- [x] **SPC700 second upload self-corruption**: Fixed. Root causes:
+  1. **INC dp ($AB)** was missing `direct_page()` base offset — fixed
+  2. **~45 other dp-addressing opcodes** were missing `direct_page()` — all fixed
+  3. **SPC700 sync timing** (Option B): SPC700 now runs inline in `tick_cycles()` instead of batching cycles and flushing on port access. This prevents the split-read race where the SPC700 could execute hundreds of instructions between two consecutive main-CPU port writes (e.g. writing the dest-addr low byte to $2142 and high byte to $2143), which caused the N-SPC upload handler at $1315 to use stale/wrong ZP $14–$15 values.
+  - See `SPC_ANALYSIS.md` for full analysis and resolution
 
 ### High
-- [ ] **Clean up SPC700 debug infrastructure**: Remove all temporary tracing after the upload bug is resolved — `crates/core/src/apu/spc700.rs`, `crates/core/src/cpu_spc700.rs`, `crates/systems/snes/src/bus.rs`
-  - Remove `trace_ports`, `last_pc`, `port_trace_count` fields from `Spc700Memory`
-  - Remove PORT-READ/PORT-WRITE/CTRL-WRITE file tracing to `spc700_diag.txt`
-  - Remove DIAG snapshots every 5000 cycles
-  - Remove SPC700-TRACE for N-SPC addresses
-  - Remove watchpoint on $1308–$130C
-  - Remove jump detection RAM dump
-  - Remove timer counter `eprintln!` in COUNTER0 read handler
-  - Remove per-instruction logging ($0100–$0FFF) in `cpu_spc700.rs` step()
-  - Remove port read/write tracing at $2140–$2143 in `bus.rs`
-  - Restore `config.json` `log_rate_limit` from 10000000 to 20
+- [x] **Clean up SPC700 debug infrastructure** — all temporary tracing removed:
+  - Removed `trace_ports`, `last_pc`, `port_trace_count` fields from `Spc700Memory`
+  - Removed PORT-READ/PORT-WRITE/CTRL-WRITE file tracing to `spc700_diag.txt`
+  - Removed DIAG snapshots (every 5000 cycles)
+  - Removed SPC700-TRACE for N-SPC addresses
+  - Removed watchpoint on $1308–$130C
+  - Removed jump detection RAM dump
+  - Removed timer counter `eprintln!` in COUNTER0 read handler
+  - Removed per-instruction logging ($0100–$0FFF) in `cpu_spc700.rs` step()
+  - Removed port read/write tracing at $2140–$2143 in `bus.rs`

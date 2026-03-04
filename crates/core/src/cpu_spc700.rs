@@ -104,15 +104,8 @@ impl<M: MemorySpc700> CpuSpc700<M> {
         let pc_before = self.pc;
         let opcode = self.fetch_byte();
 
-        // Log execution from uploaded code regions (typically $0100-$0FFF)
-        if (0x0100..0x1000).contains(&pc_before) {
-            log(LogCategory::APU, LogLevel::Info, || {
-                format!("SPC700: Executing uploaded code at PC=${:04X} opcode=${:02X} A=${:02X} X=${:02X} Y=${:02X}", 
-                    pc_before, opcode, self.a, self.x, self.y)
-            });
-        }
-        // Log every 1000th instruction from IPL ROM to avoid spam
-        else if self.cycles.is_multiple_of(1000) {
+        // Log every 1000th instruction at Debug level to avoid spam
+        if self.cycles.is_multiple_of(1000) {
             log(LogCategory::APU, LogLevel::Debug, || {
                 format!(
                     "SPC700: PC=${:04X} opcode=${:02X} A=${:02X} X=${:02X} Y=${:02X}",

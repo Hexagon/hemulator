@@ -1,8 +1,8 @@
 # SPC700 / SNES Boot Analysis
 
-**Date**: March 4, 2026  
+**Date**: March 4, 2026 (initial), resolved March 4, 2026 (second session)  
 **Test ROM**: `roms/snes/Super Mario World (USA).sfc`  
-**Status**: Second SPC700 upload fails — upload handler overwrites its own code
+**Status**: ✅ RESOLVED — Second SPC700 upload fixed (sync timing + dp addressing)
 
 ---
 
@@ -250,25 +250,46 @@ Opcode $D7 at line ~593 correctly reads the 16-bit pointer from direct page with
 
 This gives ratio ~0.286, which matches the real hardware ratio (1.024 MHz / 3.58 MHz). The fractional accumulator prevents drift. The ratio itself appears correct, but the **batch execution model** is the issue — cycles are accumulated and run in one big burst only on port access.
 
-## Proposed Fix
+## Resolution (March 4, 2026 — second session)
 
-### Option A: Catch-up sync on every write (minimal change)
-Ensure ALL four port writes for a block header complete before running the SPC700. This could be done by:
-- NOT calling `sync_spc700()` on port writes, only on port reads
-- Or adding a small "write buffer" that delays SPC700 execution until after the full header is written
+All issues identified in the Code Review Findings have been fixed:
 
-### Option B: Run SPC700 more frequently (better accuracy)
-Instead of only syncing on port access, run the SPC700 periodically (e.g., every N main CPU cycles) in `add_cpu_cycles()`. This prevents large cycle batches and keeps the two processors more tightly synchronized. This is closer to how reference emulators (ares/bsnes) work — they sync the SPC700 on every memory access or at regular intervals.
+### Fix 1: All dp-addressing opcodes — `direct_page()` added (~45 instructions)
 
-### Option C: Deferred port visibility (hardware-accurate)
-Model the actual hardware latching: when the main CPU writes to a port, the value doesn't become visible to the SPC700 immediately. Instead, buffer the write and make it visible only after the SPC700 has been synced past the write cycle. This is the most accurate but most complex approach.
+Opcode `$AB` (`INC dp`) and ~44 other instructions were missing `direct_page()` in their address calculations. Every SPC700 instruction that uses any direct-page addressing mode now correctly applies the `direct_page()` base offset (0x0000 when P=0, 0x0100 when P=1). The affected addressing modes were:
+- Simple dp: `let addr = self.fetch_byte() as u16;` → `self.direct_page() | (fetch_byte() as u16)`
+- dp+X: `dp.wrapping_add(x) as u16` → `self.direct_page() | (dp.wrapping_add(x) as u16)`
+- [dp+X] indexed indirect: pointer fetch now uses `direct_page()`
+- [dp]+Y indirect indexed: pointer fetch now uses `direct_page()`
+- dp,dp two-operand: both operands now use `direct_page()`
+- dp,#imm: dp operand now uses `direct_page()`
 
-**Recommended**: Start with **Option B** — run SPC700 in `add_cpu_cycles()` directly instead of accumulating. This is simple, accurate, and solves the race condition by keeping the two CPUs in tighter lockstep.
+### Fix 2: Sync timing (Option B implemented) — `crates/systems/snes/src/bus.rs`
 
-## Next Steps
+The `sync_spc700()` method and `spc700_pending_cycles` accumulator have been removed. The SPC700 now runs **inline** in `tick_cycles()` for its proportional share of cycles after each main CPU instruction:
 
-1. **Fix `INC dp` ($AB)**: Add `direct_page()` call — simple, independent bug fix
-2. **Audit all dp-addressing opcodes**: Grep for `0xAB|0xBB|0xCB|0x8B|0x4B` etc. to find other opcodes that may be missing `direct_page()`
-3. **Implement Option B**: Move SPC700 execution from deferred-batch into `add_cpu_cycles()` so it runs incrementally
-4. **Verify fix**: Run Super Mario World, confirm second upload completes and game boots
-5. **Clean up debug infrastructure** once the issue is resolved (see list above)
+```rust
+// In tick_cycles():
+if spc700_cycles > 0 {
+    if let Some(ref spc700_cell) = self.spc700 {
+        spc700_cell.borrow_mut().run_cycles(spc700_cycles as u32);
+    }
+}
+```
+
+This prevents large cycle batches from building up. Between any two consecutive main CPU port writes (e.g., `$2142` low byte and `$2143` high byte), the SPC700 can execute at most 1–2 instructions rather than hundreds. The torn-read race is effectively eliminated.
+
+### Fix 3: Debug infrastructure removed
+
+All temporary diagnostic code has been removed from:
+- `crates/core/src/apu/spc700.rs`: trace_ports, last_pc, port_trace_count, file tracing, watchpoints, DIAG snapshots, SPC700-TRACE, jump detection RAM dump, timer eprintln
+- `crates/core/src/cpu_spc700.rs`: per-instruction logging for $0100–$0FFF
+- `crates/systems/snes/src/bus.rs`: port read/write tracing at $2140–$2143, sync_spc700() calls
+
+### Fix 4: Test updated — `test_port_clear_via_control`
+
+The test was asserting the OLD (wrong) behavior (that control register bits 4–5 clear `apu_out`). Updated to correctly test the hardware behavior: bits 4–5 clear the INPUT latches (`cpuio`), as documented in fullsnes and the S-SMP wiki.
+
+## Summary
+
+The second upload self-corruption bug was caused by a race condition in the SPC700 synchronization model: large batches of SPC700 cycles were flushed on each port access, allowing the SPC700 to execute hundreds of instructions between two consecutive writes to the upload destination-address ports ($2142 and $2143). This produced a torn 16-bit address read at the N-SPC $1325 block header. The fix (Option B) runs the SPC700 incrementally — keeping both CPUs in tight lockstep — so the SPC700 can no longer race ahead between adjacent port writes.
