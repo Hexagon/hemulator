@@ -31,12 +31,10 @@ const MI_INTR_MASK: u32 = 0x0C;
 
 /// Interrupt bit positions
 pub const MI_INTR_SP: u32 = 0x01; // Bit 0
-#[allow(dead_code)]
-const MI_INTR_SI: u32 = 0x02; // Bit 1
+pub const MI_INTR_SI: u32 = 0x02; // Bit 1
 pub const MI_INTR_AI: u32 = 0x04; // Bit 2
 pub const MI_INTR_VI: u32 = 0x08; // Bit 3
-#[allow(dead_code)]
-const MI_INTR_PI: u32 = 0x10; // Bit 4
+pub const MI_INTR_PI: u32 = 0x10; // Bit 4
 #[allow(dead_code)] // Reserved for future RDP interrupt handling
 pub const MI_INTR_DP: u32 = 0x20; // Bit 5
 
@@ -144,7 +142,6 @@ impl MipsInterface {
     }
 
     /// Clear an interrupt bit (called by hardware components)
-    #[allow(dead_code)] // Reserved for future use
     pub fn clear_interrupt(&mut self, interrupt_bit: u32) {
         self.intr &= !interrupt_bit;
     }

@@ -282,6 +282,12 @@ impl Vdp {
         // Clear frame interrupt flag on read
         self.frame_interrupt_pending = false;
 
+        // Clear line interrupt flag on read — on real hardware, reading the
+        // status register de-asserts /INT completely, clearing both frame and
+        // line pending latches.  Without this, a stale line_interrupt_pending
+        // causes an interrupt storm (Sonic 2 black screen).
+        self.line_interrupt_pending = false;
+
         // Clear sprite flags on read
         self.sprite_overflow = false;
         self.sprite_collision = false;
@@ -317,6 +323,17 @@ impl Vdp {
             )
         });
         vcounter
+    }
+
+    /// Read horizontal counter.
+    ///
+    /// The real SMS H-counter is latched via the TH pin and returns a value
+    /// from 0x00-0x93 (NTSC) representing the horizontal position divided by
+    /// 2.  Few games rely on precise H-counter reads; we return 0x00 as a
+    /// safe stub for maximum compatibility.
+    pub fn read_hcounter(&self) -> u8 {
+        // TODO: Implement proper H-counter latching for TH-pin triggered reads
+        0x00
     }
 
     /// Step VDP by one scanline
@@ -401,18 +418,29 @@ impl Vdp {
     }
 
     /// Check if frame interrupt is pending
+    #[allow(dead_code)]
     pub fn frame_interrupt_pending(&self) -> bool {
         self.frame_interrupt_pending
     }
 
     /// Check if line interrupt is pending
+    #[allow(dead_code)]
     pub fn line_interrupt_pending(&self) -> bool {
         self.line_interrupt_pending
     }
 
     /// Clear line interrupt
+    #[allow(dead_code)]
     pub fn clear_line_interrupt(&mut self) {
         self.line_interrupt_pending = false;
+    }
+
+    /// Check if the VDP /INT line is active (any enabled interrupt pending).
+    /// On real SMS hardware, /INT = (frame_pending AND IE0) OR (line_pending AND IE1).
+    pub fn irq_line_active(&self) -> bool {
+        let frame_irq = self.frame_interrupt_pending && (self.registers[1] & 0x20) != 0;
+        let line_irq = self.line_interrupt_pending && (self.registers[0] & 0x10) != 0;
+        frame_irq || line_irq
     }
 
     /// Get tile viewer data for debugging
@@ -632,8 +660,8 @@ impl Vdp {
             let tile_col = (adj_x >> 3) as u16;
             let pixel_x = (adj_x & 7) as u16;
 
-            // Apply vertical scroll (inhibited for rightmost 8 columns if bit 7 set)
-            let (tile_row, pixel_y) = if vscroll_inhibit && tile_col >= 24 {
+            // Apply vertical scroll (inhibited for rightmost 8 screen columns if reg0 bit 7 set)
+            let (tile_row, pixel_y) = if vscroll_inhibit && x >= 192 {
                 // No vertical scroll for columns 24-31
                 let y = line as u16;
                 (y >> 3, y & 7)
@@ -709,7 +737,15 @@ impl Vdp {
         // Register 6 bit 2 selects sprite pattern generator base: 0=$0000, 1=$2000
         let sprite_pattern_base = ((self.registers[6] as u16) & 0x04) << 11;
         let tall_sprites = (self.registers[1] & 0x02) != 0;
-        let sprite_height: u8 = if tall_sprites { 16 } else { 8 };
+        let zoomed = (self.registers[1] & 0x01) != 0;
+        let base_height: u8 = if tall_sprites { 16 } else { 8 };
+        // Zoom doubles the effective pixel size of sprites
+        let effective_height: u8 = if zoomed {
+            base_height.saturating_mul(2)
+        } else {
+            base_height
+        };
+        let display_height = self.get_display_height();
 
         let mut sprites_on_line = 0;
 
@@ -721,14 +757,18 @@ impl Vdp {
         for i in 0..64u16 {
             let y = self.vram[(sprite_attr_table + i) as usize];
 
-            // Check for end marker (Y = 0xD0 terminates sprite list in 192-line mode)
-            if y == 0xD0 {
+            // Check for end-of-sprite-list marker.
+            // In 192-line mode, Y=$D0 (208) terminates the list because it is
+            // beyond the visible area.  In 224/240-line modes those Y values are
+            // valid sprite positions, so the terminator does not apply.
+            if display_height == 192 && y == 0xD0 {
                 break;
             }
 
             // Y position is offset by 1
             let y_pos = y.wrapping_add(1);
-            if line < y_pos || line >= y_pos.wrapping_add(sprite_height) {
+            let diff = line.wrapping_sub(y_pos);
+            if diff >= effective_height {
                 continue;
             }
 
@@ -747,7 +787,13 @@ impl Vdp {
             let y_pos = y.wrapping_add(1);
 
             // Get sprite X position and tile number
-            let x_pos = self.vram[(sprite_attr_table + 128 + i * 2) as usize];
+            let mut x_pos = self.vram[(sprite_attr_table + 128 + i * 2) as usize];
+
+            // Early Clock (Register 0, bit 3): shift all sprites left 8 pixels.
+            // Used by Sonic 1 for smooth left-edge scrolling.
+            if (self.registers[0] & 0x08) != 0 {
+                x_pos = x_pos.wrapping_sub(8);
+            }
             let mut tile_num = self.vram[(sprite_attr_table + 128 + i * 2 + 1) as usize];
 
             // In 8x16 (tall) mode, bit 0 of tile number is forced to 0
@@ -755,8 +801,11 @@ impl Vdp {
                 tile_num &= 0xFE;
             }
 
-            // Calculate sprite row within the sprite (0-7 for 8x8, 0-15 for 8x16)
-            let sprite_y = line - y_pos;
+            // Calculate sprite row within the sprite.
+            // When zoomed, each source pixel is doubled, so divide screen offset by 2
+            // to get the actual tile-data row.
+            let raw_y = line.wrapping_sub(y_pos);
+            let sprite_y = if zoomed { raw_y / 2 } else { raw_y };
 
             // For 8x16 (tall) sprites in Mode 4:
             // - Uses 2 tiles vertically (tile N and tile N+1)
@@ -782,15 +831,18 @@ impl Vdp {
             let byte2 = self.vram[(tile_addr + 2) as usize];
             let byte3 = self.vram[(tile_addr + 3) as usize];
 
-            // Render sprite pixels (always 8 pixels wide)
-            // For 8x16 sprites, this renders one 8-pixel-wide row of the tall sprite
-            for px in 0..8u8 {
+            // Render sprite pixels.
+            // When zoomed, each source pixel is doubled horizontally (16 screen pixels).
+            let pixel_width: u8 = if zoomed { 16 } else { 8 };
+            for px in 0..pixel_width {
                 let x = x_pos.wrapping_add(px);
                 if x as u16 >= 256 {
                     continue;
                 }
 
-                let shift = 7 - px;
+                // Map screen pixel to source tile bit; zoom doubles each column.
+                let src_px = if zoomed { px / 2 } else { px };
+                let shift = 7 - src_px;
                 let pixel = ((byte0 >> shift) & 1)
                     | (((byte1 >> shift) & 1) << 1)
                     | (((byte2 >> shift) & 1) << 2)
@@ -1314,6 +1366,7 @@ mod tests {
 
         // Set all flags
         vdp.frame_interrupt_pending = true;
+        vdp.line_interrupt_pending = true;
         vdp.sprite_overflow = true;
         vdp.sprite_collision = true;
 
@@ -1325,8 +1378,9 @@ mod tests {
         assert_eq!(status & 0x40, 0x40); // Sprite overflow
         assert_eq!(status & 0x20, 0x20); // Sprite collision
 
-        // After read, flags should be cleared
+        // After read, ALL flags should be cleared (including line_interrupt_pending)
         assert!(!vdp.frame_interrupt_pending);
+        assert!(!vdp.line_interrupt_pending);
         assert!(!vdp.sprite_overflow);
         assert!(!vdp.sprite_collision);
 

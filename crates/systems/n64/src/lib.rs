@@ -93,10 +93,9 @@ impl N64System {
         let bus = N64Bus::new(gl)?;
         Ok(Self {
             cpu: N64Cpu::new(bus),
-            // Reduced from 1,562,500 to improve performance
-            // The actual N64 runs at 93.75MHz (1,562,500 cycles/frame at 60Hz)
-            // but we use fewer cycles for faster emulation while maintaining timing
-            frame_cycles: 50000, // ~50k cycles per frame for better performance
+            // The N64 CPU runs at 93.75MHz with 60fps NTSC = 1,562,500 cycles/frame
+            // Using the correct value ensures games initialize properly
+            frame_cycles: 1_562_500,
             current_cycles: 0,
             instruction_tracer: emu_core::instruction_tracer::InstructionTracer::new(),
             breakpoint_manager: emu_core::breakpoints::BreakpointManager::new(),
@@ -344,20 +343,6 @@ impl System for N64System {
                 let cycles = self.cpu.step();
                 self.current_cycles += cycles;
 
-                // DIAGNOSTIC: Print PC every 100000 cycles to find stuck loops
-                static mut DIAG_COUNTER: u32 = 0;
-                unsafe {
-                    DIAG_COUNTER += 1;
-                    if DIAG_COUNTER.is_multiple_of(100000) {
-                        let cpu = &self.cpu.cpu;
-                        let counter = DIAG_COUNTER;
-                        eprintln!(
-                            "[DIAG] count={} PC=0x{:08X} t0=0x{:016X} t1=0x{:016X} at=0x{:016X} v0=0x{:016X} a0=0x{:016X}",
-                            counter, pc_before, cpu.gpr[8], cpu.gpr[9], cpu.gpr[1], cpu.gpr[2], cpu.gpr[4]
-                        );
-                    }
-                }
-
                 // Record instruction in tracer if enabled
                 if self.instruction_tracer.is_enabled() {
                     if let Some(instruction) = self.disassemble_instruction(pc_before) {
@@ -393,7 +378,13 @@ impl System for N64System {
             }
         }
 
-        // Get frame from RDP
+        // Get frame from VI framebuffer readback (primary display method)
+        // The game renders to RDRAM, and VI reads from RDRAM at VI_ORIGIN
+        if let Some(vi_frame) = self.cpu.bus().read_vi_framebuffer() {
+            return Ok(vi_frame);
+        }
+
+        // Fallback: return RDP internal frame (for cases where VI isn't configured yet)
         let frame = self.cpu.bus().rdp().get_frame().clone();
         Ok(frame)
     }
