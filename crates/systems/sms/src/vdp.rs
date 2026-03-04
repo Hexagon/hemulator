@@ -605,7 +605,7 @@ impl Vdp {
         }
 
         // Clear scanline to backdrop color (RGB only; alpha restored at end of scanline)
-        let backdrop_color = self.decode_color(self.cram[16] & 0x3F) & RGB_MASK;
+        let backdrop_color = self.backdrop_color() & RGB_MASK;
         let line_offset = (line as usize) * 256;
         for x in 0..256 {
             self.frame.pixels[line_offset + x] = backdrop_color;
@@ -885,7 +885,7 @@ impl Vdp {
                     // Only render sprite if:
                     // 1. Background pixel is transparent (backdrop color), OR
                     // 2. Background pixel doesn't have priority bit set
-                    let backdrop_color = self.decode_color(self.cram[16] & 0x3F);
+                    let backdrop_color = self.backdrop_color();
                     let bg_is_backdrop = (bg_pixel & RGB_MASK) == (backdrop_color & RGB_MASK);
 
                     if bg_is_backdrop || !bg_has_priority {
@@ -1121,6 +1121,13 @@ impl Vdp {
         }
     }
 
+    /// Get the current backdrop/overscan color (ARGB).
+    /// Register 7 bits 3-0 select a colour from the sprite palette (CRAM 16-31).
+    fn backdrop_color(&self) -> u32 {
+        let index = 16 + (self.registers[7] & 0x0F) as usize;
+        self.decode_color(self.cram[index] & 0x3F)
+    }
+
     /// Decode 6-bit SMS color to 32-bit ARGB
     fn decode_color(&self, color: u8) -> u32 {
         // SMS uses 6-bit color: --BBGGRR
@@ -1147,7 +1154,7 @@ impl Default for Vdp {
 impl Renderer for Vdp {
     fn get_frame(&self) -> &Frame {
         // Log every time frame is retrieved
-        let backdrop = self.decode_color(self.cram[16] & 0x3F);
+        let backdrop = self.backdrop_color();
         // Register 1 bit 6: screen enable (1=on, 0=blank) — same for Mode 4 and TMS
         let display_enabled = (self.registers[1] & 0x40) != 0;
         let sprite_enabled = display_enabled; // Sprites are active whenever display is on
@@ -1258,6 +1265,31 @@ mod tests {
 
         // Test red (0x03)
         assert_eq!(vdp.decode_color(0x03), 0xFFFF0000);
+    }
+
+    #[test]
+    fn test_backdrop_uses_register7() {
+        let mut vdp = Vdp::new();
+
+        // Set CRAM[16] = sky blue, CRAM[17] = black
+        vdp.cram[16] = 0x30; // Blue (--11_00_00)
+        vdp.cram[17] = 0x00; // Black
+
+        // With R7 = 0 (default), backdrop should come from CRAM[16]
+        assert_eq!(vdp.backdrop_color(), vdp.decode_color(0x30));
+
+        // Set R7 = 1 → backdrop selects CRAM[17] (black)
+        vdp.registers[7] = 0x01;
+        assert_eq!(vdp.backdrop_color(), vdp.decode_color(0x00));
+
+        // Set R7 = 0x0F → backdrop selects CRAM[31]
+        vdp.cram[31] = 0x03; // Red
+        vdp.registers[7] = 0x0F;
+        assert_eq!(vdp.backdrop_color(), vdp.decode_color(0x03));
+
+        // Upper bits of R7 are ignored
+        vdp.registers[7] = 0xF1;
+        assert_eq!(vdp.backdrop_color(), vdp.decode_color(0x00)); // CRAM[17]
     }
 
     #[test]
