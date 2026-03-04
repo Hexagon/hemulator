@@ -14,7 +14,7 @@
 pub struct WaveChannel {
     /// Wave RAM: 32 samples, each 4 bits (0-15)
     pub wave_ram: [u8; 32],
-    /// 11-bit timer reload value (GB); up to 12-bit for GBA
+    /// Timer reload value (up to 12 bits) used by GB/GBA wave frequency calculations
     pub timer_reload: u16,
     /// Timer counter
     timer: u16,
