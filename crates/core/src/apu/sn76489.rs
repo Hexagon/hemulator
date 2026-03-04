@@ -11,11 +11,11 @@
 //!
 //! # Clock Prescaler
 //! The SN76489 contains an internal ÷16 clock prescaler. All tone and noise
-//! counters are clocked at `CLK/16`, not at the raw input clock rate. The
-//! tone frequency formula is therefore: `f = CLK / (32 × N)` (÷16 prescaler
-//! × ÷2 flip-flop × N counter). When emulating, `clock()` is called at the
-//! full CPU clock rate and the prescaler fires every 16th call.
-//!
+//! counters are clocked at `CLK/16`, not at the raw input clock rate. Given
+//! a tone register value of `N`, the counter and toggle logic produce a
+//! fundamental tone frequency of `f = CLK / (32 × (N + 1))` (÷16 prescaler
+//! × ÷2 flip-flop × (N + 1) counter ticks). When emulating, `clock()` is
+//! called at the full CPU clock rate and the prescaler fires every 16th call.
 //! # Sega Variant (SN76496)
 //! The Sega variant uses a 16-bit LFSR for noise (instead of 15-bit)
 
