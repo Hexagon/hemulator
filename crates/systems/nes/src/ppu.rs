@@ -1351,7 +1351,7 @@ impl Ppu {
                                 "Sprite 0 hit FOUND at scanline {} x={} (will trigger at dot {})",
                                 y,
                                 x,
-                                x + 2
+                                x + 1
                             )
                         });
                     }
@@ -1374,7 +1374,7 @@ impl Ppu {
                             "Sprite 0 HIT scheduled at scanline {} x={} (dot {})",
                             y,
                             hit_x,
-                            hit_x + 2
+                            hit_x + 1
                         )
                     });
                 }
@@ -1501,14 +1501,15 @@ impl Ppu {
         }
 
         // Cycle-accurate sprite 0 hit: check if we've reached the pending hit position.
-        // On real hardware, sprite 0 hit is detected during visible scanline rendering
-        // at approximately dot = X_position + 2 (accounting for PPU pipeline delay).
-        // The hit can only occur during dots 2-257 of visible scanlines (0-239).
-        if scanline < 240 && dot >= 2 && dot <= 257 {
+        // On real hardware the hit fires at the same dot the overlapping pixel is rendered.
+        // PPU dot numbering: dot 1 = pixel x=0, dot 2 = pixel x=1, … dot N = pixel x=N-1.
+        // Therefore the hit for a pixel at screen x fires at dot = x + 1, i.e. trigger_dot = hit_x + 1.
+        // Reference: Mesen2 NesPpu.cpp GetPixelColor() – hit flag set while rendering the pixel.
+        // The hit can only occur during dots 1-256 of visible scanlines (0-239).
+        if scanline < 240 && dot >= 1 && dot <= 256 {
             if let Some((hit_scanline, hit_x)) = self.sprite_0_hit_pending.get() {
-                // Check if we're on the right scanline and have reached the hit position
-                // Hit triggers at dot = X + 2 (2 cycle pipeline delay)
-                let trigger_dot = hit_x.saturating_add(2);
+                // Trigger at dot = hit_x + 1 (hit fires at the pixel-render cycle for screen x=hit_x)
+                let trigger_dot = hit_x.saturating_add(1);
                 if scanline == hit_scanline && dot >= trigger_dot && !self.sprite_0_hit.get() {
                     log(LogCategory::PPU, LogLevel::Info, || {
                         format!(

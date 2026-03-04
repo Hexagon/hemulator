@@ -122,14 +122,6 @@ static ROM_DATABASE: &[RomDbEntry] = &[
         Some(Mirroring::Horizontal), // TLROM uses horizontal mirroring
         Some("TLROM"),               // Board type
     ),
-    // Bee 52 (USA) (Unl) - Header incorrectly specifies horizontal mirroring,
-    // but the game requires vertical mirroring for correct scrolling
-    RomDbEntry::new(
-        0xE19C2722,                // CRC32 of full ROM file
-        None,                      // Use header mapper (71 - Camerica)
-        Some(Mirroring::Vertical), // Override to vertical mirroring
-        None,                      // No specific board name
-    ),
 ];
 
 /// Calculate CRC32 checksum of ROM data.
@@ -202,16 +194,16 @@ mod tests {
 
     #[test]
     fn test_lookup_rom_found() {
-        // If we add an entry to the database, it should be found
-        // The database currently has at least one entry (Bee 52)
+        // The database has entries - verify a known entry is found
         assert!(!ROM_DATABASE.is_empty());
 
-        // Look up the Bee 52 ROM entry
-        let bee52_entry = lookup_rom(0xE19C2722);
-        assert!(bee52_entry.is_some());
-        let entry = bee52_entry.unwrap();
-        assert_eq!(entry.crc32, 0xE19C2722);
-        assert_eq!(entry.mirroring, Some(Mirroring::Vertical));
+        // Look up the Bad Dudes (USA) ROM entry
+        let bad_dudes_entry = lookup_rom(0x161D717B);
+        assert!(bad_dudes_entry.is_some());
+        let entry = bad_dudes_entry.unwrap();
+        assert_eq!(entry.crc32, 0x161D717B);
+        assert_eq!(entry.mapper, Some(4));
+        assert_eq!(entry.mirroring, Some(Mirroring::Horizontal));
     }
 
     #[test]
