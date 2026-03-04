@@ -14,7 +14,7 @@ pub mod window_backend;
 use egui_ui::EguiApp;
 use emu_core::{types::Frame, System};
 use hemu_project::HemuProject;
-use rodio::{OutputStream, Source};
+use rodio::{DeviceSinkBuilder, Source};
 use rom_detect::{detect_rom_type_with_extension, is_ps1_bios_file, SystemType};
 use save_state::GameSaves;
 use settings::Settings;
@@ -1272,16 +1272,16 @@ impl Iterator for StreamSource {
 }
 
 impl Source for StreamSource {
-    fn current_frame_len(&self) -> Option<usize> {
+    fn current_span_len(&self) -> Option<usize> {
         None
     }
 
-    fn channels(&self) -> u16 {
-        self.channels
+    fn channels(&self) -> std::num::NonZero<u16> {
+        std::num::NonZero::new(self.channels).unwrap()
     }
 
-    fn sample_rate(&self) -> u32 {
-        self.sample_rate
+    fn sample_rate(&self) -> std::num::NonZero<u32> {
+        std::num::NonZero::new(self.sample_rate).unwrap()
     }
 
     fn total_duration(&self) -> Option<std::time::Duration> {
@@ -1423,13 +1423,11 @@ fn save_screenshot(
 ) -> Result<String, Box<dyn std::error::Error>> {
     use chrono::Local;
     use png::Encoder;
-    use rand::Rng;
-
     // Get current local time
     let now = Local::now();
 
     // Generate random number 000-999
-    let random = rand::thread_rng().gen_range(0..1000);
+    let random = rand::random_range(0u32..1000);
 
     // Create filename: YYYYMMDDHHMMSSRRR.png
     let filename = format!("{}{:03}.png", now.format("%Y%m%d%H%M%S"), random);
@@ -3764,7 +3762,7 @@ fn main() {
             };
 
         // Initialize audio output
-        let (_stream, stream_handle) = match OutputStream::try_default() {
+        let _stream = match DeviceSinkBuilder::open_default_sink() {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("Error: Failed to initialize audio (exiting): {}.", e);
@@ -3772,16 +3770,11 @@ fn main() {
             }
         };
         let (audio_tx, audio_rx) = sync_channel::<i16>(44100 * 2);
-        if let Err(e) = stream_handle.play_raw(
-            StreamSource {
-                rx: audio_rx,
-                sample_rate: 44100,
-                channels: 2,
-            }
-            .convert_samples(),
-        ) {
-            eprintln!("Warning: Failed to start audio playback: {}", e);
-        }
+        _stream.mixer().add(StreamSource {
+            rx: audio_rx,
+            sample_rate: 44100,
+            channels: 2,
+        });
 
         const SAMPLE_RATE: usize = 44100;
         let mut audio_sample_remainder: f64 = 0.0;
@@ -3926,7 +3919,7 @@ fn main() {
     }
 
     // Initialize audio output
-    let (_stream, stream_handle) = match OutputStream::try_default() {
+    let _stream = match DeviceSinkBuilder::open_default_sink() {
         Ok(s) => s,
         Err(e) => {
             eprintln!(
@@ -3937,16 +3930,11 @@ fn main() {
         }
     };
     let (audio_tx, audio_rx) = sync_channel::<i16>(44100 * 2);
-    if let Err(e) = stream_handle.play_raw(
-        StreamSource {
-            rx: audio_rx,
-            sample_rate: 44100,
-            channels: 2,
-        }
-        .convert_samples(),
-    ) {
-        eprintln!("Warning: Failed to start audio playback: {}", e);
-    }
+    _stream.mixer().add(StreamSource {
+        rx: audio_rx,
+        sample_rate: 44100,
+        channels: 2,
+    });
 
     // Timing trackers - reset when ROM is loaded
     let mut emulation_start_time = Instant::now(); // Time when emulation started

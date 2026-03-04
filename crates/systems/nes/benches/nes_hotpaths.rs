@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use emu_core::debug::Debugger;
 use emu_core::System;
 use emu_nes::NesSystem;
@@ -105,7 +105,7 @@ fn bench_cpu_instructions(c: &mut Criterion) {
 
             // Execute one frame (this exercises the CPU step loop heavily)
             let frame = nes.step_frame().unwrap();
-            black_box(frame);
+            std::hint::black_box(frame);
         });
     });
 
@@ -125,7 +125,7 @@ fn bench_memory_access(c: &mut Criterion) {
             // This tests the bus address decoding performance
             for addr in (0x0000..0x0800).step_by(64) {
                 let val = nes.read_memory(addr, 1).unwrap();
-                black_box(val);
+                std::hint::black_box(val);
             }
         });
     });
@@ -139,7 +139,7 @@ fn bench_memory_access(c: &mut Criterion) {
             // Benchmark reading from PRG ROM (via mapper)
             for addr in (0x8000..0xC000).step_by(64) {
                 let val = nes.read_memory(addr, 1).unwrap();
-                black_box(val);
+                std::hint::black_box(val);
             }
         });
     });
@@ -161,7 +161,7 @@ fn bench_frame_execution(c: &mut Criterion) {
 
             // Execute one complete frame
             let frame = nes.step_frame().unwrap();
-            black_box(frame);
+            std::hint::black_box(frame);
         });
     });
 
@@ -174,7 +174,7 @@ fn bench_frame_execution(c: &mut Criterion) {
             // Execute 10 frames
             for _ in 0..10 {
                 let frame = nes.step_frame().unwrap();
-                black_box(frame);
+                std::hint::black_box(frame);
             }
         });
     });
@@ -193,7 +193,7 @@ fn bench_ppu_operations(c: &mut Criterion) {
         b.iter(|| {
             // Execute a frame which includes PPU rendering
             let frame = nes.step_frame().unwrap();
-            black_box(frame);
+            std::hint::black_box(frame);
         });
     });
 
