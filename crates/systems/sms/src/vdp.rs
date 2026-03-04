@@ -380,12 +380,27 @@ impl Vdp {
             for line in old_scanline..display_height {
                 self.render_scanline(line as u8);
             }
+
+            // The VBlank period reloads the line counter from R10 on every
+            // scanline.  When we skip directly from end-of-frame to early
+            // active display (the common case), we must ensure the counter
+            // is reloaded as it would have been during VBlank.
+            self.line_counter = self.registers[10];
+
             // Render scanlines from start of new frame up to and including current scanline
             for line in 0..=scanline.min(display_height - 1) {
                 self.render_scanline(line as u8);
             }
-            // Check for frame interrupt at end of visible area
-            if (self.registers[1] & 0x20) != 0 {
+            // Only trigger VBlank if we haven't already entered VBlank during
+            // normal forward progression.  If in_vblank is true, VBlank was
+            // already triggered at scanline 192 (and the ISR likely cleared the
+            // flag already).  Re-setting frame_interrupt_pending here would cause
+            // a double VBlank per frame — leading to flickering and game desync
+            // (Sonic 2 random restarts).
+            //
+            // If in_vblank is false (first frame from sentinel scanline, or a
+            // mid-frame wrap), we DO need to trigger VBlank since it was missed.
+            if !self.in_vblank {
                 self.frame_interrupt_pending = true;
             }
             // New frame: reset the VBlank latch, then set it if we're already past the
@@ -401,11 +416,11 @@ impl Vdp {
             for line in (old_scanline + 1)..=scanline.min(display_height - 1) {
                 self.render_scanline(line as u8);
             }
-            // Check for frame interrupt when crossing into VBlank
+            // Check for frame interrupt when crossing into VBlank.
+            // Status register bit 7 is ALWAYS set on VBlank entry,
+            // regardless of IE0 (R1 bit 5).  IE0 only gates /INT.
             if old_scanline < display_height && scanline >= display_height {
-                if (self.registers[1] & 0x20) != 0 {
-                    self.frame_interrupt_pending = true;
-                }
+                self.frame_interrupt_pending = true;
                 self.in_vblank = true;
                 // Reload line counter at start of VBlank (every VBlank scanline)
                 self.line_counter = self.registers[10];
@@ -571,18 +586,21 @@ impl Vdp {
     fn render_scanline(&mut self, line: u8) {
         let display_height = self.get_display_height() as u8;
 
-        // Handle line counter and line interrupts
+        // Handle line counter and line interrupts.
+        // Per SMS Power VDP documentation: the counter is loaded from R10
+        // during VBlank.  On each active-display scanline it is decremented.
+        // When it reaches -1 (wraps to 0xFF), a line interrupt is asserted
+        // (if enabled) and the counter is reloaded from R10.
         if line < display_height {
-            if self.line_counter == 0 {
-                // Reload line counter from register 10
+            self.line_counter = self.line_counter.wrapping_sub(1);
+            if self.line_counter == 0xFF {
+                // Counter underflowed → reload from R10 and latch line interrupt
                 self.line_counter = self.registers[10];
 
                 // Trigger line interrupt if enabled (bit 4 of register 0)
                 if (self.registers[0] & 0x10) != 0 {
                     self.line_interrupt_pending = true;
                 }
-            } else {
-                self.line_counter = self.line_counter.wrapping_sub(1);
             }
         }
 
@@ -1334,11 +1352,19 @@ mod tests {
         // Set line counter reload value (register 10)
         vdp.registers[10] = 5;
 
-        // Initialize line counter to register 10 value (simulating start of frame)
+        // Initialize line counter to register 10 value (simulating VBlank reload)
         vdp.line_counter = vdp.registers[10];
 
-        // Render scanlines and check line interrupt triggering
-        // First scanline should decrement counter
+        // With R10=5, the counter decrements each scanline and underflows
+        // after R10+1 = 6 scanlines:
+        //   scanline 0: 5 → 4
+        //   scanline 1: 4 → 3
+        //   scanline 2: 3 → 2
+        //   scanline 3: 2 → 1
+        //   scanline 4: 1 → 0
+        //   scanline 5: 0 → 0xFF (underflow!) → reload to 5 + fire interrupt
+
+        // First scanline should decrement counter from 5 to 4
         vdp.render_scanline(0);
         assert_eq!(vdp.line_counter, 4);
         assert!(!vdp.line_interrupt_pending);
@@ -1350,7 +1376,7 @@ mod tests {
         assert_eq!(vdp.line_counter, 0);
         assert!(!vdp.line_interrupt_pending);
 
-        // Next scanline (when counter is 0) should trigger interrupt and reload
+        // Next scanline: counter underflows (0 → 0xFF), triggers interrupt and reloads
         vdp.render_scanline(5);
         assert!(vdp.line_interrupt_pending);
         assert_eq!(vdp.line_counter, 5);
@@ -1406,8 +1432,11 @@ mod tests {
             "in_vblank should be true after crossing display_height"
         );
 
-        // Frame interrupt enable is NOT yet set
-        assert_eq!(vdp.registers[1] & 0x20, 0);
+        // Status bit 7 is always set on VBlank entry, regardless of IE0
+        assert!(vdp.frame_interrupt_pending);
+        // Clear it by reading status, simulating the game reading status before
+        // enabling interrupts
+        vdp.read_status();
         assert!(!vdp.frame_interrupt_pending);
 
         // Write R1 = 0x20 (frame interrupt enable) via the control port
@@ -1430,17 +1459,23 @@ mod tests {
         // Advance into active display via set_scanline.
         // From initial scanline 262, set_scanline(100) wraps to a new frame and
         // ends at scanline 100 < display_height(192), so in_vblank becomes false.
+        // The wrap crosses VBlank, so frame_interrupt_pending is set.
         vdp.set_scanline(100);
         assert!(
             !vdp.in_vblank,
             "in_vblank should be false inside active display"
         );
 
+        // The VBlank crossing during the wrap unconditionally set the flag.
+        // Clear it to simulate the game having read status already.
+        vdp.read_status();
+        assert!(!vdp.frame_interrupt_pending);
+
         // Write R1 = 0x20 (frame interrupt enable)
         vdp.write_control(0x20);
         vdp.write_control(0x81);
 
-        // Must NOT fire yet — we are not in VBlank
+        // Must NOT fire — we are not in VBlank, and the flag was already consumed
         assert!(
             !vdp.frame_interrupt_pending,
             "frame_interrupt_pending must not be set when scanline is inside active display"
