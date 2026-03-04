@@ -109,11 +109,7 @@ fn detect_mapper(rom: &[u8]) -> MapperType {
 
     if let Some(mt) = crc_lookup(crc) {
         log(LogCategory::Bus, LogLevel::Info, || {
-            format!(
-                "SMS mapper: detected {} via CRC32 {:08X}",
-                mt.name(),
-                crc
-            )
+            format!("SMS mapper: detected {} via CRC32 {:08X}", mt.name(), crc)
         });
         return mt;
     }
@@ -286,7 +282,6 @@ pub struct SmsMemory {
     psg: Rc<RefCell<SmsPsg>>,
 
     // --------------- Mapper --------------------------------------------------
-
     /// Active mapper type.
     mapper_type: MapperType,
 
@@ -333,7 +328,6 @@ pub struct SmsMemory {
     janggun_control: u8,
 
     // --------------- Controller / memory control ----------------------------
-
     /// Controller state
     controller_1: u8,
     controller_2: u8,
@@ -687,9 +681,7 @@ impl SmsMemory {
             // First 1 KB is ALWAYS pinned to the start of ROM (never remapped).
             0x0000..=0x03FF => self.rom_byte(addr as usize),
             // Rest of slot 0 respects $FFFD bank register.
-            0x0400..=0x3FFF => {
-                self.rom_byte(self.sega_banks[0] * 0x4000 + addr as usize)
-            }
+            0x0400..=0x3FFF => self.rom_byte(self.sega_banks[0] * 0x4000 + addr as usize),
             0x4000..=0x7FFF => {
                 self.rom_byte(self.sega_banks[1] * 0x4000 + (addr & 0x3FFF) as usize)
             }
@@ -709,9 +701,7 @@ impl SmsMemory {
     fn read_codemasters(&self, addr: u16) -> u8 {
         match addr {
             // No first-1KB pinning – entire slot 0 is remappable.
-            0x0000..=0x3FFF => {
-                self.rom_byte(self.codemasters_banks[0] * 0x4000 + addr as usize)
-            }
+            0x0000..=0x3FFF => self.rom_byte(self.codemasters_banks[0] * 0x4000 + addr as usize),
             0x4000..=0x7FFF => {
                 self.rom_byte(self.codemasters_banks[1] * 0x4000 + (addr & 0x3FFF) as usize)
             }
@@ -764,21 +754,13 @@ impl SmsMemory {
     fn read_msx(&self, addr: u16) -> u8 {
         match addr {
             // $0000-$1FFF: msx_banks[0]
-            0x0000..=0x1FFF => {
-                self.rom_byte(self.msx_banks[0] * 0x2000 + (addr & 0x1FFF) as usize)
-            }
+            0x0000..=0x1FFF => self.rom_byte(self.msx_banks[0] * 0x2000 + (addr & 0x1FFF) as usize),
             // $2000-$3FFF: msx_banks[1]
-            0x2000..=0x3FFF => {
-                self.rom_byte(self.msx_banks[1] * 0x2000 + (addr & 0x1FFF) as usize)
-            }
+            0x2000..=0x3FFF => self.rom_byte(self.msx_banks[1] * 0x2000 + (addr & 0x1FFF) as usize),
             // $4000-$5FFF: msx_banks[2]
-            0x4000..=0x5FFF => {
-                self.rom_byte(self.msx_banks[2] * 0x2000 + (addr & 0x1FFF) as usize)
-            }
+            0x4000..=0x5FFF => self.rom_byte(self.msx_banks[2] * 0x2000 + (addr & 0x1FFF) as usize),
             // $6000-$7FFF: msx_banks[3]
-            0x6000..=0x7FFF => {
-                self.rom_byte(self.msx_banks[3] * 0x2000 + (addr & 0x1FFF) as usize)
-            }
+            0x6000..=0x7FFF => self.rom_byte(self.msx_banks[3] * 0x2000 + (addr & 0x1FFF) as usize),
             // $8000-$BFFF: fixed to last 16 KB of ROM
             0x8000..=0xBFFF => {
                 let last_16k_start = self.rom.len().saturating_sub(0x4000);
@@ -793,9 +775,7 @@ impl SmsMemory {
         match addr {
             // First 1 KB always pinned.
             0x0000..=0x03FF => self.rom_byte(addr as usize),
-            0x0400..=0x3FFF => {
-                self.rom_byte(self.sega_banks[0] * 0x4000 + addr as usize)
-            }
+            0x0400..=0x3FFF => self.rom_byte(self.sega_banks[0] * 0x4000 + addr as usize),
             0x4000..=0x7FFF => {
                 self.rom_byte(self.sega_banks[1] * 0x4000 + (addr & 0x3FFF) as usize)
             }
@@ -809,9 +789,7 @@ impl SmsMemory {
     /// Read for **4PAK All Action** mapper.
     fn read_fourpak(&self, addr: u16) -> u8 {
         match addr {
-            0x0000..=0x3FFF => {
-                self.rom_byte(self.sega_banks[0] * 0x4000 + addr as usize)
-            }
+            0x0000..=0x3FFF => self.rom_byte(self.sega_banks[0] * 0x4000 + addr as usize),
             0x4000..=0x7FFF => {
                 self.rom_byte(self.sega_banks[1] * 0x4000 + (addr & 0x3FFF) as usize)
             }
@@ -841,8 +819,7 @@ impl SmsMemory {
             }
             // Slot 2 low / high (may XOR data bytes)
             0x8000..=0x9FFF => {
-                let b =
-                    self.rom_byte(self.janggun_banks[4] * 0x2000 + (addr & 0x1FFF) as usize);
+                let b = self.rom_byte(self.janggun_banks[4] * 0x2000 + (addr & 0x1FFF) as usize);
                 if (self.janggun_control & 0x40) != 0 {
                     b ^ 0xFF
                 } else {
@@ -850,8 +827,7 @@ impl SmsMemory {
                 }
             }
             0xA000..=0xBFFF => {
-                let b =
-                    self.rom_byte(self.janggun_banks[5] * 0x2000 + (addr & 0x1FFF) as usize);
+                let b = self.rom_byte(self.janggun_banks[5] * 0x2000 + (addr & 0x1FFF) as usize);
                 if (self.janggun_control & 0x80) != 0 {
                     b ^ 0xFF
                 } else {
@@ -1175,8 +1151,8 @@ mod tests {
         // even when bank 0 is remapped.
         let mut rom = vec![0; 0x20000]; // 128 KB
         rom[0x0038] = 0xC9; // RST $38 vector: RET
-        // Put a known value at bank 3, offset $0400 within the bank
-        // (ROM[3*0x4000 + 0x0400] = ROM[0xC400])
+                            // Put a known value at bank 3, offset $0400 within the bank
+                            // (ROM[3*0x4000 + 0x0400] = ROM[0xC400])
         rom[3 * 0x4000 + 0x0400] = 0xBB;
 
         let mut mem = make_mem(rom);
@@ -1347,7 +1323,7 @@ mod tests {
     #[test]
     fn test_mapper_detection_large_rom() {
         let rom = vec![0; 0x40000]; // 256 KB
-        // No Codemasters checksum, no CRC match → Sega.
+                                    // No Codemasters checksum, no CRC match → Sega.
         assert_eq!(detect_mapper(&rom), MapperType::Sega);
     }
 

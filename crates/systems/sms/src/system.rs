@@ -116,10 +116,7 @@ impl SmsSystem {
 
         // Log detected mapper
         log(LogCategory::CPU, LogLevel::Info, || {
-            format!(
-                "SMS: Mapper={}",
-                self.cpu.memory.mapper_type().name()
-            )
+            format!("SMS: Mapper={}", self.cpu.memory.mapper_type().name())
         });
 
         self.reset();

@@ -4001,14 +4001,12 @@ fn main() {
                             rom_hash = None;
                         } else {
                             rom_loaded = true;
-                            runtime_state
-                                .set_mount("Cartridge".to_string(), rom_path_str.clone());
+                            runtime_state.set_mount("Cartridge".to_string(), rom_path_str.clone());
                             settings.add_recent_file(rom_path_str);
                             if let Err(e) = settings.save() {
                                 eprintln!("Warning: Failed to save settings: {}", e);
                             }
-                            egui_app
-                                .update_recent_files(settings.get_recent_files().to_vec());
+                            egui_app.update_recent_files(settings.get_recent_files().to_vec());
                             status_message = "N64 ROM loaded".to_string();
                             println!("N64 system created with GL context, ROM loaded");
                         }
@@ -4019,10 +4017,8 @@ fn main() {
                     }
                     sys = EmulatorSystem::N64(Box::new(n64_sys));
                     egui_app.property_pane.system_name = "N64".to_string();
-                    egui_app.property_pane.rendering_backend =
-                        sys.get_current_renderer_name();
-                    egui_app.property_pane.available_renderers =
-                        sys.get_available_renderers();
+                    egui_app.property_pane.rendering_backend = sys.get_current_renderer_name();
+                    egui_app.property_pane.available_renderers = sys.get_available_renderers();
                     egui_app.status_bar.set_message(status_message.clone());
                 }
                 Err(e) => {
