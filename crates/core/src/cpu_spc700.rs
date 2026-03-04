@@ -1923,9 +1923,9 @@ impl<M: MemorySpc700> CpuSpc700<M> {
             // ADC A, (dp+X)
             0x87 => {
                 let dp = self.fetch_byte();
-                let ptr_addr = self.direct_page() | (dp.wrapping_add(self.x) as u16);
-                let addr_lo = self.read(ptr_addr);
-                let addr_hi = self.read(ptr_addr.wrapping_add(1));
+                let ptr_index = dp.wrapping_add(self.x);
+                let addr_lo = self.read(self.direct_page() | (ptr_index as u16));
+                let addr_hi = self.read(self.direct_page() | (ptr_index.wrapping_add(1) as u16));
                 let addr = ((addr_hi as u16) << 8) | (addr_lo as u16);
                 let val = self.read(addr);
                 let carry = if self.get_flag(psw_flags::CARRY) {
@@ -2025,7 +2025,7 @@ impl<M: MemorySpc700> CpuSpc700<M> {
                 let dp = self.fetch_byte() as u16;
                 let dp_addr = self.direct_page() | dp;
                 let addr_lo = self.read(dp_addr);
-                let addr_hi = self.read(dp_addr.wrapping_add(1));
+                let addr_hi = self.read(self.direct_page() | (dp.wrapping_add(1) & 0xFF));
                 let base = ((addr_hi as u16) << 8) | (addr_lo as u16);
                 let addr = base.wrapping_add(self.y as u16);
                 let val = self.read(addr);
@@ -2090,9 +2090,9 @@ impl<M: MemorySpc700> CpuSpc700<M> {
             }
             0xA7 => {
                 let dp = self.fetch_byte();
-                let ptr_addr = self.direct_page() | (dp.wrapping_add(self.x) as u16);
-                let addr_lo = self.read(ptr_addr);
-                let addr_hi = self.read(ptr_addr.wrapping_add(1));
+                let ptr_index = dp.wrapping_add(self.x);
+                let addr_lo = self.read(self.direct_page() | (ptr_index as u16));
+                let addr_hi = self.read(self.direct_page() | (ptr_index.wrapping_add(1) as u16));
                 let addr = ((addr_hi as u16) << 8) | (addr_lo as u16);
                 let val = self.read(addr);
                 let carry = if self.get_flag(psw_flags::CARRY) {
@@ -2152,7 +2152,7 @@ impl<M: MemorySpc700> CpuSpc700<M> {
                 let dp = self.fetch_byte() as u16;
                 let dp_addr = self.direct_page() | dp;
                 let addr_lo = self.read(dp_addr);
-                let addr_hi = self.read(dp_addr.wrapping_add(1));
+                let addr_hi = self.read(self.direct_page() | (dp.wrapping_add(1) & 0xFF));
                 let base = ((addr_hi as u16) << 8) | (addr_lo as u16);
                 let addr = base.wrapping_add(self.y as u16);
                 let val = self.read(addr);
@@ -2188,9 +2188,9 @@ impl<M: MemorySpc700> CpuSpc700<M> {
             // OR A, (dp+X)
             0x07 => {
                 let dp = self.fetch_byte();
-                let ptr_addr = self.direct_page() | (dp.wrapping_add(self.x) as u16);
-                let addr_lo = self.read(ptr_addr);
-                let addr_hi = self.read(ptr_addr.wrapping_add(1));
+                let ptr_index = dp.wrapping_add(self.x);
+                let addr_lo = self.read(self.direct_page() | (ptr_index as u16));
+                let addr_hi = self.read(self.direct_page() | (ptr_index.wrapping_add(1) as u16));
                 let addr = ((addr_hi as u16) << 8) | (addr_lo as u16);
                 self.a |= self.read(addr);
                 self.update_nz(self.a);
@@ -2245,7 +2245,7 @@ impl<M: MemorySpc700> CpuSpc700<M> {
                 let dp = self.fetch_byte() as u16;
                 let dp_addr = self.direct_page() | dp;
                 let addr_lo = self.read(dp_addr);
-                let addr_hi = self.read(dp_addr.wrapping_add(1));
+                let addr_hi = self.read(self.direct_page() | (dp.wrapping_add(1) & 0xFF));
                 let base = ((addr_hi as u16) << 8) | (addr_lo as u16);
                 let addr = base.wrapping_add(self.y as u16);
                 self.a |= self.read(addr);
@@ -2286,9 +2286,9 @@ impl<M: MemorySpc700> CpuSpc700<M> {
             // AND A, (dp+X)
             0x27 => {
                 let dp = self.fetch_byte();
-                let ptr_addr = self.direct_page() | (dp.wrapping_add(self.x) as u16);
-                let addr_lo = self.read(ptr_addr);
-                let addr_hi = self.read(ptr_addr.wrapping_add(1));
+                let ptr_index = dp.wrapping_add(self.x);
+                let addr_lo = self.read(self.direct_page() | (ptr_index as u16));
+                let addr_hi = self.read(self.direct_page() | (ptr_index.wrapping_add(1) as u16));
                 let addr = ((addr_hi as u16) << 8) | (addr_lo as u16);
                 self.a &= self.read(addr);
                 self.update_nz(self.a);
@@ -2341,7 +2341,7 @@ impl<M: MemorySpc700> CpuSpc700<M> {
                 let dp = self.fetch_byte() as u16;
                 let dp_addr = self.direct_page() | dp;
                 let addr_lo = self.read(dp_addr);
-                let addr_hi = self.read(dp_addr.wrapping_add(1));
+                let addr_hi = self.read(self.direct_page() | (dp.wrapping_add(1) & 0xFF));
                 let base = ((addr_hi as u16) << 8) | (addr_lo as u16);
                 let addr = base.wrapping_add(self.y as u16);
                 self.a &= self.read(addr);
@@ -2378,9 +2378,9 @@ impl<M: MemorySpc700> CpuSpc700<M> {
             // EOR A, (dp+X)
             0x47 => {
                 let dp = self.fetch_byte();
-                let ptr_addr = self.direct_page() | (dp.wrapping_add(self.x) as u16);
-                let addr_lo = self.read(ptr_addr);
-                let addr_hi = self.read(ptr_addr.wrapping_add(1));
+                let ptr_index = dp.wrapping_add(self.x);
+                let addr_lo = self.read(self.direct_page() | (ptr_index as u16));
+                let addr_hi = self.read(self.direct_page() | (ptr_index.wrapping_add(1) as u16));
                 let addr = ((addr_hi as u16) << 8) | (addr_lo as u16);
                 self.a ^= self.read(addr);
                 self.update_nz(self.a);
@@ -2444,7 +2444,7 @@ impl<M: MemorySpc700> CpuSpc700<M> {
                 let dp = self.fetch_byte() as u16;
                 let dp_addr = self.direct_page() | dp;
                 let addr_lo = self.read(dp_addr);
-                let addr_hi = self.read(dp_addr.wrapping_add(1));
+                let addr_hi = self.read(self.direct_page() | (dp.wrapping_add(1) & 0xFF));
                 let base = ((addr_hi as u16) << 8) | (addr_lo as u16);
                 let addr = base.wrapping_add(self.y as u16);
                 self.a ^= self.read(addr);
@@ -2497,7 +2497,7 @@ impl<M: MemorySpc700> CpuSpc700<M> {
                 let dp = self.fetch_byte() as u16;
                 let dp_addr = self.direct_page() | dp;
                 let addr_lo = self.read(dp_addr);
-                let addr_hi = self.read(dp_addr.wrapping_add(1));
+                let addr_hi = self.read(self.direct_page() | (dp.wrapping_add(1) & 0xFF));
                 let addr = ((addr_hi as u16) << 8) | (addr_lo as u16);
                 let val = self.read(addr);
                 let result = self.a.wrapping_sub(val);
@@ -2516,9 +2516,9 @@ impl<M: MemorySpc700> CpuSpc700<M> {
             // CMP A, (dp+X)
             0x67 => {
                 let dp = self.fetch_byte();
-                let ptr_addr = self.direct_page() | (dp.wrapping_add(self.x) as u16);
-                let addr_lo = self.read(ptr_addr);
-                let addr_hi = self.read(ptr_addr.wrapping_add(1));
+                let ptr_index = dp.wrapping_add(self.x);
+                let addr_lo = self.read(self.direct_page() | (ptr_index as u16));
+                let addr_hi = self.read(self.direct_page() | (ptr_index.wrapping_add(1) as u16));
                 let addr = ((addr_hi as u16) << 8) | (addr_lo as u16);
                 let val = self.read(addr);
                 let result = self.a.wrapping_sub(val);
@@ -2585,7 +2585,7 @@ impl<M: MemorySpc700> CpuSpc700<M> {
                 let dp = self.fetch_byte() as u16;
                 let dp_addr = self.direct_page() | dp;
                 let addr_lo = self.read(dp_addr);
-                let addr_hi = self.read(dp_addr.wrapping_add(1));
+                let addr_hi = self.read(self.direct_page() | (dp.wrapping_add(1) & 0xFF));
                 let addr = ((addr_hi as u16) << 8) | (addr_lo as u16);
                 self.write(addr, self.a);
                 5
@@ -2595,7 +2595,7 @@ impl<M: MemorySpc700> CpuSpc700<M> {
                 let dp = self.fetch_byte() as u16;
                 let dp_addr = self.direct_page() | dp;
                 let addr_lo = self.read(dp_addr);
-                let addr_hi = self.read(dp_addr.wrapping_add(1));
+                let addr_hi = self.read(self.direct_page() | (dp.wrapping_add(1) & 0xFF));
                 let base = ((addr_hi as u16) << 8) | (addr_lo as u16);
                 let addr = base.wrapping_add(self.y as u16);
                 let val = self.read(addr);
@@ -2751,9 +2751,9 @@ impl<M: MemorySpc700> CpuSpc700<M> {
             // MOV A, (dp)
             0xE7 => {
                 let dp = self.fetch_byte();
-                let ptr_addr = self.direct_page() | (dp.wrapping_add(self.x) as u16);
-                let addr_lo = self.read(ptr_addr);
-                let addr_hi = self.read(ptr_addr.wrapping_add(1));
+                let ptr_index = dp.wrapping_add(self.x);
+                let addr_lo = self.read(self.direct_page() | (ptr_index as u16));
+                let addr_hi = self.read(self.direct_page() | (ptr_index.wrapping_add(1) as u16));
                 let addr = ((addr_hi as u16) << 8) | (addr_lo as u16);
                 self.a = self.read(addr);
                 self.update_nz(self.a);
@@ -2874,9 +2874,9 @@ impl<M: MemorySpc700> CpuSpc700<M> {
             // MOV [dp+X], A - indexed indirect store
             0xC7 => {
                 let dp = self.fetch_byte();
-                let ptr_addr = self.direct_page() | (dp.wrapping_add(self.x) as u16);
-                let addr_lo = self.read(ptr_addr);
-                let addr_hi = self.read(ptr_addr.wrapping_add(1));
+                let ptr_index = dp.wrapping_add(self.x);
+                let addr_lo = self.read(self.direct_page() | (ptr_index as u16));
+                let addr_hi = self.read(self.direct_page() | (ptr_index.wrapping_add(1) as u16));
                 let addr = ((addr_hi as u16) << 8) | (addr_lo as u16);
                 self.write(addr, self.a);
                 7
