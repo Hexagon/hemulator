@@ -21,23 +21,23 @@ emu_chip8 = { path = "../../systems/chip8" }
 emu_colecovision = { path = "../../systems/colecovision" }
 emu_sg1000 = { path = "../../systems/sg1000" }
 emu_ps1 = { path = "../../systems/ps1" }
-rodio = "0.17"
+rodio = "0.22"
 log = "0.4"
-env_logger = "0.10"
+env_logger = "0.11"
 serde = { version = "1.0", features = ["derive"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 png = "0.18"
 serde_json = "1.0"
 sha2 = "0.10"
 base64 = "0.22"
-rfd = "0.14"
-open = "3.2"
-rand = "0.8"
+open = "5.0"
+rfd = "0.17"
+rand = "0.10"
 chrono = "0.4"
 
 # Window and rendering support
-sdl2 = { version = "0.37", features = ["bundled"] }
-glow = "0.13"
+sdl2 = { version = "0.38", features = ["bundled"] }
+glow = "0.16"
 bytemuck = "1.14"
 
 # egui support
