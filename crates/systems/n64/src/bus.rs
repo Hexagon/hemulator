@@ -11,6 +11,7 @@ use crate::vi::VideoInterface;
 use crate::N64Error;
 use emu_core::cpu_mips_r4300i::MemoryMips;
 use emu_core::logging::{log, LogCategory, LogLevel};
+use emu_core::types::Frame;
 
 /// N64 memory bus
 pub struct N64Bus {
@@ -39,6 +40,11 @@ pub struct N64Bus {
     tlb: Tlb,
     /// Entry point from ROM header (set during cartridge load)
     entry_point: Option<u64>,
+    /// PI DMA addresses
+    pi_dram_addr: u32,
+    pi_cart_addr: u32,
+    /// SI DMA address
+    si_dram_addr: u32,
 }
 
 impl N64Bus {
@@ -59,6 +65,9 @@ impl N64Bus {
             ai: AudioInterface::new(),
             tlb: Tlb::new(),
             entry_point: None,
+            pi_dram_addr: 0,
+            pi_cart_addr: 0,
+            si_dram_addr: 0,
         };
 
         // Initialize PIF ROM
@@ -255,14 +264,9 @@ impl N64Bus {
     /// Execute pending RSP task if RSP is not halted
     /// Returns true if an SP interrupt should be triggered
     pub fn process_rsp_task(&mut self) -> bool {
-        use emu_core::logging::{log, LogCategory, LogLevel};
-        log(LogCategory::PPU, LogLevel::Info, || {
-            "N64 Bus: process_rsp_task() called".to_string()
-        });
-
-        // Clone RDRAM reference to avoid borrow checker issues
-        let rdram_clone = self.rdram.clone();
-        let (_cycles, should_interrupt) = self.rsp.execute_task(&rdram_clone, &mut self.rdp);
+        // Use disjoint field borrows to avoid cloning 4MB RDRAM
+        // Rust allows borrowing separate struct fields simultaneously
+        let (_cycles, should_interrupt) = self.rsp.execute_task(&self.rdram, &mut self.rdp);
 
         if should_interrupt {
             log(LogCategory::PPU, LogLevel::Info, || {
@@ -282,17 +286,109 @@ impl N64Bus {
         }
     }
 
-    fn translate_address(&self, addr: u32) -> u32 {
-        // Use TLB for address translation
-        // Convert 32-bit address to 64-bit for TLB lookup
-        let virt_addr = addr as u64;
+    /// Read the framebuffer from RDRAM using VI registers
+    ///
+    /// This is the primary display method for N64 emulation. The game renders
+    /// to a framebuffer in RDRAM (via CPU, RSP, or RDP), and the VI reads from
+    /// RDRAM at VI_ORIGIN to produce video output.
+    ///
+    /// Returns `Some(Frame)` if VI is enabled and has a valid framebuffer,
+    /// `None` if VI is disabled or origin is 0.
+    pub fn read_vi_framebuffer(&self) -> Option<Frame> {
+        // Check if VI is enabled (color depth bits != 0)
+        if !self.vi.is_enabled() {
+            return None;
+        }
 
+        let origin = self.vi.get_framebuffer_origin() as usize;
+        let width = self.vi.get_width() as usize;
+        let height = self.vi.get_display_height() as usize;
+        let color_depth = self.vi.get_color_depth();
+
+        // Validate parameters
+        if origin == 0 || width == 0 || height == 0 || width > 640 || height > 480 {
+            return None;
+        }
+
+        // Calculate bytes per pixel based on color depth
+        let bytes_per_pixel = match color_depth {
+            2 => 2, // 16-bit RGBA5551
+            3 => 4, // 32-bit RGBA8888
+            _ => return None,
+        };
+
+        let framebuffer_size = width * height * bytes_per_pixel;
+
+        // Bounds check against RDRAM
+        if origin + framebuffer_size > self.rdram.len() {
+            return None;
+        }
+
+        // Create frame with the framebuffer dimensions
+        let mut frame = Frame::new(width as u32, height as u32);
+
+        match color_depth {
+            2 => {
+                // 16-bit RGBA5551 → ARGB8888
+                for y in 0..height {
+                    for x in 0..width {
+                        let offset = origin + (y * width + x) * 2;
+                        let pixel =
+                            u16::from_be_bytes([self.rdram[offset], self.rdram[offset + 1]]);
+                        // N64 16-bit format: RRRRR GGGGG BBBBB A
+                        let r = ((pixel >> 11) & 0x1F) as u32;
+                        let g = ((pixel >> 6) & 0x1F) as u32;
+                        let b = ((pixel >> 1) & 0x1F) as u32;
+                        // Convert 5-bit to 8-bit
+                        let r8 = (r << 3) | (r >> 2);
+                        let g8 = (g << 3) | (g >> 2);
+                        let b8 = (b << 3) | (b >> 2);
+                        let argb = 0xFF000000 | (r8 << 16) | (g8 << 8) | b8;
+                        frame.pixels[y * width + x] = argb;
+                    }
+                }
+            }
+            3 => {
+                // 32-bit RGBA8888 → ARGB8888
+                for y in 0..height {
+                    for x in 0..width {
+                        let offset = origin + (y * width + x) * 4;
+                        let r = self.rdram[offset] as u32;
+                        let g = self.rdram[offset + 1] as u32;
+                        let b = self.rdram[offset + 2] as u32;
+                        let _a = self.rdram[offset + 3] as u32;
+                        let argb = 0xFF000000 | (r << 16) | (g << 8) | b;
+                        frame.pixels[y * width + x] = argb;
+                    }
+                }
+            }
+            _ => return None,
+        }
+
+        Some(frame)
+    }
+
+    /// Get immutable reference to RDRAM (for direct framebuffer access)
+    #[allow(dead_code)] // Reserved for future use
+    pub fn rdram(&self) -> &[u8] {
+        &self.rdram
+    }
+
+    #[inline(always)]
+    fn translate_address(&self, addr: u32) -> u32 {
+        // Fast path for KSEG0 (0x80000000-0x9FFFFFFF) and KSEG1 (0xA0000000-0xBFFFFFFF)
+        // These are direct-mapped segments that bypass TLB entirely.
+        // Most N64 code runs in KSEG0/KSEG1, so this is the hot path.
+        if (0x8000_0000..0xC000_0000).contains(&addr) {
+            return addr & 0x1FFF_FFFF;
+        }
+
+        // KUSEG (0x00000000-0x7FFFFFFF) and KSSEG/KSEG3 use TLB
+        let virt_addr = addr as u64;
         match self.tlb.translate(virt_addr) {
             Some((phys_addr, _is_cached)) => phys_addr,
             None => {
-                // TLB miss - fallback to simple unmapped translation
-                // This handles KSEG0/KSEG1 which should already be handled by TLB,
-                // but provides a safety net
+                // TLB miss fallback
                 addr & 0x1FFFFFFF
             }
         }
@@ -308,13 +404,6 @@ impl N64Bus {
 impl MemoryMips for N64Bus {
     fn read_byte(&self, addr: u32) -> u8 {
         let phys_addr = self.translate_address(addr);
-
-        log(LogCategory::Bus, LogLevel::Trace, || {
-            format!(
-                "N64 Bus: Read byte from 0x{:08X} (phys: 0x{:08X})",
-                addr, phys_addr
-            )
-        });
 
         match phys_addr {
             // RDRAM (0x00000000 - 0x003FFFFF)
@@ -364,13 +453,6 @@ impl MemoryMips for N64Bus {
     fn read_word(&self, addr: u32) -> u32 {
         let phys_addr = self.translate_address(addr);
 
-        log(LogCategory::Bus, LogLevel::Trace, || {
-            format!(
-                "N64 Bus: Read word from 0x{:08X} (phys: 0x{:08X})",
-                addr, phys_addr
-            )
-        });
-
         match phys_addr {
             // RDRAM
             0x0000_0000..=0x003F_FFFF => {
@@ -406,6 +488,90 @@ impl MemoryMips for N64Bus {
             0x0450_0000..=0x0450_0017 => {
                 let offset = phys_addr & 0x1F;
                 self.ai.read_register(offset)
+            }
+            // PI registers (0x04600000 - 0x046FFFFF)
+            // Peripheral Interface - handles DMA between ROM and RDRAM
+            0x0460_0000..=0x046F_FFFF => {
+                let offset = phys_addr & 0xFF;
+                match offset {
+                    0x00 => 0,    // PI_DRAM_ADDR - DRAM address for DMA
+                    0x04 => 0,    // PI_CART_ADDR - Cart address for DMA
+                    0x08 => 0,    // PI_RD_LEN - Read DMA length
+                    0x0C => 0,    // PI_WR_LEN - Write DMA length
+                    0x10 => 0x00, // PI_STATUS - 0 means ready (no DMA in progress)
+                    0x14 => 0xFF, // PI_BSD_DOM1_LAT - Domain 1 latency
+                    0x18 => 0xFF, // PI_BSD_DOM1_PWD - Domain 1 pulse width
+                    0x1C => 0x0F, // PI_BSD_DOM1_PGS - Domain 1 page size
+                    0x20 => 0x03, // PI_BSD_DOM1_RLS - Domain 1 release
+                    0x24 => 0xFF, // PI_BSD_DOM2_LAT - Domain 2 latency
+                    0x28 => 0xFF, // PI_BSD_DOM2_PWD - Domain 2 pulse width
+                    0x2C => 0x0F, // PI_BSD_DOM2_PGS - Domain 2 page size
+                    0x30 => 0x03, // PI_BSD_DOM2_RLS - Domain 2 release
+                    _ => 0,
+                }
+            }
+            // RI registers (0x04700000 - 0x047FFFFF)
+            // RDRAM Interface - configures RDRAM timing and parameters
+            0x0470_0000..=0x047F_FFFF => {
+                let offset = phys_addr & 0xFF;
+                match offset {
+                    0x00 => 0x0E,    // RI_MODE - Operating mode
+                    0x04 => 0x40,    // RI_CONFIG - Current config
+                    0x08 => 0x14,    // RI_CURRENT_LOAD
+                    0x0C => 0x00,    // RI_SELECT - Bank select
+                    0x10 => 0x63634, // RI_REFRESH - Refresh rate
+                    0x14 => 0x00,    // RI_LATENCY
+                    0x18 => 0x00,    // RI_RERROR - Read error
+                    0x1C => 0x00,    // RI_WERROR - Write error
+                    _ => 0,
+                }
+            }
+            // SI registers (0x04800000 - 0x048FFFFF)
+            // Serial Interface - PIF/controller communication
+            0x0480_0000..=0x048F_FFFF => {
+                let offset = phys_addr & 0x1F;
+                match offset {
+                    0x00 => 0,    // SI_DRAM_ADDR
+                    0x04 => 0,    // SI_PIF_ADDR_RD64B
+                    0x10 => 0,    // SI_PIF_ADDR_WR64B
+                    0x18 => 0x00, // SI_STATUS - 0 means ready
+                    _ => 0,
+                }
+            }
+            // RDRAM config registers (0x03F00000 - 0x03FFFFFF)
+            0x03F0_0000..=0x03FF_FFFF => {
+                let offset = phys_addr & 0x3F;
+                match offset {
+                    0x00 => 0x0101_0101, // RDRAM_CONFIG - RDRAM present
+                    0x04 => 0x0080_0000, // RDRAM_DEVICE_ID
+                    0x08 => 0x0000_0000, // RDRAM_DELAY
+                    0x0C => 0x0000_0000, // RDRAM_MODE
+                    0x10 => 0x0000_0000, // RDRAM_REF_INTERVAL
+                    0x14 => 0x0000_0000, // RDRAM_REF_ROW
+                    0x18 => 0x0000_0000, // RDRAM_RAS_INTERVAL
+                    0x1C => 0x0000_0000, // RDRAM_MIN_INTERVAL
+                    0x20 => 0x0000_0000, // RDRAM_ADDR_SELECT
+                    0x24 => 0x0000_0000, // RDRAM_DEVICE_MANUF
+                    _ => 0,
+                }
+            }
+            // SP DMEM (0x04000000 - 0x04000FFF)
+            0x0400_0000..=0x0400_0FFF => {
+                let offset = phys_addr & 0xFFF;
+                let b0 = self.rsp.read_dmem(offset) as u32;
+                let b1 = self.rsp.read_dmem(offset + 1) as u32;
+                let b2 = self.rsp.read_dmem(offset + 2) as u32;
+                let b3 = self.rsp.read_dmem(offset + 3) as u32;
+                (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
+            }
+            // SP IMEM (0x04001000 - 0x04001FFF)
+            0x0400_1000..=0x0400_1FFF => {
+                let offset = phys_addr & 0xFFF;
+                let b0 = self.rsp.read_imem(offset) as u32;
+                let b1 = self.rsp.read_imem(offset + 1) as u32;
+                let b2 = self.rsp.read_imem(offset + 2) as u32;
+                let b3 = self.rsp.read_imem(offset + 3) as u32;
+                (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
             }
             // Cartridge SRAM / FlashRAM (0x08000000 - 0x0FFFFFFF, cartridge domain 2)
             0x0800_0000..=0x0FFF_FFFF => {
@@ -454,13 +620,6 @@ impl MemoryMips for N64Bus {
     fn write_byte(&mut self, addr: u32, val: u8) {
         let phys_addr = self.translate_address(addr);
 
-        log(LogCategory::Bus, LogLevel::Trace, || {
-            format!(
-                "N64 Bus: Write byte 0x{:02X} to 0x{:08X} (phys: 0x{:08X})",
-                val, addr, phys_addr
-            )
-        });
-
         match phys_addr {
             // RDRAM
             0x0000_0000..=0x003F_FFFF => {
@@ -502,13 +661,6 @@ impl MemoryMips for N64Bus {
 
     fn write_word(&mut self, addr: u32, val: u32) {
         let phys_addr = self.translate_address(addr);
-
-        log(LogCategory::Bus, LogLevel::Trace, || {
-            format!(
-                "N64 Bus: Write word 0x{:08X} to 0x{:08X} (phys: 0x{:08X})",
-                val, addr, phys_addr
-            )
-        });
 
         match phys_addr {
             // RDRAM
@@ -563,6 +715,150 @@ impl MemoryMips for N64Bus {
                         "N64 Bus: AI interrupt triggered".to_string()
                     });
                 }
+            }
+            // PI registers (0x04600000 - 0x046FFFFF)
+            // Peripheral Interface - handles DMA between ROM and RDRAM
+            0x0460_0000..=0x046F_FFFF => {
+                let offset = phys_addr & 0xFF;
+                match offset {
+                    0x00 => {
+                        // PI_DRAM_ADDR
+                        self.pi_dram_addr = val & 0x00FF_FFFF;
+                    }
+                    0x04 => {
+                        // PI_CART_ADDR
+                        self.pi_cart_addr = val;
+                    }
+                    0x08 => {
+                        // PI_RD_LEN - DMA from RDRAM to cart (read)
+                        // Length is value + 1
+                        let len = (val & 0x00FF_FFFF) + 1;
+                        log(LogCategory::Bus, LogLevel::Info, || {
+                            format!(
+                                "N64 PI: DMA read RDRAM 0x{:08X} -> Cart 0x{:08X}, len=0x{:X}",
+                                self.pi_dram_addr, self.pi_cart_addr, len
+                            )
+                        });
+                        // Read DMA: RDRAM -> Cart (not commonly used by games)
+                    }
+                    0x0C => {
+                        // PI_WR_LEN - DMA from cart to RDRAM (write)
+                        // Length is value + 1
+                        let len = ((val & 0x00FF_FFFF) + 1) as usize;
+                        let dram_addr = self.pi_dram_addr as usize;
+                        let cart_addr = self.pi_cart_addr;
+
+                        log(LogCategory::Bus, LogLevel::Info, || {
+                            format!(
+                                "N64 PI: DMA write Cart 0x{:08X} -> RDRAM 0x{:08X}, len=0x{:X}",
+                                cart_addr, dram_addr, len
+                            )
+                        });
+
+                        // Perform the DMA: copy from cartridge ROM to RDRAM
+                        if let Some(ref cart) = self.cartridge {
+                            let cart_offset = if cart_addr >= 0x1000_0000 {
+                                cart_addr - 0x1000_0000
+                            } else {
+                                cart_addr
+                            };
+                            for i in 0..len {
+                                let src = cart_offset as usize + i;
+                                let dst = dram_addr + i;
+                                if dst < self.rdram.len() {
+                                    self.rdram[dst] = cart.read(src as u32);
+                                }
+                            }
+                        }
+
+                        // Trigger PI interrupt when DMA completes
+                        self.mi.set_interrupt(crate::mi::MI_INTR_PI);
+                    }
+                    0x10 => {
+                        // PI_STATUS - writing bit 1 clears PI interrupt
+                        if val & 0x02 != 0 {
+                            self.mi.clear_interrupt(crate::mi::MI_INTR_PI);
+                        }
+                    }
+                    _ => {
+                        // BSD domain timing registers - accept but ignore
+                    }
+                }
+            }
+            // RI registers (0x04700000 - 0x047FFFFF)
+            // RDRAM Interface - accept writes silently
+            0x0470_0000..=0x047F_FFFF => {
+                // RI register writes are accepted but ignored for now
+            }
+            // SI registers (0x04800000 - 0x048FFFFF)
+            // Serial Interface - PIF/controller communication
+            0x0480_0000..=0x048F_FFFF => {
+                let offset = phys_addr & 0x1F;
+                match offset {
+                    0x00 => {
+                        // SI_DRAM_ADDR
+                        self.si_dram_addr = val & 0x00FF_FFFF;
+                    }
+                    0x04 => {
+                        // SI_PIF_ADDR_RD64B - DMA: PIF -> RDRAM
+                        let dram_addr = self.si_dram_addr as usize;
+                        log(LogCategory::Bus, LogLevel::Debug, || {
+                            format!("N64 SI: DMA PIF -> RDRAM 0x{:08X}", dram_addr)
+                        });
+                        // Copy 64 bytes from PIF RAM to RDRAM
+                        for i in 0..64 {
+                            if dram_addr + i < self.rdram.len() {
+                                self.rdram[dram_addr + i] = self.pif.read_ram(i as u32);
+                            }
+                        }
+                        // Trigger SI interrupt
+                        self.mi.set_interrupt(crate::mi::MI_INTR_SI);
+                    }
+                    0x10 => {
+                        // SI_PIF_ADDR_WR64B - DMA: RDRAM -> PIF
+                        let dram_addr = self.si_dram_addr as usize;
+                        log(LogCategory::Bus, LogLevel::Debug, || {
+                            format!("N64 SI: DMA RDRAM 0x{:08X} -> PIF", dram_addr)
+                        });
+                        // Copy 64 bytes from RDRAM to PIF RAM
+                        for i in 0..64 {
+                            if dram_addr + i < self.rdram.len() {
+                                self.pif.write_ram(i as u32, self.rdram[dram_addr + i]);
+                            }
+                        }
+                        // Process PIF commands (controller/EEPROM)
+                        self.pif.process_commands();
+                        // Trigger SI interrupt
+                        self.mi.set_interrupt(crate::mi::MI_INTR_SI);
+                    }
+                    0x18 => {
+                        // SI_STATUS - writing clears SI interrupt
+                        self.mi.clear_interrupt(crate::mi::MI_INTR_SI);
+                    }
+                    _ => {}
+                }
+            }
+            // RDRAM config registers (0x03F00000 - 0x03FFFFFF)
+            0x03F0_0000..=0x03FF_FFFF => {
+                // RDRAM config writes accepted but ignored
+            }
+            // SP DMEM (0x04000000 - 0x04000FFF)
+            0x0400_0000..=0x0400_0FFF => {
+                let offset = phys_addr & 0xFFF;
+                let bytes = val.to_be_bytes();
+                self.rsp.write_dmem(offset, bytes[0]);
+                self.rsp.write_dmem(offset + 1, bytes[1]);
+                self.rsp.write_dmem(offset + 2, bytes[2]);
+                self.rsp.write_dmem(offset + 3, bytes[3]);
+            }
+            // SP IMEM (0x04001000 - 0x04001FFF)
+            0x0400_1000..=0x0400_1FFF => {
+                let offset = phys_addr & 0xFFF;
+                let bytes = val.to_be_bytes();
+                self.rsp.write_imem(offset, bytes[0]);
+                self.rsp.write_imem(offset + 1, bytes[1]);
+                self.rsp.write_imem(offset + 2, bytes[2]);
+                self.rsp.write_imem(offset + 3, bytes[3]);
             }
             // Cartridge SRAM / FlashRAM (0x08000000 - 0x0FFFFFFF)
             0x0800_0000..=0x0FFF_FFFF => {

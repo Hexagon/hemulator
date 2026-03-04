@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use emu_core::cpu_6502::{Cpu6502, Memory6502};
 
 /// Simple memory implementation for benchmarking
@@ -66,7 +66,7 @@ fn bench_cpu_step(c: &mut Criterion) {
             let mut cpu = Cpu6502::new(BenchMemory::new());
             cpu.reset();
             cpu.step();
-            black_box(cpu.a);
+            std::hint::black_box(cpu.a);
         });
     });
 
@@ -87,7 +87,7 @@ fn bench_cpu_multiple_steps(c: &mut Criterion) {
                     for _ in 0..count {
                         cpu.step();
                     }
-                    black_box(cpu.cycles);
+                    std::hint::black_box(cpu.cycles);
                 });
             },
         );
@@ -108,7 +108,7 @@ fn bench_cpu_addressing_modes(c: &mut Criterion) {
             for _ in 0..100 {
                 cpu.step();
             }
-            black_box(cpu.a);
+            std::hint::black_box(cpu.a);
         });
     });
 
@@ -120,7 +120,7 @@ fn bench_cpu_reset(c: &mut Criterion) {
         let mut cpu = Cpu6502::new(BenchMemory::new());
         b.iter(|| {
             cpu.reset();
-            black_box(cpu.pc);
+            std::hint::black_box(cpu.pc);
         });
     });
 }

@@ -18,7 +18,7 @@ jobs:
           - arch: i686
             rust_target: i686-pc-windows-msvc
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
@@ -71,7 +71,7 @@ jobs:
             rust_target: i686-unknown-linux-gnu
             deb_arch: i386
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install system dependencies
         run: |
