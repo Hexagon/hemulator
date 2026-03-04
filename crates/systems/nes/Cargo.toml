@@ -11,7 +11,7 @@ thiserror = "1.0"
 crc32fast = "1.4"
 
 # OpenGL dependencies (optional)
-glow = { version = "0.13", optional = true }
+glow = { version = "0.16", optional = true }
 
 [features]
 default = []
