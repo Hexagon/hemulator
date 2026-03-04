@@ -199,14 +199,76 @@ All of this is **debug code that should be removed** once the issue is resolved:
 ### Other
 - `config.json`: `log_rate_limit` set to 10000000 (should be 20)
 
+## Code Review Findings (March 4, 2026 session)
+
+### Finding 1: `INC dp` (opcode $AB) missing `direct_page()` call
+
+In `crates/core/src/cpu_spc700.rs` line ~605, opcode $AB (`INC dp`) does:
+```rust
+0xAB => {
+    let addr = self.fetch_byte() as u16;  // ← BUG: no direct_page()!
+    let val = self.memory.read(addr);
+    ...
+}
+```
+It should be `let addr = self.direct_page() | (self.fetch_byte() as u16);`. This means when the PSW P flag is set (direct page = $0100), `INC $15` would write to $0015 instead of $0115.
+
+**Impact on current bug**: Likely **not** the root cause since the N-SPC engine probably runs with P=0 (direct page = $0000), but it IS a real bug that needs fixing. May affect other games.
+
+### Finding 2: Sync timing creates split-read race condition (LIKELY ROOT CAUSE)
+
+The `sync_spc700()` mechanism in `bus.rs` (line ~397) only runs the SPC700 when the main CPU accesses APU ports ($2140–$2143). Between port accesses, cycles accumulate in `spc700_pending_cycles`. When the main CPU writes a multi-byte value across ports (e.g., destination address to ports 2+3), the sequence is:
+
+1. Main CPU writes low byte to $2142 → `sync_spc700()` flushes pending cycles, THEN writes port 2
+2. Main CPU writes high byte to $2143 → `sync_spc700()` flushes pending cycles, THEN writes port 3
+
+**The problem**: Between steps 1 and 2, `sync_spc700()` runs all accumulated SPC700 cycles. During that batch, if the SPC700 reaches the block header read at $1325–$132B:
+- `MOV A, $00F6` at $1325 reads port 2 = **new low byte** (just written)
+- `MOV Y, $00F7` at $1328 reads port 3 = **old high byte** (not yet written!)
+- `MOVW $14, YA` at $132B stores a **corrupt hybrid address**
+
+This is a classic **torn read** / split-write race. The SPC700 sees half-old, half-new header data.
+
+**How this produces $1300**: If port 2 = $00 (new, correct for $8100 low byte) and port 3 = $13 (some stale/intermediate value), dest becomes $1300. OR if the race hits at a different point in the upload sequence where ports contain residual values.
+
+### Finding 3: BNE branch offset is correct
+
+Opcode $D0 (BNE) at `cpu_spc700.rs` line ~265 correctly handles signed offsets:
+```rust
+let offset = self.fetch_byte() as i8;
+self.pc = self.pc.wrapping_add(offset as u16);
+```
+`$FB` as `i8` = -5, so `$130A + (-5) = $1305` ✓. This is NOT a bug.
+
+### Finding 4: `MOV [dp]+Y, A` ($D7) looks correct
+
+Opcode $D7 at line ~593 correctly reads the 16-bit pointer from direct page with wrapping, then adds Y. The implementation looks correct — the bug is in the **pointer value** (ZP $14-$15), not in the instruction itself.
+
+### Finding 5: Cycle ratio calculation
+
+`bus.rs` line ~374: `SPC700 cycles = CPU cycles * 1024 / 3580`
+
+This gives ratio ~0.286, which matches the real hardware ratio (1.024 MHz / 3.58 MHz). The fractional accumulator prevents drift. The ratio itself appears correct, but the **batch execution model** is the issue — cycles are accumulated and run in one big burst only on port access.
+
+## Proposed Fix
+
+### Option A: Catch-up sync on every write (minimal change)
+Ensure ALL four port writes for a block header complete before running the SPC700. This could be done by:
+- NOT calling `sync_spc700()` on port writes, only on port reads
+- Or adding a small "write buffer" that delays SPC700 execution until after the full header is written
+
+### Option B: Run SPC700 more frequently (better accuracy)
+Instead of only syncing on port access, run the SPC700 periodically (e.g., every N main CPU cycles) in `add_cpu_cycles()`. This prevents large cycle batches and keeps the two processors more tightly synchronized. This is closer to how reference emulators (ares/bsnes) work — they sync the SPC700 on every memory access or at regular intervals.
+
+### Option C: Deferred port visibility (hardware-accurate)
+Model the actual hardware latching: when the main CPU writes to a port, the value doesn't become visible to the SPC700 immediately. Instead, buffer the write and make it visible only after the SPC700 has been synced past the write cycle. This is the most accurate but most complex approach.
+
+**Recommended**: Start with **Option B** — run SPC700 in `add_cpu_cycles()` directly instead of accumulating. This is simple, accurate, and solves the race condition by keeping the two CPUs in tighter lockstep.
+
 ## Next Steps
 
-1. **Investigate the block transition timing**: The first 80-byte block (dest=$8000) finishes, and the SPC700 should read the second header (dest=$8100) from ports 2–3. Trace the exact port values at the $1325 MOVW to see if $1300 comes from reading stale/incorrect port data, or from the `INC $15` path incorrectly wrapping.
-
-2. **Check if the issue is a main CPU timing bug**: The main CPU upload routine may not be writing the second block header fast enough. Add tracing to the main CPU's $2142/$2143 writes to see when the new destination address is written relative to when the SPC700 reads it.
-
-3. **Compare with reference emulator**: Check how ares/bsnes handles the timing of the SPC700 relative to the main CPU during uploads. The `sync_spc700()` call in `bus.rs` runs pending SPC700 cycles before port access, but the ratio or accumulation may be off.
-
-4. **Alternative theory — opcode $D0 (BNE) with wrap**: The `D0 FB` at $1308 branches backward by 5 to $1305. Verify the signed offset is being calculated correctly for negative branch offsets in the SPC700 BNE implementation.
-
-5. **Clean up debug infrastructure** once the root cause is resolved (see list above).
+1. **Fix `INC dp` ($AB)**: Add `direct_page()` call — simple, independent bug fix
+2. **Audit all dp-addressing opcodes**: Grep for `0xAB|0xBB|0xCB|0x8B|0x4B` etc. to find other opcodes that may be missing `direct_page()`
+3. **Implement Option B**: Move SPC700 execution from deferred-batch into `add_cpu_cycles()` so it runs incrementally
+4. **Verify fix**: Run Super Mario World, confirm second upload completes and game boots
+5. **Clean up debug infrastructure** once the issue is resolved (see list above)
