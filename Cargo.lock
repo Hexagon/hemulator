@@ -656,7 +656,7 @@ checksum = "6420863ea1d90e750f75075231a260030ad8a9f30a7cef82cdc966492dc4c4eb"
 dependencies = [
  "bytemuck",
  "egui",
- "glow 0.16.0",
+ "glow",
  "log",
  "memoffset",
  "profiling",
@@ -718,7 +718,7 @@ name = "emu_colecovision"
 version = "0.1.0"
 dependencies = [
  "emu_core",
- "glow 0.13.1",
+ "glow",
  "serde",
  "serde_json",
  "thiserror",
@@ -770,7 +770,7 @@ dependencies = [
  "emu_sms",
  "emu_snes",
  "env_logger",
- "glow 0.13.1",
+ "glow",
  "hemu_gba",
  "image",
  "log",
@@ -793,7 +793,7 @@ dependencies = [
  "bytemuck",
  "crc32fast",
  "emu_core",
- "glow 0.13.1",
+ "glow",
  "serde",
  "serde_json",
  "thiserror",
@@ -806,7 +806,7 @@ dependencies = [
  "crc32fast",
  "criterion",
  "emu_core",
- "glow 0.13.1",
+ "glow",
  "serde",
  "serde_json",
  "thiserror",
@@ -847,7 +847,7 @@ name = "emu_sms"
 version = "0.1.0"
 dependencies = [
  "emu_core",
- "glow 0.13.1",
+ "glow",
  "serde",
  "serde_json",
  "thiserror",
@@ -1064,18 +1064,6 @@ name = "glob"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
-
-[[package]]
-name = "glow"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd348e04c43b32574f2de31c8bb397d96c9fcfa1371bd4ca6d8bdc464ab121b1"
-dependencies = [
- "js-sys",
- "slotmap",
- "wasm-bindgen",
- "web-sys",
-]
 
 [[package]]
 name = "glow"
