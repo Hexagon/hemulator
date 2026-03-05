@@ -656,12 +656,12 @@ impl System for NesSystem {
                         // The horizontal bits were just restored from t at dot 257 of the previous scanline,
                         // and vertical bits are correct for the current scanline.
                         //
-                        // On odd frames, dot 0 of scanline 0 is skipped. Also, due to CPU instruction
-                        // boundaries, the frame may start at various dots within scanline 0.
+                        // Due to CPU instruction boundaries, the frame may start at various dots
+                        // within scanline 0 (the PPU may have ticked past dot 0 before we check).
                         // We trigger rendering when:
                         // 1. dot_before == 0 (standard trigger for all scanlines)
-                        // 2. For scanline 0: any dot if we haven't rendered it yet (catches odd frames
-                        //    and frames starting mid-scanline)
+                        // 2. For scanline 0: any dot if we haven't rendered it yet (catches cases
+                        //    where CPU instruction boundaries cause us to miss dot 0)
                         // We use rendered_scanlines to prevent double-rendering.
                         let should_render = if scanline_before < 240
                             && scanline_before as u32 >= rendered_scanlines

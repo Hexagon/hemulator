@@ -159,8 +159,9 @@ pub struct Ppu {
     /// Cycle-accurate timing: current dot/pixel within scanline (0-340)
     /// Each scanline has 341 dots (0-340)
     dot: Cell<u16>,
-    /// Cycle-accurate timing: odd frame flag for skipping cycle on scanline 0
-    /// On odd frames, dot 0 of scanline 0 is skipped (goes directly from -1,340 to 0,1)
+    /// Cycle-accurate timing: odd frame flag for skipping cycle on pre-render scanline
+    /// On odd frames with rendering enabled, dot 340 of the pre-render scanline is skipped.
+    /// The PPU jumps from (261, 339) directly to (0, 0).
     odd_frame: Cell<bool>,
     /// Monotonic frame counter (increments when scanline wraps 261 -> 0).
     frame_counter: Cell<u64>,
@@ -169,8 +170,14 @@ pub struct Ppu {
     timing_mode: TimingMode,
     /// Cycle-accurate sprite 0 hit: stores the (scanline, X position) where hit should trigger.
     /// This is set during render_scanline() and the flag is actually set during tick()
-    /// when we reach the corresponding dot position (X + 2 to account for PPU pipeline).
+    /// when we reach the corresponding dot position (X + 1 to match hardware).
     sprite_0_hit_pending: Cell<Option<(u16, u16)>>,
+    /// Internal OAM evaluation index for OAMDATA reads during rendering.
+    /// During sprite evaluation (dots 65-256 of visible scanlines), the PPU reads through
+    /// primary OAM and this tracks the current byte being read. Reads of $2004 during
+    /// rendering return the value the PPU is internally reading, not OAM[OAMADDR].
+    /// Reference: NESdev wiki PPU sprite evaluation, foobles/nes-ppu (CC-BY-NC-4.0)
+    oam_eval_index: Cell<u8>,
 }
 
 impl fmt::Debug for Ppu {
@@ -232,6 +239,7 @@ impl Ppu {
             frame_counter: Cell::new(0),
             timing_mode,
             sprite_0_hit_pending: Cell::new(None),
+            oam_eval_index: Cell::new(0),
         }
     }
 
@@ -528,9 +536,47 @@ impl Ppu {
                 status
             }
             4 => {
-                // OAMDATA read: return current OAM byte at oam_addr
-                let addr = self.oam_addr.get() as usize;
-                self.oam[addr]
+                // OAMDATA ($2004) read: behavior depends on PPU rendering state.
+                //
+                // During VBlank or when rendering is disabled: return OAM[OAMADDR] as normal.
+                //
+                // During active rendering (visible scanlines 0-239 with BG or sprites enabled):
+                // The PPU's internal sprite evaluation hardware is using the OAM bus, and reads
+                // of $2004 return whatever the hardware is currently reading:
+                // - Dots 1-64: Secondary OAM clear → returns $FF
+                // - Dots 65-256: Sprite evaluation → returns current primary OAM byte being read
+                // - Dots 257-320: Sprite tile fetches → returns $FF
+                //
+                // Bee 52 and other Codemasters games read $2004 during rendering to synchronize
+                // with the PPU and time their HUD scroll splits. Returning incorrect values
+                // causes timing loops to fail → garbled HUD.
+                // Reference: NESdev wiki PPU sprite evaluation, NESdev wiki PPU registers
+                let scanline = self.scanline.get();
+                let dot = self.dot.get();
+                let rendering_enabled = (self.mask & 0x18) != 0;
+
+                if rendering_enabled && scanline < 240 {
+                    // During active rendering on visible scanlines
+                    if dot >= 1 && dot <= 64 {
+                        // Secondary OAM clear phase: PPU writes $FF to secondary OAM.
+                        // Reads of $2004 during this phase always return $FF.
+                        0xFF
+                    } else if dot >= 65 && dot <= 256 {
+                        // Sprite evaluation phase: PPU reads through primary OAM.
+                        // Return the byte the evaluation hardware is currently reading.
+                        let eval_idx = self.oam_eval_index.get() as usize;
+                        self.oam[eval_idx & 0xFF]
+                    } else {
+                        // Outside evaluation (dots 257-340): sprite tile fetch / idle.
+                        // Hardware returns $FF during sprite tile loading.
+                        0xFF
+                    }
+                } else {
+                    // VBlank, post-render, pre-render, or rendering disabled:
+                    // return OAM at the current OAMADDR
+                    let addr = self.oam_addr.get() as usize;
+                    self.oam[addr]
+                }
             }
             7 => {
                 // PPUDATA read with buffered behavior.
@@ -1571,9 +1617,52 @@ impl Ppu {
             }
         }
 
+        // Track internal OAM evaluation index for OAMDATA ($2004) reads during rendering.
+        // Games like Bee 52 read $2004 during rendering to time HUD splits.
+        // The PPU reads through primary OAM during sprite evaluation (dots 65-256).
+        // Reference: NESdev wiki PPU sprite evaluation
+        if scanline < 240 {
+            let rendering_enabled = (self.mask & 0x18) != 0;
+            if rendering_enabled {
+                if dot == 0 {
+                    // Reset evaluation index at start of each scanline
+                    self.oam_eval_index.set(0);
+                } else if dot >= 65 && dot <= 256 {
+                    // During sprite evaluation, the PPU reads through primary OAM.
+                    // Each sprite check reads the Y byte first (odd cycle), then
+                    // either copies the remaining 3 bytes (if in range) or moves to
+                    // the next sprite. Approximate: advance 1 byte every 2 dots.
+                    let eval_dot = dot - 65;
+                    // Each sprite takes at least 2 cycles to check (read Y, compare).
+                    // If in range, 3 more reads (8 cycles total for matched sprite).
+                    // Simple approximation: advance 1 byte per 2 dots.
+                    let byte_index = (eval_dot / 2) as u8;
+                    self.oam_eval_index.set(byte_index);
+                }
+            }
+        }
+
         // Advance to next dot
         let mut next_dot = dot + 1;
         let mut next_scanline = scanline;
+
+        // Hardware-accurate odd frame cycle skip:
+        // On odd frames with rendering enabled, the PPU skips dot 340 of the pre-render
+        // scanline by jumping directly from (261, 339) to (0, 0).
+        // The rendering enabled check MUST happen at dot 339 of the pre-render scanline,
+        // not later. Games like Bee 52 toggle rendering mid-frame, and checking at the
+        // wrong time causes a 1-dot CPU/PPU drift every other frame → 30Hz flicker.
+        // Reference: NESdev wiki PPU frame timing, foobles/nes-ppu (MIT)
+        if scanline == pre_render_scanline && dot == 339 && self.odd_frame.get() {
+            let rendering_enabled = (self.mask & 0x18) != 0;
+            if rendering_enabled {
+                // Skip dot 340: force next_dot to 341 so end-of-scanline wraps to (0, 0)
+                next_dot = 341;
+                log(LogCategory::PPU, LogLevel::Trace, || {
+                    "PPU: Odd frame cycle skip at (pre-render, 339) → skipping dot 340".to_string()
+                });
+            }
+        }
 
         // Handle end of scanline (341 dots per scanline, indexed 0-340)
         if next_dot >= 341 {
@@ -1591,18 +1680,6 @@ impl Ppu {
                 let frame_number = self.frame_counter.get() + 1;
                 self.frame_counter.set(frame_number);
                 ended_frame_number = Some(frame_number);
-            }
-        }
-
-        // Odd frame cycle skip: on odd frames with rendering enabled,
-        // skip from scanline 261 dot 340 directly to scanline 0 dot 1
-        if next_scanline == 0 && next_dot == 0 && self.odd_frame.get() {
-            let rendering_enabled = (self.mask & 0x18) != 0;
-            if rendering_enabled {
-                next_dot = 1;
-                log(LogCategory::PPU, LogLevel::Trace, || {
-                    "PPU: Odd frame cycle skip (0,0 -> 0,1)".to_string()
-                });
             }
         }
 
