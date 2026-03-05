@@ -3029,32 +3029,66 @@ mod boot_output_tests {
     #[test]
     fn test_int13h_no_call_limit() {
         // Verify that INT 13h succeeds even after >1000 invocations (old limit was 1000).
-        use crate::disk::DiskRequest;
+        // This test exercises the actual CPU INT 13h dispatch path (handle_int13h)
+        // rather than the bus disk_read helper, so it would catch a regression in
+        // the call-count check that used to live in handle_int13h.
 
-        let mut bus = crate::bus::PcBus::new();
+        let mut sys = PcSystem::new();
 
-        // Mount a 1.44 MB floppy with a valid boot sector
+        // Mount a 1.44 MB floppy with a valid first sector
         let mut floppy = vec![0u8; 1474560];
         floppy[510] = 0x55;
         floppy[511] = 0xAA;
-        bus.mount_floppy_a(floppy);
+        assert!(sys.mount("FloppyA", &floppy).is_ok());
 
-        let request = DiskRequest {
-            drive: 0x00,
-            cylinder: 0,
-            head: 0,
-            sector: 1,
-            count: 1,
-        };
+        // Build a tiny program that resets the disk (INT 13h AH=00h) and then
+        // loops back on itself so we can call sys.cpu.step() repeatedly.
+        //
+        // Layout at 0x7C00:
+        //   0x00: MOV AH, 0x00
+        //   0x02: MOV DL, 0x00 (drive A)
+        //   0x04: INT 13h
+        //   0x06: JMP 0x7C00   (short loop back to start)
+        let program: &[u8] = &[
+            0xB4, 0x00, // MOV AH, 0x00
+            0xB2, 0x00, // MOV DL, 0x00
+            0xCD, 0x13, // INT 13h
+            0xEB, 0xF8, // JMP SHORT -8 (back to MOV AH)
+        ];
+        for (i, &b) in program.iter().enumerate() {
+            sys.cpu.bus_mut().write(0x7C00 + i as u32, b);
+        }
 
-        // Perform 1500 reads - previously would fail after 1000
-        for i in 0..1500 {
-            let mut buf = vec![0u8; 512];
-            let status = bus.disk_read(&request, &mut buf);
+        // Point the CPU at the program
+        let mut regs = sys.cpu.get_registers();
+        regs.cs = 0x0000;
+        regs.ip = 0x7C00;
+        regs.sp = 0xFFFE;
+        sys.cpu.set_registers(&regs);
+
+        const FLAG_CF: u32 = 0x0001;
+
+        // Execute >1000 INT 13h calls and verify that the carry flag (error
+        // indicator) is never set.
+        // Each loop iteration is: MOV AH (1), MOV DL (1), INT 13h (many steps
+        // inside the handler), JMP (1) – use 200 steps per iteration to be safe.
+        for iteration in 0..1050 {
+            // Step through one full loop iteration
+            for _ in 0..20 {
+                sys.cpu.step();
+            }
+            let regs = sys.cpu.get_registers();
             assert_eq!(
-                status, 0x00,
-                "Disk read #{} should succeed (status=0x{:02X})",
-                i, status
+                (regs.ax >> 8) & 0xFF,
+                0x00,
+                "INT 13h AH should be 0 (success) after iteration {}",
+                iteration
+            );
+            assert_eq!(
+                regs.flags & FLAG_CF,
+                0,
+                "Carry flag should be clear (no error) after iteration {}",
+                iteration
             );
         }
     }

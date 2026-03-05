@@ -8,8 +8,10 @@ use std::fmt;
 /// - 720 KB  (3.5", double-density)
 /// - 1.2 MB  (5.25", high-density)
 /// - 1.44 MB (3.5", high-density) – most common
-/// - 2.88 MB (3.5", extended density)
-pub const FLOPPY_IMAGE_SIZES: &[usize] = &[368_640, 737_280, 1_228_800, 1_474_560, 2_949_120];
+///
+/// Note: 2.88 MB (extended density) is intentionally omitted because the PC
+/// system's floppy mount validation does not support that format.
+pub const FLOPPY_IMAGE_SIZES: &[usize] = &[368_640, 737_280, 1_228_800, 1_474_560];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(clippy::upper_case_acronyms)]
@@ -771,8 +773,10 @@ mod edge_case_tests {
 
     #[test]
     fn test_img_hard_drive_detection() {
-        // 20 MB hard drive image (.img) should be detected as PC
-        let data = vec![0u8; 20 * 1024 * 1024];
+        // Any .img file >= 1 MB that is not a standard floppy size should be
+        // detected as a PC hard drive image.  Use the smallest possible size
+        // above 1 MB to keep the test fast and memory-efficient.
+        let data = vec![0u8; 1024 * 1024 + 1];
         assert_eq!(
             detect_rom_type_with_extension(&data, Some("img"), None).unwrap(),
             SystemType::PC

@@ -2410,7 +2410,7 @@ impl PcCpu {
         // Get function code from AH register
         let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
 
-        log(LogCategory::Bus, LogLevel::Debug, || {
+        log(LogCategory::Bus, LogLevel::Trace, || {
             format!("INT 13h AH=0x{:02X}", ah)
         });
 
