@@ -525,6 +525,11 @@ impl GbBus {
         (self.key1 & 0x81) | 0x7E
     }
 
+    /// Check if the CGB is currently in double-speed mode
+    pub fn is_double_speed(&self) -> bool {
+        self.cgb_mode && (self.key1 & 0x80) != 0
+    }
+
     /// Write to KEY1 register (0xFF4D)
     /// Only bit 0 is writable - it arms the speed switch
     pub fn write_key1(&mut self, val: u8) {

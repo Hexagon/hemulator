@@ -452,26 +452,36 @@ impl System for GbSystem {
             return Err(GbError::NoCartridge);
         }
 
-        // Game Boy runs at ~4.194304 MHz
-        // Frame rate is ~59.73 Hz
-        // Cycles per frame: 4194304 / 59.73 ≈ 70224 cycles
+        // Game Boy runs at ~4.194304 MHz, frame rate is ~59.73 Hz
+        // PPU cycles per frame: 4194304 / 59.73 ≈ 70224 cycles
+        // In CGB double-speed mode, CPU runs at ~8.388608 MHz but PPU and APU
+        // still run at normal speed. We track frame progress in PPU cycles.
         const CYCLES_PER_FRAME: u32 = 70224;
 
-        let mut cycles = 0;
+        let mut cycles = 0u32; // PPU-rate cycles for frame progress
         while cycles < CYCLES_PER_FRAME {
             // Execute any pending GDMA before CPU step
             self.cpu.memory.execute_pending_gdma();
 
+            let is_double_speed = self.cpu.memory.is_double_speed();
+
             if self.cpu.memory.oam_dma_active() {
                 // CPU is halted during OAM DMA. Advance time in 4-cycle chunks.
-                let dma_cycles = 4;
-                cycles += dma_cycles;
+                let dma_cycles: u32 = 4;
+                // In double-speed mode, PPU/APU run at half the CPU rate
+                let ppu_cycles = if is_double_speed {
+                    dma_cycles.div_ceil(2)
+                } else {
+                    dma_cycles
+                };
+
+                cycles += ppu_cycles;
                 self.total_cycles += dma_cycles as u64;
 
-                // Accumulate cycles for audio generation
-                self.audio_cycles_accumulated += dma_cycles;
+                // Accumulate PPU-rate cycles for audio generation
+                self.audio_cycles_accumulated += ppu_cycles;
 
-                // Step timer and handle timer interrupt
+                // Timer gets full CPU cycles (DIV runs at 2x in double-speed)
                 if self.cpu.memory.timer.step(dma_cycles) {
                     // Timer overflow - request timer interrupt (bit 2)
                     self.cpu.memory.request_interrupt(0x04);
@@ -480,9 +490,9 @@ impl System for GbSystem {
                 // Step OAM DMA transfer
                 self.cpu.memory.step_oam_dma(dma_cycles);
 
-                // Step PPU and handle VBlank, STAT interrupts, and HDMA
+                // Step PPU at normal rate
                 let (vblank_started, stat_interrupt, hblank_entered) =
-                    self.cpu.memory.ppu.step(dma_cycles);
+                    self.cpu.memory.ppu.step(ppu_cycles);
 
                 if vblank_started {
                     // V-Blank started - request VBlank interrupt (bit 0)
@@ -510,7 +520,13 @@ impl System for GbSystem {
 
             let pc_before = self.cpu.pc;
             let cpu_cycles = self.cpu.step();
-            cycles += cpu_cycles;
+            // In double-speed mode, PPU/APU run at half the CPU rate
+            let ppu_cycles = if is_double_speed {
+                cpu_cycles.div_ceil(2)
+            } else {
+                cpu_cycles
+            };
+            cycles += ppu_cycles;
             self.total_cycles += cpu_cycles as u64;
 
             if !self.pc_0038_logged && self.cpu.pc == 0x0038 {
@@ -550,10 +566,10 @@ impl System for GbSystem {
                 }
             }
 
-            // Accumulate cycles for audio generation
-            self.audio_cycles_accumulated += cpu_cycles;
+            // Accumulate PPU-rate cycles for audio generation
+            self.audio_cycles_accumulated += ppu_cycles;
 
-            // Step timer and handle timer interrupt
+            // Timer gets full CPU cycles (DIV runs at 2x in double-speed)
             if self.cpu.memory.timer.step(cpu_cycles) {
                 // Timer overflow - request timer interrupt (bit 2)
                 self.cpu.memory.request_interrupt(0x04);
@@ -562,9 +578,9 @@ impl System for GbSystem {
             // Step OAM DMA transfer
             self.cpu.memory.step_oam_dma(cpu_cycles);
 
-            // Step PPU and handle VBlank, STAT interrupts, and HDMA
+            // Step PPU at normal rate
             let (vblank_started, stat_interrupt, hblank_entered) =
-                self.cpu.memory.ppu.step(cpu_cycles);
+                self.cpu.memory.ppu.step(ppu_cycles);
 
             if vblank_started {
                 // V-Blank started - request VBlank interrupt (bit 0)
@@ -2320,6 +2336,64 @@ mod tests {
         assert!(
             !sys.cpu.memory.is_boot_rom_enabled(),
             "Boot ROM should be disabled after reset"
+        );
+    }
+
+    #[test]
+    fn test_double_speed_frame_progression() {
+        // Test that frame progression stays at ~70,224 PPU cycles per frame
+        // regardless of double-speed mode, and audio cycle accounting is consistent.
+        // Reference: Pan Docs - 154 scanlines × 456 dots = 70,224 T-cycles per frame.
+        const EXPECTED_CYCLES_PER_FRAME: u32 = 70224;
+
+        let mut rom = vec![0; 0x8000];
+        rom[0x143] = 0x80; // CGB-compatible
+
+        // Normal-speed system
+        let mut sys_normal = GbSystem::new();
+        sys_normal.mount("Cartridge", &rom.clone()).unwrap();
+
+        // Step one frame in normal speed
+        let frame_normal = sys_normal.step_frame().unwrap();
+        let audio_normal = sys_normal.audio_cycles_accumulated;
+
+        // Double-speed system: request a speed switch via KEY1
+        let mut sys_double = GbSystem::new();
+        sys_double.mount("Cartridge", &rom).unwrap();
+        // Arm KEY1 bit 0 and then perform the speed switch to enter double-speed mode
+        sys_double.cpu.memory.write(0xFF4D, 0x01); // Arm speed switch (set bit 0)
+        sys_double.cpu.memory.perform_speed_switch(); // Perform speed switch (toggle bit 7, clear bit 0)
+
+        assert!(
+            sys_double.cpu.memory.is_double_speed(),
+            "System should be in double-speed mode"
+        );
+
+        // Step one frame in double speed
+        let frame_double = sys_double.step_frame().unwrap();
+        let audio_double = sys_double.audio_cycles_accumulated;
+
+        // Both frames should have the same dimensions
+        assert_eq!(frame_normal.width, frame_double.width);
+        assert_eq!(frame_normal.height, frame_double.height);
+
+        // Audio cycles should be near 70,224 PPU cycles per frame in both modes.
+        // The loop may slightly overshoot since CPU instructions aren't single-cycle,
+        // but should never undershoot and should stay within a small margin.
+        let max_overshoot = 20; // longest GB instruction is ~20 T-cycles
+        assert!(
+            audio_normal >= EXPECTED_CYCLES_PER_FRAME
+                && audio_normal <= EXPECTED_CYCLES_PER_FRAME + max_overshoot,
+            "Normal-speed audio cycles should be near {}, got {}",
+            EXPECTED_CYCLES_PER_FRAME,
+            audio_normal
+        );
+        assert!(
+            audio_double >= EXPECTED_CYCLES_PER_FRAME
+                && audio_double <= EXPECTED_CYCLES_PER_FRAME + max_overshoot,
+            "Double-speed audio cycles should be near {}, got {}",
+            EXPECTED_CYCLES_PER_FRAME,
+            audio_double
         );
     }
 }
