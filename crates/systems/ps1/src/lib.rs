@@ -778,7 +778,7 @@ impl Ps1Bus {
             bios_loaded: false,
             cdrom: CdRom::new(),
             joy_data: 0xFFFF,
-            joy_stat: 0,
+            joy_stat: 0x05, // TX Ready 1 + TX Ready 2
             joy_ctrl: 0,
             mem_ctrl: [0; 9],
             ram_size_reg: 0,
@@ -881,7 +881,7 @@ impl Ps1Bus {
 
             // Joypad
             0x1F80_1040 => self.joy_data,
-            0x1F80_1044 => self.joy_stat as u16,
+            0x1F80_1044 => (self.joy_stat | 0x05) as u16, // Always report TX Ready
             0x1F80_104A => self.joy_ctrl,
 
             _ => 0,
@@ -933,8 +933,8 @@ impl Ps1Bus {
 
             // Joypad
             0x1F80_1040 => self.joy_data as u32,
-            0x1F80_1044 => self.joy_stat,
-            0x1F80_104E => 0, // JOY_BAUD
+            0x1F80_1044 => self.joy_stat | 0x05, // Always report TX Ready
+            0x1F80_104E => 0,                    // JOY_BAUD
 
             // Memory control
             0x1F80_1000..=0x1F80_1020 => {
