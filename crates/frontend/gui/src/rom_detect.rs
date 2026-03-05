@@ -429,6 +429,28 @@ pub fn is_ps1_bios_file(data: &[u8]) -> bool {
     is_ps1_bios(data)
 }
 
+/// Determine the PC mount-point and a short status message for a file.
+///
+/// Returns `("FloppyA", "PC floppy A: loaded")` for standard floppy images,
+/// `("HardDrive", "PC hard drive loaded")` for images ≥ 1 MB, or
+/// `("", "<descriptive message>")` when no automatic mount is appropriate
+/// (unrecognised size, or a non-disk-image file like `.com`/`.exe`).
+///
+/// `extension` must be supplied in lower-case.
+pub fn pc_disk_mount_target(extension: &str, size: usize) -> (&'static str, &'static str) {
+    if matches!(extension, "img" | "ima") {
+        if FLOPPY_IMAGE_SIZES.contains(&size) {
+            ("FloppyA", "PC floppy A: loaded")
+        } else if size >= 1024 * 1024 {
+            ("HardDrive", "PC hard drive loaded")
+        } else {
+            ("", "PC disk image size not recognised")
+        }
+    } else {
+        ("", "PC system started – use mount points to add disks")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -781,5 +803,43 @@ mod edge_case_tests {
             detect_rom_type_with_extension(&data, Some("img"), None).unwrap(),
             SystemType::PC
         );
+    }
+
+    #[test]
+    fn test_pc_disk_mount_target_floppy() {
+        // Standard 1.44 MB floppy image → FloppyA
+        let (mount, msg) = pc_disk_mount_target("img", 1_474_560);
+        assert_eq!(mount, "FloppyA");
+        assert!(!msg.is_empty());
+
+        // .ima extension also maps to FloppyA
+        let (mount, _) = pc_disk_mount_target("ima", 737_280);
+        assert_eq!(mount, "FloppyA");
+    }
+
+    #[test]
+    fn test_pc_disk_mount_target_hard_drive() {
+        // Image >= 1 MB but not a standard floppy size → HardDrive
+        let (mount, msg) = pc_disk_mount_target("img", 1024 * 1024 + 1);
+        assert_eq!(mount, "HardDrive");
+        assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn test_pc_disk_mount_target_unrecognised_size() {
+        // .img file that is neither a floppy size nor >= 1 MB → no mount
+        let (mount, _) = pc_disk_mount_target("img", 1024);
+        assert_eq!(mount, "");
+    }
+
+    #[test]
+    fn test_pc_disk_mount_target_non_disk_file() {
+        // .com / .exe or other extension → no mount, just start PC
+        let (mount, _) = pc_disk_mount_target("com", 4096);
+        assert_eq!(mount, "");
+        let (mount, _) = pc_disk_mount_target("exe", 65536);
+        assert_eq!(mount, "");
+        let (mount, _) = pc_disk_mount_target("", 0);
+        assert_eq!(mount, "");
     }
 }

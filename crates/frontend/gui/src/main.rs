@@ -16,7 +16,7 @@ use emu_core::{types::Frame, System};
 use hemu_project::HemuProject;
 use rodio::{DeviceSinkBuilder, Source};
 use rom_detect::{
-    detect_rom_type_with_extension, is_ps1_bios_file, SystemType, FLOPPY_IMAGE_SIZES,
+    detect_rom_type_with_extension, is_ps1_bios_file, pc_disk_mount_target, SystemType,
 };
 use save_state::GameSaves;
 use settings::Settings;
@@ -3184,40 +3184,22 @@ fn main() {
                             rom_hash = None; // PC systems don't use ROM hash
                             let mut pc_sys = emu_pc::PcSystem::new();
 
-                            // If the file is a disk image (.img/.ima), mount it
-                            // to the appropriate drive; otherwise just start the PC
-                            // and let the user mount disk images manually.
+                            // Determine the correct mount point for .img/.ima disk images;
+                            // other PC files (.com/.exe) simply start a bare system.
                             let ext_str = extension.as_deref().unwrap_or("");
-                            if matches!(ext_str, "img" | "ima") {
-                                if FLOPPY_IMAGE_SIZES.contains(&data.len()) {
-                                    if let Err(e) = pc_sys.mount("FloppyA", &data) {
-                                        eprintln!("Failed to mount floppy: {}", e);
-                                        status_message = format!("Error mounting floppy: {}", e);
-                                    } else {
-                                        runtime_state.set_mount("FloppyA".to_string(), p.clone());
-                                        status_message = format!("PC floppy A: loaded: {}", p);
-                                        println!("Mounted floppy A: {}", p);
-                                    }
-                                } else if data.len() >= 1024 * 1024 {
-                                    if let Err(e) = pc_sys.mount("HardDrive", &data) {
-                                        eprintln!("Failed to mount hard drive: {}", e);
-                                        status_message =
-                                            format!("Error mounting hard drive: {}", e);
-                                    } else {
-                                        runtime_state.set_mount("HardDrive".to_string(), p.clone());
-                                        status_message = format!("PC hard drive loaded: {}", p);
-                                        println!("Mounted hard drive: {}", p);
-                                    }
-                                } else {
-                                    status_message =
-                                        "PC disk image size not recognised. Use F3 to mount."
-                                            .to_string();
+                            let (mount_id, msg) = pc_disk_mount_target(ext_str, data.len());
+                            if mount_id.is_empty() {
+                                status_message = msg.to_string();
+                                if !matches!(ext_str, "img" | "ima") {
+                                    println!("Initialized PC system. Mount disk images to proceed.");
                                 }
+                            } else if let Err(e) = pc_sys.mount(mount_id, &data) {
+                                eprintln!("Failed to mount {}: {}", mount_id, e);
+                                status_message = format!("Error: {}", e);
                             } else {
-                                // .com / .exe or other PC file: just start the system
-                                status_message =
-                                    "PC system started. Use F3 to mount disk images.".to_string();
-                                println!("Initialized PC system. Mount disk images to proceed.");
+                                runtime_state.set_mount(mount_id.to_string(), p.clone());
+                                status_message = format!("{}: {}", msg, p);
+                                println!("Mounted {}: {}", mount_id, p);
                             }
 
                             sys = EmulatorSystem::PC(Box::new(pc_sys));
@@ -5089,21 +5071,7 @@ fn main() {
                                         let ext_str =
                                             extension.map(|e| e.to_lowercase()).unwrap_or_default();
                                         let (mount_id, msg) =
-                                            if matches!(ext_str.as_str(), "img" | "ima") {
-                                                if FLOPPY_IMAGE_SIZES.contains(&data.len()) {
-                                                    ("FloppyA", "PC floppy A: loaded")
-                                                } else if data.len() >= 1024 * 1024 {
-                                                    ("HardDrive", "PC hard drive loaded")
-                                                } else {
-                                                    ("", "PC disk image size not recognised")
-                                                }
-                                            } else {
-                                                // .com / .exe or other PC file: start bare system
-                                                (
-                                                "",
-                                                "PC system started – use mount points to add disks",
-                                            )
-                                            };
+                                            pc_disk_mount_target(&ext_str, data.len());
 
                                         if mount_id.is_empty() {
                                             rom_loaded = true;
@@ -5827,20 +5795,7 @@ fn main() {
                                         let ext_str =
                                             extension.map(|e| e.to_lowercase()).unwrap_or_default();
                                         let (mount_id, msg) =
-                                            if matches!(ext_str.as_str(), "img" | "ima") {
-                                                if FLOPPY_IMAGE_SIZES.contains(&data.len()) {
-                                                    ("FloppyA", "PC floppy A: loaded")
-                                                } else if data.len() >= 1024 * 1024 {
-                                                    ("HardDrive", "PC hard drive loaded")
-                                                } else {
-                                                    ("", "PC disk image size not recognised")
-                                                }
-                                            } else {
-                                                (
-                                                "",
-                                                "PC system started – use mount points to add disks",
-                                            )
-                                            };
+                                            pc_disk_mount_target(&ext_str, data.len());
 
                                         if mount_id.is_empty() {
                                             rom_loaded = true;
