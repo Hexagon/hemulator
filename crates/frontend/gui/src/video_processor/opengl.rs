@@ -228,7 +228,7 @@ impl VideoProcessor for OpenGLProcessor {
                 0,
                 glow::RGBA,
                 glow::UNSIGNED_BYTE,
-                Some(&rgba_buffer),
+                glow::PixelUnpackData::Slice(Some(&rgba_buffer)),
             );
 
             // Render to default framebuffer

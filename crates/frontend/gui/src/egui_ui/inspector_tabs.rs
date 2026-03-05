@@ -50,6 +50,8 @@ pub enum InspectorTab {
     Chip8Registers,
 
     PcBda, // BIOS Data Area
+
+    Ps1Gpu, // GPU state and VRAM viewer
 }
 
 impl InspectorTab {
@@ -86,6 +88,7 @@ impl InspectorTab {
             InspectorTab::Chip8Display => "📺 Display",
             InspectorTab::Chip8Registers => "📝 Registers",
             InspectorTab::PcBda => "🖥️ BDA/EBDA",
+            InspectorTab::Ps1Gpu => "🎮 GPU",
         }
     }
 
@@ -165,6 +168,10 @@ pub fn get_tabs_for_system(system_type: Option<&SystemType>) -> Vec<InspectorTab
             SystemType::Chip8 => {
                 tabs.push(InspectorTab::Mounts); // CHIP-8 uses Mounts tab for "Program"
                 tabs.extend_from_slice(&[InspectorTab::Chip8Display, InspectorTab::Chip8Registers]);
+            }
+            SystemType::PS1 => {
+                tabs.push(InspectorTab::Mounts); // PS1 uses Mounts tab (BIOS, disc)
+                tabs.push(InspectorTab::Ps1Gpu);
             }
             _ => {
                 // Fallback for cartridge-based systems not explicitly listed above
@@ -247,6 +254,9 @@ pub fn render_inspector_tab(tab: &InspectorTab, ui: &mut Ui, tab_manager: &mut T
         }
         InspectorTab::PcBda => {
             render_pc_bda_tab(ui, tab_manager);
+        }
+        InspectorTab::Ps1Gpu => {
+            render_ps1_gpu_tab(ui, tab_manager);
         }
     }
 }
@@ -1677,4 +1687,445 @@ fn render_gba_bg_layers_tab(ui: &mut Ui, tab_manager: &TabManager) {
     } else {
         ui.label("No GBA system data available");
     }
+}
+
+/// Render the PS1 GPU inspector tab
+fn render_ps1_gpu_tab(ui: &mut Ui, tab_manager: &mut TabManager) {
+    use egui::ScrollArea;
+
+    let available_height = ui.available_height();
+    ScrollArea::vertical()
+        .auto_shrink([false; 2])
+        .max_height(available_height)
+        .show(ui, |ui| {
+            if let Some(ref data) = tab_manager.ps1_gpu_data {
+                // Header
+                ui.heading("🎮 PS1 GPU Inspector");
+                ui.separator();
+                ui.add_space(10.0);
+
+                // GPUSTAT register
+                ui.heading("GPUSTAT Register");
+                ui.add_space(5.0);
+
+                egui::Grid::new("inspector_ps1_gpustat_grid")
+                    .num_columns(2)
+                    .spacing([40.0, 8.0])
+                    .striped(true)
+                    .show(ui, |ui| {
+                        ui.label(egui::RichText::new("GPUSTAT:").strong());
+                        ui.label(format!("0x{:08X}", data.gpustat));
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("IRQ:").strong());
+                        ui.label(if data.irq {
+                            "✓ Active"
+                        } else {
+                            "✗ Inactive"
+                        });
+                        ui.end_row();
+                    });
+
+                ui.add_space(15.0);
+                ui.separator();
+                ui.add_space(10.0);
+
+                // Display Configuration
+                ui.heading("Display Configuration");
+                ui.add_space(5.0);
+
+                egui::Grid::new("inspector_ps1_display_grid")
+                    .num_columns(2)
+                    .spacing([40.0, 8.0])
+                    .striped(true)
+                    .show(ui, |ui| {
+                        ui.label(egui::RichText::new("VRAM Start:").strong());
+                        ui.label(format!(
+                            "({}, {})",
+                            data.display_vram_x, data.display_vram_y
+                        ));
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("H Range:").strong());
+                        ui.label(format!(
+                            "{} - {}",
+                            data.display_horiz_start, data.display_horiz_end
+                        ));
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("V Range:").strong());
+                        ui.label(format!(
+                            "{} - {}",
+                            data.display_vert_start, data.display_vert_end
+                        ));
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("H Resolution:").strong());
+                        ui.label(&data.hres);
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("V Resolution:").strong());
+                        ui.label(&data.vres);
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("Video Standard:").strong());
+                        ui.label(if data.is_pal { "PAL" } else { "NTSC" });
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("Color Depth:").strong());
+                        ui.label(if data.display_24bit {
+                            "24-bit"
+                        } else {
+                            "15-bit"
+                        });
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("Interlace:").strong());
+                        ui.label(if data.interlace {
+                            "✓ Enabled"
+                        } else {
+                            "✗ Disabled"
+                        });
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("Display:").strong());
+                        ui.label(if data.display_disabled {
+                            "✗ Disabled"
+                        } else {
+                            "✓ Enabled"
+                        });
+                        ui.end_row();
+                    });
+
+                ui.add_space(15.0);
+                ui.separator();
+                ui.add_space(10.0);
+
+                // Draw Area
+                ui.heading("Draw Area");
+                ui.add_space(5.0);
+
+                egui::Grid::new("inspector_ps1_draw_area_grid")
+                    .num_columns(2)
+                    .spacing([40.0, 8.0])
+                    .striped(true)
+                    .show(ui, |ui| {
+                        ui.label(egui::RichText::new("Top-Left:").strong());
+                        ui.label(format!("({}, {})", data.draw_area_left, data.draw_area_top));
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("Bottom-Right:").strong());
+                        ui.label(format!(
+                            "({}, {})",
+                            data.draw_area_right, data.draw_area_bottom
+                        ));
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("Draw Offset:").strong());
+                        ui.label(format!("({}, {})", data.draw_offset_x, data.draw_offset_y));
+                        ui.end_row();
+                    });
+
+                ui.add_space(15.0);
+                ui.separator();
+                ui.add_space(10.0);
+
+                // Texture Settings
+                ui.heading("Texture Settings");
+                ui.add_space(5.0);
+
+                egui::Grid::new("inspector_ps1_texture_grid")
+                    .num_columns(2)
+                    .spacing([40.0, 8.0])
+                    .striped(true)
+                    .show(ui, |ui| {
+                        ui.label(egui::RichText::new("Texpage Base:").strong());
+                        ui.label(format!("({}, {})", data.texpage_x, data.texpage_y));
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("Texture Depth:").strong());
+                        ui.label(&data.tex_depth);
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("Semi-Transparency:").strong());
+                        ui.label(&data.semi_transparency);
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("Dithering:").strong());
+                        ui.label(if data.dithering {
+                            "✓ Enabled"
+                        } else {
+                            "✗ Disabled"
+                        });
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("Set Mask Bit:").strong());
+                        ui.label(if data.set_mask_bit {
+                            "✓ Yes"
+                        } else {
+                            "✗ No"
+                        });
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("Check Mask Bit:").strong());
+                        ui.label(if data.check_mask_bit {
+                            "✓ Yes"
+                        } else {
+                            "✗ No"
+                        });
+                        ui.end_row();
+                    });
+
+                ui.add_space(10.0);
+
+                // Texture Window (collapsible)
+                egui::CollapsingHeader::new("Texture Window")
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        egui::Grid::new("inspector_ps1_texwindow_grid")
+                            .num_columns(2)
+                            .spacing([40.0, 8.0])
+                            .striped(true)
+                            .show(ui, |ui| {
+                                ui.label(egui::RichText::new("Mask X:").strong());
+                                ui.label(format!("0x{:02X}", data.tex_window_mask_x));
+                                ui.end_row();
+
+                                ui.label(egui::RichText::new("Mask Y:").strong());
+                                ui.label(format!("0x{:02X}", data.tex_window_mask_y));
+                                ui.end_row();
+
+                                ui.label(egui::RichText::new("Offset X:").strong());
+                                ui.label(format!("0x{:02X}", data.tex_window_offset_x));
+                                ui.end_row();
+
+                                ui.label(egui::RichText::new("Offset Y:").strong());
+                                ui.label(format!("0x{:02X}", data.tex_window_offset_y));
+                                ui.end_row();
+                            });
+                    });
+
+                ui.add_space(15.0);
+                ui.separator();
+                ui.add_space(10.0);
+
+                // Timing
+                ui.heading("Timing");
+                ui.add_space(5.0);
+
+                egui::Grid::new("inspector_ps1_timing_grid")
+                    .num_columns(2)
+                    .spacing([40.0, 8.0])
+                    .striped(true)
+                    .show(ui, |ui| {
+                        ui.label(egui::RichText::new("Scanline:").strong());
+                        ui.label(format!("{}", data.scanline));
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("VBlank:").strong());
+                        ui.label(if data.in_vblank {
+                            "✓ In VBlank"
+                        } else {
+                            "✗ Active"
+                        });
+                        ui.end_row();
+                    });
+
+                ui.add_space(15.0);
+                ui.separator();
+                ui.add_space(10.0);
+
+                // GPUSTAT bit breakdown (collapsible)
+                egui::CollapsingHeader::new("GPUSTAT Bit Breakdown")
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        let s = data.gpustat;
+                        egui::Grid::new("inspector_ps1_gpustat_bits_grid")
+                            .num_columns(2)
+                            .spacing([40.0, 8.0])
+                            .striped(true)
+                            .show(ui, |ui| {
+                                ui.label("Bits 0-3: Texture page X base");
+                                ui.label(format!("{} (N*64)", s & 0xF));
+                                ui.end_row();
+
+                                ui.label("Bit 4: Texture page Y base");
+                                ui.label(format!("{} (N*256)", (s >> 4) & 1));
+                                ui.end_row();
+
+                                ui.label("Bits 5-6: Semi-transparency");
+                                ui.label(match (s >> 5) & 3 {
+                                    0 => "B/2+F/2",
+                                    1 => "B+F",
+                                    2 => "B-F",
+                                    3 => "B+F/4",
+                                    _ => unreachable!(),
+                                });
+                                ui.end_row();
+
+                                ui.label("Bits 7-8: Texture depth");
+                                ui.label(match (s >> 7) & 3 {
+                                    0 => "4-bit CLUT",
+                                    1 => "8-bit CLUT",
+                                    2 => "15-bit direct",
+                                    3 => "Reserved",
+                                    _ => unreachable!(),
+                                });
+                                ui.end_row();
+
+                                ui.label("Bit 9: Dither 24→15 bit");
+                                ui.label(if (s >> 9) & 1 != 0 {
+                                    "✓ On"
+                                } else {
+                                    "✗ Off"
+                                });
+                                ui.end_row();
+
+                                ui.label("Bit 10: Drawing to display");
+                                ui.label(if (s >> 10) & 1 != 0 {
+                                    "✓ Allowed"
+                                } else {
+                                    "✗ Not allowed"
+                                });
+                                ui.end_row();
+
+                                ui.label("Bit 11: Set mask bit");
+                                ui.label(if (s >> 11) & 1 != 0 {
+                                    "✓ Yes"
+                                } else {
+                                    "✗ No"
+                                });
+                                ui.end_row();
+
+                                ui.label("Bit 12: Check mask bit");
+                                ui.label(if (s >> 12) & 1 != 0 {
+                                    "✓ Yes"
+                                } else {
+                                    "✗ No"
+                                });
+                                ui.end_row();
+
+                                ui.label("Bit 13: Interlace field");
+                                ui.label(if (s >> 13) & 1 != 0 { "Odd" } else { "Even" });
+                                ui.end_row();
+
+                                ui.label("Bit 14: Reverse flag");
+                                ui.label(format!("{}", (s >> 14) & 1));
+                                ui.end_row();
+
+                                ui.label("Bit 15: Texture disable");
+                                ui.label(if (s >> 15) & 1 != 0 {
+                                    "✓ Disabled"
+                                } else {
+                                    "✗ Enabled"
+                                });
+                                ui.end_row();
+
+                                ui.label("Bits 17-18: H resolution");
+                                ui.label(match (s >> 17) & 3 {
+                                    0 => "256",
+                                    1 => "320",
+                                    2 => "512",
+                                    3 => "640",
+                                    _ => unreachable!(),
+                                });
+                                ui.end_row();
+
+                                ui.label("Bit 19: V resolution");
+                                ui.label(if (s >> 19) & 1 != 0 { "480" } else { "240" });
+                                ui.end_row();
+
+                                ui.label("Bit 20: Video mode");
+                                ui.label(if (s >> 20) & 1 != 0 { "PAL" } else { "NTSC" });
+                                ui.end_row();
+
+                                ui.label("Bit 21: Color depth");
+                                ui.label(if (s >> 21) & 1 != 0 {
+                                    "24-bit"
+                                } else {
+                                    "15-bit"
+                                });
+                                ui.end_row();
+
+                                ui.label("Bit 22: Vertical interlace");
+                                ui.label(if (s >> 22) & 1 != 0 {
+                                    "✓ On"
+                                } else {
+                                    "✗ Off"
+                                });
+                                ui.end_row();
+
+                                ui.label("Bit 23: Display enable");
+                                ui.label(if (s >> 23) & 1 != 0 {
+                                    "✗ Disabled"
+                                } else {
+                                    "✓ Enabled"
+                                });
+                                ui.end_row();
+
+                                ui.label("Bit 24: IRQ");
+                                ui.label(if (s >> 24) & 1 != 0 {
+                                    "✓ Active"
+                                } else {
+                                    "✗ Inactive"
+                                });
+                                ui.end_row();
+
+                                ui.label("Bit 25: DMA / Data request");
+                                ui.label(format!("{}", (s >> 25) & 1));
+                                ui.end_row();
+
+                                ui.label("Bit 26: Ready for CMD");
+                                ui.label(if (s >> 26) & 1 != 0 {
+                                    "✓ Ready"
+                                } else {
+                                    "✗ Busy"
+                                });
+                                ui.end_row();
+
+                                ui.label("Bit 27: Ready for VRAM");
+                                ui.label(if (s >> 27) & 1 != 0 {
+                                    "✓ Ready"
+                                } else {
+                                    "✗ Busy"
+                                });
+                                ui.end_row();
+
+                                ui.label("Bit 28: Ready for DMA");
+                                ui.label(if (s >> 28) & 1 != 0 {
+                                    "✓ Ready"
+                                } else {
+                                    "✗ Busy"
+                                });
+                                ui.end_row();
+
+                                ui.label("Bits 29-30: DMA direction");
+                                ui.label(match (s >> 29) & 3 {
+                                    0 => "Off",
+                                    1 => "FIFO",
+                                    2 => "CPU→GP0",
+                                    3 => "VRAM→CPU",
+                                    _ => unreachable!(),
+                                });
+                                ui.end_row();
+
+                                ui.label("Bit 31: Interlace (odd line)");
+                                ui.label(format!("{}", (s >> 31) & 1));
+                                ui.end_row();
+                            });
+                    });
+
+                ui.add_space(10.0);
+            } else {
+                // No GPU data available
+                ui.vertical_centered(|ui| {
+                    ui.add_space(40.0);
+                    ui.label(egui::RichText::new("🎮").size(48.0));
+                    ui.add_space(10.0);
+                    ui.heading("No GPU Data Available");
+                    ui.add_space(10.0);
+                    ui.label("Load a PS1 game to see GPU state information");
+                });
+            }
+        });
 }

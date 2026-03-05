@@ -14,7 +14,7 @@ pub mod window_backend;
 use egui_ui::EguiApp;
 use emu_core::{types::Frame, System};
 use hemu_project::HemuProject;
-use rodio::{OutputStream, Source};
+use rodio::{DeviceSinkBuilder, Source};
 use rom_detect::{detect_rom_type_with_extension, is_ps1_bios_file, SystemType};
 use save_state::GameSaves;
 use settings::Settings;
@@ -1272,16 +1272,16 @@ impl Iterator for StreamSource {
 }
 
 impl Source for StreamSource {
-    fn current_frame_len(&self) -> Option<usize> {
+    fn current_span_len(&self) -> Option<usize> {
         None
     }
 
-    fn channels(&self) -> u16 {
-        self.channels
+    fn channels(&self) -> std::num::NonZero<u16> {
+        std::num::NonZero::new(self.channels).unwrap()
     }
 
-    fn sample_rate(&self) -> u32 {
-        self.sample_rate
+    fn sample_rate(&self) -> std::num::NonZero<u32> {
+        std::num::NonZero::new(self.sample_rate).unwrap()
     }
 
     fn total_duration(&self) -> Option<std::time::Duration> {
@@ -1423,13 +1423,11 @@ fn save_screenshot(
 ) -> Result<String, Box<dyn std::error::Error>> {
     use chrono::Local;
     use png::Encoder;
-    use rand::Rng;
-
     // Get current local time
     let now = Local::now();
 
     // Generate random number 000-999
-    let random = rand::thread_rng().gen_range(0..1000);
+    let random = rand::random_range(0u32..1000);
 
     // Create filename: YYYYMMDDHHMMSSRRR.png
     let filename = format!("{}{:03}.png", now.format("%Y%m%d%H%M%S"), random);
@@ -2693,10 +2691,13 @@ fn main() {
     // Determine what to load based on CLI args
     let rom_path = cli_args.rom_path.as_ref().cloned();
 
-    let mut sys: EmulatorSystem;
+    let mut sys: EmulatorSystem = EmulatorSystem::NES(Box::default());
     let mut rom_hash: Option<String> = None;
     let mut rom_loaded = false;
     let mut status_message = String::new();
+    // Deferred N64 ROM loading: N64 requires GL context, which is only available
+    // after the event loop starts. Store ROM data + path here for deferred creation.
+    let mut pending_n64_rom: Option<(Vec<u8>, String)> = None;
 
     // Initialize system based on --system parameter if specified
     if let Some(ref system_name) = cli_args.system {
@@ -2910,41 +2911,26 @@ fn main() {
                 }
             }
             "n64" => {
-                // Create N64 system with null GL context for early initialization
-                // Real GL context will be provided when egui_backend is created
-                let n64_sys = emu_n64::N64System::new_for_test();
-                sys = EmulatorSystem::N64(Box::new(n64_sys));
-                rom_loaded = true; // Mark system as loaded even without ROM
-                status_message = "Clean N64 system started".to_string();
-                println!("Started clean N64 system");
+                // N64 requires a real GL context for its renderer, which isn't
+                // available until the event loop starts. Defer creation.
+                status_message = "N64 system (pending GL init)".to_string();
+                println!("N64 system will be created when GL context is available");
 
-                // If a file is provided with --system n64, load it directly
+                // If a file is provided with --system n64, store it for deferred loading
                 if let Some(ref p) = rom_path {
                     if !p.to_lowercase().ends_with(".hemu") {
                         match std::fs::read(p) {
                             Ok(data) => {
-                                rom_hash = Some(GameSaves::rom_hash(&data));
-                                if let EmulatorSystem::N64(n64_sys) = &mut sys {
-                                    if let Err(e) = n64_sys.mount("Cartridge", &data) {
-                                        eprintln!("Failed to load N64 ROM: {}", e);
-                                        status_message = format!("Error: {}", e);
-                                        rom_hash = None;
-                                    } else {
-                                        rom_loaded = true;
-                                        runtime_state.set_mount("Cartridge".to_string(), p.clone());
-                                        if let Err(e) = settings.save() {
-                                            eprintln!("Warning: Failed to save settings: {}", e);
-                                        }
-                                        status_message = "N64 ROM loaded".to_string();
-                                        println!("Loaded N64 ROM: {}", p);
-                                    }
-                                }
+                                pending_n64_rom = Some((data, p.clone()));
                             }
                             Err(e) => {
                                 eprintln!("Failed to read file: {}", e);
                             }
                         }
                     }
+                } else {
+                    // --system n64 with no ROM: still defer creation
+                    pending_n64_rom = Some((vec![], String::new()));
                 }
             }
             _ => {
@@ -3223,22 +3209,10 @@ fn main() {
                             }
                         }
                         Ok(SystemType::N64) => {
-                            rom_hash = Some(GameSaves::rom_hash(&data));
-                            let mut n64_sys = emu_n64::N64System::new_for_test();
-                            if let Err(e) = n64_sys.mount("Cartridge", &data) {
-                                eprintln!("Failed to load N64 ROM: {}", e);
-                                status_message = format!("Error: {}", e);
-                                rom_hash = None;
-                            } else {
-                                rom_loaded = true;
-                                sys = EmulatorSystem::N64(Box::new(n64_sys));
-                                runtime_state.set_mount("Cartridge".to_string(), p.clone());
-                                if let Err(e) = settings.save() {
-                                    eprintln!("Warning: Failed to save settings: {}", e);
-                                }
-                                status_message = "N64 ROM loaded".to_string();
-                                println!("Loaded N64 ROM: {}", p);
-                            }
+                            // N64 requires GL context — defer creation to event loop
+                            pending_n64_rom = Some((data.clone(), p.clone()));
+                            status_message = "N64 ROM detected (pending GL init)".to_string();
+                            println!("N64 ROM will be loaded when GL context is available: {}", p);
                         }
                         Ok(SystemType::SMS) => {
                             rom_hash = Some(GameSaves::rom_hash(&data));
@@ -3764,7 +3738,7 @@ fn main() {
             };
 
         // Initialize audio output
-        let (_stream, stream_handle) = match OutputStream::try_default() {
+        let _stream = match DeviceSinkBuilder::open_default_sink() {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("Error: Failed to initialize audio (exiting): {}.", e);
@@ -3772,16 +3746,11 @@ fn main() {
             }
         };
         let (audio_tx, audio_rx) = sync_channel::<i16>(44100 * 2);
-        if let Err(e) = stream_handle.play_raw(
-            StreamSource {
-                rx: audio_rx,
-                sample_rate: 44100,
-                channels: 2,
-            }
-            .convert_samples(),
-        ) {
-            eprintln!("Warning: Failed to start audio playback: {}", e);
-        }
+        _stream.mixer().add(StreamSource {
+            rx: audio_rx,
+            sample_rate: 44100,
+            channels: 2,
+        });
 
         const SAMPLE_RATE: usize = 44100;
         let mut audio_sample_remainder: f64 = 0.0;
@@ -3926,7 +3895,7 @@ fn main() {
     }
 
     // Initialize audio output
-    let (_stream, stream_handle) = match OutputStream::try_default() {
+    let _stream = match DeviceSinkBuilder::open_default_sink() {
         Ok(s) => s,
         Err(e) => {
             eprintln!(
@@ -3937,16 +3906,11 @@ fn main() {
         }
     };
     let (audio_tx, audio_rx) = sync_channel::<i16>(44100 * 2);
-    if let Err(e) = stream_handle.play_raw(
-        StreamSource {
-            rx: audio_rx,
-            sample_rate: 44100,
-            channels: 2,
-        }
-        .convert_samples(),
-    ) {
-        eprintln!("Warning: Failed to start audio playback: {}", e);
-    }
+    _stream.mixer().add(StreamSource {
+        rx: audio_rx,
+        sample_rate: 44100,
+        channels: 2,
+    });
 
     // Timing trackers - reset when ROM is loaded
     let mut emulation_start_time = Instant::now(); // Time when emulation started
@@ -4024,6 +3988,48 @@ fn main() {
 
     // Main event loop with egui
     loop {
+        // Handle deferred N64 creation (needs GL context from event loop)
+        if let Some((rom_data, rom_path_str)) = pending_n64_rom.take() {
+            let gl_ctx = egui_backend.gl_context();
+            match create_n64_system(gl_ctx, &settings) {
+                Ok(mut n64_sys) => {
+                    if !rom_data.is_empty() {
+                        rom_hash = Some(GameSaves::rom_hash(&rom_data));
+                        if let Err(e) = n64_sys.mount("Cartridge", &rom_data) {
+                            eprintln!("Failed to load N64 ROM: {}", e);
+                            status_message = format!("Error: {}", e);
+                            rom_hash = None;
+                        } else {
+                            rom_loaded = true;
+                            runtime_state.set_mount("Cartridge".to_string(), rom_path_str.clone());
+                            settings.add_recent_file(rom_path_str);
+                            if let Err(e) = settings.save() {
+                                eprintln!("Warning: Failed to save settings: {}", e);
+                            }
+                            egui_app.update_recent_files(settings.get_recent_files().to_vec());
+                            status_message = "N64 ROM loaded".to_string();
+                            println!("N64 system created with GL context, ROM loaded");
+                        }
+                    } else {
+                        rom_loaded = true;
+                        status_message = "Clean N64 system started".to_string();
+                        println!("N64 system created with GL context");
+                    }
+                    sys = EmulatorSystem::N64(Box::new(n64_sys));
+                    egui_app.property_pane.system_name = "N64".to_string();
+                    egui_app.property_pane.rendering_backend = sys.get_current_renderer_name();
+                    egui_app.property_pane.available_renderers = sys.get_available_renderers();
+                    egui_app.status_bar.set_message(status_message.clone());
+                }
+                Err(e) => {
+                    eprintln!("Failed to create N64 system: {}", e);
+                    egui_app
+                        .status_bar
+                        .set_error(format!("Failed to create N64 system: {}", e));
+                }
+            }
+        }
+
         // Detect transition: ROM has just been loaded or unloaded this frame
         let rom_state_changed = rom_loaded != prev_rom_loaded;
 
@@ -4582,6 +4588,45 @@ fn main() {
                         keys: inspector_data.keys,
                     });
                     egui_app.tab_manager.update_system_tile_data(tile_data);
+                }
+                EmulatorSystem::PS1(s) => {
+                    let gpu_data = s.get_gpu_inspector_data();
+                    let ps1_gpu = egui_ui::Ps1GpuData {
+                        gpustat: gpu_data.gpustat,
+                        display_vram_x: gpu_data.display_vram_x,
+                        display_vram_y: gpu_data.display_vram_y,
+                        display_horiz_start: gpu_data.display_horiz_start,
+                        display_horiz_end: gpu_data.display_horiz_end,
+                        display_vert_start: gpu_data.display_vert_start,
+                        display_vert_end: gpu_data.display_vert_end,
+                        hres: gpu_data.hres_str,
+                        vres: gpu_data.vres_str,
+                        is_pal: gpu_data.is_pal,
+                        display_24bit: gpu_data.display_24bit,
+                        interlace: gpu_data.interlace,
+                        display_disabled: gpu_data.display_disabled,
+                        draw_area_left: gpu_data.draw_area_left,
+                        draw_area_top: gpu_data.draw_area_top,
+                        draw_area_right: gpu_data.draw_area_right,
+                        draw_area_bottom: gpu_data.draw_area_bottom,
+                        draw_offset_x: gpu_data.draw_offset_x,
+                        draw_offset_y: gpu_data.draw_offset_y,
+                        texpage_x: gpu_data.texpage_x,
+                        texpage_y: gpu_data.texpage_y,
+                        tex_depth: gpu_data.tex_depth_str,
+                        semi_transparency: gpu_data.semi_transparency_str,
+                        dithering: gpu_data.dithering,
+                        set_mask_bit: gpu_data.set_mask_bit,
+                        check_mask_bit: gpu_data.check_mask_bit,
+                        tex_window_mask_x: gpu_data.tex_window_mask_x,
+                        tex_window_mask_y: gpu_data.tex_window_mask_y,
+                        tex_window_offset_x: gpu_data.tex_window_offset_x,
+                        tex_window_offset_y: gpu_data.tex_window_offset_y,
+                        scanline: gpu_data.scanline,
+                        in_vblank: gpu_data.in_vblank,
+                        irq: gpu_data.irq,
+                    };
+                    egui_app.tab_manager.update_ps1_gpu_data(ps1_gpu);
                 }
                 _ => {
                     // Other systems don't have tile viewers yet

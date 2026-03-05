@@ -1,11 +1,252 @@
 //! Sega Master System memory bus implementation
+//!
+//! Supports 9 mapper types:
+//! 1. **None** – No banking, ROM ≤ 48 KB, direct mapping
+//! 2. **Sega** – Standard SMS mapper ($FFFD/$FFFE/$FFFF)
+//! 3. **Codemasters** – ROM-area writes at $0000/$4000/$8000
+//! 4. **Korean** – Single register at $A000 (banks slot 2)
+//! 5. **Korean8k** – Four 8 KB banks via $4000/$6000/$8000/$A000
+//! 6. **MSX** – Registers at $0000/$0001/$0002/$0003
+//! 7. **Nemesis** – Starts with last ROM bank in slot 0
+//! 8. **FourPak** – 4PAK All Action multicart ($3FFE/$7FFE/$BFFE)
+//! 9. **Janggun** – Janggun-ui Adeul extended Korean mapper
 
 use crate::psg::SmsPsg;
 use crate::vdp::Vdp;
 use emu_core::cpu_z80::MemoryZ80;
 use emu_core::logging::{log, LogCategory, LogLevel};
+use serde_json::Value;
 use std::cell::RefCell;
 use std::rc::Rc;
+
+// ---------------------------------------------------------------------------
+// Mapper type enum
+// ---------------------------------------------------------------------------
+
+/// All recognised SMS/GG mapper types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MapperType {
+    /// No banking – ROM ≤ 48 KB.
+    None,
+    /// Standard Sega mapper ($FFFD / $FFFE / $FFFF in RAM).
+    Sega,
+    /// Codemasters mapper (writes to $0000 / $4000 / $8000 in ROM area).
+    Codemasters,
+    /// Korean mapper – single $A000 register banks slot 2.
+    Korean,
+    /// Korean 8 K mapper – four 8 KB registers at $4000 / $6000 / $8000 / $A000.
+    Korean8k,
+    /// MSX-style mapper – registers at $0000–$0003.
+    Msx,
+    /// Nemesis / "The Castle" – slot 0 starts at last bank.
+    Nemesis,
+    /// 4PAK All Action multicart ($3FFE / $7FFE / $BFFE).
+    FourPak,
+    /// Janggun-ui Adeul (Korean extended mapper with 8 KB pages + XOR).
+    Janggun,
+}
+
+impl MapperType {
+    /// Human-readable name used for logging and debug UI.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::None => "None",
+            Self::Sega => "Sega",
+            Self::Codemasters => "Codemasters",
+            Self::Korean => "Korean",
+            Self::Korean8k => "Korean 8K",
+            Self::Msx => "MSX",
+            Self::Nemesis => "Nemesis",
+            Self::FourPak => "4PAK All Action",
+            Self::Janggun => "Janggun",
+        }
+    }
+
+    /// String key used for JSON serialisation.
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Sega => "sega",
+            Self::Codemasters => "codemasters",
+            Self::Korean => "korean",
+            Self::Korean8k => "korean8k",
+            Self::Msx => "msx",
+            Self::Nemesis => "nemesis",
+            Self::FourPak => "fourpak",
+            Self::Janggun => "janggun",
+        }
+    }
+
+    fn from_str(s: &str) -> Self {
+        match s {
+            "none" => Self::None,
+            "sega" => Self::Sega,
+            "codemasters" => Self::Codemasters,
+            "korean" => Self::Korean,
+            "korean8k" => Self::Korean8k,
+            "msx" => Self::Msx,
+            "nemesis" => Self::Nemesis,
+            "fourpak" => Self::FourPak,
+            "janggun" => Self::Janggun,
+            _ => Self::Sega, // safe default
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Mapper auto-detection
+// ---------------------------------------------------------------------------
+
+/// Detect the mapper type from a ROM image.
+///
+/// Detection order:
+/// 1. CRC32 database for known special-mapper games
+/// 2. Codemasters checksum heuristic
+/// 3. Size-based: ≤ 48 KB → None, > 48 KB → Sega
+fn detect_mapper(rom: &[u8]) -> MapperType {
+    // --- CRC32 database for uncommon mappers ----------------------------------
+    let crc = crc32(rom);
+
+    if let Some(mt) = crc_lookup(crc) {
+        log(LogCategory::Bus, LogLevel::Info, || {
+            format!("SMS mapper: detected {} via CRC32 {:08X}", mt.name(), crc)
+        });
+        return mt;
+    }
+
+    // --- Codemasters checksum heuristic --------------------------------------
+    if is_codemasters(rom) {
+        log(LogCategory::Bus, LogLevel::Info, || {
+            "SMS mapper: detected Codemasters via checksum".to_string()
+        });
+        return MapperType::Codemasters;
+    }
+
+    // --- Fallback by size ----------------------------------------------------
+    if rom.len() <= 0xC000 {
+        MapperType::None
+    } else {
+        MapperType::Sega
+    }
+}
+
+/// Simple CRC32 (used only for mapper detection, no crypto needed).
+fn crc32(data: &[u8]) -> u32 {
+    let mut crc: u32 = 0xFFFF_FFFF;
+    for &b in data {
+        crc ^= b as u32;
+        for _ in 0..8 {
+            if crc & 1 != 0 {
+                crc = (crc >> 1) ^ 0xEDB8_8320;
+            } else {
+                crc >>= 1;
+            }
+        }
+    }
+    !crc
+}
+
+/// Lookup a CRC32 in the built-in database of known special-mapper games.
+fn crc_lookup(crc: u32) -> Option<MapperType> {
+    // Korean mapper ($A000 register)
+    const KOREAN: &[u32] = &[
+        0x17AB6883, // Sangokushi 3 (KR)
+        0x77EFE84A, // Dodgeball King (KR)
+        0xA05258F5, // Jang Pung II (KR)
+        0x929222C4, // Jang Pung 3 (KR)
+    ];
+
+    // Korean 8K mapper ($4000/$6000/$8000/$A000)
+    const KOREAN_8K: &[u32] = &[
+        0x89B79E77, // Zemina - Wonsiin (KR)
+        0x18FB98A3, // Zemina - Street Master (KR)
+        0x97D03541, // Zemina - Cyborg Z (KR)
+        0xA67F2A5C, // Zemina - F-1 Spirit (KR)
+        0x0A77FA5E, // Zemina - Knightmare (KR)
+        0xDAB66797, // Zemina - Nemesis (KR)
+        0x83F0EEDE, // Zemina - Nemesis 2 (KR)
+        0xF89AF3CC, // Zemina - Super Boy II (KR)
+    ];
+
+    // MSX mapper ($0000-$0003)
+    const MSX: &[u32] = &[
+        0x0A440F96, // Zemina - MSX adapter games
+        0x2BCDB8FA, // Zemina - Wonsiin II (KR)
+    ];
+
+    // Nemesis / The Castle
+    const NEMESIS: &[u32] = &[
+        0x2E366CCF, // The Castle (KR)
+    ];
+
+    // 4PAK All Action
+    const FOURPAK: &[u32] = &[
+        0xD8084A30, // 4 PAK All Action (AU)
+    ];
+
+    // Janggun-ui Adeul
+    const JANGGUN: &[u32] = &[
+        0x192949D5, // Janggun-ui Adeul (KR)
+    ];
+
+    if KOREAN.contains(&crc) {
+        return Some(MapperType::Korean);
+    }
+    if KOREAN_8K.contains(&crc) {
+        return Some(MapperType::Korean8k);
+    }
+    if MSX.contains(&crc) {
+        return Some(MapperType::Msx);
+    }
+    if NEMESIS.contains(&crc) {
+        return Some(MapperType::Nemesis);
+    }
+    if FOURPAK.contains(&crc) {
+        return Some(MapperType::FourPak);
+    }
+    if JANGGUN.contains(&crc) {
+        return Some(MapperType::Janggun);
+    }
+    None
+}
+
+/// Heuristic: Codemasters ROMs have a 16-bit checksum at $7FE6 that, when
+/// added to the sum of all other bytes (mod 0x10000), equals 0x10000.
+/// Additionally they do NOT carry a "TMR SEGA" header.
+fn is_codemasters(rom: &[u8]) -> bool {
+    if rom.len() < 0x8000 {
+        return false;
+    }
+
+    // Must NOT have a standard Sega header
+    let sega_header_offsets: &[usize] = &[0x7FF0, 0x3FF0, 0x1FF0];
+    for &off in sega_header_offsets {
+        if rom.len() > off + 8 && &rom[off..off + 8] == b"TMR SEGA" {
+            return false;
+        }
+    }
+
+    // Codemasters checksum at $7FE6-$7FE7 (little-endian)
+    let stored = u16::from_le_bytes([rom[0x7FE6], rom[0x7FE7]]);
+    if stored == 0 {
+        return false;
+    }
+
+    let mut sum: u16 = 0;
+    for (i, &b) in rom.iter().enumerate() {
+        if i != 0x7FE6 && i != 0x7FE7 {
+            sum = sum.wrapping_add(b as u16);
+        }
+    }
+
+    // The stored checksum should be 0x10000 − sum (mod 0x10000)
+    // i.e. sum + stored ≡ 0 (mod 0x10000)
+    sum.wrapping_add(stored) == 0
+}
+
+// ---------------------------------------------------------------------------
+// SMS Memory bus
+// ---------------------------------------------------------------------------
 
 /// SMS Memory bus
 ///
@@ -40,243 +281,786 @@ pub struct SmsMemory {
     // Shared PSG reference
     psg: Rc<RefCell<SmsPsg>>,
 
-    // Banking registers (for ROMs > 48KB)
-    rom_bank_0: usize, // Maps to 0x0000-0x3FFF
-    rom_bank_1: usize, // Maps to 0x4000-0x7FFF
-    rom_bank_2: usize, // Maps to 0x8000-0xBFFF
+    // --------------- Mapper --------------------------------------------------
+    /// Active mapper type.
+    mapper_type: MapperType,
+
+    /// Number of 16 KB ROM banks.
     num_banks: usize,
 
-    // Controller state
+    /// Number of 8 KB ROM banks (used by Korean8k / MSX / Janggun).
+    num_8k_banks: usize,
+
+    // -- Sega mapper state --
+    /// Sega-style 16 KB bank registers: [slot0, slot1, slot2].
+    /// Also used by Korean, Nemesis, FourPak as their base registers.
+    sega_banks: [usize; 3],
+
+    /// Sega mapper: cartridge RAM (up to 32 KB, battery-backed).
+    cart_ram: Vec<u8>,
+
+    /// Sega mapper: cartridge RAM enabled (bit 3 of $FFFC).
+    cart_ram_enabled: bool,
+
+    /// Sega mapper: cart RAM bank select (bit 2 of $FFFC → 0 or 1).
+    cart_ram_bank: usize,
+
+    // -- Codemasters mapper state --
+    codemasters_banks: [usize; 3],
+
+    // -- Korean 8K mapper state --
+    /// Four 8 KB bank indices for slots at $4000-$5FFF … $A000-$BFFF.
+    korean_8k_banks: [usize; 4],
+
+    // -- MSX mapper state --
+    /// Four 8 KB bank indices mapped via $0000-$0003.
+    msx_banks: [usize; 4],
+
+    // -- Nemesis mapper state --
+    /// Once the first write to $0000 occurs, switch from start-up mode.
+    nemesis_activated: bool,
+
+    // -- Janggun mapper state --
+    /// Six 8 KB sub-bank indices (slots 0,1,2 each have two 8 KB halves).
+    janggun_banks: [usize; 6],
+
+    /// Janggun control byte (bit 6 = enable XOR for slot 2 low, bit 7 = slot 2 high).
+    janggun_control: u8,
+
+    // --------------- Controller / memory control ----------------------------
+    /// Controller state
     controller_1: u8,
     controller_2: u8,
 
-    // Memory control register
+    /// Memory control register (port $3E)
     memory_control: u8,
 }
 
 impl SmsMemory {
-    /// Create a new SMS memory bus
+    /// Create a new SMS memory bus.
     pub fn new(rom: Vec<u8>, vdp: Rc<RefCell<Vdp>>, psg: Rc<RefCell<SmsPsg>>) -> Self {
-        // Calculate number of 16KB banks
-        let num_banks = rom.len().div_ceil(0x4000);
+        let mapper_type = detect_mapper(&rom);
+        let num_banks = rom.len().div_ceil(0x4000).max(1);
+        let num_8k_banks = rom.len().div_ceil(0x2000).max(1);
+
+        log(LogCategory::Bus, LogLevel::Info, || {
+            format!(
+                "SMS: ROM size={} KB, mapper={}, 16K banks={}, 8K banks={}",
+                rom.len() / 1024,
+                mapper_type.name(),
+                num_banks,
+                num_8k_banks
+            )
+        });
+
+        let (sega_banks, codemasters_banks) = match mapper_type {
+            MapperType::Codemasters => ([0, 1, 2], [0, 1, 0]),
+            MapperType::Nemesis => {
+                let last = num_banks.saturating_sub(1);
+                ([last, 1, 2], [0, 1, 0])
+            }
+            _ => ([0, 1, 2], [0, 1, 0]),
+        };
 
         Self {
             rom,
-            bios: Vec::new(), // No BIOS by default
+            bios: Vec::new(),
             ram: [0; 0x2000],
             vdp,
             psg,
-            rom_bank_0: 0,
-            rom_bank_1: 1,
-            rom_bank_2: 2,
+            mapper_type,
             num_banks,
+            num_8k_banks,
+            sega_banks,
+            cart_ram: Vec::new(),
+            cart_ram_enabled: false,
+            cart_ram_bank: 0,
+            codemasters_banks,
+            korean_8k_banks: [0, 1, 2, 3],
+            msx_banks: [0, 1, 2, 3],
+            nemesis_activated: false,
+            janggun_banks: [0, 1, 2, 3, 4, 5],
+            janggun_control: 0,
             controller_1: 0xFF,
             controller_2: 0xFF,
-            memory_control: 0x08, // Bit 3 set by default (BIOS disabled)
+            memory_control: 0x08, // Bit 3 set → BIOS disabled by default
         }
     }
 
-    /// Load BIOS ROM
+    // -----------------------------------------------------------------------
+    // Public helpers
+    // -----------------------------------------------------------------------
+
+    /// Get the active mapper type.
+    pub fn mapper_type(&self) -> MapperType {
+        self.mapper_type
+    }
+
+    /// Force a specific mapper type (for manual override / debugging).
+    #[allow(dead_code)]
+    pub fn set_mapper_type(&mut self, mt: MapperType) {
+        self.mapper_type = mt;
+        // Re-initialise mapper-specific state
+        match mt {
+            MapperType::Codemasters => {
+                self.codemasters_banks = [0, 1, 0];
+            }
+            MapperType::Nemesis => {
+                let last = self.num_banks.saturating_sub(1);
+                self.sega_banks = [last, 1, 2];
+                self.nemesis_activated = false;
+            }
+            MapperType::Korean8k => {
+                self.korean_8k_banks = [0, 1, 2, 3];
+            }
+            MapperType::Msx => {
+                self.msx_banks = [0, 1, 2, 3];
+            }
+            MapperType::Janggun => {
+                self.janggun_banks = [0, 1, 2, 3, 4, 5];
+                self.janggun_control = 0;
+            }
+            _ => {}
+        }
+    }
+
+    /// Load BIOS ROM.
     pub fn load_bios(&mut self, bios: Vec<u8>) {
         self.bios = bios;
-        // Enable BIOS when explicitly loaded (user wants to use it)
         if !self.bios.is_empty() {
-            self.memory_control &= !0x08; // Clear bit 3 to enable BIOS
+            self.memory_control &= !0x08; // Enable BIOS
         } else {
-            self.memory_control |= 0x08; // Set bit 3 to disable BIOS when none is loaded
+            self.memory_control |= 0x08;
         }
     }
 
-    /// Load cartridge ROM (preserves BIOS)
+    /// Load cartridge ROM (preserves BIOS).
     pub fn load_rom(&mut self, rom: Vec<u8>) {
+        let mt = detect_mapper(&rom);
+        self.num_banks = rom.len().div_ceil(0x4000).max(1);
+        self.num_8k_banks = rom.len().div_ceil(0x2000).max(1);
         self.rom = rom;
-        // Recalculate number of banks
-        self.num_banks = self.rom.len().div_ceil(0x4000);
-        // Reset bank registers
-        self.rom_bank_0 = 0;
-        self.rom_bank_1 = 1;
-        self.rom_bank_2 = 2;
+        self.mapper_type = mt;
+
+        // Reset all mapper state
+        match mt {
+            MapperType::Codemasters => {
+                self.sega_banks = [0, 1, 2];
+                self.codemasters_banks = [0, 1, 0];
+            }
+            MapperType::Nemesis => {
+                let last = self.num_banks.saturating_sub(1);
+                self.sega_banks = [last, 1, 2];
+                self.nemesis_activated = false;
+                self.codemasters_banks = [0, 1, 0];
+            }
+            _ => {
+                self.sega_banks = [0, 1, 2];
+                self.codemasters_banks = [0, 1, 0];
+            }
+        }
+        self.korean_8k_banks = [0, 1, 2, 3];
+        self.msx_banks = [0, 1, 2, 3];
+        self.janggun_banks = [0, 1, 2, 3, 4, 5];
+        self.janggun_control = 0;
+        self.cart_ram_enabled = false;
+        self.cart_ram_bank = 0;
+
+        log(LogCategory::Bus, LogLevel::Info, || {
+            format!(
+                "SMS: Loaded ROM {} KB, mapper={}",
+                self.rom.len() / 1024,
+                mt.name()
+            )
+        });
     }
 
-    /// Check if BIOS is currently enabled
+    /// Check if BIOS is currently enabled.
     pub fn is_bios_enabled(&self) -> bool {
-        // Bit 3 of memory control: 0 = BIOS enabled, 1 = BIOS disabled
         (self.memory_control & 0x08) == 0 && !self.bios.is_empty()
     }
 
-    /// Update banking configuration
-    fn update_banking(&mut self) {
-        // Sega mapper banking registers in RAM:
-        // 0xFFFD (RAM[0x1FFD]) = page for slot 0 (0x0000-0x3FFF)
-        // 0xFFFE (RAM[0x1FFE]) = page for slot 1 (0x4000-0x7FFF)
-        // 0xFFFF (RAM[0x1FFF]) = page for slot 2 (0x8000-0xBFFF)
-        let frame_0 = self.ram[0x1FFD] as usize;
-        let frame_1 = self.ram[0x1FFE] as usize;
-        let frame_2 = self.ram[0x1FFF] as usize;
+    // -----------------------------------------------------------------------
+    // Controller helpers
+    // -----------------------------------------------------------------------
 
-        // Map banks with wraparound
-        self.rom_bank_0 = frame_0 % self.num_banks.max(1);
-        self.rom_bank_1 = frame_1 % self.num_banks.max(1);
-        self.rom_bank_2 = frame_2 % self.num_banks.max(1);
-    }
-
-    /// Set controller 1 state
     pub fn set_controller_1(&mut self, state: u8) {
         self.controller_1 = state;
     }
-
-    /// Set controller 2 state
     pub fn set_controller_2(&mut self, state: u8) {
         self.controller_2 = state;
     }
+    pub fn get_controller_1(&self) -> u8 {
+        self.controller_1
+    }
+    pub fn get_controller_2(&self) -> u8 {
+        self.controller_2
+    }
+    pub fn get_memory_control(&self) -> u8 {
+        self.memory_control
+    }
+    pub fn set_memory_control(&mut self, value: u8) {
+        self.memory_control = value;
+    }
 
-    // Save state support methods
-    /// Get RAM contents for save state
+    // -----------------------------------------------------------------------
+    // Save-state helpers (backward-compatible API)
+    // -----------------------------------------------------------------------
+
     pub fn get_ram(&self) -> Vec<u8> {
         self.ram.to_vec()
     }
-
-    /// Set RAM contents from save state
     pub fn set_ram(&mut self, data: &[u8]) {
         let len = data.len().min(self.ram.len());
         self.ram[..len].copy_from_slice(&data[..len]);
     }
 
-    /// Get ROM bank 0 index
     pub fn get_rom_bank_0(&self) -> usize {
-        self.rom_bank_0
+        match self.mapper_type {
+            MapperType::Codemasters => self.codemasters_banks[0],
+            _ => self.sega_banks[0],
+        }
     }
-
-    /// Get ROM bank 1 index
     pub fn get_rom_bank_1(&self) -> usize {
-        self.rom_bank_1
+        match self.mapper_type {
+            MapperType::Codemasters => self.codemasters_banks[1],
+            _ => self.sega_banks[1],
+        }
     }
-
-    /// Get ROM bank 2 index
     pub fn get_rom_bank_2(&self) -> usize {
-        self.rom_bank_2
+        match self.mapper_type {
+            MapperType::Codemasters => self.codemasters_banks[2],
+            _ => self.sega_banks[2],
+        }
     }
 
-    /// Get controller 1 state
-    pub fn get_controller_1(&self) -> u8 {
-        self.controller_1
-    }
-
-    /// Get controller 2 state
-    pub fn get_controller_2(&self) -> u8 {
-        self.controller_2
-    }
-
-    /// Get memory control register
-    pub fn get_memory_control(&self) -> u8 {
-        self.memory_control
-    }
-
-    /// Set ROM bank 0 index for save state
     pub fn set_rom_bank_0(&mut self, bank: usize) {
-        self.rom_bank_0 = bank % self.num_banks.max(1);
+        let b = bank % self.num_banks.max(1);
+        match self.mapper_type {
+            MapperType::Codemasters => self.codemasters_banks[0] = b,
+            _ => self.sega_banks[0] = b,
+        }
     }
-
-    /// Set ROM bank 1 index for save state
     pub fn set_rom_bank_1(&mut self, bank: usize) {
-        self.rom_bank_1 = bank % self.num_banks.max(1);
+        let b = bank % self.num_banks.max(1);
+        match self.mapper_type {
+            MapperType::Codemasters => self.codemasters_banks[1] = b,
+            _ => self.sega_banks[1] = b,
+        }
     }
-
-    /// Set ROM bank 2 index for save state
     pub fn set_rom_bank_2(&mut self, bank: usize) {
-        self.rom_bank_2 = bank % self.num_banks.max(1);
+        let b = bank % self.num_banks.max(1);
+        match self.mapper_type {
+            MapperType::Codemasters => self.codemasters_banks[2] = b,
+            _ => self.sega_banks[2] = b,
+        }
     }
 
-    /// Set memory control register for save state
-    pub fn set_memory_control(&mut self, value: u8) {
-        self.memory_control = value;
+    /// Serialise full mapper state to JSON (for save states).
+    pub fn get_mapper_state(&self) -> Value {
+        serde_json::json!({
+            "mapper_type": self.mapper_type.as_str(),
+            "sega_banks": self.sega_banks.to_vec(),
+            "cart_ram_enabled": self.cart_ram_enabled,
+            "cart_ram_bank": self.cart_ram_bank,
+            "cart_ram": self.cart_ram.clone(),
+            "codemasters_banks": self.codemasters_banks.to_vec(),
+            "korean_8k_banks": self.korean_8k_banks.to_vec(),
+            "msx_banks": self.msx_banks.to_vec(),
+            "nemesis_activated": self.nemesis_activated,
+            "janggun_banks": self.janggun_banks.to_vec(),
+            "janggun_control": self.janggun_control,
+        })
+    }
+
+    /// Restore full mapper state from JSON.
+    pub fn set_mapper_state(&mut self, state: &Value) {
+        if let Some(mt_str) = state.get("mapper_type").and_then(|v| v.as_str()) {
+            self.mapper_type = MapperType::from_str(mt_str);
+        }
+        if let Some(arr) = state.get("sega_banks").and_then(|v| v.as_array()) {
+            for (i, val) in arr.iter().enumerate().take(3) {
+                if let Some(b) = val.as_u64() {
+                    self.sega_banks[i] = b as usize;
+                }
+            }
+        }
+        if let Some(v) = state.get("cart_ram_enabled").and_then(|v| v.as_bool()) {
+            self.cart_ram_enabled = v;
+        }
+        if let Some(v) = state.get("cart_ram_bank").and_then(|v| v.as_u64()) {
+            self.cart_ram_bank = v as usize;
+        }
+        if let Some(arr) = state.get("cart_ram").and_then(|v| v.as_array()) {
+            self.cart_ram = arr
+                .iter()
+                .filter_map(|v| v.as_u64().map(|n| n as u8))
+                .collect();
+        }
+        if let Some(arr) = state.get("codemasters_banks").and_then(|v| v.as_array()) {
+            for (i, val) in arr.iter().enumerate().take(3) {
+                if let Some(b) = val.as_u64() {
+                    self.codemasters_banks[i] = b as usize;
+                }
+            }
+        }
+        if let Some(arr) = state.get("korean_8k_banks").and_then(|v| v.as_array()) {
+            for (i, val) in arr.iter().enumerate().take(4) {
+                if let Some(b) = val.as_u64() {
+                    self.korean_8k_banks[i] = b as usize;
+                }
+            }
+        }
+        if let Some(arr) = state.get("msx_banks").and_then(|v| v.as_array()) {
+            for (i, val) in arr.iter().enumerate().take(4) {
+                if let Some(b) = val.as_u64() {
+                    self.msx_banks[i] = b as usize;
+                }
+            }
+        }
+        if let Some(v) = state.get("nemesis_activated").and_then(|v| v.as_bool()) {
+            self.nemesis_activated = v;
+        }
+        if let Some(arr) = state.get("janggun_banks").and_then(|v| v.as_array()) {
+            for (i, val) in arr.iter().enumerate().take(6) {
+                if let Some(b) = val.as_u64() {
+                    self.janggun_banks[i] = b as usize;
+                }
+            }
+        }
+        if let Some(v) = state.get("janggun_control").and_then(|v| v.as_u64()) {
+            self.janggun_control = v as u8;
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Sega mapper banking (RAM-based at $FFFC-$FFFF)
+    // -----------------------------------------------------------------------
+
+    fn update_sega_banking(&mut self) {
+        // $FFFC → cart RAM control
+        let fffc = self.ram[0x1FFC];
+        self.cart_ram_enabled = (fffc & 0x08) != 0;
+        self.cart_ram_bank = ((fffc >> 2) & 1) as usize;
+        // Allocate cart RAM on first enable (up to 32 KB = 2 × 16 KB)
+        if self.cart_ram_enabled && self.cart_ram.is_empty() {
+            self.cart_ram.resize(0x8000, 0);
+        }
+
+        // $FFFD / $FFFE / $FFFF → page for slots 0 / 1 / 2
+        let nb = self.num_banks.max(1);
+        self.sega_banks[0] = (self.ram[0x1FFD] as usize) % nb;
+        self.sega_banks[1] = (self.ram[0x1FFE] as usize) % nb;
+        self.sega_banks[2] = (self.ram[0x1FFF] as usize) % nb;
+    }
+
+    // -----------------------------------------------------------------------
+    // ROM read helper (with bounds check)
+    // -----------------------------------------------------------------------
+
+    #[inline(always)]
+    fn rom_byte(&self, offset: usize) -> u8 {
+        self.rom.get(offset).copied().unwrap_or(0xFF)
+    }
+
+    // -----------------------------------------------------------------------
+    // Per-mapper READ helpers
+    // -----------------------------------------------------------------------
+
+    /// Read for **None** mapper (no banking).
+    fn read_none(&self, addr: u16) -> u8 {
+        match addr {
+            0x0000..=0xBFFF => self.rom_byte(addr as usize),
+            0xC000..=0xFFFF => self.ram[(addr & 0x1FFF) as usize],
+        }
+    }
+
+    /// Read for **Sega** mapper.
+    fn read_sega(&self, addr: u16) -> u8 {
+        match addr {
+            // First 1 KB is ALWAYS pinned to the start of ROM (never remapped).
+            0x0000..=0x03FF => self.rom_byte(addr as usize),
+            // Rest of slot 0 respects $FFFD bank register.
+            0x0400..=0x3FFF => self.rom_byte(self.sega_banks[0] * 0x4000 + addr as usize),
+            0x4000..=0x7FFF => {
+                self.rom_byte(self.sega_banks[1] * 0x4000 + (addr & 0x3FFF) as usize)
+            }
+            0x8000..=0xBFFF => {
+                if self.cart_ram_enabled && !self.cart_ram.is_empty() {
+                    let offset = self.cart_ram_bank * 0x4000 + (addr & 0x3FFF) as usize;
+                    self.cart_ram.get(offset).copied().unwrap_or(0xFF)
+                } else {
+                    self.rom_byte(self.sega_banks[2] * 0x4000 + (addr & 0x3FFF) as usize)
+                }
+            }
+            0xC000..=0xFFFF => self.ram[(addr & 0x1FFF) as usize],
+        }
+    }
+
+    /// Read for **Codemasters** mapper.
+    fn read_codemasters(&self, addr: u16) -> u8 {
+        match addr {
+            // No first-1KB pinning – entire slot 0 is remappable.
+            0x0000..=0x3FFF => self.rom_byte(self.codemasters_banks[0] * 0x4000 + addr as usize),
+            0x4000..=0x7FFF => {
+                self.rom_byte(self.codemasters_banks[1] * 0x4000 + (addr & 0x3FFF) as usize)
+            }
+            0x8000..=0xBFFF => {
+                self.rom_byte(self.codemasters_banks[2] * 0x4000 + (addr & 0x3FFF) as usize)
+            }
+            0xC000..=0xFFFF => self.ram[(addr & 0x1FFF) as usize],
+        }
+    }
+
+    /// Read for **Korean** mapper (single $A000 register, banks slot 2).
+    fn read_korean(&self, addr: u16) -> u8 {
+        match addr {
+            // Slots 0 & 1 fixed.
+            0x0000..=0x3FFF => self.rom_byte(addr as usize), // always bank 0
+            0x4000..=0x7FFF => self.rom_byte(0x4000 + (addr & 0x3FFF) as usize), // always bank 1
+            0x8000..=0xBFFF => {
+                self.rom_byte(self.sega_banks[2] * 0x4000 + (addr & 0x3FFF) as usize)
+            }
+            0xC000..=0xFFFF => self.ram[(addr & 0x1FFF) as usize],
+        }
+    }
+
+    /// Read for **Korean 8K** mapper.
+    fn read_korean_8k(&self, addr: u16) -> u8 {
+        match addr {
+            // $0000-$3FFF: fixed to first 16 KB of ROM.
+            0x0000..=0x3FFF => self.rom_byte(addr as usize),
+            // $4000-$5FFF: bank[0]
+            0x4000..=0x5FFF => {
+                self.rom_byte(self.korean_8k_banks[0] * 0x2000 + (addr & 0x1FFF) as usize)
+            }
+            // $6000-$7FFF: bank[1]
+            0x6000..=0x7FFF => {
+                self.rom_byte(self.korean_8k_banks[1] * 0x2000 + (addr & 0x1FFF) as usize)
+            }
+            // $8000-$9FFF: bank[2]
+            0x8000..=0x9FFF => {
+                self.rom_byte(self.korean_8k_banks[2] * 0x2000 + (addr & 0x1FFF) as usize)
+            }
+            // $A000-$BFFF: bank[3]
+            0xA000..=0xBFFF => {
+                self.rom_byte(self.korean_8k_banks[3] * 0x2000 + (addr & 0x1FFF) as usize)
+            }
+            0xC000..=0xFFFF => self.ram[(addr & 0x1FFF) as usize],
+        }
+    }
+
+    /// Read for **MSX** mapper (registers at $0000-$0003).
+    fn read_msx(&self, addr: u16) -> u8 {
+        match addr {
+            // $0000-$1FFF: msx_banks[0]
+            0x0000..=0x1FFF => self.rom_byte(self.msx_banks[0] * 0x2000 + (addr & 0x1FFF) as usize),
+            // $2000-$3FFF: msx_banks[1]
+            0x2000..=0x3FFF => self.rom_byte(self.msx_banks[1] * 0x2000 + (addr & 0x1FFF) as usize),
+            // $4000-$5FFF: msx_banks[2]
+            0x4000..=0x5FFF => self.rom_byte(self.msx_banks[2] * 0x2000 + (addr & 0x1FFF) as usize),
+            // $6000-$7FFF: msx_banks[3]
+            0x6000..=0x7FFF => self.rom_byte(self.msx_banks[3] * 0x2000 + (addr & 0x1FFF) as usize),
+            // $8000-$BFFF: fixed to last 16 KB of ROM
+            0x8000..=0xBFFF => {
+                let last_16k_start = self.rom.len().saturating_sub(0x4000);
+                self.rom_byte(last_16k_start + (addr & 0x3FFF) as usize)
+            }
+            0xC000..=0xFFFF => self.ram[(addr & 0x1FFF) as usize],
+        }
+    }
+
+    /// Read for **Nemesis** mapper.
+    fn read_nemesis(&self, addr: u16) -> u8 {
+        match addr {
+            // First 1 KB always pinned.
+            0x0000..=0x03FF => self.rom_byte(addr as usize),
+            0x0400..=0x3FFF => self.rom_byte(self.sega_banks[0] * 0x4000 + addr as usize),
+            0x4000..=0x7FFF => {
+                self.rom_byte(self.sega_banks[1] * 0x4000 + (addr & 0x3FFF) as usize)
+            }
+            0x8000..=0xBFFF => {
+                self.rom_byte(self.sega_banks[2] * 0x4000 + (addr & 0x3FFF) as usize)
+            }
+            0xC000..=0xFFFF => self.ram[(addr & 0x1FFF) as usize],
+        }
+    }
+
+    /// Read for **4PAK All Action** mapper.
+    fn read_fourpak(&self, addr: u16) -> u8 {
+        match addr {
+            0x0000..=0x3FFF => self.rom_byte(self.sega_banks[0] * 0x4000 + addr as usize),
+            0x4000..=0x7FFF => {
+                self.rom_byte(self.sega_banks[1] * 0x4000 + (addr & 0x3FFF) as usize)
+            }
+            0x8000..=0xBFFF => {
+                self.rom_byte(self.sega_banks[2] * 0x4000 + (addr & 0x3FFF) as usize)
+            }
+            0xC000..=0xFFFF => self.ram[(addr & 0x1FFF) as usize],
+        }
+    }
+
+    /// Read for **Janggun** mapper (8 KB sub-banks with optional XOR).
+    fn read_janggun(&self, addr: u16) -> u8 {
+        match addr {
+            // Slot 0 low / high
+            0x0000..=0x1FFF => {
+                self.rom_byte(self.janggun_banks[0] * 0x2000 + (addr & 0x1FFF) as usize)
+            }
+            0x2000..=0x3FFF => {
+                self.rom_byte(self.janggun_banks[1] * 0x2000 + (addr & 0x1FFF) as usize)
+            }
+            // Slot 1 low / high
+            0x4000..=0x5FFF => {
+                self.rom_byte(self.janggun_banks[2] * 0x2000 + (addr & 0x1FFF) as usize)
+            }
+            0x6000..=0x7FFF => {
+                self.rom_byte(self.janggun_banks[3] * 0x2000 + (addr & 0x1FFF) as usize)
+            }
+            // Slot 2 low / high (may XOR data bytes)
+            0x8000..=0x9FFF => {
+                let b = self.rom_byte(self.janggun_banks[4] * 0x2000 + (addr & 0x1FFF) as usize);
+                if (self.janggun_control & 0x40) != 0 {
+                    b ^ 0xFF
+                } else {
+                    b
+                }
+            }
+            0xA000..=0xBFFF => {
+                let b = self.rom_byte(self.janggun_banks[5] * 0x2000 + (addr & 0x1FFF) as usize);
+                if (self.janggun_control & 0x80) != 0 {
+                    b ^ 0xFF
+                } else {
+                    b
+                }
+            }
+            0xC000..=0xFFFF => self.ram[(addr & 0x1FFF) as usize],
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Per-mapper WRITE helpers
+    // -----------------------------------------------------------------------
+
+    /// Write for the **Sega** mapper.
+    fn write_sega(&mut self, addr: u16, val: u8) {
+        match addr {
+            0x8000..=0xBFFF if self.cart_ram_enabled && !self.cart_ram.is_empty() => {
+                let offset = self.cart_ram_bank * 0x4000 + (addr & 0x3FFF) as usize;
+                if offset < self.cart_ram.len() {
+                    self.cart_ram[offset] = val;
+                }
+            }
+            0xC000..=0xFFFF => {
+                let ram_addr = (addr & 0x1FFF) as usize;
+                self.ram[ram_addr] = val;
+                if (0x1FFC..=0x1FFF).contains(&ram_addr) {
+                    self.update_sega_banking();
+                }
+            }
+            _ => {} // writes to ROM area ignored
+        }
+    }
+
+    /// Write for the **Codemasters** mapper.
+    fn write_codemasters(&mut self, addr: u16, val: u8) {
+        let nb = self.num_banks.max(1);
+        match addr {
+            0x0000..=0x3FFF => {
+                self.codemasters_banks[0] = (val as usize) % nb;
+            }
+            0x4000..=0x7FFF => {
+                self.codemasters_banks[1] = (val as usize) % nb;
+            }
+            0x8000..=0xBFFF => {
+                self.codemasters_banks[2] = (val as usize) % nb;
+            }
+            0xC000..=0xFFFF => {
+                self.ram[(addr & 0x1FFF) as usize] = val;
+            }
+        }
+    }
+
+    /// Write for the **Korean** mapper.
+    fn write_korean(&mut self, addr: u16, val: u8) {
+        match addr {
+            0xA000 => {
+                self.sega_banks[2] = (val as usize) % self.num_banks.max(1);
+            }
+            0xC000..=0xFFFF => {
+                self.ram[(addr & 0x1FFF) as usize] = val;
+            }
+            _ => {}
+        }
+    }
+
+    /// Write for the **Korean 8K** mapper.
+    fn write_korean_8k(&mut self, addr: u16, val: u8) {
+        let nb = self.num_8k_banks.max(1);
+        match addr {
+            0x4000 => self.korean_8k_banks[0] = (val as usize) % nb,
+            0x6000 => self.korean_8k_banks[1] = (val as usize) % nb,
+            0x8000 => self.korean_8k_banks[2] = (val as usize) % nb,
+            0xA000 => self.korean_8k_banks[3] = (val as usize) % nb,
+            0xC000..=0xFFFF => {
+                self.ram[(addr & 0x1FFF) as usize] = val;
+            }
+            _ => {}
+        }
+    }
+
+    /// Write for the **MSX** mapper.
+    fn write_msx(&mut self, addr: u16, val: u8) {
+        let nb = self.num_8k_banks.max(1);
+        match addr {
+            0x0000 => self.msx_banks[0] = (val as usize) % nb,
+            0x0001 => self.msx_banks[1] = (val as usize) % nb,
+            0x0002 => self.msx_banks[2] = (val as usize) % nb,
+            0x0003 => self.msx_banks[3] = (val as usize) % nb,
+            0xC000..=0xFFFF => {
+                self.ram[(addr & 0x1FFF) as usize] = val;
+            }
+            _ => {}
+        }
+    }
+
+    /// Write for the **Nemesis** mapper.
+    fn write_nemesis(&mut self, addr: u16, val: u8) {
+        match addr {
+            0x0000 => {
+                if !self.nemesis_activated {
+                    // First write switches slot 0 from last bank to bank 0.
+                    self.nemesis_activated = true;
+                    self.sega_banks[0] = 0;
+                }
+            }
+            0xC000..=0xFFFF => {
+                let ram_addr = (addr & 0x1FFF) as usize;
+                self.ram[ram_addr] = val;
+                if (0x1FFC..=0x1FFF).contains(&ram_addr) {
+                    self.update_sega_banking();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Write for the **4PAK All Action** mapper.
+    fn write_fourpak(&mut self, addr: u16, val: u8) {
+        let nb = self.num_banks.max(1);
+        match addr {
+            0x3FFE => self.sega_banks[0] = (val as usize) % nb,
+            0x7FFE => self.sega_banks[1] = (val as usize) % nb,
+            0xBFFE => self.sega_banks[2] = (val as usize) % nb,
+            0xC000..=0xFFFF => {
+                self.ram[(addr & 0x1FFF) as usize] = val;
+            }
+            _ => {}
+        }
+    }
+
+    /// Write for the **Janggun** mapper.
+    fn write_janggun(&mut self, addr: u16, val: u8) {
+        let nb = self.num_8k_banks.max(1);
+        match addr {
+            // $FFFE: control register (bits 6-7 = XOR for slot 2 halves)
+            0xFFFE => {
+                self.janggun_control = val;
+                self.ram[(addr & 0x1FFF) as usize] = val;
+            }
+            // $FFFF: bank for slot 2 (16 KB = 2 × 8 KB pages)
+            0xFFFF => {
+                let base = ((val as usize) * 2) % nb;
+                self.janggun_banks[4] = base;
+                self.janggun_banks[5] = (base + 1) % nb;
+                self.ram[(addr & 0x1FFF) as usize] = val;
+            }
+            // Individual 8K half-bank registers
+            0x4000 => self.janggun_banks[2] = (val as usize) % nb,
+            0x6000 => self.janggun_banks[3] = (val as usize) % nb,
+            0x8000 => self.janggun_banks[4] = (val as usize) % nb,
+            0xA000 => self.janggun_banks[5] = (val as usize) % nb,
+            0xC000..=0xFFFD => {
+                self.ram[(addr & 0x1FFF) as usize] = val;
+            }
+            _ => {}
+        }
     }
 }
 
+// ---------------------------------------------------------------------------
+// MemoryZ80 trait implementation
+// ---------------------------------------------------------------------------
+
 impl MemoryZ80 for SmsMemory {
     fn read(&self, addr: u16) -> u8 {
-        match addr {
-            0x0000..=0x03FF if self.is_bios_enabled() => {
-                // BIOS area (1KB) when BIOS is enabled
-                self.bios.get(addr as usize).copied().unwrap_or(0xFF)
-            }
-            0x0000..=0x3FFF => {
-                // Bank 0
-                let offset = self.rom_bank_0 * 0x4000 + (addr as usize);
-                self.rom.get(offset).copied().unwrap_or(0xFF)
-            }
-            0x4000..=0x7FFF => {
-                // Bank 1
-                let offset = self.rom_bank_1 * 0x4000 + ((addr & 0x3FFF) as usize);
-                self.rom.get(offset).copied().unwrap_or(0xFF)
-            }
-            0x8000..=0xBFFF => {
-                // Bank 2
-                let offset = self.rom_bank_2 * 0x4000 + ((addr & 0x3FFF) as usize);
-                self.rom.get(offset).copied().unwrap_or(0xFF)
-            }
-            0xC000..=0xFFFF => {
-                // RAM (8KB, mirrored)
-                self.ram[(addr & 0x1FFF) as usize]
-            }
+        // BIOS overlay always takes priority for first 1 KB.
+        if addr <= 0x03FF && self.is_bios_enabled() {
+            return self.bios.get(addr as usize).copied().unwrap_or(0xFF);
+        }
+
+        match self.mapper_type {
+            MapperType::None => self.read_none(addr),
+            MapperType::Sega => self.read_sega(addr),
+            MapperType::Codemasters => self.read_codemasters(addr),
+            MapperType::Korean => self.read_korean(addr),
+            MapperType::Korean8k => self.read_korean_8k(addr),
+            MapperType::Msx => self.read_msx(addr),
+            MapperType::Nemesis => self.read_nemesis(addr),
+            MapperType::FourPak => self.read_fourpak(addr),
+            MapperType::Janggun => self.read_janggun(addr),
         }
     }
 
     fn write(&mut self, addr: u16, val: u8) {
-        match addr {
-            0xC000..=0xFFFF => {
-                // RAM write
-                let ram_addr = (addr & 0x1FFF) as usize;
-                self.ram[ram_addr] = val;
-
-                // Check if banking registers were updated (0xFFFD, 0xFFFE, 0xFFFF)
-                if matches!(ram_addr, 0x1FFD..=0x1FFF) {
-                    self.update_banking();
+        match self.mapper_type {
+            MapperType::None => {
+                if addr >= 0xC000 {
+                    self.ram[(addr & 0x1FFF) as usize] = val;
                 }
             }
-            _ => {
-                // ROM area - ignore writes
-            }
+            MapperType::Sega => self.write_sega(addr, val),
+            MapperType::Codemasters => self.write_codemasters(addr, val),
+            MapperType::Korean => self.write_korean(addr, val),
+            MapperType::Korean8k => self.write_korean_8k(addr, val),
+            MapperType::Msx => self.write_msx(addr, val),
+            MapperType::Nemesis => self.write_nemesis(addr, val),
+            MapperType::FourPak => self.write_fourpak(addr, val),
+            MapperType::Janggun => self.write_janggun(addr, val),
         }
     }
 
     fn io_read(&mut self, port: u8) -> u8 {
-        // SMS I/O port decoding (partial decoding based on bit patterns):
-        // - 0x00-0x3F: Memory control, I/O control, etc.
-        // - 0x40-0x7F: V-counter (even) / H-counter (odd)
-        // - 0x80-0xBF: VDP data (even) / VDP status (odd)
-        // - 0xC0-0xFF: Controller ports (even = port A, odd = port B)
         let value = match port {
             // 0x40-0x7F: V-counter (even ports) / H-counter (odd ports)
             p if (0x40..=0x7F).contains(&p) => {
-                // V-counter on even ports, H-counter on odd ports
-                // Both currently read vcounter for simplicity
-                self.vdp.borrow().read_vcounter()
+                if p & 0x01 == 0 {
+                    // Even port: V-counter
+                    self.vdp.borrow().read_vcounter()
+                } else {
+                    // Odd port: H-counter
+                    self.vdp.borrow().read_hcounter()
+                }
             }
             // 0x80-0xBF: VDP ports (bit 0 determines data vs control)
             p if (0x80..=0xBF).contains(&p) => {
                 if p & 0x01 == 0 {
-                    // Even port: VDP data
                     self.vdp.borrow_mut().read_data()
                 } else {
-                    // Odd port: VDP status
                     self.vdp.borrow_mut().read_status()
                 }
             }
             // 0xC0-0xFF: Controller ports
             p if (0xC0..=0xFF).contains(&p) => {
                 if p & 0x01 == 0 {
-                    // Even port: Controller port 1
                     self.controller_1
                 } else {
-                    // Odd port: Controller port 2
                     self.controller_2
                 }
             }
             _ => 0xFF,
         };
 
-        // Log I/O reads for debugging (only when debug logging is enabled)
         log(LogCategory::Bus, LogLevel::Debug, || {
             format!("SMS I/O: Read port ${:02X} = ${:02X}", port, value)
         });
@@ -285,96 +1069,304 @@ impl MemoryZ80 for SmsMemory {
     }
 
     fn io_write(&mut self, port: u8, val: u8) {
-        // SMS I/O port decoding (partial decoding based on bit patterns):
-        // - 0x00-0x3F: Memory control, I/O control, etc.
-        // - 0x40-0x7F: PSG write (directly connected to SN76489)
-        // - 0x80-0xBF: VDP data (even) / VDP control (odd)
-        // - 0xC0-0xFF: Controller ports (directly readable, no writes typically)
         match port {
             // 0x00-0x3F: Memory control registers
             0x3E => {
-                // Memory control register
                 self.memory_control = val;
             }
             0x3F => {
-                // I/O port control (nationalization adapter)
-                // Controls TH pin direction for controller ports
-                // Not implemented yet
+                // I/O port control (nationalization adapter) – not yet implemented.
             }
             // 0x40-0x7F: PSG write
             p if (0x40..=0x7F).contains(&p) => {
                 self.psg.borrow_mut().write(val);
             }
-            // 0x80-0xBF: VDP ports (bit 0 determines data vs control)
+            // 0x80-0xBF: VDP ports
             p if (0x80..=0xBF).contains(&p) => {
                 if p & 0x01 == 0 {
-                    // Even port: VDP data
                     self.vdp.borrow_mut().write_data(val);
                 } else {
-                    // Odd port: VDP control
                     self.vdp.borrow_mut().write_control(val);
                 }
             }
-            _ => {
-                // Ignore writes to other ports
-            }
+            _ => {}
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::psg::SmsPsg;
 
-    #[test]
-    fn test_ram_read_write() {
+    fn make_mem(rom: Vec<u8>) -> SmsMemory {
         let vdp = Rc::new(RefCell::new(Vdp::new()));
         let psg = Rc::new(RefCell::new(SmsPsg::new()));
-        let rom = vec![0; 0x8000];
-        let mut mem = SmsMemory::new(rom, vdp, psg);
+        SmsMemory::new(rom, vdp, psg)
+    }
 
-        // Write to RAM
+    #[test]
+    fn test_ram_read_write() {
+        let mut mem = make_mem(vec![0; 0x8000]);
         mem.write(0xC000, 0x42);
         assert_eq!(mem.read(0xC000), 0x42);
-
         // Check RAM mirror
         assert_eq!(mem.read(0xE000), 0x42);
     }
 
     #[test]
     fn test_rom_read() {
-        let vdp = Rc::new(RefCell::new(Vdp::new()));
-        let psg = Rc::new(RefCell::new(SmsPsg::new()));
         let mut rom = vec![0; 0x8000];
         rom[0x100] = 0xAB;
-
-        let mem = SmsMemory::new(rom, vdp, psg);
-
+        let mem = make_mem(rom);
         assert_eq!(mem.read(0x100), 0xAB);
     }
 
     #[test]
-    fn test_banking() {
-        let vdp = Rc::new(RefCell::new(Vdp::new()));
-        let psg = Rc::new(RefCell::new(SmsPsg::new()));
-
-        // Create 128KB ROM (8 banks of 16KB)
+    fn test_sega_banking() {
+        // 128 KB ROM (8 × 16 KB banks), tagged at offset 0 of each bank.
         let mut rom = vec![0; 0x20000];
-        // Mark each bank with its number
         for i in 0..8 {
             rom[i * 0x4000] = i as u8;
         }
+        let mut mem = make_mem(rom);
+        mem.set_mapper_type(MapperType::Sega);
 
-        let mut mem = SmsMemory::new(rom, vdp, psg);
-
-        // Initially bank 0, 1, 2 should be mapped
-        assert_eq!(mem.read(0x0000), 0);
+        assert_eq!(mem.read(0x0000), 0); // pinned first 1 KB
         assert_eq!(mem.read(0x4000), 1);
         assert_eq!(mem.read(0x8000), 2);
 
-        // Switch slot 2 (0x8000-0xBFFF) to bank 5 using 0xFFFF
+        // Switch slot 2 to bank 5 via $FFFF
         mem.write(0xFFFF, 5);
         assert_eq!(mem.read(0x8000), 5);
+    }
+
+    #[test]
+    fn test_sega_first_1kb_pinned() {
+        // Ensure first 1 KB is always from physical ROM start,
+        // even when bank 0 is remapped.
+        let mut rom = vec![0; 0x20000]; // 128 KB
+        rom[0x0038] = 0xC9; // RST $38 vector: RET
+                            // Put a known value at bank 3, offset $0400 within the bank
+                            // (ROM[3*0x4000 + 0x0400] = ROM[0xC400])
+        rom[3 * 0x4000 + 0x0400] = 0xBB;
+
+        let mut mem = make_mem(rom);
+        mem.set_mapper_type(MapperType::Sega);
+
+        // Remap slot 0 to bank 3
+        mem.write(0xFFFD, 3);
+        // First 1 KB must still be from bank 0 (pinned)
+        assert_eq!(mem.read(0x0038), 0xC9);
+        // $0400+ should come from bank 3
+        assert_eq!(mem.read(0x0400), 0xBB);
+    }
+
+    #[test]
+    fn test_codemasters_banking() {
+        let mut rom = vec![0; 0x20000]; // 128 KB
+        for i in 0..8 {
+            rom[i * 0x4000] = i as u8;
+        }
+        let mut mem = make_mem(rom);
+        mem.set_mapper_type(MapperType::Codemasters);
+
+        // Default banks: 0, 1, 0
+        assert_eq!(mem.read(0x0000), 0);
+        assert_eq!(mem.read(0x4000), 1);
+        assert_eq!(mem.read(0x8000), 0); // slot 2 defaults to bank 0 for Codemasters
+
+        // Remap slot 2 to bank 5 via write to $8000
+        mem.write(0x8000, 5);
+        assert_eq!(mem.read(0x8000), 5);
+
+        // Remap slot 0 to bank 7 via write to $0000 (no first-1 KB pinning)
+        mem.write(0x0000, 7);
+        assert_eq!(mem.read(0x0000), 7);
+    }
+
+    #[test]
+    fn test_korean_banking() {
+        let mut rom = vec![0; 0x20000]; // 128 KB
+        for i in 0..8 {
+            rom[i * 0x4000] = i as u8;
+        }
+        let mut mem = make_mem(rom);
+        mem.set_mapper_type(MapperType::Korean);
+
+        // Slots 0 & 1 fixed
+        assert_eq!(mem.read(0x0000), 0);
+        assert_eq!(mem.read(0x4000), 1);
+        // Default slot 2 = bank 2
+        assert_eq!(mem.read(0x8000), 2);
+
+        // Switch slot 2 via $A000
+        mem.write(0xA000, 6);
+        assert_eq!(mem.read(0x8000), 6);
+    }
+
+    #[test]
+    fn test_korean_8k_banking() {
+        let mut rom = vec![0; 0x20000]; // 128 KB = 16 × 8 KB banks
+        for i in 0..16 {
+            rom[i * 0x2000] = i as u8;
+        }
+        let mut mem = make_mem(rom);
+        mem.set_mapper_type(MapperType::Korean8k);
+
+        // $0000 fixed
+        assert_eq!(mem.read(0x0000), 0);
+
+        // Default 8K banks [0,1,2,3]
+        assert_eq!(mem.read(0x4000), 0); // bank 0
+        assert_eq!(mem.read(0x6000), 1); // bank 1
+        assert_eq!(mem.read(0x8000), 2); // bank 2
+        assert_eq!(mem.read(0xA000), 3); // bank 3
+
+        // Remap $8000-$9FFF to bank 10
+        mem.write(0x8000, 10);
+        assert_eq!(mem.read(0x8000), 10);
+    }
+
+    #[test]
+    fn test_msx_banking() {
+        let mut rom = vec![0; 0x20000]; // 128 KB = 16 × 8 KB banks
+        for i in 0..16 {
+            rom[i * 0x2000] = i as u8;
+        }
+        let mut mem = make_mem(rom);
+        mem.set_mapper_type(MapperType::Msx);
+
+        // Default banks [0,1,2,3]
+        assert_eq!(mem.read(0x0000), 0);
+        assert_eq!(mem.read(0x2000), 1);
+        assert_eq!(mem.read(0x4000), 2);
+        assert_eq!(mem.read(0x6000), 3);
+
+        // Remap $0000-$1FFF to bank 8
+        mem.write(0x0000, 8);
+        assert_eq!(mem.read(0x0000), 8);
+    }
+
+    #[test]
+    fn test_nemesis_startup() {
+        // 64 KB ROM → 4 banks.  Nemesis starts with LAST bank in slot 0.
+        let mut rom = vec![0; 0x10000];
+        for i in 0..4 {
+            rom[i * 0x4000] = i as u8;
+        }
+        let mut mem = make_mem(rom);
+        mem.set_mapper_type(MapperType::Nemesis);
+
+        // Slot 0 should show last bank (3) at $0400+
+        // First 1 KB is pinned to physical ROM start (bank 0).
+        assert_eq!(mem.read(0x0000), 0); // pinned
+        assert_eq!(mem.read(0x4000), 1); // slot 1 = bank 1
+
+        // After first write to $0000, slot 0 becomes bank 0.
+        mem.write(0x0000, 0);
+        assert!(mem.nemesis_activated);
+    }
+
+    #[test]
+    fn test_fourpak_banking() {
+        let mut rom = vec![0; 0x40000]; // 256 KB
+        for i in 0..16 {
+            rom[i * 0x4000] = i as u8;
+        }
+        let mut mem = make_mem(rom);
+        mem.set_mapper_type(MapperType::FourPak);
+
+        // Switch slot 0 via $3FFE
+        mem.write(0x3FFE, 5);
+        assert_eq!(mem.read(0x0000), 5);
+
+        // Switch slot 1 via $7FFE
+        mem.write(0x7FFE, 8);
+        assert_eq!(mem.read(0x4000), 8);
+
+        // Switch slot 2 via $BFFE
+        mem.write(0xBFFE, 12);
+        assert_eq!(mem.read(0x8000), 12);
+    }
+
+    #[test]
+    fn test_janggun_banking() {
+        let mut rom = vec![0; 0x40000]; // 256 KB = 32 × 8 KB banks
+        for i in 0..32 {
+            rom[i * 0x2000] = i as u8;
+        }
+        let expected_raw = rom[4 * 0x2000]; // janggun_banks[4] defaults to 4
+        let mut mem = make_mem(rom);
+        mem.set_mapper_type(MapperType::Janggun);
+
+        // Remap $4000-$5FFF to bank 10
+        mem.write(0x4000, 10);
+        assert_eq!(mem.read(0x4000), 10);
+
+        // Enable XOR for slot 2 low ($8000-$9FFF)
+        mem.write(0xFFFE, 0x40);
+        // The data from the bank should be XOR 0xFF
+        assert_eq!(mem.read(0x8000), expected_raw ^ 0xFF);
+    }
+
+    #[test]
+    fn test_mapper_detection_small_rom() {
+        let rom = vec![0; 0x8000]; // 32 KB
+        assert_eq!(detect_mapper(&rom), MapperType::None);
+    }
+
+    #[test]
+    fn test_mapper_detection_large_rom() {
+        let rom = vec![0; 0x40000]; // 256 KB
+                                    // No Codemasters checksum, no CRC match → Sega.
+        assert_eq!(detect_mapper(&rom), MapperType::Sega);
+    }
+
+    #[test]
+    fn test_cart_ram() {
+        let rom = vec![0; 0x20000];
+        let mut mem = make_mem(rom);
+        mem.set_mapper_type(MapperType::Sega);
+
+        // Enable cart RAM via $FFFC (bit 3 = 1)
+        mem.write(0xFFFC, 0x08);
+        // Write to cart RAM in $8000-$BFFF region
+        mem.write(0x8000, 0x42);
+        assert_eq!(mem.read(0x8000), 0x42);
+
+        // Disable cart RAM
+        mem.write(0xFFFC, 0x00);
+        // Now reads come from ROM again, not cart RAM
+        assert_ne!(mem.read(0x8000), 0x42);
+    }
+
+    #[test]
+    fn test_mapper_state_roundtrip() {
+        let rom = vec![0; 0x20000];
+        let mut mem = make_mem(rom.clone());
+        mem.set_mapper_type(MapperType::Sega);
+        mem.write(0xFFFF, 5); // bank 2 = 5
+
+        let state = mem.get_mapper_state();
+
+        let mut mem2 = make_mem(rom);
+        mem2.set_mapper_state(&state);
+        assert_eq!(mem2.mapper_type(), MapperType::Sega);
+        assert_eq!(mem2.get_rom_bank_2(), 5);
+    }
+
+    #[test]
+    fn test_crc32_basic() {
+        // Just verify CRC32 doesn't panic and produces consistent results.
+        let data = b"hello world";
+        let c1 = crc32(data);
+        let c2 = crc32(data);
+        assert_eq!(c1, c2);
+        assert_ne!(c1, 0);
     }
 }

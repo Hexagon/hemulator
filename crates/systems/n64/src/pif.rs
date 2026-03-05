@@ -536,6 +536,12 @@ impl Pif {
         self.controller1 = state;
     }
 
+    /// Process PIF command block (called after SI DMA write completes)
+    /// This is the main entry point for PIF command processing via SI DMA.
+    pub fn process_commands(&mut self) {
+        self.process_controller_commands();
+    }
+
     /// Update controller 2 state
     pub fn set_controller2(&mut self, state: ControllerState) {
         self.controller2 = state;

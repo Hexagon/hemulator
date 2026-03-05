@@ -174,25 +174,34 @@ impl VideoInterface {
     }
 
     /// Get the framebuffer origin address
-    #[allow(dead_code)] // Reserved for future use
     pub fn get_framebuffer_origin(&self) -> u32 {
         self.origin
     }
 
     /// Get the framebuffer width
-    #[allow(dead_code)] // Reserved for future use
     pub fn get_width(&self) -> u32 {
         self.width
     }
 
+    /// Get the display height calculated from VI_V_START register
+    /// VI_V_START contains start in upper 10 bits and end in lower 10 bits
+    pub fn get_display_height(&self) -> u32 {
+        let v_start = (self.v_start >> 16) & 0x3FF;
+        let v_end = self.v_start & 0x3FF;
+        if v_end > v_start {
+            (v_end - v_start) / 2 // Divide by 2 for interlaced
+        } else {
+            240 // Default NTSC height
+        }
+    }
+
     /// Check if display is enabled
-    #[allow(dead_code)] // Reserved for future use
     pub fn is_enabled(&self) -> bool {
         self.status & 0x03 != 0
     }
 
     /// Get color depth from status register
-    #[allow(dead_code)] // Reserved for future use
+    /// 0 = blank, 2 = 16-bit (RGBA5551), 3 = 32-bit (RGBA8888)
     pub fn get_color_depth(&self) -> u32 {
         self.status & 0x03
     }

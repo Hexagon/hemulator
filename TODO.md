@@ -1,21 +1,5 @@
 # TODO
 
-## Dev Shell (`dev.ps1`)
-
-- [x] `build` — Build workspace with `release-quick` profile
-- [x] `run` — Build and run emulator with a ROM
-- [x] `test` — Run all workspace tests
-- [x] `clippy` — Clippy with `-D warnings`
-- [x] `fmt` — Format all code
-- [x] `check` — Full CI pipeline (fmt + clippy + build + test)
-- [x] `trace` — Run with instruction tracing
-- [x] `dump` — Headless debug dump
-- [x] `cpu` — Run with CPU trace/debug logging (`--log-cpu`)
-- [x] `gpu` — Run with PPU trace/debug logging (`--log-ppu`)
-- [ ] `apu` — Run with APU logging (`--log-apu`)
-- [ ] `bus` — Run with bus logging (`--log-bus`)
-- [ ] `all-logs` — Run with all log categories enabled
-
 ## Ignored Tests
 
 All tests below are marked `#[ignore]` because they require an OpenGL context that is
@@ -93,3 +77,22 @@ not available in CI or in headless `cargo test` runs.  They can be run manually 
 - [ ] **cputest-full fails at test `0x0025`** — next failing emulation-mode test after dp-wrap fix; needs investigation
   - File: `crates/core/src/cpu_65c816.rs`
   - Raise `MIN_PASSING` in `test_cputest_full_loads_and_runs` once resolved
+
+### Critical
+- [x] **SPC700 second upload self-corruption**: Fixed. Root causes:
+  1. **INC dp ($AB)** was missing `direct_page()` base offset — fixed
+  2. **~45 other dp-addressing opcodes** were missing `direct_page()` — all fixed
+  3. **SPC700 sync timing** (Option B): SPC700 now runs inline in `tick_cycles()` instead of batching cycles and flushing on port access. This prevents the split-read race where the SPC700 could execute hundreds of instructions between two consecutive main-CPU port writes (e.g. writing the dest-addr low byte to $2142 and high byte to $2143), which caused the N-SPC upload handler at $1315 to use stale/wrong ZP $14–$15 values.
+  - See `SPC_ANALYSIS.md` for full analysis and resolution
+
+### High
+- [x] **Clean up SPC700 debug infrastructure** — all temporary tracing removed:
+  - Removed `trace_ports`, `last_pc`, `port_trace_count` fields from `Spc700Memory`
+  - Removed PORT-READ/PORT-WRITE/CTRL-WRITE file tracing to `spc700_diag.txt`
+  - Removed DIAG snapshots (every 5000 cycles)
+  - Removed SPC700-TRACE for N-SPC addresses
+  - Removed watchpoint on $1308–$130C
+  - Removed jump detection RAM dump
+  - Removed timer counter `eprintln!` in COUNTER0 read handler
+  - Removed per-instruction logging ($0100–$0FFF) in `cpu_spc700.rs` step()
+  - Removed port read/write tracing at $2140–$2143 in `bus.rs`

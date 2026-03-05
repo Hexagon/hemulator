@@ -1661,6 +1661,166 @@ mod tests {
     }
 
     #[test]
+    fn test_mode4_full_frame_diverse_palette() {
+        // This test simulates what a game like Doom does:
+        // 1. Set up Mode 4 with identity affine transform
+        // 2. Fill palette with 16 distinct colors (a grayscale ramp)
+        // 3. Fill VRAM framebuffer with varied pixel indices
+        // 4. Render all 160 scanlines
+        // 5. Verify output has correct colors at specific positions
+
+        let mut ppu = Ppu::new();
+        let mut io = vec![0u8; 0x400];
+        let mut palette = vec![0u8; 0x400];
+        let mut vram = vec![0u8; 0x18000];
+        let oam = vec![0u8; 0x400];
+
+        // Mode 4, BG2 enabled, page 0
+        io[DISPCNT] = 4;
+        io[DISPCNT + 1] = (DISPCNT_BG2_ENABLE >> 8) as u8;
+
+        // Set BG2PA = 0x0100 (1.0) and BG2PD = 0x0100 (1.0) for identity transform
+        io[BG2PA] = 0x00;
+        io[BG2PA + 1] = 0x01;
+        io[BG2PB] = 0x00;
+        io[BG2PB + 1] = 0x00;
+        io[BG2PC] = 0x00;
+        io[BG2PC + 1] = 0x00;
+        io[BG2PD] = 0x00;
+        io[BG2PD + 1] = 0x01;
+
+        // Set up a 16-color grayscale palette (entries 0-15)
+        // Entry 0 = black (0x0000)
+        palette[0] = 0x00;
+        palette[1] = 0x00;
+        // Entries 1-15: grayscale ramp
+        for i in 1u16..16 {
+            let gray = (i * 2) & 0x1F; // 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30
+            let color = gray | (gray << 5) | (gray << 10);
+            palette[(i as usize) * 2] = color as u8;
+            palette[(i as usize) * 2 + 1] = (color >> 8) as u8;
+        }
+
+        // Fill VRAM with a pattern: pixel value = (x + y) % 16
+        for y in 0..160usize {
+            for x in 0..240usize {
+                vram[y * 240 + x] = ((x + y) % 16) as u8;
+            }
+        }
+
+        // Latch affine registers (like frame start)
+        ppu.latch_affine_registers(&io);
+
+        // Render all 160 scanlines
+        // Note: render_scanline already calls increment_affine_refs internally
+        for line in 0..160u32 {
+            ppu.render_scanline(line, &io, &palette, &vram, &oam);
+        }
+
+        // Verify specific pixels
+        // Pixel (0,0): index = (0+0)%16 = 0 → transparent → backdrop (palette[0] = black)
+        assert_eq!(
+            ppu.frame.pixels[0],
+            gba_color_to_rgb(0x0000),
+            "Pixel (0,0) should be black (palette[0])"
+        );
+
+        // Pixel (1,0): index = (1+0)%16 = 1 → palette entry 1 = gray level 2
+        let expected_gray1 = 2u16 | (2u16 << 5) | (2u16 << 10);
+        assert_eq!(
+            ppu.frame.pixels[1],
+            gba_color_to_rgb(expected_gray1),
+            "Pixel (1,0) should be palette[1]"
+        );
+
+        // Pixel (15,0): index = (15+0)%16 = 15 → palette entry 15 = gray level 30
+        let expected_gray15 = 30u16 | (30u16 << 5) | (30u16 << 10);
+        assert_eq!(
+            ppu.frame.pixels[15],
+            gba_color_to_rgb(expected_gray15),
+            "Pixel (15,0) should be palette[15]"
+        );
+
+        // Pixel (0,1): index = (0+1)%16 = 1 → same as palette entry 1
+        assert_eq!(
+            ppu.frame.pixels[240],
+            gba_color_to_rgb(expected_gray1),
+            "Pixel (0,1) should be palette[1]"
+        );
+
+        // Pixel (100,80): index = (100+80)%16 = 180%16 = 4 → palette entry 4 = gray level 8
+        let expected_gray4 = 8u16 | (8u16 << 5) | (8u16 << 10);
+        assert_eq!(
+            ppu.frame.pixels[80 * 240 + 100],
+            gba_color_to_rgb(expected_gray4),
+            "Pixel (100,80) should be palette[4]"
+        );
+
+        // Count unique colors in the frame - should have 16 distinct values
+        let mut unique: std::collections::HashSet<u32> = std::collections::HashSet::new();
+        for y in 0..160 {
+            for x in 0..240 {
+                unique.insert(ppu.frame.pixels[y * 240 + x]);
+            }
+        }
+        assert!(
+            unique.len() >= 16,
+            "Expected at least 16 unique colors, got {}",
+            unique.len()
+        );
+    }
+
+    #[test]
+    fn test_mode4_page_flip() {
+        // Test that page flipping (DISPCNT bit 4) reads from the correct VRAM page
+        let mut ppu = Ppu::new();
+        let mut io = vec![0u8; 0x400];
+        let mut palette = vec![0u8; 0x400];
+        let mut vram = vec![0u8; 0x18000];
+        let oam = vec![0u8; 0x400];
+
+        // Mode 4, BG2 enabled
+        io[DISPCNT] = 4;
+        io[DISPCNT + 1] = (DISPCNT_BG2_ENABLE >> 8) as u8;
+
+        // Identity affine
+        io[BG2PA] = 0x00;
+        io[BG2PA + 1] = 0x01;
+        io[BG2PD] = 0x00;
+        io[BG2PD + 1] = 0x01;
+
+        // Palette: entry 1 = red, entry 2 = blue
+        palette[2] = 0x1F;
+        palette[3] = 0x00; // Red
+        palette[4] = 0x00;
+        palette[5] = 0x7C; // Blue
+
+        // Page 0: pixel (0,0) = index 1 (red)
+        vram[0] = 1;
+        // Page 1: pixel (0,0) = index 2 (blue)
+        vram[0xA000] = 2;
+
+        // Render page 0
+        ppu.latch_affine_registers(&io);
+        ppu.render_scanline(0, &io, &palette, &vram, &oam);
+        assert_eq!(
+            ppu.frame.pixels[0],
+            gba_color_to_rgb(0x001F),
+            "Page 0 should show red"
+        );
+
+        // Switch to page 1 (set DISPCNT bit 4)
+        io[DISPCNT] = 4 | 0x10; // mode 4 + frame select
+        ppu.latch_affine_registers(&io);
+        ppu.render_scanline(0, &io, &palette, &vram, &oam);
+        assert_eq!(
+            ppu.frame.pixels[0],
+            gba_color_to_rgb(0x7C00),
+            "Page 1 should show blue"
+        );
+    }
+
+    #[test]
     fn test_text_bg_simple() {
         let mut ppu = Ppu::new();
         let mut io = vec![0u8; 0x400];
