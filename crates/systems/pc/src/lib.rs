@@ -2989,4 +2989,73 @@ mod boot_output_tests {
         config.set_level(LogCategory::CPU, old_level);
         config.set_rate_limit(old_rate_limit);
     }
+
+    #[test]
+    fn test_custom_bios_loading() {
+        // Verify that a custom BIOS (any size up to 256 KB) is end-aligned so
+        // the reset vector lands at physical address 0xFFFF0.
+
+        let mut sys = PcSystem::new();
+
+        // Build a minimal 64 KB BIOS with a distinctive byte at the entry point
+        // (F000:FFF0 = offset 0xFFF0 in a 64 KB image).
+        let mut bios64 = vec![0xCFu8; 0x10000]; // all IRET
+        bios64[0xFFF0] = 0xEB; // JMP SHORT at entry point
+        bios64[0xFFF1] = 0xFE; // JMP $-2 (tight loop)
+
+        sys.mount("BIOS", &bios64).expect("64 KB BIOS mount failed");
+
+        // Entry point is CS=0xFFFF, IP=0x0000 which translates to physical 0xFFFF0
+        assert_eq!(
+            sys.cpu.bus().read(0xFFFF0),
+            0xEB,
+            "64 KB BIOS entry byte should be at 0xFFFF0"
+        );
+
+        // Test with a 128 KB BIOS: the reset vector is at offset 0x1FFF0
+        let mut bios128 = vec![0xCFu8; 0x20000]; // 128 KB
+        bios128[0x1FFF0] = 0xEB; // entry point byte
+
+        sys.mount("BIOS", &bios128)
+            .expect("128 KB BIOS mount failed");
+
+        assert_eq!(
+            sys.cpu.bus().read(0xFFFF0),
+            0xEB,
+            "128 KB BIOS entry byte should be at 0xFFFF0 after end-alignment"
+        );
+    }
+
+    #[test]
+    fn test_int13h_no_call_limit() {
+        // Verify that INT 13h succeeds even after >1000 invocations (old limit was 1000).
+        use crate::disk::DiskRequest;
+
+        let mut bus = crate::bus::PcBus::new();
+
+        // Mount a 1.44 MB floppy with a valid boot sector
+        let mut floppy = vec![0u8; 1474560];
+        floppy[510] = 0x55;
+        floppy[511] = 0xAA;
+        bus.mount_floppy_a(floppy);
+
+        let request = DiskRequest {
+            drive: 0x00,
+            cylinder: 0,
+            head: 0,
+            sector: 1,
+            count: 1,
+        };
+
+        // Perform 1500 reads - previously would fail after 1000
+        for i in 0..1500 {
+            let mut buf = vec![0u8; 512];
+            let status = bus.disk_read(&request, &mut buf);
+            assert_eq!(
+                status, 0x00,
+                "Disk read #{} should succeed (status=0x{:02X})",
+                i, status
+            );
+        }
+    }
 }

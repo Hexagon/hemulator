@@ -2,6 +2,15 @@
 use std::error::Error;
 use std::fmt;
 
+/// Standard floppy disk image sizes in bytes.
+///
+/// - 360 KB  (5.25", double-density)
+/// - 720 KB  (3.5", double-density)
+/// - 1.2 MB  (5.25", high-density)
+/// - 1.44 MB (3.5", high-density) – most common
+/// - 2.88 MB (3.5", extended density)
+pub const FLOPPY_IMAGE_SIZES: &[usize] = &[368_640, 737_280, 1_228_800, 1_474_560, 2_949_120];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(clippy::upper_case_acronyms)]
 pub enum SystemType {
@@ -87,7 +96,7 @@ pub fn detect_rom_type_with_extension(
                 }
                 // Fall through to content detection for other sizes
             }
-            "bin" | "iso" | "img" => {
+            "bin" | "iso" | "img" | "ima" => {
                 // Check for PS1 BIOS first (512KB .bin files)
                 if is_ps1_bios(data) {
                     return Ok(SystemType::PS1);
@@ -95,6 +104,16 @@ pub fn detect_rom_type_with_extension(
                 // Check for PS1 disc image
                 if is_ps1_disc_image(data) {
                     return Ok(SystemType::PS1);
+                }
+                // .img and .ima are PC disk image extensions: detect floppy/hard-drive sizes
+                if matches!(ext_lower.as_str(), "img" | "ima") {
+                    if FLOPPY_IMAGE_SIZES.contains(&data.len()) {
+                        return Ok(SystemType::PC);
+                    }
+                    // Hard drive: >= 1 MB and not a recognised floppy size
+                    if data.len() >= 1024 * 1024 {
+                        return Ok(SystemType::PC);
+                    }
                 }
                 // For .bin extension (ambiguous), use preferred system if provided
                 if let Some(preferred) = preferred_system {
@@ -724,5 +743,39 @@ mod edge_case_tests {
         println!("4KB file detected as: {:?}", result);
         // Currently detected as Atari2600 (line 110 matches 4096)
         assert_eq!(result, SystemType::Atari2600);
+    }
+
+    #[test]
+    fn test_img_floppy_detection() {
+        // 1.44 MB floppy image (.img) should be detected as PC
+        let data = vec![0u8; 1474560];
+        assert_eq!(
+            detect_rom_type_with_extension(&data, Some("img"), None).unwrap(),
+            SystemType::PC
+        );
+
+        // 720 KB floppy image (.img)
+        let data = vec![0u8; 737280];
+        assert_eq!(
+            detect_rom_type_with_extension(&data, Some("img"), None).unwrap(),
+            SystemType::PC
+        );
+
+        // .ima extension also detected as PC floppy
+        let data = vec![0u8; 1474560];
+        assert_eq!(
+            detect_rom_type_with_extension(&data, Some("ima"), None).unwrap(),
+            SystemType::PC
+        );
+    }
+
+    #[test]
+    fn test_img_hard_drive_detection() {
+        // 20 MB hard drive image (.img) should be detected as PC
+        let data = vec![0u8; 20 * 1024 * 1024];
+        assert_eq!(
+            detect_rom_type_with_extension(&data, Some("img"), None).unwrap(),
+            SystemType::PC
+        );
     }
 }

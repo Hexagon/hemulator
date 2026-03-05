@@ -15,7 +15,9 @@ use egui_ui::EguiApp;
 use emu_core::{types::Frame, System};
 use hemu_project::HemuProject;
 use rodio::{DeviceSinkBuilder, Source};
-use rom_detect::{detect_rom_type_with_extension, is_ps1_bios_file, SystemType};
+use rom_detect::{
+    detect_rom_type_with_extension, is_ps1_bios_file, SystemType, FLOPPY_IMAGE_SIZES,
+};
 use save_state::GameSaves;
 use settings::Settings;
 use std::collections::HashMap;
@@ -3179,16 +3181,50 @@ fn main() {
                             }
                         }
                         Ok(SystemType::PC) => {
-                            // PC executables should be on disk images, not loaded directly
-                            // Create a new PC system and let user mount disk images via F3
-                            status_message =
-                                "PC system detected. Use F3 to mount disk images.".to_string();
                             rom_hash = None; // PC systems don't use ROM hash
-                            let pc_sys = emu_pc::PcSystem::new();
+                            let mut pc_sys = emu_pc::PcSystem::new();
+
+                            // If the file is a disk image (.img/.ima), mount it
+                            // to the appropriate drive; otherwise just start the PC
+                            // and let the user mount disk images manually.
+                            let ext_str = extension.as_deref().unwrap_or("");
+                            if matches!(ext_str, "img" | "ima") {
+                                if FLOPPY_IMAGE_SIZES.contains(&data.len()) {
+                                    if let Err(e) = pc_sys.mount("FloppyA", &data) {
+                                        eprintln!("Failed to mount floppy: {}", e);
+                                        status_message = format!("Error mounting floppy: {}", e);
+                                    } else {
+                                        runtime_state.set_mount("FloppyA".to_string(), p.clone());
+                                        status_message = format!("PC floppy A: loaded: {}", p);
+                                        println!("Mounted floppy A: {}", p);
+                                    }
+                                } else if data.len() >= 1024 * 1024 {
+                                    if let Err(e) = pc_sys.mount("HardDrive", &data) {
+                                        eprintln!("Failed to mount hard drive: {}", e);
+                                        status_message =
+                                            format!("Error mounting hard drive: {}", e);
+                                    } else {
+                                        runtime_state.set_mount("HardDrive".to_string(), p.clone());
+                                        status_message = format!("PC hard drive loaded: {}", p);
+                                        println!("Mounted hard drive: {}", p);
+                                    }
+                                } else {
+                                    status_message =
+                                        "PC disk image size not recognised. Use F3 to mount."
+                                            .to_string();
+                                }
+                            } else {
+                                // .com / .exe or other PC file: just start the system
+                                status_message =
+                                    "PC system started. Use F3 to mount disk images.".to_string();
+                                println!("Initialized PC system. Mount disk images to proceed.");
+                            }
+
                             sys = EmulatorSystem::PC(Box::new(pc_sys));
-                            // Don't save mount points for PC since they use disk images
-                            eprintln!("PC executable detected. Please mount disk images using F3.");
-                            println!("Initialized PC system. Mount disk images to proceed.");
+                            rom_loaded = true; // Mark as loaded so slot-args block reuses this system
+                            if let Err(e) = settings.save() {
+                                eprintln!("Warning: Failed to save settings: {}", e);
+                            }
                         }
                         Ok(SystemType::SNES) => {
                             rom_hash = Some(GameSaves::rom_hash(&data));
@@ -5046,14 +5082,30 @@ fn main() {
                                         }
                                     }
                                     Ok(SystemType::PC) => {
-                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        rom_hash = None; // PC systems don't use ROM hash
                                         let mut pc_sys = emu_pc::PcSystem::new();
-                                        if let Err(e) = pc_sys.mount("Disk", &data) {
-                                            egui_app
-                                                .status_bar
-                                                .set_message(format!("Error: {}", e));
-                                            rom_hash = None;
-                                        } else {
+
+                                        // Determine correct mount point from extension / size
+                                        let ext_str =
+                                            extension.map(|e| e.to_lowercase()).unwrap_or_default();
+                                        let (mount_id, msg) =
+                                            if matches!(ext_str.as_str(), "img" | "ima") {
+                                                if FLOPPY_IMAGE_SIZES.contains(&data.len()) {
+                                                    ("FloppyA", "PC floppy A: loaded")
+                                                } else if data.len() >= 1024 * 1024 {
+                                                    ("HardDrive", "PC hard drive loaded")
+                                                } else {
+                                                    ("", "PC disk image size not recognised")
+                                                }
+                                            } else {
+                                                // .com / .exe or other PC file: start bare system
+                                                (
+                                                "",
+                                                "PC system started – use mount points to add disks",
+                                            )
+                                            };
+
+                                        if mount_id.is_empty() {
                                             rom_loaded = true;
                                             sys = EmulatorSystem::PC(Box::new(pc_sys));
                                             egui_app.property_pane.system_name = "PC".to_string();
@@ -5061,9 +5113,6 @@ fn main() {
                                                 sys.get_current_renderer_name();
                                             egui_app.property_pane.available_renderers =
                                                 sys.get_available_renderers();
-                                            runtime_state
-                                                .set_mount("Disk".to_string(), path_str.clone());
-                                            // Add to recent files
                                             settings.add_recent_file(path_str.clone());
                                             if let Err(e) = settings.save() {
                                                 eprintln!(
@@ -5074,14 +5123,32 @@ fn main() {
                                             egui_app.update_recent_files(
                                                 settings.get_recent_files().to_vec(),
                                             );
-                                            egui_app
-                                                .status_bar
-                                                .set_message("PC executable loaded".to_string());
+                                            egui_app.status_bar.set_message(msg.to_string());
                                             let _ = sys.resolution();
-                                            // Load save states for this ROM
-                                            if let Some(ref hash) = rom_hash {
-                                                _game_saves = GameSaves::load(hash);
+                                        } else if let Err(e) = pc_sys.mount(mount_id, &data) {
+                                            egui_app.status_bar.set_error(format!("Error: {}", e));
+                                        } else {
+                                            rom_loaded = true;
+                                            sys = EmulatorSystem::PC(Box::new(pc_sys));
+                                            egui_app.property_pane.system_name = "PC".to_string();
+                                            egui_app.property_pane.rendering_backend =
+                                                sys.get_current_renderer_name();
+                                            egui_app.property_pane.available_renderers =
+                                                sys.get_available_renderers();
+                                            runtime_state
+                                                .set_mount(mount_id.to_string(), path_str.clone());
+                                            settings.add_recent_file(path_str.clone());
+                                            if let Err(e) = settings.save() {
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
                                             }
+                                            egui_app.update_recent_files(
+                                                settings.get_recent_files().to_vec(),
+                                            );
+                                            egui_app.status_bar.set_message(msg.to_string());
+                                            let _ = sys.resolution();
                                         }
                                     }
                                     Ok(SystemType::SNES) => {
@@ -5753,14 +5820,29 @@ fn main() {
                                         }
                                     }
                                     Ok(SystemType::PC) => {
-                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        rom_hash = None; // PC systems don't use ROM hash
                                         let mut pc_sys = emu_pc::PcSystem::new();
-                                        if let Err(e) = pc_sys.mount("Disk", &data) {
-                                            egui_app
-                                                .status_bar
-                                                .set_message(format!("Error: {}", e));
-                                            rom_hash = None;
-                                        } else {
+
+                                        // Determine correct mount point from extension / size
+                                        let ext_str =
+                                            extension.map(|e| e.to_lowercase()).unwrap_or_default();
+                                        let (mount_id, msg) =
+                                            if matches!(ext_str.as_str(), "img" | "ima") {
+                                                if FLOPPY_IMAGE_SIZES.contains(&data.len()) {
+                                                    ("FloppyA", "PC floppy A: loaded")
+                                                } else if data.len() >= 1024 * 1024 {
+                                                    ("HardDrive", "PC hard drive loaded")
+                                                } else {
+                                                    ("", "PC disk image size not recognised")
+                                                }
+                                            } else {
+                                                (
+                                                "",
+                                                "PC system started – use mount points to add disks",
+                                            )
+                                            };
+
+                                        if mount_id.is_empty() {
                                             rom_loaded = true;
                                             sys = EmulatorSystem::PC(Box::new(pc_sys));
                                             egui_app.property_pane.system_name = "PC".to_string();
@@ -5768,8 +5850,6 @@ fn main() {
                                                 sys.get_current_renderer_name();
                                             egui_app.property_pane.available_renderers =
                                                 sys.get_available_renderers();
-                                            runtime_state
-                                                .set_mount("Disk".to_string(), file_path.clone());
                                             settings.add_recent_file(file_path.clone());
                                             if let Err(e) = settings.save() {
                                                 eprintln!(
@@ -5780,13 +5860,32 @@ fn main() {
                                             egui_app.update_recent_files(
                                                 settings.get_recent_files().to_vec(),
                                             );
-                                            egui_app
-                                                .status_bar
-                                                .set_message("PC executable loaded".to_string());
+                                            egui_app.status_bar.set_message(msg.to_string());
                                             let _ = sys.resolution();
-                                            if let Some(ref hash) = rom_hash {
-                                                _game_saves = GameSaves::load(hash);
+                                        } else if let Err(e) = pc_sys.mount(mount_id, &data) {
+                                            egui_app.status_bar.set_error(format!("Error: {}", e));
+                                        } else {
+                                            rom_loaded = true;
+                                            sys = EmulatorSystem::PC(Box::new(pc_sys));
+                                            egui_app.property_pane.system_name = "PC".to_string();
+                                            egui_app.property_pane.rendering_backend =
+                                                sys.get_current_renderer_name();
+                                            egui_app.property_pane.available_renderers =
+                                                sys.get_available_renderers();
+                                            runtime_state
+                                                .set_mount(mount_id.to_string(), file_path.clone());
+                                            settings.add_recent_file(file_path.clone());
+                                            if let Err(e) = settings.save() {
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
                                             }
+                                            egui_app.update_recent_files(
+                                                settings.get_recent_files().to_vec(),
+                                            );
+                                            egui_app.status_bar.set_message(msg.to_string());
+                                            let _ = sys.resolution();
                                         }
                                     }
                                     Ok(SystemType::SNES) => {

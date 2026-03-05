@@ -2410,25 +2410,9 @@ impl PcCpu {
         // Get function code from AH register
         let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
 
-        // Count INT 13h calls for debugging
-        static mut INT13H_CALL_COUNT: u32 = 0;
-        unsafe {
-            INT13H_CALL_COUNT += 1;
-            let count = INT13H_CALL_COUNT; // Copy value to avoid shared reference
-            if count % 10 == 1 {
-                log(LogCategory::Bus, LogLevel::Debug, || {
-                    format!("INT 13h call #{}", count)
-                });
-            }
-            if count > 1000 {
-                log(LogCategory::Bus, LogLevel::Debug, || {
-                    "!!! INT 13h called over 1000 times! Stopping...".to_string()
-                });
-                self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Error
-                self.set_carry_flag(true);
-                return 51;
-            }
-        }
+        log(LogCategory::Bus, LogLevel::Debug, || {
+            format!("INT 13h AH=0x{:02X}", ah)
+        });
 
         // Execute the appropriate INT 13h function
         // These functions will set AX (status in AH) and carry flag
