@@ -45,3 +45,10 @@ debug_run.txt
 
 # Anti-ignores
 !workbench/workbench.hemu
+
+# Generated test includes (produced by make_cpu_tests.py)
+test_roms/snes/tests-basic.inc
+test_roms/snes/tests-full.inc
+test_roms/snes/tests_table.inc
+tests-basic.inc
+tests_table.inc
