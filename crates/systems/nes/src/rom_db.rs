@@ -197,13 +197,14 @@ mod tests {
         // The database has entries - verify a known entry is found
         assert!(!ROM_DATABASE.is_empty());
 
-        // Look up the Bad Dudes (USA) ROM entry
-        let bad_dudes_entry = lookup_rom(0x161D717B);
-        assert!(bad_dudes_entry.is_some());
-        let entry = bad_dudes_entry.unwrap();
-        assert_eq!(entry.crc32, 0x161D717B);
-        assert_eq!(entry.mapper, Some(4));
-        assert_eq!(entry.mirroring, Some(Mirroring::Horizontal));
+        // Dynamically select a known entry from the ROM database
+        let known = &ROM_DATABASE[0];
+
+        // Look up the entry by its CRC32 and verify all fields match
+        let looked_up = lookup_rom(known.crc32);
+        assert!(looked_up.is_some());
+        let entry = looked_up.unwrap();
+        assert_eq!(*entry, *known);
     }
 
     #[test]

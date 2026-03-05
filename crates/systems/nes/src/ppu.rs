@@ -557,7 +557,11 @@ impl Ppu {
 
                 if rendering_enabled && scanline < 240 {
                     // During active rendering on visible scanlines
-                    if dot >= 1 && dot <= 64 {
+                    if dot == 0 {
+                        // Dot 0 is the idle cycle — no OAM operations are active yet.
+                        // Hardware returns $FF during this idle tick.
+                        0xFF
+                    } else if dot >= 1 && dot <= 64 {
                         // Secondary OAM clear phase: PPU writes $FF to secondary OAM.
                         // Reads of $2004 during this phase always return $FF.
                         0xFF
@@ -4845,6 +4849,29 @@ mod tests {
             ppu.read_register(4),
             ppu.oam[10],
             "Rendering disabled: should return OAM[OAMADDR]"
+        );
+
+        // --- Pre-render scanline with rendering enabled: should return OAM[OAMADDR] ---
+        // Per NESdev wiki, the pre-render scanline (261 NTSC / 311 PAL) does NOT perform
+        // sprite evaluation. $2004 reads on pre-render behave like VBlank, returning
+        // OAM at the current OAMADDR address.
+        ppu.mask = 0x18; // Re-enable rendering
+        ppu.scanline.set(261); // Pre-render scanline (NTSC)
+        ppu.dot.set(100); // Mid-scanline
+        ppu.oam_addr.set(20);
+        assert_eq!(
+            ppu.read_register(4),
+            ppu.oam[20],
+            "Pre-render scanline with rendering enabled: should return OAM[OAMADDR]"
+        );
+
+        // Also verify dot 0 (idle cycle) on visible scanline returns $FF with rendering
+        ppu.scanline.set(0); // Visible scanline
+        ppu.dot.set(0);
+        assert_eq!(
+            ppu.read_register(4),
+            0xFF,
+            "Dot 0 (idle cycle) during rendering: should return $FF"
         );
     }
 }
