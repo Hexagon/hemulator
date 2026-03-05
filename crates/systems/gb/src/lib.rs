@@ -2341,8 +2341,11 @@ mod tests {
 
     #[test]
     fn test_double_speed_frame_progression() {
-        // Test that frame progression stays at 70,224 PPU cycles per frame
+        // Test that frame progression stays at ~70,224 PPU cycles per frame
         // regardless of double-speed mode, and audio cycle accounting is consistent.
+        // Reference: Pan Docs - 154 scanlines × 456 dots = 70,224 T-cycles per frame.
+        const EXPECTED_CYCLES_PER_FRAME: u32 = 70224;
+
         let mut rom = vec![0; 0x8000];
         rom[0x143] = 0x80; // CGB-compatible
 
@@ -2354,12 +2357,12 @@ mod tests {
         let frame_normal = sys_normal.step_frame().unwrap();
         let audio_normal = sys_normal.audio_cycles_accumulated;
 
-        // Double-speed system: force KEY1 bit 7 to enter double speed
+        // Double-speed system: request a speed switch via KEY1
         let mut sys_double = GbSystem::new();
         sys_double.mount("Cartridge", &rom).unwrap();
-        // Directly set KEY1 bit 7 to simulate double-speed mode
-        sys_double.cpu.memory.write(0xFF4D, 0x01); // Arm speed switch
-        sys_double.cpu.memory.perform_speed_switch(); // Toggle speed
+        // Arm KEY1 bit 0 and then perform the speed switch to enter double-speed mode
+        sys_double.cpu.memory.write(0xFF4D, 0x01); // Arm speed switch (set bit 0)
+        sys_double.cpu.memory.perform_speed_switch(); // Perform speed switch (toggle bit 7, clear bit 0)
 
         assert!(
             sys_double.cpu.memory.is_double_speed(),
@@ -2374,16 +2377,23 @@ mod tests {
         assert_eq!(frame_normal.width, frame_double.width);
         assert_eq!(frame_normal.height, frame_double.height);
 
-        // Audio cycles accumulated should be similar (both in PPU-rate cycles)
-        // Allow some tolerance since the exact CPU instructions executed differ
-        let diff = (audio_normal as i64 - audio_double as i64).unsigned_abs();
+        // Audio cycles should be near 70,224 PPU cycles per frame in both modes.
+        // The loop may slightly overshoot since CPU instructions aren't single-cycle,
+        // but should never undershoot and should stay within a small margin.
+        let max_overshoot = 20; // longest GB instruction is ~20 T-cycles
         assert!(
-            diff < 1000,
-            "Audio cycle accumulation should be similar in both speed modes, \
-             normal={} double={} diff={}",
-            audio_normal,
-            audio_double,
-            diff
+            audio_normal >= EXPECTED_CYCLES_PER_FRAME
+                && audio_normal <= EXPECTED_CYCLES_PER_FRAME + max_overshoot,
+            "Normal-speed audio cycles should be near {}, got {}",
+            EXPECTED_CYCLES_PER_FRAME,
+            audio_normal
+        );
+        assert!(
+            audio_double >= EXPECTED_CYCLES_PER_FRAME
+                && audio_double <= EXPECTED_CYCLES_PER_FRAME + max_overshoot,
+            "Double-speed audio cycles should be near {}, got {}",
+            EXPECTED_CYCLES_PER_FRAME,
+            audio_double
         );
     }
 }
