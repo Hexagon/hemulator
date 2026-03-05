@@ -157,6 +157,11 @@ cargo bench -p emu_nes
 The `-p` package name follows the pattern `emu_<system>` (e.g. `emu_gb`, `emu_snes`, `emu_pc`).
 Exception: Game Boy Advance uses `hemu_gba`.
 
+> **Note:** `-p` builds use the crate's **default features**. Some systems have optional features enabled only by the full workspace build (e.g. `emu_nes` has an `opengl` feature used by the GUI). If you are working on feature-gated code, pass `--features` explicitly:
+> ```bash
+> cargo build -p emu_nes --features opengl
+> ```
+
 **Approach 2 — Full binary with `--no-gui` (visual output, audio, and controllers)**
 
 `cargo run` always builds the **entire workspace** regardless of which ROM you pass. The `--no-gui`
