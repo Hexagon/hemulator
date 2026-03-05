@@ -169,10 +169,10 @@ flag skips the egui overlay at runtime, giving a lighter SDL2 window:
 
 ```bash
 # Load a ROM (system auto-detected from file format)
-cargo run --profile release-quick -- --no-gui game.nes
+cargo run -p emu_gui --profile release-quick -- --no-gui game.nes
 
 # Start a specific system without a ROM
-cargo run --profile release-quick -- --no-gui --system nes
+cargo run -p emu_gui --profile release-quick -- --no-gui --system nes
 ```
 
 The `--system` flag accepts: `nes`, `gb`, `gba`, `atari2600`, `snes`, `n64`, `pc`.
