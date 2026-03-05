@@ -1128,15 +1128,26 @@ impl Ppu {
     /// Returns (vblank_started, stat_interrupt, hblank_entered)
     pub fn step(&mut self, cycles: u32) -> (bool, bool, bool) {
         // When LCD is disabled, LY stays at 0 and no timing progresses.
+        // However, we still track the 456-cycle scanline rhythm so that
+        // HBlank DMA (HDMA) transfers can complete.  On real hardware,
+        // mode 0 (HBlank) is continuously active when the LCD is off,
+        // meaning HDMA transfers one 16-byte block per ~456 T-cycles.
         if (self.lcdc & LCDC_ENABLE) == 0 {
             self.ly = 0;
-            self.cycle_counter = 0;
             self.prev_mode = 0;
-            self.stat &= !0x03;
+            self.stat &= !0x03; // Mode 0 always when LCD off
             self.stat_interrupt_line = false;
             self.scanline_states_captured = false;
             self.window_line_counter = 0;
-            return (false, false, false);
+
+            // Track cycle counter for HDMA timing even with LCD off
+            self.cycle_counter += cycles;
+            let mut hblank_entered = false;
+            while self.cycle_counter >= 456 {
+                self.cycle_counter -= 456;
+                hblank_entered = true;
+            }
+            return (false, false, hblank_entered);
         }
 
         // Accumulate cycles
