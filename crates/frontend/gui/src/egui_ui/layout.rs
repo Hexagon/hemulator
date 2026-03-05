@@ -9,19 +9,6 @@ use crate::settings::ScalingMode;
 use egui::{CentralPanel, Context, TopBottomPanel};
 use egui_dock::{DockArea, Style};
 
-/// Convert linear color component (0-255) to sRGB color space (0-255)
-/// This compensates for GL_FRAMEBUFFER_SRGB incorrectly treating texture colors as linear
-#[inline]
-fn linear_to_srgb(linear: u8) -> u8 {
-    let linear_f = linear as f32 / 255.0;
-    let srgb_f = if linear_f <= 0.0031308 {
-        linear_f * 12.92
-    } else {
-        1.055 * linear_f.powf(1.0 / 2.4) - 0.055
-    };
-    (srgb_f * 255.0).round().min(255.0) as u8
-}
-
 /// Main egui application state
 pub struct EguiApp {
     pub menu_bar: MenuBar,
@@ -55,9 +42,9 @@ impl EguiApp {
         height: usize,
     ) {
         // Convert ARGB to RGBA for egui
-        // Apply inverse gamma to compensate for GL_FRAMEBUFFER_SRGB
-        // GL_FRAMEBUFFER_SRGB treats all colors as linear and converts to sRGB,
-        // so we pre-apply gamma to cancel out that conversion
+        // The egui_sdl2_gl shader already handles sRGB round-trip correctly:
+        // texture sRGB → linear_from_srgba → linear → GL_FRAMEBUFFER_SRGB → sRGB
+        // So we just upload the raw sRGB values directly
         let rgba_pixels: Vec<u8> = pixels
             .iter()
             .flat_map(|&pixel| {
@@ -66,12 +53,7 @@ impl EguiApp {
                 let g = ((pixel >> 8) & 0xFF) as u8;
                 let b = (pixel & 0xFF) as u8;
 
-                // Apply inverse gamma (linear→sRGB) to compensate for GL_FRAMEBUFFER_SRGB
-                let r_corrected = linear_to_srgb(r);
-                let g_corrected = linear_to_srgb(g);
-                let b_corrected = linear_to_srgb(b);
-
-                [r_corrected, g_corrected, b_corrected, a]
+                [r, g, b, a]
             })
             .collect();
 
@@ -196,33 +178,5 @@ impl EguiApp {
 impl Default for EguiApp {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_linear_to_srgb_conversion() {
-        // Test black (should stay black)
-        assert_eq!(linear_to_srgb(0), 0);
-
-        // Test white (should stay white)
-        assert_eq!(linear_to_srgb(255), 255);
-
-        // Test middle gray (linear 128 should convert to brighter sRGB value)
-        // linear 128/255 = 0.502, sRGB = 1.055 * 0.502^(1/2.4) - 0.055 ≈ 0.735
-        // sRGB 0.735 * 255 ≈ 188
-        let result = linear_to_srgb(128);
-        assert!(
-            (186..=190).contains(&result),
-            "Expected ~188, got {}",
-            result
-        );
-
-        // Test darker linear value (should convert to brighter sRGB)
-        let result = linear_to_srgb(100);
-        assert!(result > 100, "sRGB value should be > 100 for linear 100");
     }
 }

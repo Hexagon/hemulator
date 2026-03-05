@@ -1793,3 +1793,85 @@ fn gp0_command_length(cmd: u8) -> u32 {
         _ => 1,            // Unknown, consume 1 word
     }
 }
+
+// ============================================================================
+// Inspector data for debugging GUI
+// ============================================================================
+
+/// GPU inspector data exported for the debug UI
+pub struct Ps1GpuInspectorData {
+    pub gpustat: u32,
+    pub display_vram_x: u32,
+    pub display_vram_y: u32,
+    pub display_horiz_start: u32,
+    pub display_horiz_end: u32,
+    pub display_vert_start: u32,
+    pub display_vert_end: u32,
+    pub hres_str: String,
+    pub vres_str: String,
+    pub is_pal: bool,
+    pub display_24bit: bool,
+    pub interlace: bool,
+    pub display_disabled: bool,
+    pub draw_area_left: u32,
+    pub draw_area_top: u32,
+    pub draw_area_right: u32,
+    pub draw_area_bottom: u32,
+    pub draw_offset_x: i32,
+    pub draw_offset_y: i32,
+    pub texpage_x: u32,
+    pub texpage_y: u32,
+    pub tex_depth_str: String,
+    pub semi_transparency_str: String,
+    pub dithering: bool,
+    pub set_mask_bit: bool,
+    pub check_mask_bit: bool,
+    pub tex_window_mask_x: u8,
+    pub tex_window_mask_y: u8,
+    pub tex_window_offset_x: u8,
+    pub tex_window_offset_y: u8,
+    pub scanline: u32,
+    pub in_vblank: bool,
+    pub irq: bool,
+}
+
+impl Gpu {
+    /// Get inspector data for the debug UI
+    pub fn get_inspector_data(&self) -> Ps1GpuInspectorData {
+        Ps1GpuInspectorData {
+            gpustat: self.gpustat(),
+            display_vram_x: self.display_vram_x,
+            display_vram_y: self.display_vram_y,
+            display_horiz_start: self.display_horiz_start,
+            display_horiz_end: self.display_horiz_end,
+            display_vert_start: self.display_vert_start,
+            display_vert_end: self.display_vert_end,
+            hres_str: format!("{:?}", self.hres),
+            vres_str: format!("{:?}", self.vres),
+            is_pal: self.is_pal,
+            display_24bit: self.display_24bit,
+            interlace: self.interlace,
+            display_disabled: self.display_disabled,
+            draw_area_left: self.draw_area_left,
+            draw_area_top: self.draw_area_top,
+            draw_area_right: self.draw_area_right,
+            draw_area_bottom: self.draw_area_bottom,
+            draw_offset_x: self.draw_offset_x,
+            draw_offset_y: self.draw_offset_y,
+            texpage_x: self.texpage_x,
+            texpage_y: self.texpage_y,
+            tex_depth_str: format!("{:?}", self.tex_depth),
+            semi_transparency_str: format!("{:?}", self.semi_transparency),
+            dithering: self.dithering,
+            set_mask_bit: self.set_mask_bit,
+            check_mask_bit: self.check_mask_bit,
+            tex_window_mask_x: self.tex_window_mask_x,
+            tex_window_mask_y: self.tex_window_mask_y,
+            tex_window_offset_x: self.tex_window_offset_x,
+            tex_window_offset_y: self.tex_window_offset_y,
+            scanline: self.scanline,
+            in_vblank: self.in_vblank,
+            irq: self.irq,
+        }
+    }
+}

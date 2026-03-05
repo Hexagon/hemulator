@@ -305,6 +305,44 @@ pub struct PcBdaData {
     pub ebda_segment: u16,
 }
 
+/// PS1 GPU inspector data for the debug UI
+#[derive(Clone, Debug)]
+pub struct Ps1GpuData {
+    pub gpustat: u32,
+    pub display_vram_x: u32,
+    pub display_vram_y: u32,
+    pub display_horiz_start: u32,
+    pub display_horiz_end: u32,
+    pub display_vert_start: u32,
+    pub display_vert_end: u32,
+    pub hres: String,
+    pub vres: String,
+    pub is_pal: bool,
+    pub display_24bit: bool,
+    pub interlace: bool,
+    pub display_disabled: bool,
+    pub draw_area_left: u32,
+    pub draw_area_top: u32,
+    pub draw_area_right: u32,
+    pub draw_area_bottom: u32,
+    pub draw_offset_x: i32,
+    pub draw_offset_y: i32,
+    pub texpage_x: u32,
+    pub texpage_y: u32,
+    pub tex_depth: String,
+    pub semi_transparency: String,
+    pub dithering: bool,
+    pub set_mask_bit: bool,
+    pub check_mask_bit: bool,
+    pub tex_window_mask_x: u8,
+    pub tex_window_mask_y: u8,
+    pub tex_window_offset_x: u8,
+    pub tex_window_offset_y: u8,
+    pub scanline: u32,
+    pub in_vblank: bool,
+    pub irq: bool,
+}
+
 /// Mount point information for inspector
 #[derive(Clone, Debug)]
 pub struct MountInfo {
@@ -348,6 +386,7 @@ pub struct TabManager {
     pub enhanced_debug_state: Option<EnhancedDebugState>,
     pub system_tile_data: Option<SystemTileData>,
     pub pc_bda_data: Option<PcBdaData>,
+    pub ps1_gpu_data: Option<Ps1GpuData>,
     pub cartridge_data: Option<CartridgeData>,
     pub mount_info: Vec<MountInfo>,
     pub system_loaded: bool,
@@ -383,6 +422,7 @@ impl TabManager {
             enhanced_debug_state: None,
             system_tile_data: None,
             pc_bda_data: None,
+            ps1_gpu_data: None,
             cartridge_data: None,
             mount_info: Vec::new(),
             system_loaded: false,
@@ -418,6 +458,10 @@ impl TabManager {
 
     pub fn update_pc_bda_data(&mut self, data: PcBdaData) {
         self.pc_bda_data = Some(data);
+    }
+
+    pub fn update_ps1_gpu_data(&mut self, data: Ps1GpuData) {
+        self.ps1_gpu_data = Some(data);
     }
 
     pub fn update_cartridge_data(&mut self, data: CartridgeData) {
@@ -474,6 +518,7 @@ impl TabManager {
         self.enhanced_debug_state = None;
         self.system_tile_data = None;
         self.pc_bda_data = None;
+        self.ps1_gpu_data = None;
         self.cartridge_data = None;
         self.cached_memory.clear();
         self.cached_memory_start = 0;

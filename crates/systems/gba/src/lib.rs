@@ -175,7 +175,7 @@ impl GbaBus {
             vram: vec![0; 0x18000],  // 96KB
             oam: vec![0; 0x400],     // 1KB
             rom: Vec::new(),
-            sram: vec![0; 0x10000], // 64KB
+            sram: vec![0xFF; 0x10000], // 64KB - 0xFF = erased/uninitialized (matches real hardware)
             dma: dma::Dma::new(),
             timers: timers::Timers::new(),
             eeprom: RefCell::new(eeprom::Eeprom::new()),

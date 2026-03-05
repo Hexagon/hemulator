@@ -115,7 +115,6 @@ const EXCODE_ADES: u32 = 0x05; // Address error (store)
 const EXCODE_SYS: u32 = 0x08; // Syscall
 const EXCODE_BP: u32 = 0x09; // Breakpoint
 const EXCODE_RI: u32 = 0x0A; // Reserved instruction
-#[allow(dead_code)]
 const EXCODE_CPU: u32 = 0x0B; // Coprocessor unusable
 const EXCODE_OVF: u32 = 0x0C; // Arithmetic overflow
 
@@ -140,10 +139,8 @@ const OP_ORI: u32 = 0x0D;
 const OP_XORI: u32 = 0x0E;
 const OP_LUI: u32 = 0x0F;
 const OP_COP0: u32 = 0x10;
-#[allow(dead_code)]
 const OP_COP1: u32 = 0x11; // PS1 has no FPU
 const OP_COP2: u32 = 0x12; // GTE
-#[allow(dead_code)]
 const OP_COP3: u32 = 0x13;
 const OP_LB: u32 = 0x20;
 const OP_LH: u32 = 0x21;
@@ -1021,6 +1018,8 @@ impl<M: MemoryR3000A> CpuR3000A<M> {
 
         // PRId: R3000A processor identification
         cpu.cop0[COP0_PRID] = 0x0000_0002;
+        // BEV=1 on reset: use ROM exception vectors at 0xBFC00180
+        cpu.cop0[COP0_SR] = SR_BEV;
 
         cpu
     }
@@ -1035,6 +1034,8 @@ impl<M: MemoryR3000A> CpuR3000A<M> {
         self.lo = 0;
         self.cop0 = [0; 32];
         self.cop0[COP0_PRID] = 0x0000_0002;
+        // BEV=1 on reset: use ROM exception vectors at 0xBFC00180
+        self.cop0[COP0_SR] = SR_BEV;
         self.cycles = 0;
         self.load_delay = (0, 0);
     }
@@ -1511,6 +1512,15 @@ impl<M: MemoryR3000A> CpuR3000A<M> {
             }
 
             // ================================================================
+            // COP1 / COP3 — Not present on PS1 (trigger CopUnusable)
+            // ================================================================
+            OP_COP1 | OP_COP3 => {
+                self.pc = current_pc;
+                self.in_delay_slot = was_in_delay;
+                self.exception(EXCODE_CPU);
+            }
+
+            // ================================================================
             // COP2 — GTE (Geometry Transform Engine)
             // ================================================================
             OP_COP2 => {
@@ -1705,6 +1715,13 @@ impl<M: MemoryR3000A> CpuR3000A<M> {
                     let val = self.gte.data[rt as usize];
                     self.store32(addr, val);
                 }
+            }
+
+            // LWC0/SWC0/LWC1/SWC1/LWC3/SWC3 — coprocessor not present
+            0x30 | 0x31 | 0x33 | 0x38 | 0x39 | 0x3B => {
+                self.pc = current_pc;
+                self.in_delay_slot = was_in_delay;
+                self.exception(EXCODE_CPU);
             }
 
             _ => {
@@ -2074,9 +2091,8 @@ mod tests {
             encode_r(FUNCT_SYSCALL, 0, 0, 0, 0),
         );
         cpu.step();
-        // Should jump to boot exception vector (BEV=0 by default => 0x80000080)
-        // Wait, default SR has BEV=0 since cop0 is zeroed
-        assert_eq!(cpu.pc, 0x8000_0080);
+        // Should jump to boot exception vector (BEV=1 on reset => 0xBFC00180)
+        assert_eq!(cpu.pc, 0xBFC0_0180);
         // EPC should point to the syscall instruction
         assert_eq!(cpu.cop0[COP0_EPC], 0xBFC0_0000);
         // Cause exception code should be SYSCALL (8)
