@@ -172,12 +172,6 @@ pub struct Ppu {
     /// This is set during render_scanline() and the flag is actually set during tick()
     /// when we reach the corresponding dot position (X + 1, per Mesen2 reference).
     sprite_0_hit_pending: Cell<Option<(u16, u16)>>,
-    /// Internal OAM evaluation index for OAMDATA reads during rendering.
-    /// During sprite evaluation (dots 65-256 of visible scanlines), the PPU reads through
-    /// primary OAM and this tracks the current byte being read. Reads of $2004 during
-    /// rendering return the value the PPU is internally reading, not OAM[OAMADDR].
-    /// Reference: NESdev wiki PPU sprite evaluation, foobles/nes-ppu (CC-BY-NC-4.0)
-    oam_eval_index: Cell<u8>,
 }
 
 impl fmt::Debug for Ppu {
@@ -239,7 +233,6 @@ impl Ppu {
             frame_counter: Cell::new(0),
             timing_mode,
             sprite_0_hit_pending: Cell::new(None),
-            oam_eval_index: Cell::new(0),
         }
     }
 
@@ -568,8 +561,23 @@ impl Ppu {
                     } else if dot >= 65 && dot <= 256 {
                         // Sprite evaluation phase: PPU reads through primary OAM.
                         // Return the byte the evaluation hardware is currently reading.
-                        let eval_idx = self.oam_eval_index.get() as usize;
-                        self.oam[eval_idx & 0xFF]
+                        //
+                        // NOTE: We derive the effective evaluation index directly from
+                        // the current dot instead of relying on a state variable updated
+                        // in tick(). CPU reads of $2004 happen via read_register()
+                        // without ticking the PPU first, so any state set by tick()
+                        // would be stale (from the previous dot).
+                        //
+                        // Approximation: advance through sprites at 1 check per 2 dots
+                        // (worst case: no sprites in range = 2 dots per sprite check).
+                        // Map evaluation progress to sprite Y-byte addresses
+                        // (sprite_index * 4) to match hardware's 4-byte stride pattern.
+                        // Reference: NESdev wiki PPU sprite evaluation, Mesen2 NesPpu.cpp
+                        let eval_dot = (dot - 65) as usize;
+                        let eval_step = eval_dot / 2;
+                        let sprite_index = eval_step % 64;
+                        let y_addr = sprite_index * 4;
+                        self.oam[y_addr]
                     } else {
                         // Outside evaluation (dots 257-340): sprite tile fetch / idle.
                         // Hardware returns $FF during sprite tile loading.
@@ -1618,43 +1626,6 @@ impl Ppu {
             let sprites_enabled = (self.mask & 0x10) != 0;
             if sprites_enabled {
                 self.evaluate_sprites_for_scanline(scanline as u32);
-            }
-        }
-
-        // Track internal OAM evaluation index for OAMDATA ($2004) reads during rendering.
-        // Games like Bee 52 read $2004 during rendering to time HUD splits.
-        // The PPU reads through primary OAM during sprite evaluation (dots 65-256).
-        // Reference: NESdev wiki PPU sprite evaluation
-        if scanline < 240 {
-            let rendering_enabled = (self.mask & 0x18) != 0;
-            if rendering_enabled {
-                if dot == 0 {
-                    // Reset evaluation index at start of each scanline
-                    self.oam_eval_index.set(0);
-                } else if dot >= 65 && dot <= 256 {
-                    // During sprite evaluation, the PPU reads through primary OAM.
-                    // Each sprite check reads the Y byte first (odd cycle), then
-                    // either copies the remaining 3 bytes (if in range) or moves to
-                    // the next sprite.
-                    //
-                    // Approximation: advance through sprites at 1 check per 2 dots. This assumes
-                    // no sprites are in range (worst case: 2 dots per sprite check). When sprites
-                    // ARE in range, the real hardware spends 8 cycles per matching sprite
-                    // (reading all 4 bytes), which slows the evaluation. A more accurate
-                    // implementation would track a full evaluation state machine with
-                    // sprite-in-range checks, secondary OAM fill count, and the overflow
-                    // bug's m/n pointer behavior. This approximation is sufficient for
-                    // games like Bee 52 that use $2004 reads for coarse timing.
-                    let eval_dot = dot - 65;
-                    // Map evaluation progress to sprite Y-byte addresses (sprite_index * 4)
-                    // so that $2004 reads during rendering see the same Y-byte pattern
-                    // that hardware would read from primary OAM.
-                    let eval_step = (eval_dot / 2) as u8;
-                    // Wrap after 64 sprites (all of OAM) in case evaluation spans more dots
-                    let sprite_index = eval_step % 64;
-                    let y_addr = sprite_index.wrapping_mul(4);
-                    self.oam_eval_index.set(y_addr);
-                }
             }
         }
 
@@ -4793,27 +4764,32 @@ mod tests {
         );
 
         // --- Dots 65-256: Sprite evaluation → returns primary OAM Y-byte ---
-        // Note: oam_eval_index is updated inside tick() based on the *current* dot before
-        // advancing. We call tick() to trigger the update, then reset the dot position so
-        // that read_register() sees a dot in the evaluation range (65-256).
+        // The evaluation index is now computed directly from the current dot inside
+        // read_register(), so no tick() workaround is needed. This matches hardware
+        // behavior where the CPU reads $2004 and sees the byte the PPU's evaluation
+        // hardware is currently reading from primary OAM.
         // At dot 65, eval_step = (65-65)/2 = 0, sprite_index = 0, y_addr = 0
         ppu.dot.set(65);
-        ppu.tick(); // processes dot 65 (sets oam_eval_index=0), advances to dot 66
-        ppu.dot.set(66); // keep in eval range for read_register
         let val_eval_sprite0 = ppu.read_register(4);
         assert_eq!(
             val_eval_sprite0, ppu.oam[0],
-            "During sprite evaluation: should return OAM byte at sprite 0 Y-addr (0)"
+            "During sprite evaluation (dot 65): should return OAM byte at sprite 0 Y-addr (0)"
         );
 
         // At dot 67, eval_step = (67-65)/2 = 1, sprite_index = 1, y_addr = 4
         ppu.dot.set(67);
-        ppu.tick(); // processes dot 67 (sets oam_eval_index=4), advances to dot 68
-        ppu.dot.set(68); // keep in eval range for read_register
         let val_eval_sprite1 = ppu.read_register(4);
         assert_eq!(
             val_eval_sprite1, ppu.oam[4],
-            "During sprite evaluation: should return OAM byte at sprite 1 Y-addr (4)"
+            "During sprite evaluation (dot 67): should return OAM byte at sprite 1 Y-addr (4)"
+        );
+
+        // At dot 129, eval_step = (129-65)/2 = 32, sprite_index = 32, y_addr = 128
+        ppu.dot.set(129);
+        let val_eval_sprite32 = ppu.read_register(4);
+        assert_eq!(
+            val_eval_sprite32, ppu.oam[128],
+            "During sprite evaluation (dot 129): should return OAM byte at sprite 32 Y-addr (128)"
         );
 
         // --- Dots 257+: Sprite tile fetch → should return $FF ---
