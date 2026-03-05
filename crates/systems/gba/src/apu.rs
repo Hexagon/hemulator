@@ -1057,6 +1057,8 @@ impl GbaApu {
         self.pulse2_frequency = 0;
         self.wave_frequency = 0;
         self.wave_dac_enabled = false;
+        self.dc_filter_l.reset();
+        self.dc_filter_r.reset();
         // Note: FIFOs and DMA sound settings are NOT cleared by power off
     }
 }
