@@ -4589,6 +4589,45 @@ fn main() {
                     });
                     egui_app.tab_manager.update_system_tile_data(tile_data);
                 }
+                EmulatorSystem::PS1(s) => {
+                    let gpu_data = s.get_gpu_inspector_data();
+                    let ps1_gpu = egui_ui::Ps1GpuData {
+                        gpustat: gpu_data.gpustat,
+                        display_vram_x: gpu_data.display_vram_x,
+                        display_vram_y: gpu_data.display_vram_y,
+                        display_horiz_start: gpu_data.display_horiz_start,
+                        display_horiz_end: gpu_data.display_horiz_end,
+                        display_vert_start: gpu_data.display_vert_start,
+                        display_vert_end: gpu_data.display_vert_end,
+                        hres: gpu_data.hres_str,
+                        vres: gpu_data.vres_str,
+                        is_pal: gpu_data.is_pal,
+                        display_24bit: gpu_data.display_24bit,
+                        interlace: gpu_data.interlace,
+                        display_disabled: gpu_data.display_disabled,
+                        draw_area_left: gpu_data.draw_area_left,
+                        draw_area_top: gpu_data.draw_area_top,
+                        draw_area_right: gpu_data.draw_area_right,
+                        draw_area_bottom: gpu_data.draw_area_bottom,
+                        draw_offset_x: gpu_data.draw_offset_x,
+                        draw_offset_y: gpu_data.draw_offset_y,
+                        texpage_x: gpu_data.texpage_x,
+                        texpage_y: gpu_data.texpage_y,
+                        tex_depth: gpu_data.tex_depth_str,
+                        semi_transparency: gpu_data.semi_transparency_str,
+                        dithering: gpu_data.dithering,
+                        set_mask_bit: gpu_data.set_mask_bit,
+                        check_mask_bit: gpu_data.check_mask_bit,
+                        tex_window_mask_x: gpu_data.tex_window_mask_x,
+                        tex_window_mask_y: gpu_data.tex_window_mask_y,
+                        tex_window_offset_x: gpu_data.tex_window_offset_x,
+                        tex_window_offset_y: gpu_data.tex_window_offset_y,
+                        scanline: gpu_data.scanline,
+                        in_vblank: gpu_data.in_vblank,
+                        irq: gpu_data.irq,
+                    };
+                    egui_app.tab_manager.update_ps1_gpu_data(ps1_gpu);
+                }
                 _ => {
                     // Other systems don't have tile viewers yet
                 }

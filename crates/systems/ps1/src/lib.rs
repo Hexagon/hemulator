@@ -25,6 +25,7 @@
 //! - Avocado PS1 emulator
 //! - Rustation PS1 emulator
 
+pub mod debugger;
 pub mod gpu;
 pub mod spu;
 
@@ -33,6 +34,7 @@ use emu_core::renderer::Renderer;
 use emu_core::types::Frame;
 use emu_core::{MountPointInfo, System};
 use serde_json::Value;
+use std::cell::Cell;
 use thiserror::Error;
 
 use gpu::Gpu;
@@ -199,7 +201,6 @@ impl InterruptController {
 const IRQ_VBLANK: u16 = 1 << 0;
 #[allow(dead_code)]
 const IRQ_GPU: u16 = 1 << 1;
-#[allow(dead_code)]
 const IRQ_CDROM: u16 = 1 << 2;
 const IRQ_DMA: u16 = 1 << 3;
 const IRQ_TIMER0: u16 = 1 << 4;
@@ -251,6 +252,473 @@ impl Timer {
 }
 
 // ============================================================================
+// CD-ROM Controller
+// ============================================================================
+
+/// Convert BCD byte to binary
+fn bcd_to_bin(bcd: u8) -> u8 {
+    (bcd >> 4) * 10 + (bcd & 0x0F)
+}
+
+/// Convert MSF (minute:second:frame in BCD) to LBA (logical block address)
+fn msf_to_lba(mm: u8, ss: u8, ff: u8) -> u32 {
+    let m = bcd_to_bin(mm) as u32;
+    let s = bcd_to_bin(ss) as u32;
+    let f = bcd_to_bin(ff) as u32;
+    // Standard CD: LBA = (m*60+s)*75 + f - 150
+    // The 150 offset accounts for the 2-second pregap
+    let raw = (m * 60 + s) * 75 + f;
+    raw.saturating_sub(150)
+}
+
+/// PS1 CD-ROM controller with FIFO management, two-stage responses, and sector reading.
+///
+/// The PS1 CD-ROM uses an asynchronous command/response model:
+/// - Commands generate INT3 (acknowledge) immediately
+/// - Many commands then generate a delayed INT2 (complete) or INT1 (data ready)
+/// - The BIOS polls the status register and IRQ flags to detect responses
+/// - Response and data FIFOs use `Cell<usize>` for interior mutability during `&self` reads
+pub struct CdRom {
+    /// Register bank index (0-3), written to 0x1F801800
+    pub index: u8,
+    /// Parameter FIFO (up to 16 bytes)
+    pub params: Vec<u8>,
+    /// Response FIFO
+    response: Vec<u8>,
+    /// Response read position (Cell for interior mutability during &self reads)
+    response_pos: Cell<usize>,
+    /// Data FIFO (sector data, up to 2048 bytes)
+    pub data_fifo: Vec<u8>,
+    /// Data FIFO read position
+    pub data_fifo_pos: Cell<usize>,
+    /// IRQ enable register (5 bits)
+    pub irq_enable: u8,
+    /// IRQ flag register (5 bits)
+    pub irq_flag: u8,
+    /// Seek target from Setloc (BCD: MM, SS, FF)
+    seek_target: [u8; 3],
+    /// Whether we're actively reading sectors
+    pub read_active: bool,
+    /// Current read position (LBA)
+    pub read_lba: u32,
+    /// Pending 2nd response data (for two-stage commands like GetID, Init)
+    pending_response: Vec<u8>,
+    /// Pending 2nd response IRQ type
+    pub pending_irq: u8,
+    /// Drive mode byte (set by SetMode command 0x0E)
+    mode_byte: u8,
+    /// Sector buffer (last read sector's user data)
+    pub sector_buffer: Vec<u8>,
+    /// Delay counter for pending response delivery (in scanlines)
+    pub delivery_delay: u32,
+    /// Whether the motor is spinning
+    motor_on: bool,
+    /// Disc image data
+    pub disc_data: Vec<u8>,
+    /// Detected sector size in disc image (2048 for ISO, 2352 for BIN)
+    pub disc_sector_size: usize,
+}
+
+impl Default for CdRom {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CdRom {
+    pub fn new() -> Self {
+        Self {
+            index: 0,
+            params: Vec::with_capacity(16),
+            response: Vec::new(),
+            response_pos: Cell::new(0),
+            data_fifo: Vec::new(),
+            data_fifo_pos: Cell::new(0),
+            irq_enable: 0,
+            irq_flag: 0,
+            seek_target: [0; 3],
+            read_active: false,
+            read_lba: 0,
+            pending_response: Vec::new(),
+            pending_irq: 0,
+            mode_byte: 0,
+            sector_buffer: Vec::new(),
+            delivery_delay: 0,
+            motor_on: false,
+            disc_data: Vec::new(),
+            disc_sector_size: 2352,
+        }
+    }
+
+    pub fn reset(&mut self) {
+        let disc_data = std::mem::take(&mut self.disc_data);
+        let disc_sector_size = self.disc_sector_size;
+        *self = Self::new();
+        self.disc_data = disc_data;
+        self.disc_sector_size = disc_sector_size;
+    }
+
+    /// Compute the status register byte (0x1F801800 read)
+    pub fn read_status(&self) -> u8 {
+        let index = self.index & 3;
+        let prmempt = if self.params.is_empty() { 1 << 3 } else { 0 };
+        let prmwrdy = if self.params.len() < 16 { 1 << 4 } else { 0 };
+        let rslrrdy = if self.response_pos.get() < self.response.len() {
+            1 << 5
+        } else {
+            0
+        };
+        let drqsts = if self.data_fifo_pos.get() < self.data_fifo.len() {
+            1 << 6
+        } else {
+            0
+        };
+        index | prmempt | prmwrdy | rslrrdy | drqsts
+    }
+
+    /// Read and pop a byte from the response FIFO (0x1F801801 read)
+    pub fn read_response(&self) -> u8 {
+        let pos = self.response_pos.get();
+        if pos < self.response.len() {
+            self.response_pos.set(pos + 1);
+            self.response[pos]
+        } else {
+            0
+        }
+    }
+
+    /// Read and pop a byte from the data FIFO (0x1F801802 read)
+    pub fn read_data(&self) -> u8 {
+        let pos = self.data_fifo_pos.get();
+        if pos < self.data_fifo.len() {
+            self.data_fifo_pos.set(pos + 1);
+            self.data_fifo[pos]
+        } else {
+            0
+        }
+    }
+
+    /// Read 4 bytes from the data FIFO as a little-endian word (for DMA channel 3)
+    pub fn read_data_word(&self) -> u32 {
+        let mut val = 0u32;
+        for i in 0..4 {
+            val |= (self.read_data() as u32) << (i * 8);
+        }
+        val
+    }
+
+    /// Get the drive status byte used in command responses
+    fn stat_byte(&self) -> u8 {
+        let mut stat = 0u8;
+        if self.motor_on {
+            stat |= 0x02;
+        }
+        if self.read_active {
+            stat |= 0x20;
+        }
+        stat
+    }
+
+    /// Set the first response (clears previous, sets IRQ flag)
+    fn set_response(&mut self, data: &[u8], irq: u8) {
+        self.response.clear();
+        self.response_pos.set(0);
+        self.response.extend_from_slice(data);
+        self.irq_flag = irq;
+    }
+
+    /// Queue a second response for delivery after IRQ acknowledge
+    fn queue_pending(&mut self, data: &[u8], irq: u8) {
+        self.pending_response.clear();
+        self.pending_response.extend_from_slice(data);
+        self.pending_irq = irq;
+        self.delivery_delay = 50; // ~50 scanlines delay
+    }
+
+    /// Deliver pending 2nd response
+    pub fn deliver_pending(&mut self) {
+        if self.pending_irq != 0 {
+            self.response.clear();
+            self.response_pos.set(0);
+            let pending = std::mem::take(&mut self.pending_response);
+            self.response.extend_from_slice(&pending);
+            self.irq_flag = self.pending_irq;
+            self.pending_irq = 0;
+            self.delivery_delay = 0;
+        }
+    }
+
+    /// Load sector buffer into data FIFO (triggered by Request Register bit 7)
+    pub fn load_data_fifo(&mut self) {
+        if !self.sector_buffer.is_empty() {
+            self.data_fifo.clear();
+            self.data_fifo_pos.set(0);
+            self.data_fifo.extend_from_slice(&self.sector_buffer);
+        }
+    }
+
+    /// Read a sector's user data from the disc image (pure function, no &self)
+    fn read_sector_data(lba: u32, disc_data: &[u8], sector_size: usize) -> Vec<u8> {
+        let offset = lba as usize * sector_size;
+        if offset >= disc_data.len() {
+            return vec![0; 2048];
+        }
+
+        if sector_size == 2352 {
+            // Raw sector: extract user data based on mode byte
+            let mode = if offset + 15 < disc_data.len() {
+                disc_data[offset + 15]
+            } else {
+                1
+            };
+            let data_offset = match mode {
+                2 => 24, // Mode 2 Form 1: sync(12)+header(4)+subheader(8)+data
+                _ => 16, // Mode 1: sync(12)+header(4)+data
+            };
+            let start = offset + data_offset;
+            let end = (start + 2048).min(disc_data.len());
+            if start < disc_data.len() {
+                disc_data[start..end].to_vec()
+            } else {
+                vec![0; 2048]
+            }
+        } else {
+            // ISO format: pure user data
+            let end = (offset + 2048).min(disc_data.len());
+            disc_data[offset..end].to_vec()
+        }
+    }
+
+    /// Execute a CD-ROM command
+    pub fn execute_command(&mut self, cmd: u8) {
+        let stat = self.stat_byte();
+
+        match cmd {
+            0x01 => {
+                // GetStat — returns drive status byte
+                self.motor_on = true;
+                let s = self.stat_byte();
+                self.set_response(&[s], 3);
+            }
+            0x02 => {
+                // Setloc(mm, ss, ff) — set seek target
+                if self.params.len() >= 3 {
+                    self.seek_target = [self.params[0], self.params[1], self.params[2]];
+                }
+                self.set_response(&[stat], 3);
+            }
+            0x03 => {
+                // Play — start audio playback (stub)
+                self.set_response(&[stat], 3);
+            }
+            0x06 => {
+                // ReadN — read data sectors with retry
+                self.motor_on = true;
+                let lba = msf_to_lba(
+                    self.seek_target[0],
+                    self.seek_target[1],
+                    self.seek_target[2],
+                );
+                self.read_lba = lba;
+                self.read_active = true;
+                let s = self.stat_byte();
+                self.set_response(&[s], 3); // INT3: acknowledge
+                                            // Load first sector and set delivery delay for INT1
+                self.sector_buffer =
+                    Self::read_sector_data(lba, &self.disc_data, self.disc_sector_size);
+                self.delivery_delay = 100;
+            }
+            0x07 => {
+                // MotorOn
+                self.motor_on = true;
+                let s = self.stat_byte();
+                self.set_response(&[s], 3);
+                let s2 = self.stat_byte();
+                self.queue_pending(&[s2], 2);
+            }
+            0x08 => {
+                // Stop
+                self.motor_on = false;
+                self.read_active = false;
+                self.set_response(&[stat], 3);
+                let s = self.stat_byte();
+                self.queue_pending(&[s], 2);
+            }
+            0x09 => {
+                // Pause
+                self.read_active = false;
+                self.set_response(&[stat], 3);
+                let s = self.stat_byte();
+                self.queue_pending(&[s], 2);
+            }
+            0x0A => {
+                // Init — initialize controller
+                self.motor_on = true;
+                self.mode_byte = 0x20; // Default mode
+                let s = self.stat_byte();
+                self.set_response(&[s], 3);
+                let s2 = self.stat_byte();
+                self.queue_pending(&[s2], 2);
+            }
+            0x0B => {
+                // Mute
+                self.set_response(&[stat], 3);
+            }
+            0x0C => {
+                // Demute
+                self.set_response(&[stat], 3);
+            }
+            0x0D => {
+                // SetFilter (file, channel from params)
+                self.set_response(&[stat], 3);
+            }
+            0x0E => {
+                // SetMode — set drive mode
+                if !self.params.is_empty() {
+                    self.mode_byte = self.params[0];
+                }
+                self.set_response(&[stat], 3);
+            }
+            0x0F => {
+                // Getparam — returns mode, file, channel, etc.
+                self.set_response(&[stat, self.mode_byte, 0x00, 0x00, 0x00], 3);
+            }
+            0x10 => {
+                // GetlocL — get logical position (data sector header)
+                self.set_response(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00], 3);
+            }
+            0x11 => {
+                // GetlocP — get physical position (subQ data)
+                self.set_response(&[0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00], 3);
+            }
+            0x13 => {
+                // GetTN — get first/last track numbers
+                self.set_response(&[stat, 0x01, 0x01], 3);
+            }
+            0x14 => {
+                // GetTD — get track start position
+                self.set_response(&[stat, 0x00, 0x02], 3);
+            }
+            0x15 => {
+                // SeekL — seek to data sector
+                self.motor_on = true;
+                let s = self.stat_byte();
+                self.set_response(&[s], 3);
+                let s2 = self.stat_byte();
+                self.queue_pending(&[s2], 2);
+            }
+            0x16 => {
+                // SeekP — seek to audio position
+                self.motor_on = true;
+                let s = self.stat_byte();
+                self.set_response(&[s], 3);
+                let s2 = self.stat_byte();
+                self.queue_pending(&[s2], 2);
+            }
+            0x19 => {
+                // Test — sub-function in param
+                let sub = self.params.first().copied().unwrap_or(0);
+                match sub {
+                    0x20 => {
+                        // Get BIOS date/version: 97/01/10 Rev C3
+                        self.set_response(&[0x98, 0x06, 0x10, 0xC3], 3);
+                    }
+                    _ => {
+                        self.set_response(&[0], 3);
+                    }
+                }
+            }
+            0x1A => {
+                // GetID — identify disc
+                if self.disc_data.is_empty() {
+                    // No disc
+                    self.set_response(&[0x11, 0x80], 5); // INT5: error
+                } else {
+                    // Game disc present: two-stage response
+                    self.motor_on = true;
+                    let s = self.stat_byte();
+                    self.set_response(&[s], 3); // INT3: acknowledge
+                                                // Queue INT2: stat, flags=0(licensed), type=0x20(mode2), atip=0, "SCEA"
+                    self.queue_pending(&[0x02, 0x00, 0x20, 0x00, b'S', b'C', b'E', b'A'], 2);
+                }
+            }
+            0x1B => {
+                // ReadS — read data sectors without retry (same as ReadN)
+                self.motor_on = true;
+                let lba = msf_to_lba(
+                    self.seek_target[0],
+                    self.seek_target[1],
+                    self.seek_target[2],
+                );
+                self.read_lba = lba;
+                self.read_active = true;
+                let s = self.stat_byte();
+                self.set_response(&[s], 3);
+                self.sector_buffer =
+                    Self::read_sector_data(lba, &self.disc_data, self.disc_sector_size);
+                self.delivery_delay = 100;
+            }
+            0x1E => {
+                // ReadTOC
+                self.set_response(&[stat], 3);
+                let s = self.stat_byte();
+                self.queue_pending(&[s], 2);
+            }
+            _ => {
+                // Unknown command — just acknowledge
+                self.set_response(&[stat], 3);
+            }
+        }
+        self.params.clear();
+    }
+
+    /// Step the CD-ROM controller (called per scanline).
+    /// Returns true if a CD-ROM IRQ should be raised.
+    pub fn step(&mut self) -> bool {
+        if self.delivery_delay > 0 {
+            self.delivery_delay -= 1;
+            if self.delivery_delay == 0 {
+                // Sector data delivery (read active, no other pending response)
+                if self.read_active && self.pending_irq == 0 {
+                    if self.irq_flag == 0 {
+                        self.response.clear();
+                        self.response_pos.set(0);
+                        self.response.push(self.stat_byte());
+                        self.irq_flag = 1; // INT1: data ready
+                        return true;
+                    } else {
+                        // Previous IRQ not yet acknowledged, retry next scanline
+                        self.delivery_delay = 1;
+                    }
+                }
+                // Pending second response delivery
+                if self.pending_irq != 0 {
+                    if self.irq_flag == 0 {
+                        self.deliver_pending();
+                        return true;
+                    } else {
+                        // Previous IRQ not yet acknowledged, retry next scanline
+                        self.delivery_delay = 1;
+                    }
+                }
+            }
+        }
+
+        false
+    }
+
+    /// Advance to next sector after INT1 acknowledge (called from io_write_byte)
+    pub fn advance_read(&mut self) {
+        if self.read_active {
+            self.read_lba += 1;
+            self.sector_buffer =
+                Self::read_sector_data(self.read_lba, &self.disc_data, self.disc_sector_size);
+            self.delivery_delay = 100;
+        }
+    }
+}
+
+// ============================================================================
 // PS1 Memory Bus
 // ============================================================================
 
@@ -274,22 +742,8 @@ pub struct Ps1Bus {
     timers: [Timer; 3],
     /// BIOS loaded flag
     bios_loaded: bool,
-    /// CD-ROM sector buffer (simplified)
-    cdrom_data: Vec<u8>,
-    /// CD-ROM data read position
-    cdrom_data_pos: usize,
-    /// CD-ROM status register
-    cdrom_status: u8,
-    /// CD-ROM parameter FIFO
-    cdrom_params: Vec<u8>,
-    /// CD-ROM response FIFO
-    cdrom_response: Vec<u8>,
-    /// CD-ROM interrupt flag
-    cdrom_irq: u8,
-    /// CD-ROM interrupt enable
-    cdrom_irq_enable: u8,
-    /// Disc image data
-    disc_data: Vec<u8>,
+    /// CD-ROM controller
+    cdrom: CdRom,
     /// Joypad state
     joy_data: u16,
     /// Joypad status
@@ -322,14 +776,7 @@ impl Ps1Bus {
             irq: InterruptController::new(),
             timers: Default::default(),
             bios_loaded: false,
-            cdrom_data: Vec::new(),
-            cdrom_data_pos: 0,
-            cdrom_status: 0x18, // Not busy, parameter fifo empty, can receive
-            cdrom_params: Vec::new(),
-            cdrom_response: Vec::new(),
-            cdrom_irq: 0,
-            cdrom_irq_enable: 0,
-            disc_data: Vec::new(),
+            cdrom: CdRom::new(),
             joy_data: 0xFFFF,
             joy_stat: 0,
             joy_ctrl: 0,
@@ -347,11 +794,7 @@ impl Ps1Bus {
         self.dma.reset();
         self.irq.reset();
         self.timers = Default::default();
-        self.cdrom_status = 0x18;
-        self.cdrom_params.clear();
-        self.cdrom_response.clear();
-        self.cdrom_irq = 0;
-        self.cdrom_data_pos = 0;
+        self.cdrom.reset();
         // Don't clear bios or disc_data
     }
 
@@ -398,24 +841,17 @@ impl Ps1Bus {
     fn io_read_byte(&self, addr: u32) -> u8 {
         match addr {
             // CD-ROM registers (0x1F801800-0x1F801803)
-            0x1F80_1800 => self.cdrom_status,
-            0x1F80_1801 => {
-                // Response FIFO
-                if !self.cdrom_response.is_empty() {
-                    self.cdrom_response[0]
-                } else {
-                    0
+            0x1F80_1800 => self.cdrom.read_status(),
+            0x1F80_1801 => self.cdrom.read_response(),
+            0x1F80_1802 => self.cdrom.read_data(),
+            0x1F80_1803 => {
+                let index = self.cdrom.index;
+                match index & 1 {
+                    0 => self.cdrom.irq_enable | 0xE0,
+                    1 => self.cdrom.irq_flag | 0xE0,
+                    _ => unreachable!(),
                 }
             }
-            0x1F80_1802 => {
-                // Data FIFO
-                if self.cdrom_data_pos < self.cdrom_data.len() {
-                    self.cdrom_data[self.cdrom_data_pos]
-                } else {
-                    0
-                }
-            }
-            0x1F80_1803 => self.cdrom_irq_enable | 0xE0,
             _ => 0,
         }
     }
@@ -527,31 +963,85 @@ impl Ps1Bus {
         match addr {
             // CD-ROM registers
             0x1F80_1800 => {
-                // Index register
-                self.cdrom_status = (self.cdrom_status & !3) | (val & 3);
+                // Index register (bits 0-1)
+                self.cdrom.index = val & 3;
             }
             0x1F80_1801 => {
-                // Command register (index 0)
-                self.cdrom_execute_command(val);
+                let index = self.cdrom.index;
+                match index {
+                    0 => {
+                        // Command register
+                        self.cdrom.execute_command(val);
+                        // Raise CD-ROM IRQ immediately if flag matches enable
+                        if (self.cdrom.irq_flag & self.cdrom.irq_enable) != 0 {
+                            self.irq.raise(IRQ_CDROM);
+                        }
+                    }
+                    1 => {
+                        // Sound Map Data Out (stub)
+                    }
+                    2 => {
+                        // Sound Map Coding Info (stub)
+                    }
+                    3 => {
+                        // Audio Volume Apply (stub)
+                    }
+                    _ => {}
+                }
             }
             0x1F80_1802 => {
-                let index = self.cdrom_status & 3;
+                let index = self.cdrom.index;
                 match index {
-                    0 => self.cdrom_params.push(val), // Parameter FIFO
-                    1 => self.cdrom_irq_enable = val & 0x1F,
+                    0 => self.cdrom.params.push(val), // Parameter FIFO
+                    1 => self.cdrom.irq_enable = val & 0x1F,
+                    2 => {
+                        // Audio Volume Left->Left (stub)
+                    }
+                    3 => {
+                        // Audio Volume Right->Left (stub)
+                    }
                     _ => {}
                 }
             }
             0x1F80_1803 => {
-                let index = self.cdrom_status & 3;
+                let index = self.cdrom.index;
                 match index {
-                    0 => {} // Request register
-                    1 => {
-                        // Interrupt flag reset
-                        self.cdrom_irq &= !(val & 0x1F);
-                        if val & 0x40 != 0 {
-                            self.cdrom_params.clear();
+                    0 => {
+                        // Request register
+                        if val & 0x80 != 0 {
+                            // Want data — load sector into data FIFO if available
+                            self.cdrom.load_data_fifo();
+                        } else {
+                            // Clear data FIFO
+                            self.cdrom.data_fifo.clear();
+                            self.cdrom.data_fifo_pos.set(0);
                         }
+                    }
+                    1 => {
+                        // Interrupt flag acknowledge
+                        let was_data_irq = self.cdrom.irq_flag == 1 && self.cdrom.read_active;
+                        self.cdrom.irq_flag &= !(val & 0x1F);
+                        if val & 0x40 != 0 {
+                            self.cdrom.params.clear();
+                        }
+                        // If IRQ now clear and we have a pending 2nd response, deliver it
+                        if self.cdrom.irq_flag == 0 && self.cdrom.pending_irq != 0 {
+                            self.cdrom.deliver_pending();
+                            // Raise CD-ROM IRQ for newly delivered response
+                            if (self.cdrom.irq_flag & self.cdrom.irq_enable) != 0 {
+                                self.irq.raise(IRQ_CDROM);
+                            }
+                        }
+                        // If we just acknowledged a sector data INT1, advance to next sector
+                        if was_data_irq && self.cdrom.irq_flag == 0 {
+                            self.cdrom.advance_read();
+                        }
+                    }
+                    2 => {
+                        // Audio Volume Left->Right (stub)
+                    }
+                    3 => {
+                        // Audio Volume Apply Changes (stub)
                     }
                     _ => {}
                 }
@@ -714,12 +1204,32 @@ impl Ps1Bus {
 
         let step: i32 = if channel.step_backward() { -4 } else { 4 };
 
+        // OTC (channel 6): Ordering Table Clear — writes reverse linked-list into RAM
+        if ch == 6 {
+            for i in 0..word_count {
+                let phys = (addr & 0x1F_FFFF) as usize;
+                let data = if i == word_count - 1 {
+                    0x00FF_FFFFu32 // End-of-list marker
+                } else {
+                    (addr.wrapping_sub(4)) & 0x1F_FFFF // Pointer to previous entry
+                };
+                if phys + 3 < self.ram.len() {
+                    self.ram[phys] = data as u8;
+                    self.ram[phys + 1] = (data >> 8) as u8;
+                    self.ram[phys + 2] = (data >> 16) as u8;
+                    self.ram[phys + 3] = (data >> 24) as u8;
+                }
+                addr = addr.wrapping_sub(4); // OTC always steps backward
+            }
+            return;
+        }
+
         if channel.direction_to_ram() {
             // Device → RAM
             for _ in 0..word_count {
                 let data = match ch {
-                    2 => self.gpu.gpuread(),     // GPU read
-                    3 => self.cdrom_read_word(), // CD-ROM
+                    2 => self.gpu.gpuread(),          // GPU read
+                    3 => self.cdrom.read_data_word(), // CD-ROM
                     _ => 0,
                 };
                 let phys = (addr & 0x1F_FFFF) as usize;
@@ -806,76 +1316,13 @@ impl Ps1Bus {
             }
         }
     }
-
-    // ========================================================================
-    // CD-ROM (simplified)
-    // ========================================================================
-
-    fn cdrom_execute_command(&mut self, cmd: u8) {
-        self.cdrom_response.clear();
-        match cmd {
-            0x01 => {
-                // GetStat
-                self.cdrom_response.push(0x02); // Motor on
-                self.cdrom_irq = 3; // INT3 (acknowledge)
-            }
-            0x19 => {
-                // Test (sub-function in param)
-                let sub = self.cdrom_params.first().copied().unwrap_or(0);
-                match sub {
-                    0x20 => {
-                        // Get BIOS date/version
-                        self.cdrom_response
-                            .extend_from_slice(&[0x98, 0x06, 0x10, 0xC3]);
-                        self.cdrom_irq = 3;
-                    }
-                    _ => {
-                        self.cdrom_response.push(0);
-                        self.cdrom_irq = 3;
-                    }
-                }
-            }
-            0x1A => {
-                // GetID
-                // No disc response (simplified)
-                self.cdrom_response.extend_from_slice(&[0x11, 0x80]);
-                self.cdrom_irq = 5; // INT5 (error)
-            }
-            0x0E => {
-                // SetMode
-                self.cdrom_response.push(0x02);
-                self.cdrom_irq = 3;
-            }
-            _ => {
-                // Unknown command — acknowledge
-                self.cdrom_response.push(0x02);
-                self.cdrom_irq = 3;
-            }
-        }
-        self.cdrom_params.clear();
-    }
-
-    fn cdrom_read_word(&mut self) -> u32 {
-        let mut val = 0u32;
-        for i in 0..4 {
-            let byte = if self.cdrom_data_pos < self.cdrom_data.len() {
-                let b = self.cdrom_data[self.cdrom_data_pos];
-                self.cdrom_data_pos += 1;
-                b
-            } else {
-                0
-            };
-            val |= (byte as u32) << (i * 8);
-        }
-        val
-    }
 }
 
 impl MemoryR3000A for Ps1Bus {
     fn read_byte(&self, addr: u32) -> u8 {
         match addr {
-            // Main RAM (2 MB, mirrored)
-            0x0000_0000..=0x001F_FFFF => self.ram[(addr & 0x1F_FFFF) as usize],
+            // Main RAM (2 MB, mirrored 4× across first 8 MB)
+            0x0000_0000..=0x007F_FFFF => self.ram[(addr & 0x1F_FFFF) as usize],
 
             // Scratchpad (1 KB)
             0x1F80_0000..=0x1F80_03FF => self.scratchpad[(addr & 0x3FF) as usize],
@@ -898,7 +1345,7 @@ impl MemoryR3000A for Ps1Bus {
 
     fn read_halfword(&self, addr: u32) -> u16 {
         match addr {
-            0x0000_0000..=0x001F_FFFF => {
+            0x0000_0000..=0x007F_FFFF => {
                 let a = (addr & 0x1F_FFFF) as usize;
                 self.ram[a] as u16 | (self.ram[a + 1] as u16) << 8
             }
@@ -911,13 +1358,14 @@ impl MemoryR3000A for Ps1Bus {
                 let a = (addr & 0x7_FFFF) as usize;
                 self.bios[a] as u16 | (self.bios[a + 1] as u16) << 8
             }
+            0x1F00_0000..=0x1F7F_FFFF => 0xFFFF,
             _ => 0,
         }
     }
 
     fn read_word(&self, addr: u32) -> u32 {
         match addr {
-            0x0000_0000..=0x001F_FFFF => {
+            0x0000_0000..=0x007F_FFFF => {
                 let a = (addr & 0x1F_FFFF) as usize;
                 self.ram[a] as u32
                     | (self.ram[a + 1] as u32) << 8
@@ -940,13 +1388,14 @@ impl MemoryR3000A for Ps1Bus {
                     | (self.bios[a + 3] as u32) << 24
             }
             0x1FFE_0130 => self.cache_ctrl,
+            0x1F00_0000..=0x1F7F_FFFF => 0xFFFF_FFFF,
             _ => 0,
         }
     }
 
     fn write_byte(&mut self, addr: u32, val: u8) {
         match addr {
-            0x0000_0000..=0x001F_FFFF => self.ram[(addr & 0x1F_FFFF) as usize] = val,
+            0x0000_0000..=0x007F_FFFF => self.ram[(addr & 0x1F_FFFF) as usize] = val,
             0x1F80_0000..=0x1F80_03FF => self.scratchpad[(addr & 0x3FF) as usize] = val,
             0x1F80_1000..=0x1F80_2FFF => self.io_write_byte(addr, val),
             _ => {}
@@ -955,7 +1404,7 @@ impl MemoryR3000A for Ps1Bus {
 
     fn write_halfword(&mut self, addr: u32, val: u16) {
         match addr {
-            0x0000_0000..=0x001F_FFFF => {
+            0x0000_0000..=0x007F_FFFF => {
                 let a = (addr & 0x1F_FFFF) as usize;
                 self.ram[a] = val as u8;
                 self.ram[a + 1] = (val >> 8) as u8;
@@ -972,7 +1421,7 @@ impl MemoryR3000A for Ps1Bus {
 
     fn write_word(&mut self, addr: u32, val: u32) {
         match addr {
-            0x0000_0000..=0x001F_FFFF => {
+            0x0000_0000..=0x007F_FFFF => {
                 let a = (addr & 0x1F_FFFF) as usize;
                 self.ram[a] = val as u8;
                 self.ram[a + 1] = (val >> 8) as u8;
@@ -1005,6 +1454,8 @@ impl MemoryR3000A for Ps1Bus {
 pub struct Ps1System {
     cpu: CpuR3000A<Ps1Bus>,
     total_cycles: u64,
+    /// Instruction tracer for debugging
+    instruction_tracer: emu_core::instruction_tracer::InstructionTracer,
 }
 
 impl Default for Ps1System {
@@ -1019,7 +1470,15 @@ impl Ps1System {
         Self {
             cpu: CpuR3000A::new(bus),
             total_cycles: 0,
+            instruction_tracer: emu_core::instruction_tracer::InstructionTracer::new(),
         }
+    }
+
+    emu_core::impl_instruction_tracer_methods!();
+
+    /// Get GPU inspector data for the debug UI.
+    pub fn get_gpu_inspector_data(&self) -> gpu::Ps1GpuInspectorData {
+        self.bus().gpu.get_inspector_data()
     }
 
     fn bus(&self) -> &Ps1Bus {
@@ -1073,6 +1532,13 @@ impl System for Ps1System {
 
             // Step GPU scanline
             self.cpu.memory.gpu.step_scanline();
+
+            // Step CD-ROM controller
+            self.cpu.memory.cdrom.step();
+            // Level-triggered: always assert IRQ while CD-ROM has active interrupt
+            if (self.cpu.memory.cdrom.irq_flag & self.cpu.memory.cdrom.irq_enable) != 0 {
+                self.cpu.memory.irq.raise(IRQ_CDROM);
+            }
 
             // VBlank interrupt
             if self.cpu.memory.gpu.in_vblank && _scanline == 240 {
@@ -1129,8 +1595,14 @@ impl System for Ps1System {
                 if data.len() >= 0x800 && &data[0..8] == b"PS-X EXE" {
                     self.bus_mut().load_exe(data)
                 } else {
-                    // Assume raw disc image
-                    self.bus_mut().disc_data = data.to_vec();
+                    // Assume raw disc image — auto-detect sector size
+                    let sector_size = if data.len().is_multiple_of(2352) {
+                        2352
+                    } else {
+                        2048
+                    };
+                    self.bus_mut().cdrom.disc_data = data.to_vec();
+                    self.bus_mut().cdrom.disc_sector_size = sector_size;
                     Ok(())
                 }
             }
@@ -1149,7 +1621,7 @@ impl System for Ps1System {
                 Ok(())
             }
             "disc" => {
-                self.bus_mut().disc_data.clear();
+                self.bus_mut().cdrom.disc_data.clear();
                 Ok(())
             }
             _ => Err(Ps1Error::Io(format!(
@@ -1162,13 +1634,17 @@ impl System for Ps1System {
     fn is_mounted(&self, mount_point_id: &str) -> bool {
         match mount_point_id {
             "bios" => self.bus().bios_loaded,
-            "disc" => !self.bus().disc_data.is_empty(),
+            "disc" => !self.bus().cdrom.disc_data.is_empty(),
             _ => false,
         }
     }
 
     fn get_total_cycles(&self) -> u64 {
         self.total_cycles
+    }
+
+    fn debugger(&self) -> Option<&dyn emu_core::debug::Debugger> {
+        Some(self)
     }
 }
 
@@ -1190,4 +1666,221 @@ impl emu_core::renderer::Renderer for Ps1System {
     }
 
     fn resize(&mut self, _width: u32, _height: u32) {}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper: encode a MIPS I-type instruction
+    fn encode_i(opcode: u32, rs: u32, rt: u32, imm: u16) -> u32 {
+        (opcode << 26) | (rs << 21) | (rt << 16) | (imm as u32)
+    }
+
+    /// Helper: encode a MIPS R-type instruction
+    #[allow(dead_code)]
+    fn encode_r(opcode: u32, rs: u32, rt: u32, rd: u32, _sa: u32, funct: u32) -> u32 {
+        (opcode << 26) | (rs << 21) | (rt << 16) | (rd << 11) | (_sa << 6) | funct
+    }
+
+    /// Helper: encode a MIPS J-type instruction
+    fn encode_j(opcode: u32, target: u32) -> u32 {
+        (opcode << 26) | (target & 0x03FF_FFFF)
+    }
+
+    /// Write a word in LE to a byte slice at an offset
+    fn write_le32(buf: &mut [u8], offset: usize, val: u32) {
+        buf[offset] = val as u8;
+        buf[offset + 1] = (val >> 8) as u8;
+        buf[offset + 2] = (val >> 16) as u8;
+        buf[offset + 3] = (val >> 24) as u8;
+    }
+
+    #[test]
+    fn test_ps1_bios_boot_nop_loop() {
+        let mut bios = vec![0u8; 512 * 1024];
+        write_le32(&mut bios, 0, encode_j(2, 0xBFC00000 >> 2));
+
+        let mut sys = Ps1System::new();
+        sys.bus_mut().load_bios(&bios).unwrap();
+
+        let result = sys.step_frame();
+        assert!(result.is_ok(), "step_frame should succeed with BIOS loaded");
+
+        let frame = result.unwrap();
+        assert_eq!(frame.width, 320);
+        assert_eq!(frame.height, 240);
+    }
+
+    #[test]
+    fn test_ps1_bios_io_access() {
+        let mut bios = vec![0u8; 512 * 1024];
+        let mut off = 0usize;
+        // LUI $t0, 0xBF80; ORI $t0, 0x1814; LUI $t1, 0; SW $t1, 0($t0) → GP1 reset
+        write_le32(&mut bios, off, encode_i(0x0F, 0, 8, 0xBF80));
+        off += 4;
+        write_le32(&mut bios, off, encode_i(0x0D, 8, 8, 0x1814));
+        off += 4;
+        write_le32(&mut bios, off, encode_i(0x0F, 0, 9, 0x0000));
+        off += 4;
+        write_le32(&mut bios, off, encode_i(0x2B, 8, 9, 0x0000));
+        off += 4;
+        // Read IRQ status
+        write_le32(&mut bios, off, encode_i(0x0F, 0, 8, 0xBF80));
+        off += 4;
+        write_le32(&mut bios, off, encode_i(0x0D, 8, 8, 0x1070));
+        off += 4;
+        write_le32(&mut bios, off, encode_i(0x23, 8, 9, 0x0000));
+        off += 4;
+        // Write DMA control
+        write_le32(&mut bios, off, encode_i(0x0F, 0, 8, 0xBF80));
+        off += 4;
+        write_le32(&mut bios, off, encode_i(0x0D, 8, 8, 0x10F0));
+        off += 4;
+        write_le32(&mut bios, off, encode_i(0x2B, 8, 0, 0x0000));
+        off += 4;
+        // Write RAM size register
+        write_le32(&mut bios, off, encode_i(0x0F, 0, 8, 0xBF80));
+        off += 4;
+        write_le32(&mut bios, off, encode_i(0x0D, 8, 8, 0x1060));
+        off += 4;
+        write_le32(&mut bios, off, encode_i(0x0F, 0, 9, 0x0B88));
+        off += 4;
+        write_le32(&mut bios, off, encode_i(0x2B, 8, 9, 0x0000));
+        off += 4;
+        // Write to RAM via KSEG0
+        write_le32(&mut bios, off, encode_i(0x0F, 0, 8, 0x8000));
+        off += 4;
+        write_le32(&mut bios, off, encode_i(0x2B, 8, 0, 0x0000));
+        off += 4;
+        // Loop
+        write_le32(&mut bios, off, encode_j(2, (0xBFC00000 + off as u32) >> 2));
+        off += 4;
+        write_le32(&mut bios, off, 0);
+
+        let mut sys = Ps1System::new();
+        sys.bus_mut().load_bios(&bios).unwrap();
+        let result = sys.step_frame();
+        assert!(
+            result.is_ok(),
+            "step_frame with I/O access should not panic"
+        );
+    }
+
+    #[test]
+    fn test_ps1_expansion_and_unmapped_access() {
+        let mut bios = vec![0u8; 512 * 1024];
+        write_le32(&mut bios, 0, encode_i(0x0F, 0, 8, 0xBF00));
+        write_le32(&mut bios, 4, encode_i(0x20, 8, 9, 0x0000));
+        write_le32(&mut bios, 8, encode_i(0x0F, 0, 8, 0xBF80));
+        write_le32(&mut bios, 0xC, encode_i(0x0D, 8, 8, 0x2000));
+        write_le32(&mut bios, 0x10, encode_i(0x20, 8, 9, 0x0000));
+        write_le32(&mut bios, 0x14, encode_j(2, 0xBFC00014 >> 2));
+        write_le32(&mut bios, 0x18, 0);
+
+        let mut sys = Ps1System::new();
+        sys.bus_mut().load_bios(&bios).unwrap();
+        let result = sys.step_frame();
+        assert!(result.is_ok(), "unmapped access should not panic");
+    }
+
+    #[test]
+    fn test_ps1_cdrom_probe() {
+        let mut bios = vec![0u8; 512 * 1024];
+        let mut off = 0usize;
+        // Write to CD-ROM
+        write_le32(&mut bios, off, encode_i(0x0F, 0, 8, 0xBF80));
+        off += 4;
+        write_le32(&mut bios, off, encode_i(0x0D, 8, 8, 0x1800));
+        off += 4;
+        write_le32(&mut bios, off, encode_i(0x28, 8, 0, 0x0000));
+        off += 4; // SB index=0
+        write_le32(&mut bios, off, encode_i(0x0D, 0, 9, 0x0001));
+        off += 4; // LI $t1, 1
+        write_le32(&mut bios, off, encode_i(0x28, 8, 9, 0x0001));
+        off += 4; // SB cmd=1
+        write_le32(&mut bios, off, encode_i(0x20, 8, 10, 0x0001));
+        off += 4; // LB resp
+        write_le32(&mut bios, off, encode_j(2, (0xBFC00000 + off as u32) >> 2));
+        off += 4;
+        write_le32(&mut bios, off, 0);
+
+        let mut sys = Ps1System::new();
+        sys.bus_mut().load_bios(&bios).unwrap();
+        let result = sys.step_frame();
+        assert!(result.is_ok(), "CD-ROM probe should not panic");
+    }
+
+    #[test]
+    fn test_ps1_no_bios_returns_error() {
+        let mut sys = Ps1System::new();
+        let result = sys.step_frame();
+        assert!(result.is_err(), "step_frame without BIOS should error");
+    }
+
+    #[test]
+    fn test_ps1_ram_mirrors() {
+        let mut sys = Ps1System::new();
+        let bus = sys.bus_mut();
+        // Write to base RAM address
+        bus.ram[0x1000] = 0xAB;
+        bus.ram[0x1001] = 0xCD;
+        bus.ram[0x1002] = 0xEF;
+        bus.ram[0x1003] = 0x12;
+
+        // Read from mirror at +2MB (0x00200000)
+        assert_eq!(bus.read_byte(0x0020_1000), 0xAB);
+        assert_eq!(bus.read_byte(0x0020_1001), 0xCD);
+        // Read from mirror at +4MB (0x00400000)
+        assert_eq!(bus.read_byte(0x0040_1000), 0xAB);
+        // Read from mirror at +6MB (0x00600000)
+        assert_eq!(bus.read_byte(0x0060_1000), 0xAB);
+
+        // Halfword reads through mirror
+        let hw = bus.read_halfword(0x0020_1000);
+        assert_eq!(hw, 0xCDAB);
+
+        // Word reads through mirror
+        let w = bus.read_word(0x0020_1000);
+        assert_eq!(w, 0x12EFCDAB);
+
+        // Write through mirror and read from base
+        bus.write_byte(0x0040_2000, 0x42);
+        assert_eq!(bus.ram[0x2000], 0x42);
+    }
+
+    #[test]
+    fn test_ps1_otc_dma() {
+        let mut sys = Ps1System::new();
+        let bus = sys.bus_mut();
+
+        // Set up OTC DMA (channel 6) to clear an ordering table of 4 entries
+        // starting at address 0x1000 (going backward)
+        let base_addr: u32 = 0x100C; // Start at highest entry
+        let word_count: u32 = 4;
+
+        bus.dma.channels[6].base = base_addr;
+        bus.dma.channels[6].block_control = word_count;
+        bus.dma.channels[6].control = (1 << 24) | (1 << 28) | (1 << 1); // Enable, trigger, direction=to_ram
+
+        bus.execute_dma(6);
+
+        // Read back the OT entries
+        let read_word = |bus: &Ps1Bus, addr: u32| -> u32 {
+            let a = addr as usize;
+            bus.ram[a] as u32
+                | (bus.ram[a + 1] as u32) << 8
+                | (bus.ram[a + 2] as u32) << 16
+                | (bus.ram[a + 3] as u32) << 24
+        };
+
+        // First entry (highest addr 0x100C) points to 0x1008
+        assert_eq!(read_word(bus, 0x100C), 0x0000_1008);
+        // Second entry (0x1008) points to 0x1004
+        assert_eq!(read_word(bus, 0x1008), 0x0000_1004);
+        // Third entry (0x1004) points to 0x1000
+        assert_eq!(read_word(bus, 0x1004), 0x0000_1000);
+        // Last entry (0x1000) has end-of-list marker
+        assert_eq!(read_word(bus, 0x1000), 0x00FF_FFFF);
+    }
 }

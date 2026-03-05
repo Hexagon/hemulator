@@ -21,6 +21,7 @@ pub mod disasm_8086;
 pub mod disasm_arm7tdmi;
 pub mod disasm_chip8;
 pub mod disasm_lr35902;
+pub mod disasm_mips_r3000a;
 pub mod disasm_mips_r4300i;
 pub mod disasm_z80;
 pub mod graphics;
