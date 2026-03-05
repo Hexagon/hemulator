@@ -170,7 +170,7 @@ pub struct Ppu {
     timing_mode: TimingMode,
     /// Cycle-accurate sprite 0 hit: stores the (scanline, X position) where hit should trigger.
     /// This is set during render_scanline() and the flag is actually set during tick()
-    /// when we reach the corresponding dot position (X + 1 to match hardware).
+    /// when we reach the corresponding dot position (X + 1, per Mesen2 reference).
     sprite_0_hit_pending: Cell<Option<(u16, u16)>>,
     /// Internal OAM evaluation index for OAMDATA reads during rendering.
     /// During sprite evaluation (dots 65-256 of visible scanlines), the PPU reads through
@@ -1631,11 +1631,17 @@ impl Ppu {
                     // During sprite evaluation, the PPU reads through primary OAM.
                     // Each sprite check reads the Y byte first (odd cycle), then
                     // either copies the remaining 3 bytes (if in range) or moves to
-                    // the next sprite. Approximate: advance 1 byte every 2 dots.
+                    // the next sprite.
+                    //
+                    // Approximation: advance 1 byte per 2 dots. This assumes no sprites
+                    // are in range (worst case: 2 dots per sprite check). When sprites ARE
+                    // in range, the real hardware spends 8 cycles per matching sprite
+                    // (reading all 4 bytes), which slows the evaluation. A more accurate
+                    // implementation would track a full evaluation state machine with
+                    // sprite-in-range checks, secondary OAM fill count, and the overflow
+                    // bug's m/n pointer behavior. This approximation is sufficient for
+                    // games like Bee 52 that use $2004 reads for coarse timing.
                     let eval_dot = dot - 65;
-                    // Each sprite takes at least 2 cycles to check (read Y, compare).
-                    // If in range, 3 more reads (8 cycles total for matched sprite).
-                    // Simple approximation: advance 1 byte per 2 dots.
                     let byte_index = (eval_dot / 2) as u8;
                     self.oam_eval_index.set(byte_index);
                 }
@@ -1647,12 +1653,14 @@ impl Ppu {
         let mut next_scanline = scanline;
 
         // Hardware-accurate odd frame cycle skip:
-        // On odd frames with rendering enabled, the PPU skips dot 340 of the pre-render
-        // scanline by jumping directly from (261, 339) to (0, 0).
-        // The rendering enabled check MUST happen at dot 339 of the pre-render scanline,
-        // not later. Games like Bee 52 toggle rendering mid-frame, and checking at the
-        // wrong time causes a 1-dot CPU/PPU drift every other frame → 30Hz flicker.
-        // Reference: NESdev wiki PPU frame timing, foobles/nes-ppu (MIT)
+        // On odd frames, the PPU skips dot 340 of the pre-render scanline by jumping
+        // directly from (261, 339) to (0, 0). The skip ONLY occurs if rendering is
+        // enabled (BG or sprites via PPUMASK $2001) at this exact dot. We check at
+        // dot 339 because that's when the hardware makes the decision.
+        // Games like Bee 52 toggle rendering mid-frame (disabling it for CHR-RAM uploads),
+        // so checking rendering_enabled at the wrong time (e.g., at dot 0 of the new frame)
+        // causes a 1-dot CPU/PPU drift every other frame → 30Hz flicker.
+        // Reference: NESdev wiki PPU frame timing, foobles/nes-ppu (CC-BY-NC-4.0)
         if scanline == pre_render_scanline && dot == 339 && self.odd_frame.get() {
             let rendering_enabled = (self.mask & 0x18) != 0;
             if rendering_enabled {
