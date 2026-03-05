@@ -3071,25 +3071,41 @@ mod boot_output_tests {
         // Execute >1000 INT 13h calls and verify that the carry flag (error
         // indicator) is never set.
         // Each loop iteration is: MOV AH (1), MOV DL (1), INT 13h (many steps
-        // inside the handler), JMP (1) – use 200 steps per iteration to be safe.
+        // inside the handler), JMP (1). Step until CS:IP returns to 0000:7C00
+        // (the start of the loop), with an upper bound on steps per iteration
+        // to avoid hanging if something goes wrong.
         for iteration in 0..1050 {
-            // Step through one full loop iteration
-            for _ in 0..20 {
+            let mut steps = 0;
+            loop {
                 sys.cpu.step();
+                steps += 1;
+
+                let regs = sys.cpu.get_registers();
+
+                // One full loop iteration completes when we jump back to 0000:7C00.
+                if regs.cs == 0x0000 && regs.ip == 0x7C00 {
+                    assert_eq!(
+                        (regs.ax >> 8) & 0xFF,
+                        0x00,
+                        "INT 13h AH should be 0 (success) after iteration {}",
+                        iteration
+                    );
+                    assert_eq!(
+                        regs.flags & FLAG_CF,
+                        0,
+                        "Carry flag should be clear (no error) after iteration {}",
+                        iteration
+                    );
+                    break;
+                }
+
+                // Safety bound: we don't expect a single loop iteration to
+                // require anywhere near this many steps.
+                assert!(
+                    steps < 200,
+                    "Exceeded expected maximum steps per loop iteration"
+                );
             }
-            let regs = sys.cpu.get_registers();
-            assert_eq!(
-                (regs.ax >> 8) & 0xFF,
-                0x00,
-                "INT 13h AH should be 0 (success) after iteration {}",
-                iteration
-            );
-            assert_eq!(
-                regs.flags & FLAG_CF,
-                0,
-                "Carry flag should be clear (no error) after iteration {}",
-                iteration
-            );
         }
     }
 }
