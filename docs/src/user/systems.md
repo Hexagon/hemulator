@@ -840,7 +840,7 @@ For more technical information, see [crates/systems/ps1/](../../../crates/system
     - MOVSX/MOVZX, BSF/BSR, BT/BTS/BTR/BTC, SETcc (bit manipulation and conditional operations)
   - CPU model selection support for running software with different instruction set requirements
   - Maintains full backward compatibility - 16-bit operations work on low 16 bits of 32-bit registers
-  - See [AGENTS.md](https://github.com/Hexagon/hemulator/blob/master/AGENTS.md) for full instruction set details
+  - See [AGENTS.md](https://github.com/Hexagon/hemulator/blob/main/AGENTS.md) for full instruction set details
 - **Memory bus** (configurable conventional + extended memory, 128KB VRAM, 256KB ROM)
   - **Conventional memory**: 256KB-640KB (PC/XT compatible, visible to all software)
   - **Extended memory**: Above 640KB (accessible via XMS, for protected mode or extended software)

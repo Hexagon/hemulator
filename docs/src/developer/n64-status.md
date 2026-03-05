@@ -198,9 +198,9 @@ cargo run --profile release-quick -- rom.z64 --log-ppu info
 
 ### Documentation
 - **[N64 System README](../../../crates/systems/n64/README.md)** - Detailed implementation docs
-- **[ARCHITECTURE.md](architecture.md)** - Overall emulator architecture
+- **[Architecture documentation](architecture.md)** - Overall emulator architecture
 - **[User Manual](../user/)** - User manual and features
-- **[AGENTS.md](https://github.com/Hexagon/hemulator/blob/master/AGENTS.md)** - Implementation guidelines
+- **[AGENTS.md](https://github.com/Hexagon/hemulator/blob/main/AGENTS.md)** - Implementation guidelines
 
 ### Hardware Reference
 - **[MIPS R4300i CPU Reference](../references/mips-r4300i.md)** - CPU documentation
