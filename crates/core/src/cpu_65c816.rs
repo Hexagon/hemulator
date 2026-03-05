@@ -266,9 +266,9 @@ impl<M: Memory65c816> Cpu65c816<M> {
                     self.push_word(self.pc.wrapping_add(1));
                     // Push status with B flag set (to distinguish from IRQ)
                     self.push_byte(self.status | FLAG_BREAK);
-                    // Set I flag to disable interrupts
+                    // Set I flag to disable interrupts, clear D flag
                     self.status |= FLAG_IRQ_DISABLE;
-                    // D flag is NOT modified in 6502 emulation mode
+                    self.status &= !FLAG_DECIMAL;
                     // Load IRQ/BRK vector from $FFFE-$FFFF
                     self.pc = self.read_word(0xFFFE);
                     self.cycles += 7;
@@ -296,6 +296,7 @@ impl<M: Memory65c816> Cpu65c816<M> {
                     self.push_word(self.pc);
                     self.push_byte(self.status);
                     self.status |= FLAG_IRQ_DISABLE;
+                    self.status &= !FLAG_DECIMAL;
                     self.pc = self.read_word(0xFFF4);
                     self.cycles += 7;
                 } else {
@@ -359,8 +360,8 @@ impl<M: Memory65c816> Cpu65c816<M> {
             }
             0x15 => {
                 // ORA dp,X
-                let dp = self.fetch_byte() as u32 + self.d as u32;
-                let addr = dp + self.x as u32;
+                let dp_byte = self.fetch_byte();
+                let addr = self.dp_indexed_x_addr(dp_byte);
                 if self.is_8bit_a() {
                     let val = self.read(addr);
                     let result = (self.c & 0xFF) as u8 | val;
@@ -376,8 +377,9 @@ impl<M: Memory65c816> Cpu65c816<M> {
             }
             0x01 => {
                 // ORA (dp,X)
-                let dp = (self.fetch_byte() as u32 + self.d as u32 + self.x as u32) & 0xFFFF;
-                let ptr_addr = self.read_word(dp) as u32;
+                let dp_byte = self.fetch_byte();
+                let dp = self.dp_indexed_x_addr(dp_byte);
+                let ptr_addr = self.read_word_dp_wrapped(dp) as u32;
                 let addr = ((self.dbr as u32) << 16) + ptr_addr;
                 if self.is_8bit_a() {
                     let val = self.read(addr);
@@ -659,8 +661,8 @@ impl<M: Memory65c816> Cpu65c816<M> {
             }
             0x16 => {
                 // ASL dp,X
-                let dp = self.fetch_byte() as u32 + self.d as u32;
-                let addr = dp + self.x as u32;
+                let dp_byte = self.fetch_byte();
+                let addr = self.dp_indexed_x_addr(dp_byte);
                 if self.is_8bit_a() {
                     let val = self.read(addr);
                     if val & 0x80 != 0 {
@@ -770,8 +772,8 @@ impl<M: Memory65c816> Cpu65c816<M> {
             }
             0x35 => {
                 // AND dp,X
-                let dp = self.fetch_byte() as u32 + self.d as u32;
-                let addr = dp + self.x as u32;
+                let dp_byte = self.fetch_byte();
+                let addr = self.dp_indexed_x_addr(dp_byte);
                 if self.is_8bit_a() {
                     let val = self.read(addr);
                     let result = (self.c & 0xFF) as u8 & val;
@@ -839,8 +841,9 @@ impl<M: Memory65c816> Cpu65c816<M> {
             }
             0x21 => {
                 // AND (dp,X)
-                let dp = (self.fetch_byte() as u32 + self.d as u32 + self.x as u32) & 0xFFFF;
-                let ptr_addr = self.read_word(dp) as u32;
+                let dp_byte = self.fetch_byte();
+                let dp = self.dp_indexed_x_addr(dp_byte);
+                let ptr_addr = self.read_word_dp_wrapped(dp) as u32;
                 let addr = ((self.dbr as u32) << 16) + ptr_addr;
                 if self.is_8bit_a() {
                     let val = self.read(addr);
@@ -1077,8 +1080,8 @@ impl<M: Memory65c816> Cpu65c816<M> {
             }
             0x36 => {
                 // ROL dp,X
-                let dp = self.fetch_byte() as u32 + self.d as u32;
-                let addr = dp + self.x as u32;
+                let dp_byte = self.fetch_byte();
+                let addr = self.dp_indexed_x_addr(dp_byte);
                 if self.is_8bit_a() {
                     let val = self.read(addr);
                     let carry_in = if self.status & FLAG_CARRY != 0 { 1 } else { 0 };
@@ -1146,7 +1149,9 @@ impl<M: Memory65c816> Cpu65c816<M> {
             0x40 => {
                 let old_status = self.status;
                 if self.emulation {
-                    self.status = self.pop_byte();
+                    // Emulation mode: pull P (without PBR), then 16-bit PC.
+                    // M and X/B flags are always 1 in emulation mode.
+                    self.status = self.pop_byte() | FLAG_MEMORY | FLAG_INDEX;
                     self.pc = self.pop_word();
                     self.cycles += 6;
                 } else {
@@ -1214,8 +1219,8 @@ impl<M: Memory65c816> Cpu65c816<M> {
             }
             0x55 => {
                 // EOR dp,X
-                let dp = self.fetch_byte() as u32 + self.d as u32;
-                let addr = dp + self.x as u32;
+                let dp_byte = self.fetch_byte();
+                let addr = self.dp_indexed_x_addr(dp_byte);
                 if self.is_8bit_a() {
                     let val = self.read(addr);
                     let result = (self.c & 0xFF) as u8 ^ val;
@@ -1283,8 +1288,9 @@ impl<M: Memory65c816> Cpu65c816<M> {
             }
             0x41 => {
                 // EOR (dp,X)
-                let dp = (self.fetch_byte() as u32 + self.d as u32 + self.x as u32) & 0xFFFF;
-                let ptr_addr = self.read_word(dp) as u32;
+                let dp_byte = self.fetch_byte();
+                let dp = self.dp_indexed_x_addr(dp_byte);
+                let ptr_addr = self.read_word_dp_wrapped(dp) as u32;
                 let addr = ((self.dbr as u32) << 16) + ptr_addr;
                 if self.is_8bit_a() {
                     let val = self.read(addr);
@@ -1514,8 +1520,8 @@ impl<M: Memory65c816> Cpu65c816<M> {
             }
             0x56 => {
                 // LSR dp,X
-                let dp = self.fetch_byte() as u32 + self.d as u32;
-                let addr = dp + self.x as u32;
+                let dp_byte = self.fetch_byte();
+                let addr = self.dp_indexed_x_addr(dp_byte);
                 if self.is_8bit_a() {
                     let val = self.read(addr);
                     if val & 1 != 0 {
@@ -1622,8 +1628,8 @@ impl<M: Memory65c816> Cpu65c816<M> {
             }
             0x75 => {
                 // ADC dp,X
-                let dp = self.fetch_byte() as u32 + self.d as u32;
-                let addr = dp + self.x as u32;
+                let dp_byte = self.fetch_byte();
+                let addr = self.dp_indexed_x_addr(dp_byte);
                 if self.is_8bit_a() {
                     let val = self.read(addr);
                     self.adc_8(val);
@@ -1679,8 +1685,9 @@ impl<M: Memory65c816> Cpu65c816<M> {
             }
             0x61 => {
                 // ADC (dp,X)
-                let dp = (self.fetch_byte() as u32 + self.d as u32 + self.x as u32) & 0xFFFF;
-                let ptr_addr = self.read_word(dp) as u32;
+                let dp_byte = self.fetch_byte();
+                let dp = self.dp_indexed_x_addr(dp_byte);
+                let ptr_addr = self.read_word_dp_wrapped(dp) as u32;
                 let addr = ((self.dbr as u32) << 16) + ptr_addr;
                 if self.is_8bit_a() {
                     let val = self.read(addr);
@@ -1917,8 +1924,8 @@ impl<M: Memory65c816> Cpu65c816<M> {
             }
             0x76 => {
                 // ROR dp,X
-                let dp = self.fetch_byte() as u32 + self.d as u32;
-                let addr = dp + self.x as u32;
+                let dp_byte = self.fetch_byte();
+                let addr = self.dp_indexed_x_addr(dp_byte);
                 if self.is_8bit_a() {
                     let val = self.read(addr);
                     let carry_in = if self.status & FLAG_CARRY != 0 {
@@ -2056,8 +2063,9 @@ impl<M: Memory65c816> Cpu65c816<M> {
             // Additional STA addressing modes
             0x81 => {
                 // STA (dp,X)
-                let dp = (self.fetch_byte() as u32 + self.d as u32 + self.x as u32) & 0xFFFF;
-                let ptr_addr = self.read_word(dp) as u32;
+                let dp_byte = self.fetch_byte();
+                let dp = self.dp_indexed_x_addr(dp_byte);
+                let ptr_addr = self.read_word_dp_wrapped(dp) as u32;
                 let addr = ((self.dbr as u32) << 16) + ptr_addr;
                 if self.is_8bit_a() {
                     self.write(addr, (self.c & 0xFF) as u8);
@@ -2193,8 +2201,8 @@ impl<M: Memory65c816> Cpu65c816<M> {
             }
             0x95 => {
                 // STA dp,X
-                let dp = self.fetch_byte() as u32 + self.d as u32;
-                let addr = dp + self.x as u32;
+                let dp_byte = self.fetch_byte();
+                let addr = self.dp_indexed_x_addr(dp_byte);
                 if self.is_8bit_a() {
                     self.write(addr, (self.c & 0xFF) as u8);
                     self.cycles += 4;
@@ -2239,8 +2247,8 @@ impl<M: Memory65c816> Cpu65c816<M> {
             }
             0x74 => {
                 // STZ dp,X
-                let base = self.fetch_byte() as u32;
-                let addr = base + self.d as u32 + self.x as u32;
+                let dp_byte = self.fetch_byte();
+                let addr = self.dp_indexed_x_addr(dp_byte);
                 if self.is_8bit_a() {
                     self.write(addr, 0);
                     self.cycles += 4;
@@ -2398,8 +2406,8 @@ impl<M: Memory65c816> Cpu65c816<M> {
             }
             0x34 => {
                 // BIT dp,X - sets Z, N, V flags
-                let dp = self.fetch_byte() as u32 + self.d as u32;
-                let addr = dp + self.x as u32;
+                let dp_byte = self.fetch_byte();
+                let addr = self.dp_indexed_x_addr(dp_byte);
                 if self.is_8bit_a() {
                     let val = self.read(addr);
                     let result = (self.c & 0xFF) as u8 & val;
@@ -2649,8 +2657,9 @@ impl<M: Memory65c816> Cpu65c816<M> {
             // Additional LDA addressing modes
             0xA1 => {
                 // LDA (dp,X)
-                let dp = (self.fetch_byte() as u32 + self.d as u32 + self.x as u32) & 0xFFFF;
-                let ptr_addr = self.read_word(dp) as u32;
+                let dp_byte = self.fetch_byte();
+                let dp = self.dp_indexed_x_addr(dp_byte);
+                let ptr_addr = self.read_word_dp_wrapped(dp) as u32;
                 let addr = ((self.dbr as u32) << 16) + ptr_addr;
                 if self.is_8bit_a() {
                     let val = self.read(addr);
@@ -2826,8 +2835,8 @@ impl<M: Memory65c816> Cpu65c816<M> {
             }
             0xB5 => {
                 // LDA dp,X
-                let dp = self.fetch_byte() as u32 + self.d as u32;
-                let addr = dp + self.x as u32;
+                let dp_byte = self.fetch_byte();
+                let addr = self.dp_indexed_x_addr(dp_byte);
                 if self.is_8bit_a() {
                     let val = self.read(addr);
                     self.c = (self.c & 0xFF00) | val as u16;
@@ -2902,8 +2911,8 @@ impl<M: Memory65c816> Cpu65c816<M> {
             }
             0xB6 => {
                 // LDX dp,Y
-                let dp = self.fetch_byte() as u32 + self.d as u32;
-                let addr = dp + self.y as u32;
+                let dp_byte = self.fetch_byte();
+                let addr = self.dp_indexed_y_addr(dp_byte);
                 if self.is_8bit_xy() {
                     let val = self.read(addr);
                     self.x = (self.x & 0xFF00) | val as u16;
@@ -2920,8 +2929,8 @@ impl<M: Memory65c816> Cpu65c816<M> {
             // Additional LDY addressing modes
             0xB4 => {
                 // LDY dp,X
-                let dp = self.fetch_byte() as u32 + self.d as u32;
-                let addr = dp + self.x as u32;
+                let dp_byte = self.fetch_byte();
+                let addr = self.dp_indexed_x_addr(dp_byte);
                 if self.is_8bit_xy() {
                     let val = self.read(addr);
                     self.y = (self.y & 0xFF00) | val as u16;
@@ -2954,8 +2963,8 @@ impl<M: Memory65c816> Cpu65c816<M> {
             // Additional STY addressing modes
             0x94 => {
                 // STY dp,X
-                let dp = self.fetch_byte() as u32 + self.d as u32;
-                let addr = dp + self.x as u32;
+                let dp_byte = self.fetch_byte();
+                let addr = self.dp_indexed_x_addr(dp_byte);
                 if self.is_8bit_xy() {
                     self.write(addr, (self.y & 0xFF) as u8);
                     self.cycles += 4;
@@ -2968,8 +2977,8 @@ impl<M: Memory65c816> Cpu65c816<M> {
             // Additional STX addressing modes
             0x96 => {
                 // STX dp,Y
-                let dp = self.fetch_byte() as u32 + self.d as u32;
-                let addr = dp + self.y as u32;
+                let dp_byte = self.fetch_byte();
+                let addr = self.dp_indexed_y_addr(dp_byte);
                 if self.is_8bit_xy() {
                     self.write(addr, (self.x & 0xFF) as u8);
                     self.cycles += 4;
@@ -3053,8 +3062,8 @@ impl<M: Memory65c816> Cpu65c816<M> {
             }
             0xD5 => {
                 // CMP dp,X
-                let dp = self.fetch_byte() as u32 + self.d as u32;
-                let addr = dp + self.x as u32;
+                let dp_byte = self.fetch_byte();
+                let addr = self.dp_indexed_x_addr(dp_byte);
                 if self.is_8bit_a() {
                     let val = self.read(addr);
                     self.compare_8((self.c & 0xFF) as u8, val);
@@ -3110,8 +3119,9 @@ impl<M: Memory65c816> Cpu65c816<M> {
             }
             0xC1 => {
                 // CMP (dp,X)
-                let dp = (self.fetch_byte() as u32 + self.d as u32 + self.x as u32) & 0xFFFF;
-                let ptr_addr = self.read_word(dp) as u32;
+                let dp_byte = self.fetch_byte();
+                let dp = self.dp_indexed_x_addr(dp_byte);
+                let ptr_addr = self.read_word_dp_wrapped(dp) as u32;
                 let addr = ((self.dbr as u32) << 16) + ptr_addr;
                 if self.is_8bit_a() {
                     let val = self.read(addr);
@@ -3370,8 +3380,8 @@ impl<M: Memory65c816> Cpu65c816<M> {
             }
             0xF5 => {
                 // SBC dp,X
-                let dp = self.fetch_byte() as u32 + self.d as u32;
-                let addr = dp + self.x as u32;
+                let dp_byte = self.fetch_byte();
+                let addr = self.dp_indexed_x_addr(dp_byte);
                 if self.is_8bit_a() {
                     let val = self.read(addr);
                     self.sbc_8(val);
@@ -3427,8 +3437,9 @@ impl<M: Memory65c816> Cpu65c816<M> {
             }
             0xE1 => {
                 // SBC (dp,X)
-                let dp = (self.fetch_byte() as u32 + self.d as u32 + self.x as u32) & 0xFFFF;
-                let ptr_addr = self.read_word(dp) as u32;
+                let dp_byte = self.fetch_byte();
+                let dp = self.dp_indexed_x_addr(dp_byte);
+                let ptr_addr = self.read_word_dp_wrapped(dp) as u32;
                 let addr = ((self.dbr as u32) << 16) + ptr_addr;
                 if self.is_8bit_a() {
                     let val = self.read(addr);
@@ -3590,8 +3601,8 @@ impl<M: Memory65c816> Cpu65c816<M> {
             }
             0xF6 => {
                 // INC dp,X
-                let dp = self.fetch_byte() as u32 + self.d as u32;
-                let addr = dp + self.x as u32;
+                let dp_byte = self.fetch_byte();
+                let addr = self.dp_indexed_x_addr(dp_byte);
                 if self.is_8bit_a() {
                     let val = self.read(addr);
                     let result = val.wrapping_add(1);
@@ -3645,8 +3656,8 @@ impl<M: Memory65c816> Cpu65c816<M> {
             }
             0xD6 => {
                 // DEC dp,X
-                let dp = self.fetch_byte() as u32 + self.d as u32;
-                let addr = dp + self.x as u32;
+                let dp_byte = self.fetch_byte();
+                let addr = self.dp_indexed_x_addr(dp_byte);
                 if self.is_8bit_a() {
                     let val = self.read(addr);
                     let result = val.wrapping_sub(1);
@@ -3832,10 +3843,13 @@ impl<M: Memory65c816> Cpu65c816<M> {
             }
             0x7C => {
                 // JMP (absolute,X indirect)
+                // Pointer fetch uses PBR; the ptr+X sum wraps within the bank (16-bit).
+                // Both pointer bytes must be read from the same bank; hi wraps at 16 bits.
                 let ptr = self.fetch_word();
-                let addr = ((self.pbr as u32) << 16) + ptr as u32 + self.x as u32;
+                let bank = (self.pbr as u32) << 16;
+                let addr = bank | ((ptr as u32 + self.x as u32) & 0xFFFF);
                 let lo = self.read(addr) as u16;
-                let hi = self.read(addr + 1) as u16;
+                let hi = self.read(bank | ((addr + 1) & 0xFFFF)) as u16;
                 self.pc = (hi << 8) | lo;
                 self.cycles += 6;
             }
@@ -3860,31 +3874,47 @@ impl<M: Memory65c816> Cpu65c816<M> {
             }
             0x22 => {
                 // JSL - Jump to Subroutine Long
+                // Always uses the full 16-bit stack (even in emulation mode);
+                // S is re-constrained to page 1 afterward when E=1.
                 let addr = self.fetch_word();
                 let bank = self.fetch_byte();
                 let ret_addr = self.pc.wrapping_sub(1);
-                self.push_byte(self.pbr);
-                self.push_word(ret_addr);
+                self.push_byte_native(self.pbr);
+                self.push_byte_native(((ret_addr >> 8) & 0xFF) as u8);
+                self.push_byte_native((ret_addr & 0xFF) as u8);
+                self.emulation_constrain_s();
                 self.pc = addr;
                 self.pbr = bank;
                 self.cycles += 8;
             }
             0xFC => {
                 // JSR (absolute,X indirect)
+                // Always uses the full 16-bit stack (even in emulation mode);
+                // S is re-constrained to page 1 afterward when E=1.
+                // Pointer fetch uses PBR; the ptr+X sum wraps within the bank (16-bit).
+                // Both pointer bytes must be read from the same bank; hi wraps at 16 bits.
                 let ptr = self.fetch_word();
-                let addr = ((self.pbr as u32) << 16) + ptr as u32 + self.x as u32;
+                let bank = (self.pbr as u32) << 16;
+                let addr = bank | ((ptr as u32 + self.x as u32) & 0xFFFF);
                 let lo = self.read(addr) as u16;
-                let hi = self.read(addr + 1) as u16;
+                let hi = self.read(bank | ((addr + 1) & 0xFFFF)) as u16;
                 let ret_addr = self.pc.wrapping_sub(1);
-                self.push_word(ret_addr);
+                self.push_byte_native(((ret_addr >> 8) & 0xFF) as u8);
+                self.push_byte_native((ret_addr & 0xFF) as u8);
+                self.emulation_constrain_s();
                 self.pc = (hi << 8) | lo;
                 self.cycles += 8;
             }
 
             // RTL - Return from Subroutine Long
             0x6B => {
-                self.pc = self.pop_word().wrapping_add(1);
-                self.pbr = self.pop_byte();
+                // Always uses the full 16-bit stack (even in emulation mode);
+                // S is re-constrained to page 1 afterward when E=1.
+                let lo = self.pop_byte_native() as u16;
+                let hi = self.pop_byte_native() as u16;
+                self.pbr = self.pop_byte_native();
+                self.emulation_constrain_s();
+                self.pc = ((hi << 8) | lo).wrapping_add(1);
                 self.cycles += 6;
             }
 
@@ -3984,12 +4014,19 @@ impl<M: Memory65c816> Cpu65c816<M> {
             // New 65C816 stack instructions
             0x0B => {
                 // PHD - Push Direct Page
-                self.push_word(self.d);
+                // Uses native 16-bit stack even in emulation mode.
+                self.push_byte_native(((self.d >> 8) & 0xFF) as u8);
+                self.push_byte_native((self.d & 0xFF) as u8);
+                self.emulation_constrain_s();
                 self.cycles += 4;
             }
             0x2B => {
                 // PLD - Pull Direct Page
-                self.d = self.pop_word();
+                // Uses native 16-bit stack even in emulation mode.
+                let lo = self.pop_byte_native() as u16;
+                let hi = self.pop_byte_native() as u16;
+                self.emulation_constrain_s();
+                self.d = (hi << 8) | lo;
                 self.set_zn_16(self.d);
                 self.cycles += 5;
             }
@@ -4005,7 +4042,9 @@ impl<M: Memory65c816> Cpu65c816<M> {
             }
             0xAB => {
                 // PLB - Pull Data Bank
-                self.dbr = self.pop_byte();
+                // Uses native 16-bit stack even in emulation mode (undocumented behaviour).
+                self.dbr = self.pop_byte_native();
+                self.emulation_constrain_s();
                 self.set_zn_8(self.dbr);
                 self.cycles += 4;
             }
@@ -4013,22 +4052,31 @@ impl<M: Memory65c816> Cpu65c816<M> {
             // Special Push instructions
             0x62 => {
                 // PER - Push Effective PC Relative Long
+                // Uses native 16-bit stack even in emulation mode.
                 let offset = self.fetch_word() as i16;
                 let addr = self.pc.wrapping_add(offset as u16);
-                self.push_word(addr);
+                self.push_byte_native(((addr >> 8) & 0xFF) as u8);
+                self.push_byte_native((addr & 0xFF) as u8);
+                self.emulation_constrain_s();
                 self.cycles += 6;
             }
             0xD4 => {
                 // PEI - Push Effective Indirect (DP Indirect)
+                // Uses native 16-bit stack even in emulation mode.
                 let dp = self.fetch_byte() as u32 + self.d as u32;
                 let val = self.read_word(dp);
-                self.push_word(val);
+                self.push_byte_native(((val >> 8) & 0xFF) as u8);
+                self.push_byte_native((val & 0xFF) as u8);
+                self.emulation_constrain_s();
                 self.cycles += 6;
             }
             0xF4 => {
                 // PEA - Push Effective Absolute
+                // Uses native 16-bit stack even in emulation mode.
                 let val = self.fetch_word();
-                self.push_word(val);
+                self.push_byte_native(((val >> 8) & 0xFF) as u8);
+                self.push_byte_native((val & 0xFF) as u8);
+                self.emulation_constrain_s();
                 self.cycles += 5;
             }
 
@@ -4233,9 +4281,10 @@ impl<M: Memory65c816> Cpu65c816<M> {
 
             // Block Move instructions
             0x44 => {
-                // MVP - Block Move Negative (decrement)
-                let src_bank = self.fetch_byte();
+                // MVP - Block Move Positive (decrement)
+                // Machine-code encoding: $44 dstBank srcBank (destination byte first)
                 let dst_bank = self.fetch_byte();
+                let src_bank = self.fetch_byte();
 
                 let src_addr = ((src_bank as u32) << 16) | (self.x as u32);
                 let dst_addr = ((dst_bank as u32) << 16) | (self.y as u32);
@@ -4244,8 +4293,13 @@ impl<M: Memory65c816> Cpu65c816<M> {
                 self.write(dst_addr, val);
 
                 self.c = self.c.wrapping_sub(1);
-                self.x = self.x.wrapping_sub(1);
-                self.y = self.y.wrapping_sub(1);
+                if self.is_8bit_xy() {
+                    self.x = (self.x.wrapping_sub(1)) & 0xFF;
+                    self.y = (self.y.wrapping_sub(1)) & 0xFF;
+                } else {
+                    self.x = self.x.wrapping_sub(1);
+                    self.y = self.y.wrapping_sub(1);
+                }
                 self.dbr = dst_bank;
 
                 if self.c != 0xFFFF {
@@ -4254,9 +4308,10 @@ impl<M: Memory65c816> Cpu65c816<M> {
                 self.cycles += 7;
             }
             0x54 => {
-                // MVN - Block Move Next (increment)
-                let src_bank = self.fetch_byte();
+                // MVN - Block Move Negative (increment)
+                // Machine-code encoding: $54 dstBank srcBank (destination byte first)
                 let dst_bank = self.fetch_byte();
+                let src_bank = self.fetch_byte();
 
                 let src_addr = ((src_bank as u32) << 16) | (self.x as u32);
                 let dst_addr = ((dst_bank as u32) << 16) | (self.y as u32);
@@ -4265,8 +4320,13 @@ impl<M: Memory65c816> Cpu65c816<M> {
                 self.write(dst_addr, val);
 
                 self.c = self.c.wrapping_sub(1);
-                self.x = self.x.wrapping_add(1);
-                self.y = self.y.wrapping_add(1);
+                if self.is_8bit_xy() {
+                    self.x = (self.x.wrapping_add(1)) & 0xFF;
+                    self.y = (self.y.wrapping_add(1)) & 0xFF;
+                } else {
+                    self.x = self.x.wrapping_add(1);
+                    self.y = self.y.wrapping_add(1);
+                }
                 self.dbr = dst_bank;
 
                 if self.c != 0xFFFF {
@@ -4309,99 +4369,233 @@ impl<M: Memory65c816> Cpu65c816<M> {
     /// ADC operation for 8-bit mode
     fn adc_8(&mut self, val: u8) {
         let a = (self.c & 0xFF) as u8;
-        let carry = if self.status & FLAG_CARRY != 0 { 1 } else { 0 };
-        let sum = a as u16 + val as u16 + carry;
-        let result = sum as u8;
+        let carry_in: u16 = if self.status & FLAG_CARRY != 0 { 1 } else { 0 };
 
-        // Set carry
-        if sum > 0xFF {
-            self.status |= FLAG_CARRY;
+        if self.status & FLAG_DECIMAL != 0 {
+            // BCD mode: correct each nibble after digit-by-digit addition
+            let lo = (a & 0xF) as u16 + (val & 0xF) as u16 + carry_in;
+            let lo_bcd = if lo > 9 { lo + 6 } else { lo };
+            let carry_lo = lo_bcd >> 4;
+
+            let hi_a = ((a >> 4) & 0xF) as u16;
+            let hi_b = ((val >> 4) & 0xF) as u16;
+            let hi_raw = hi_a + hi_b + carry_lo;
+            let hi_bcd = if hi_raw > 9 { hi_raw + 6 } else { hi_raw };
+            let carry_out = hi_bcd >> 4;
+
+            let result = (((hi_bcd & 0xF) as u8) << 4) | ((lo_bcd & 0xF) as u8);
+
+            if carry_out != 0 {
+                self.status |= FLAG_CARRY;
+            } else {
+                self.status &= !FLAG_CARRY;
+            }
+            // V: 4-bit signed overflow of the high-nibble sum (binary, before BCD correction).
+            // Uses the raw hi_raw nibble so invalid BCD digits are handled correctly.
+            if (!(hi_a ^ hi_b) & (hi_a ^ (hi_raw & 0xF))) & 0x8 != 0 {
+                self.status |= FLAG_OVERFLOW;
+            } else {
+                self.status &= !FLAG_OVERFLOW;
+            }
+            self.c = (self.c & 0xFF00) | result as u16;
+            self.set_zn_8(result);
         } else {
-            self.status &= !FLAG_CARRY;
-        }
+            let sum = a as u16 + val as u16 + carry_in;
+            let result = sum as u8;
 
-        // Set overflow: (~(A ^ M) & (A ^ R)) & 0x80
-        if (!(a ^ val) & (a ^ result)) & 0x80 != 0 {
-            self.status |= FLAG_OVERFLOW;
-        } else {
-            self.status &= !FLAG_OVERFLOW;
+            if sum > 0xFF {
+                self.status |= FLAG_CARRY;
+            } else {
+                self.status &= !FLAG_CARRY;
+            }
+            // V: signed overflow (~(A ^ M) & (A ^ R)) & 0x80
+            if (!(a ^ val) & (a ^ result)) & 0x80 != 0 {
+                self.status |= FLAG_OVERFLOW;
+            } else {
+                self.status &= !FLAG_OVERFLOW;
+            }
+            self.c = (self.c & 0xFF00) | result as u16;
+            self.set_zn_8(result);
         }
-
-        self.c = (self.c & 0xFF00) | result as u16;
-        self.set_zn_8(result);
     }
 
     /// ADC operation for 16-bit mode
     fn adc_16(&mut self, val: u16) {
-        let carry = if self.status & FLAG_CARRY != 0 { 1 } else { 0 };
-        let sum = self.c as u32 + val as u32 + carry;
-        let result = sum as u16;
+        let carry_in: u32 = if self.status & FLAG_CARRY != 0 { 1 } else { 0 };
 
-        // Set carry
-        if sum > 0xFFFF {
-            self.status |= FLAG_CARRY;
+        if self.status & FLAG_DECIMAL != 0 {
+            // BCD mode: process all four nibbles with digit-by-digit correction.
+            // Track the most-significant nibble (d3) raw sum and operands for V.
+            let mut result: u32 = 0;
+            let mut carry: u32 = carry_in;
+            let mut v_d3_a: u32 = 0;
+            let mut v_d3_b: u32 = 0;
+            let mut v_d3_raw: u32 = 0;
+            for i in 0..4 {
+                let nibble_a = (self.c as u32 >> (i * 4)) & 0xF;
+                let nibble_b = (val as u32 >> (i * 4)) & 0xF;
+                let sum = nibble_a + nibble_b + carry;
+                if i == 3 {
+                    v_d3_a = nibble_a;
+                    v_d3_b = nibble_b;
+                    v_d3_raw = sum & 0xF;
+                }
+                if sum > 9 {
+                    result |= ((sum + 6) & 0xF) << (i * 4);
+                    carry = 1;
+                } else {
+                    result |= (sum & 0xF) << (i * 4);
+                    carry = 0;
+                }
+            }
+            let bcd_result = result as u16;
+
+            if carry != 0 {
+                self.status |= FLAG_CARRY;
+            } else {
+                self.status &= !FLAG_CARRY;
+            }
+            // V: 4-bit signed overflow of the most-significant nibble (d3) addition.
+            // Using the raw (pre-correction) nibble handles invalid BCD digits correctly.
+            if (!(v_d3_a ^ v_d3_b) & (v_d3_a ^ v_d3_raw)) & 0x8 != 0 {
+                self.status |= FLAG_OVERFLOW;
+            } else {
+                self.status &= !FLAG_OVERFLOW;
+            }
+            self.c = bcd_result;
+            self.set_zn_16(bcd_result);
         } else {
-            self.status &= !FLAG_CARRY;
-        }
+            let sum = self.c as u32 + val as u32 + carry_in;
+            let result = sum as u16;
 
-        // Set overflow
-        if (!(self.c ^ val) & (self.c ^ result)) & 0x8000 != 0 {
-            self.status |= FLAG_OVERFLOW;
-        } else {
-            self.status &= !FLAG_OVERFLOW;
+            if sum > 0xFFFF {
+                self.status |= FLAG_CARRY;
+            } else {
+                self.status &= !FLAG_CARRY;
+            }
+            if (!(self.c ^ val) & (self.c ^ result)) & 0x8000 != 0 {
+                self.status |= FLAG_OVERFLOW;
+            } else {
+                self.status &= !FLAG_OVERFLOW;
+            }
+            self.c = result;
+            self.set_zn_16(result);
         }
-
-        self.c = result;
-        self.set_zn_16(result);
     }
 
     /// SBC operation for 8-bit mode
     fn sbc_8(&mut self, val: u8) {
         let a = (self.c & 0xFF) as u8;
-        let carry = if self.status & FLAG_CARRY != 0 { 0 } else { 1 };
-        let diff = a as i16 - val as i16 - carry as i16;
-        let result = diff as u8;
+        let borrow_in: i16 = if self.status & FLAG_CARRY != 0 { 0 } else { 1 };
 
-        // Set carry (inverted borrow)
-        if diff >= 0 {
-            self.status |= FLAG_CARRY;
+        if self.status & FLAG_DECIMAL != 0 {
+            // BCD mode: digit-by-digit subtraction with borrow
+            let lo = (a & 0xF) as i16 - (val & 0xF) as i16 - borrow_in;
+            let (lo_bcd, borrow_lo) = if lo < 0 {
+                ((lo + 10) & 0xF, 1i16)
+            } else {
+                (lo & 0xF, 0i16)
+            };
+
+            let hi = ((a >> 4) & 0xF) as i16 - ((val >> 4) & 0xF) as i16 - borrow_lo;
+            let (hi_bcd, borrow_out) = if hi < 0 {
+                ((hi + 10) & 0xF, 1i16)
+            } else {
+                (hi & 0xF, 0i16)
+            };
+
+            let bcd_result = ((hi_bcd as u8 & 0xF) << 4) | (lo_bcd as u8 & 0xF);
+
+            // Carry = inverted borrow
+            if borrow_out == 0 {
+                self.status |= FLAG_CARRY;
+            } else {
+                self.status &= !FLAG_CARRY;
+            }
+            // V: binary SBC overflow (not BCD), matching real 65C816 behaviour
+            let bin_diff = a as i16 - val as i16 - borrow_in;
+            let bin_result = bin_diff as u8;
+            if ((a ^ val) & (a ^ bin_result)) & 0x80 != 0 {
+                self.status |= FLAG_OVERFLOW;
+            } else {
+                self.status &= !FLAG_OVERFLOW;
+            }
+            self.c = (self.c & 0xFF00) | bcd_result as u16;
+            self.set_zn_8(bcd_result);
         } else {
-            self.status &= !FLAG_CARRY;
-        }
+            let diff = a as i16 - val as i16 - borrow_in;
+            let result = diff as u8;
 
-        // Set overflow
-        if ((a ^ val) & (a ^ result)) & 0x80 != 0 {
-            self.status |= FLAG_OVERFLOW;
-        } else {
-            self.status &= !FLAG_OVERFLOW;
+            if diff >= 0 {
+                self.status |= FLAG_CARRY;
+            } else {
+                self.status &= !FLAG_CARRY;
+            }
+            if ((a ^ val) & (a ^ result)) & 0x80 != 0 {
+                self.status |= FLAG_OVERFLOW;
+            } else {
+                self.status &= !FLAG_OVERFLOW;
+            }
+            self.c = (self.c & 0xFF00) | result as u16;
+            self.set_zn_8(result);
         }
-
-        self.c = (self.c & 0xFF00) | result as u16;
-        self.set_zn_8(result);
     }
 
     /// SBC operation for 16-bit mode
     fn sbc_16(&mut self, val: u16) {
-        let carry = if self.status & FLAG_CARRY != 0 { 0 } else { 1 };
-        let diff = self.c as i32 - val as i32 - carry;
-        let result = diff as u16;
+        let borrow_in: i32 = if self.status & FLAG_CARRY != 0 { 0 } else { 1 };
 
-        // Set carry (inverted borrow)
-        if diff >= 0 {
-            self.status |= FLAG_CARRY;
+        if self.status & FLAG_DECIMAL != 0 {
+            // BCD mode: four-nibble subtraction with borrow
+            let mut result: u32 = 0;
+            let mut borrow: i32 = borrow_in;
+            for i in 0..4 {
+                let nibble_a = (self.c as i32 >> (i * 4)) & 0xF;
+                let nibble_b = (val as i32 >> (i * 4)) & 0xF;
+                let diff = nibble_a - nibble_b - borrow;
+                if diff < 0 {
+                    result |= ((diff + 10) as u32 & 0xF) << (i * 4);
+                    borrow = 1;
+                } else {
+                    result |= (diff as u32 & 0xF) << (i * 4);
+                    borrow = 0;
+                }
+            }
+            let bcd_result = result as u16;
+
+            // Carry = inverted borrow
+            if borrow == 0 {
+                self.status |= FLAG_CARRY;
+            } else {
+                self.status &= !FLAG_CARRY;
+            }
+            // V: binary SBC overflow, not BCD
+            let bin_diff = self.c as i32 - val as i32 - borrow_in;
+            let bin_result = bin_diff as u16;
+            if ((self.c ^ val) & (self.c ^ bin_result)) & 0x8000 != 0 {
+                self.status |= FLAG_OVERFLOW;
+            } else {
+                self.status &= !FLAG_OVERFLOW;
+            }
+            self.c = bcd_result;
+            self.set_zn_16(bcd_result);
         } else {
-            self.status &= !FLAG_CARRY;
-        }
+            let diff = self.c as i32 - val as i32 - borrow_in;
+            let result = diff as u16;
 
-        // Set overflow
-        if ((self.c ^ val) & (self.c ^ result)) & 0x8000 != 0 {
-            self.status |= FLAG_OVERFLOW;
-        } else {
-            self.status &= !FLAG_OVERFLOW;
+            if diff >= 0 {
+                self.status |= FLAG_CARRY;
+            } else {
+                self.status &= !FLAG_CARRY;
+            }
+            if ((self.c ^ val) & (self.c ^ result)) & 0x8000 != 0 {
+                self.status |= FLAG_OVERFLOW;
+            } else {
+                self.status &= !FLAG_OVERFLOW;
+            }
+            self.c = result;
+            self.set_zn_16(result);
         }
-
-        self.c = result;
-        self.set_zn_16(result);
     }
 
     /// Compare operation for 8-bit values
@@ -4479,6 +4673,56 @@ impl<M: Memory65c816> Cpu65c816<M> {
     fn read_word(&self, addr: u32) -> u16 {
         let lo = self.read(addr) as u16;
         let hi = self.read(addr + 1) as u16;
+        (hi << 8) | lo
+    }
+
+    /// Read a 16-bit pointer from a direct-page address, with emulation-mode page wrapping.
+    ///
+    /// Compute the `(dp,X)` indirect base address.
+    ///
+    /// In emulation mode (`E=1`) with `DL=$00` (direct-page low byte is zero),
+    /// the 6502 zero-page indexed-indirect rule applies: `(dp_byte + X)` wraps
+    /// within 8 bits before `D` is added, keeping the pointer inside the current
+    /// direct page.
+    ///
+    /// In all other cases (native mode, or `DL≠$00` in emulation mode) the three
+    /// components are simply added modulo 16 bits.
+    fn dp_indexed_x_addr(&self, dp_byte: u8) -> u32 {
+        if self.emulation && (self.d & 0xFF) == 0 {
+            let ptr_index = dp_byte.wrapping_add(self.x as u8) as u32;
+            (self.d as u32 + ptr_index) & 0xFFFF
+        } else {
+            (dp_byte as u32 + self.d as u32 + self.x as u32) & 0xFFFF
+        }
+    }
+
+    /// Compute the `dp,Y` effective address.
+    ///
+    /// In emulation mode (`E=1`) with `DL=$00`, `(dp_byte + Y)` wraps within
+    /// 8 bits before `D` is added — matching 6502 zero-page indexed behaviour.
+    ///
+    /// In all other cases the three components are simply added modulo 16 bits.
+    fn dp_indexed_y_addr(&self, dp_byte: u8) -> u32 {
+        if self.emulation && (self.d & 0xFF) == 0 {
+            let index = dp_byte.wrapping_add(self.y as u8) as u32;
+            (self.d as u32 + index) & 0xFFFF
+        } else {
+            (dp_byte as u32 + self.d as u32 + self.y as u32) & 0xFFFF
+        }
+    }
+
+    /// In 6502 emulation mode (E=1) the `(dp,X)` indirect pointer read wraps within the
+    /// direct page: the high byte is fetched from the same page as the low byte (the upper
+    /// 8 bits of `addr` are kept fixed, and only the lower 8 bits increment with wrap).
+    /// This mirrors the 6502 zero-page indexed indirect wrap behaviour.
+    fn read_word_dp_wrapped(&self, addr: u32) -> u16 {
+        let lo = self.read(addr) as u16;
+        let hi_addr = if self.emulation {
+            (addr & 0xFF00) | ((addr + 1) & 0xFF)
+        } else {
+            addr + 1
+        };
+        let hi = self.read(hi_addr) as u16;
         (hi << 8) | lo
     }
 
@@ -4614,6 +4858,35 @@ impl<M: Memory65c816> Cpu65c816<M> {
         let lo = self.pop_byte() as u16;
         let hi = self.pop_byte() as u16;
         (hi << 8) | lo
+    }
+
+    /// Push a byte using the full 16-bit stack (no emulation-mode page-1 wrap).
+    ///
+    /// Used by instructions that always operate on the native 24-bit stack even
+    /// in emulation mode: JSL, PHD, PEA, PEI, PER.  After all such pushes the
+    /// caller must re-constrain S to page 1 when `self.emulation` is true.
+    fn push_byte_native(&mut self, val: u8) {
+        let addr = self.s as u32;
+        self.write(addr, val);
+        self.s = self.s.wrapping_sub(1);
+    }
+
+    /// Pop a byte using the full 16-bit stack (no emulation-mode page-1 wrap).
+    ///
+    /// Counterpart of `push_byte_native`, used by RTL and PLD.
+    fn pop_byte_native(&mut self) -> u8 {
+        self.s = self.s.wrapping_add(1);
+        let addr = self.s as u32;
+        self.read(addr)
+    }
+
+    /// Re-constrain the stack pointer to page 1 after a native-stack operation
+    /// performed while in emulation mode.
+    #[inline]
+    fn emulation_constrain_s(&mut self) {
+        if self.emulation {
+            self.s = 0x0100 | (self.s & 0xFF);
+        }
     }
 }
 
@@ -5228,7 +5501,7 @@ mod tests {
         let mut cpu = Cpu65c816::new(mem);
         cpu.pc = 0x8000;
         cpu.pbr = 0;
-        cpu.status = 0x24; // Clear I flag to verify it gets set
+        cpu.status = 0x34; // M and X always set in emulation mode; clear I flag
         cpu.emulation = true;
 
         let initial_status = cpu.status;
@@ -5332,7 +5605,7 @@ mod tests {
         let mut cpu = Cpu65c816::new(mem);
         cpu.pc = 0x8000;
         cpu.pbr = 0;
-        cpu.status = 0x20; // Clear I flag to allow IRQ
+        cpu.status = 0x30; // M and X always set in emulation mode; clear I flag to allow IRQ
         cpu.emulation = true;
 
         let initial_status = cpu.status;

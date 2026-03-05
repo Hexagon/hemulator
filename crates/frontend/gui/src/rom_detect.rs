@@ -16,6 +16,7 @@ pub enum SystemType {
     Chip8,
     ColecoVision,
     SG1000,
+    PS1,
 }
 
 #[derive(Debug)]
@@ -86,7 +87,15 @@ pub fn detect_rom_type_with_extension(
                 }
                 // Fall through to content detection for other sizes
             }
-            "bin" => {
+            "bin" | "iso" | "img" => {
+                // Check for PS1 BIOS first (512KB .bin files)
+                if is_ps1_bios(data) {
+                    return Ok(SystemType::PS1);
+                }
+                // Check for PS1 disc image
+                if is_ps1_disc_image(data) {
+                    return Ok(SystemType::PS1);
+                }
                 // For .bin extension (ambiguous), use preferred system if provided
                 if let Some(preferred) = preferred_system {
                     // Validate the size matches the preferred system's expectations
@@ -148,9 +157,19 @@ pub fn detect_rom_type_with_extension(
                 // Prefer N64 for these extensions
                 return Ok(SystemType::N64);
             }
-            "com" | "exe" => {
-                // PC executable extensions
+            "com" => {
+                // PC COM executable
                 return Ok(SystemType::PC);
+            }
+            "exe" => {
+                // Could be PC EXE or PS-X EXE
+                if data.len() >= 8 && &data[0..8] == b"PS-X EXE" {
+                    return Ok(SystemType::PS1);
+                }
+                return Ok(SystemType::PC);
+            }
+            "psexe" | "psx" | "cue" => {
+                return Ok(SystemType::PS1);
             }
             _ => {
                 // Unknown extension - use preferred system if provided
@@ -268,6 +287,21 @@ pub fn detect_rom_type(data: &[u8]) -> Result<SystemType, UnsupportedRomError> {
         }
     }
 
+    // Check for PS-X EXE
+    if data.len() >= 8 && &data[0..8] == b"PS-X EXE" {
+        return Ok(SystemType::PS1);
+    }
+
+    // Check for PS1 BIOS (512KB, contains "Sony Computer Entertainment")
+    if is_ps1_bios(data) {
+        return Ok(SystemType::PS1);
+    }
+
+    // Check for PS1 disc image (BIN/IMG format with CD sync pattern)
+    if is_ps1_disc_image(data) {
+        return Ok(SystemType::PS1);
+    }
+
     // Check for DOS executable (MZ header)
     if data.len() >= 2 && &data[0..2] == b"MZ" {
         return Ok(SystemType::PC);
@@ -301,14 +335,77 @@ pub fn detect_rom_type(data: &[u8]) -> Result<SystemType, UnsupportedRomError> {
     // Check if it might be a raw binary
     if data.len().is_multiple_of(1024) {
         return Err(UnsupportedRomError {
-            reason: "Unrecognized ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), GBA (.gba), Atari 2600 (.a26/.bin), DOS (.com/.exe), SNES (.smc/.sfc), N64 (.z64/.n64/.v64), SMS (.sms), CHIP-8 (.ch8/.c8), ColecoVision (.col), SG-1000 (.sg/.sc)".to_string(),
+            reason: "Unrecognized ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), GBA (.gba), Atari 2600 (.a26/.bin), DOS (.com/.exe), SNES (.smc/.sfc), N64 (.z64/.n64/.v64), SMS (.sms), CHIP-8 (.ch8/.c8), ColecoVision (.col), SG-1000 (.sg/.sc), PS1 (.exe/.psexe/.cue/.bin/.iso)".to_string(),
         });
     }
 
     Err(UnsupportedRomError {
-        reason: "Unknown ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), GBA (.gba), Atari 2600 (.a26/.bin), DOS (.com/.exe), SNES (.smc/.sfc), N64 (.z64/.n64/.v64), SMS (.sms), CHIP-8 (.ch8/.c8), ColecoVision (.col), SG-1000 (.sg/.sc)"
+        reason: "Unknown ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), GBA (.gba), Atari 2600 (.a26/.bin), DOS (.com/.exe), SNES (.smc/.sfc), N64 (.z64/.n64/.v64), SMS (.sms), CHIP-8 (.ch8/.c8), ColecoVision (.col), SG-1000 (.sg/.sc), PS1 (.exe/.psexe/.cue/.bin/.iso)"
             .to_string(),
     })
+}
+
+/// Check if data is a PS1 BIOS ROM.
+/// PS1 BIOS files are exactly 512KB and contain known Sony strings.
+fn is_ps1_bios(data: &[u8]) -> bool {
+    // Must be exactly 512KB
+    if data.len() != 512 * 1024 {
+        return false;
+    }
+    // Search for known BIOS strings
+    let search_strings: &[&[u8]] = &[
+        b"Sony Computer Entertainment",
+        b"PlayStation",
+        b"PS-X Realtime Kernel",
+        b"System ROM Version",
+    ];
+    for needle in search_strings {
+        if data.windows(needle.len()).any(|w| w == *needle) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Check if data is a PS1 disc image (BIN/CUE raw format).
+/// PS1 disc BIN files use 2352-byte sectors starting with a CD sync pattern.
+fn is_ps1_disc_image(data: &[u8]) -> bool {
+    // CD-ROM sync pattern (12 bytes at start of each 2352-byte sector)
+    const CD_SYNC: [u8; 12] = [
+        0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00,
+    ];
+
+    // Must be large enough (at least a few sectors) and a multiple of 2352
+    if data.len() < 2352 * 16 {
+        return false;
+    }
+
+    // Check for CD sync pattern at start
+    if data.len() >= 12 && data[..12] == CD_SYNC {
+        // Also check that file size is a multiple of 2352 (raw sector size)
+        // or 2336 (Mode 2 without sync)
+        if data.len().is_multiple_of(2352) || data.len().is_multiple_of(2336) {
+            // Look for "PlayStation" or "PLAYSTATION" in the first few sectors
+            let search_area = &data[..data.len().min(2352 * 20)];
+            if search_area
+                .windows(11)
+                .any(|w| w == b"PlayStation" || w == b"PLAYSTATION")
+                || search_area.windows(8).any(|w| w == b"Sony Com")
+            {
+                return true;
+            }
+            // Even without string, CD sync + correct sector size + large enough = likely PS1 disc
+            if data.len() > 1024 * 1024 {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Public check if data appears to be a PS1 BIOS (for use by main.rs)
+pub fn is_ps1_bios_file(data: &[u8]) -> bool {
+    is_ps1_bios(data)
 }
 
 #[cfg(test)]

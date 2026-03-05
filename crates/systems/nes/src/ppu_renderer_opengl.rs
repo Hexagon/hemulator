@@ -116,7 +116,7 @@ impl OpenGLNesPpuRenderer {
                 0,
                 glow::RGBA,
                 glow::UNSIGNED_BYTE,
-                None,
+                glow::PixelUnpackData::Slice(None),
             );
             gl.tex_parameter_i32(
                 glow::TEXTURE_2D,
@@ -747,7 +747,9 @@ void main() {
                 self.height as i32,
                 glow::RGBA,
                 glow::UNSIGNED_BYTE,
-                glow::PixelPackData::Slice(bytemuck::cast_slice_mut(&mut self.framebuffer.pixels)),
+                glow::PixelPackData::Slice(Some(bytemuck::cast_slice_mut(
+                    &mut self.framebuffer.pixels,
+                ))),
             );
 
             self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
@@ -835,7 +837,7 @@ impl Renderer for OpenGLNesPpuRenderer {
                 0,
                 glow::RGBA,
                 glow::UNSIGNED_BYTE,
-                None,
+                glow::PixelUnpackData::Slice(None),
             );
         }
     }

@@ -202,6 +202,11 @@ impl MenuBar {
                         ui.close();
                     }
 
+                    if ui.button("PS1").on_hover_text("Sony PlayStation").clicked() {
+                        self.pending_action = Some(MenuAction::NewProjectSystem("PS1".to_string()));
+                        ui.close();
+                    }
+
                     if ui
                         .button("PC")
                         .on_hover_text("IBM PC/XT Compatible")

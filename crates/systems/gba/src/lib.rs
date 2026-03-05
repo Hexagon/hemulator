@@ -33,6 +33,7 @@ use emu_core::{types::Frame, MountPointInfo, System};
 use serde_json::Value;
 use thiserror::Error;
 
+pub mod apu;
 pub mod cartridge;
 pub mod debugger;
 pub mod dma;
@@ -101,6 +102,12 @@ pub struct GbaBus {
     /// Bits: 0=A, 1=B, 2=Select, 3=Start, 4=Right, 5=Left, 6=Up, 7=Down, 8=R, 9=L
     /// 0 = pressed, 1 = released. Default: 0x03FF (all released)
     keyinput: u16,
+    /// Dirty flags for affine reference point writes.
+    /// Bit 0=BG2X, bit 1=BG2Y, bit 2=BG3X, bit 3=BG3Y.
+    /// Set when the game writes to these registers; cleared after the PPU latches them.
+    pub affine_ref_dirty: u8,
+    /// Audio Processing Unit
+    pub apu: apu::GbaApu,
 }
 
 impl std::fmt::Debug for GbaBus {
@@ -134,25 +141,30 @@ impl GbaBus {
         // MOVS PC, LR restores CPSR from SPSR and returns
         Self::write_arm_word(&mut bios, 0x08, 0xE1B0_F00E);
 
-        // 0x18-0x2C: IRQ handler stub
-        // This matches the real GBA BIOS IRQ handler behavior:
-        // 1. Save context on IRQ stack
-        // 2. Load game's IRQ handler from [0x03FFFFFC] (IWRAM mirror of 0x03007FFC)
-        // 3. Set return address and call handler
-        // 4. Restore context and return from exception
+        // 0x18: IRQ vector - branch to handler at 0x80
+        // (Vectors only have room for one instruction each; FIQ is at 0x1C)
+        Self::write_arm_word(&mut bios, 0x18, 0xEA00_0018); // B 0x80
+
+        // 0x80-0x98: IRQ handler matching real GBA BIOS behavior.
+        // The real BIOS IRQ handler is very simple: save registers, call
+        // the game's ISR at [0x03FFFFFC], restore registers, and return.
+        // The game's ISR runs in IRQ mode with interrupts disabled (I=1),
+        // and is responsible for reading IE/IF, acknowledging IF, and
+        // updating BIOS IF at [0x03007FF8] for IntrWait/VBlankIntrWait.
         //
-        // 0x18: STMFD SP!, {R0-R3, R12, LR}  - save registers on IRQ stack
-        Self::write_arm_word(&mut bios, 0x18, 0xE92D_500F);
-        // 0x1C: MOV R0, #0x04000000           - load I/O base address
-        Self::write_arm_word(&mut bios, 0x1C, 0xE3A0_0301);
-        // 0x20: ADD LR, PC, #0                - set return address to 0x28
-        Self::write_arm_word(&mut bios, 0x20, 0xE28F_E000);
-        // 0x24: LDR PC, [R0, #-4]             - jump to handler at [0x03FFFFFC]
-        Self::write_arm_word(&mut bios, 0x24, 0xE510_F004);
-        // 0x28: LDMFD SP!, {R0-R3, R12, LR}  - restore registers
-        Self::write_arm_word(&mut bios, 0x28, 0xE8BD_500F);
-        // 0x2C: SUBS PC, LR, #4               - return from IRQ (restores CPSR)
-        Self::write_arm_word(&mut bios, 0x2C, 0xE25E_F004);
+        // 0x80: STMFD SP!, {R0-R3, R12, LR} — Save registers on IRQ stack
+        Self::write_arm_word(&mut bios, 0x80, 0xE92D_500F);
+        // 0x84: MOV R0, #0x04000000         — I/O base for address calculation
+        Self::write_arm_word(&mut bios, 0x84, 0xE3A0_0301);
+        // 0x88: ADD LR, PC, #0              — LR = 0x90 (return address)
+        Self::write_arm_word(&mut bios, 0x88, 0xE28F_E000);
+        // 0x8C: LDR PC, [R0, #-4]           — Jump to game ISR at [0x03FFFFFC]
+        Self::write_arm_word(&mut bios, 0x8C, 0xE510_F004);
+        // --- Game ISR returns here (0x90) ---
+        // 0x90: LDMFD SP!, {R0-R3, R12, LR} — Restore registers
+        Self::write_arm_word(&mut bios, 0x90, 0xE8BD_500F);
+        // 0x94: SUBS PC, LR, #4             — Return from IRQ (restores CPSR)
+        Self::write_arm_word(&mut bios, 0x94, 0xE25E_F004);
 
         Self {
             bios,
@@ -163,7 +175,7 @@ impl GbaBus {
             vram: vec![0; 0x18000],  // 96KB
             oam: vec![0; 0x400],     // 1KB
             rom: Vec::new(),
-            sram: vec![0; 0x10000], // 64KB
+            sram: vec![0xFF; 0x10000], // 64KB - 0xFF = erased/uninitialized (matches real hardware)
             dma: dma::Dma::new(),
             timers: timers::Timers::new(),
             eeprom: RefCell::new(eeprom::Eeprom::new()),
@@ -174,6 +186,8 @@ impl GbaBus {
             ie: 0,
             if_flags: 0,
             keyinput: 0x03FF, // All buttons released
+            affine_ref_dirty: 0,
+            apu: apu::GbaApu::new(),
         }
     }
 
@@ -220,6 +234,9 @@ impl GbaBus {
             // VCOUNT (Vertical Counter) - current scanline
             0x04000006 => self.io.get(offset).copied().unwrap_or(0),
             0x04000007 => 0, // VCOUNT is only 8 bits
+
+            // Sound registers (0x060-0x0A7) - includes SOUNDBIAS at 0x088
+            0x04000060..=0x040000A7 => self.apu.read_register(addr),
 
             // DMA registers (0x040000B0-0x040000DF)
             0x040000B0..=0x040000DF => self.dma.read(addr - 0x040000B0),
@@ -289,9 +306,49 @@ impl GbaBus {
                 self.timers.write(addr - 0x04000100, val);
             }
 
+            // Sound registers (0x060-0x0A7)
+            0x04000060..=0x040000A7 => {
+                self.apu.write_register(addr, val);
+                // Also store in I/O array for SOUNDBIAS reads
+                if offset < self.io.len() {
+                    self.io[offset] = val;
+                }
+            }
+
             // HALTCNT (0x04000301) - Halt/Stop
             0x04000301 => {
                 // TODO: Implement halt/stop modes
+            }
+
+            // Affine reference point registers - writing immediately updates
+            // the PPU's internal reference point (they are write-only latches).
+            0x04000028..=0x0400002B => {
+                // BG2X
+                if offset < self.io.len() {
+                    self.io[offset] = val;
+                }
+                self.affine_ref_dirty |= 1;
+            }
+            0x0400002C..=0x0400002F => {
+                // BG2Y
+                if offset < self.io.len() {
+                    self.io[offset] = val;
+                }
+                self.affine_ref_dirty |= 2;
+            }
+            0x04000038..=0x0400003B => {
+                // BG3X
+                if offset < self.io.len() {
+                    self.io[offset] = val;
+                }
+                self.affine_ref_dirty |= 4;
+            }
+            0x0400003C..=0x0400003F => {
+                // BG3Y
+                if offset < self.io.len() {
+                    self.io[offset] = val;
+                }
+                self.affine_ref_dirty |= 8;
             }
 
             // Other I/O registers
@@ -436,8 +493,13 @@ impl MemoryArm7 for GbaBus {
                 } else {
                     offset
                 };
-                // Only BG VRAM (< 0x10000 in bitmap modes, < 0x14000 otherwise)
-                if offset < 0x10000 {
+                // OBJ VRAM byte writes are ignored.
+                // BG/OBJ boundary depends on display mode:
+                //   Tile modes (0-2): OBJ VRAM starts at 0x10000
+                //   Bitmap modes (3-5): OBJ VRAM starts at 0x14000
+                let bg_mode = self.io[0] & 0x07;
+                let obj_boundary = if bg_mode >= 3 { 0x14000 } else { 0x10000 };
+                if offset < obj_boundary {
                     let aligned = offset & !1;
                     if aligned + 1 < self.vram.len() {
                         self.vram[aligned] = val;
@@ -560,6 +622,10 @@ impl MemoryArm7 for GbaBus {
                     self.oam[offset + 3] = (val >> 24) as u8;
                 }
             }
+            // DMA Sound FIFOs - word writes are the normal DMA path
+            0x040000A0 | 0x040000A4 => {
+                self.apu.write_fifo_word(addr, val);
+            }
             // Everything else goes through write_byte
             _ => {
                 self.write_byte(addr, val as u8);
@@ -573,6 +639,26 @@ impl MemoryArm7 for GbaBus {
     fn irq_pending(&self) -> bool {
         self.irq_pending
     }
+
+    fn halt_irq_pending(&self) -> bool {
+        // HALT wakes when (IE & IF) != 0, regardless of IME
+        (self.ie & self.if_flags) != 0
+    }
+
+    fn pre_irq_acknowledge(&mut self) {
+        // Update BIOS IF at 0x03007FF8 so IntrWait/VBlankIntrWait can detect
+        // which interrupts have fired. We do NOT clear hardware IF here because
+        // the game's ISR reads IF directly to determine which interrupt fired
+        // and acknowledges it itself.
+        let acknowledged = self.ie & self.if_flags;
+        if acknowledged != 0 {
+            // Update BIOS IF at IWRAM offset 0x7FF8 (address 0x03007FF8)
+            let bios_if = u16::from_le_bytes([self.iwram[0x7FF8], self.iwram[0x7FF9]]);
+            let new_bios_if = bios_if | acknowledged;
+            self.iwram[0x7FF8] = new_bios_if as u8;
+            self.iwram[0x7FF9] = (new_bios_if >> 8) as u8;
+        }
+    }
 }
 
 // =============================================================================
@@ -585,6 +671,9 @@ const CPU_FREQ: u64 = 16_777_216;
 
 /// Cycles per scanline: 1232 (280896 cycles/frame ÷ 228 scanlines)
 const CYCLES_PER_SCANLINE: u64 = 1232;
+
+/// Cycle within a scanline where HBlank begins (after 1006 cycles of draw)
+const HBLANK_START: u64 = 1006;
 
 /// Visible scanlines: 160
 const VISIBLE_SCANLINES: u32 = 160;
@@ -601,7 +690,6 @@ const REG_VCOUNT: usize = 0x006;
 
 // DISPSTAT bits
 const DISPSTAT_VBLANK: u8 = 1 << 0;
-#[allow(dead_code)] // Will be used when HBlank timing is fully implemented
 const DISPSTAT_HBLANK: u8 = 1 << 1;
 const DISPSTAT_VCOUNT_MATCH: u8 = 1 << 2;
 const DISPSTAT_VBLANK_IRQ: u8 = 1 << 3;
@@ -652,6 +740,8 @@ pub struct GbaSystem {
     total_cycles: u64,
     scanline: u32,
     scanline_cycles: u64,
+    /// Whether HBlank events (IRQ, DMA, flag) have been triggered for the current scanline
+    hblank_triggered: bool,
     /// Parsed cartridge header (set on mount)
     header: Option<cartridge::GbaCartridgeHeader>,
     /// Instruction tracer for debugging
@@ -686,6 +776,7 @@ impl GbaSystem {
             total_cycles: 0,
             scanline: 0,
             scanline_cycles: 0,
+            hblank_triggered: false,
             header: None,
             instruction_tracer: emu_core::instruction_tracer::InstructionTracer::new(),
         }
@@ -725,6 +816,16 @@ impl GbaSystem {
     /// Get the loaded ROM size in bytes
     pub fn rom_size(&self) -> usize {
         self.cpu.memory.rom.len()
+    }
+
+    /// Generate audio samples for the last frame.
+    ///
+    /// Returns interleaved stereo i16 samples at 44,100 Hz.
+    /// Samples were generated in real-time during step_frame;
+    /// this method drains the buffer and pads/truncates to fit `count`.
+    pub fn get_audio_samples(&mut self, count: usize) -> Vec<i16> {
+        let stereo_count = count * 2;
+        self.cpu.memory.apu.drain_samples(stereo_count)
     }
 
     /// Get tile viewer data for debugging PPU graphics.
@@ -820,34 +921,33 @@ impl GbaSystem {
         cycles
     }
 
-    /// Update DISPSTAT and VCOUNT I/O registers for current scanline
+    /// Update DISPSTAT and VCOUNT I/O registers for current scanline and dot position.
+    /// Called after every CPU step to keep display status accurate for polling games.
     fn update_display_status(&mut self) {
         // VCOUNT register
         self.cpu.memory.io[REG_VCOUNT] = self.scanline as u8;
 
-        // DISPSTAT register
+        // DISPSTAT register - preserve enable bits (bits 3-5) and VCount target (byte 1)
         let dispstat = self.cpu.memory.io[REG_DISPSTAT];
         let vcount_target = self.cpu.memory.io[REG_DISPSTAT + 1];
 
         let in_vblank = self.scanline >= VISIBLE_SCANLINES;
+        let in_hblank = self.scanline_cycles >= HBLANK_START;
         let vcount_match = self.scanline as u8 == vcount_target;
 
-        let mut new_dispstat = dispstat & !(DISPSTAT_VBLANK | DISPSTAT_VCOUNT_MATCH);
+        // Clear status bits (0-2) but preserve enable bits (3-5)
+        let mut new_dispstat =
+            dispstat & !(DISPSTAT_VBLANK | DISPSTAT_HBLANK | DISPSTAT_VCOUNT_MATCH);
         if in_vblank {
             new_dispstat |= DISPSTAT_VBLANK;
+        }
+        if in_hblank {
+            new_dispstat |= DISPSTAT_HBLANK;
         }
         if vcount_match {
             new_dispstat |= DISPSTAT_VCOUNT_MATCH;
         }
         self.cpu.memory.io[REG_DISPSTAT] = new_dispstat;
-
-        // Fire interrupts
-        if in_vblank && self.scanline == VISIBLE_SCANLINES && dispstat & DISPSTAT_VBLANK_IRQ != 0 {
-            self.cpu.memory.request_interrupt(IRQ_VBLANK);
-        }
-        if vcount_match && dispstat & DISPSTAT_VCOUNT_IRQ != 0 {
-            self.cpu.memory.request_interrupt(IRQ_VCOUNT);
-        }
     }
 }
 
@@ -859,9 +959,11 @@ impl System for GbaSystem {
         self.ppu.reset();
         self.cpu.memory.dma.reset();
         self.cpu.memory.timers.reset();
+        self.cpu.memory.apu.reset();
         self.total_cycles = 0;
         self.scanline = 0;
         self.scanline_cycles = 0;
+        self.hblank_triggered = false;
         // header is preserved across resets (only cleared on unmount)
     }
 
@@ -901,34 +1003,70 @@ impl System for GbaSystem {
                 self.cpu.memory.request_interrupt(timer_irqs);
             }
 
-            // Execute any pending immediate DMA transfers
-            if self.cpu.memory.dma.has_pending_immediate() {
+            // Feed APU FIFOs from timer overflows (Timer 0 and Timer 1 drive DMA sound)
+            let mut sound_dma_requested = false;
+            for timer_idx in 0..2u8 {
+                let overflows = self.cpu.memory.timers.last_overflows[timer_idx as usize];
+                for _ in 0..overflows {
+                    let refill = self.cpu.memory.apu.on_timer_overflow(timer_idx);
+                    if refill != 0 {
+                        // Request DMA refill for FIFOs that are running low
+                        self.cpu
+                            .memory
+                            .dma
+                            .notify_timing(dma::DmaStartTiming::Special);
+                        sound_dma_requested = true;
+                    }
+                }
+            }
+
+            // Execute sound DMA immediately so FIFO has fresh samples.
+            // On real hardware, sound DMA fires as soon as the timer overflows
+            // and the FIFO requests a refill — not at the next HBlank/VBlank.
+            // Without this, the FIFO runs dry during VBlank (68 scanlines with
+            // no HBlank DMA), causing audio freezes every frame.
+            if sound_dma_requested {
                 let dma_cycles = self.execute_dma();
                 self.total_cycles += dma_cycles;
                 self.scanline_cycles += dma_cycles;
             }
 
-            // Check if we've completed a scanline
-            if self.scanline_cycles >= CYCLES_PER_SCANLINE {
-                self.scanline_cycles -= CYCLES_PER_SCANLINE;
+            // Clock APU and generate output samples in real-time.
+            // Must happen AFTER timer ticks, FIFO pops, AND sound DMA refills
+            // so mix_channels reads the current FIFO sample.
+            self.cpu.memory.apu.tick(cycles as u32);
 
-                // HBlank IRQ at end of each visible scanline
+            // Execute any other pending DMA transfers (immediate or queued)
+            if self.cpu.memory.dma.is_transferring() {
+                let dma_cycles = self.execute_dma();
+                self.total_cycles += dma_cycles;
+                self.scanline_cycles += dma_cycles;
+            }
+
+            // Update DISPSTAT flags after every CPU step so polling games
+            // see accurate HBlank/VBlank/VCount status.
+            self.update_display_status();
+
+            // HBlank start: fires once per scanline when we cross cycle 1006
+            if self.scanline_cycles >= HBLANK_START && !self.hblank_triggered {
+                self.hblank_triggered = true;
+
+                // Fire HBlank IRQ if enabled
+                let dispstat = self.cpu.memory.io[REG_DISPSTAT];
+                if dispstat & DISPSTAT_HBLANK_IRQ != 0 {
+                    self.cpu.memory.request_interrupt(IRQ_HBLANK);
+                }
+
                 if self.scanline < VISIBLE_SCANLINES {
-                    let dispstat = self.cpu.memory.io[REG_DISPSTAT];
-                    if dispstat & DISPSTAT_HBLANK_IRQ != 0 {
-                        self.cpu.memory.request_interrupt(IRQ_HBLANK);
+                    // Apply any pending affine reference point writes
+                    // (from CPU or DMA during the draw period)
+                    let dirty = self.cpu.memory.affine_ref_dirty;
+                    if dirty != 0 {
+                        self.ppu.apply_affine_ref_writes(&self.cpu.memory.io, dirty);
+                        self.cpu.memory.affine_ref_dirty = 0;
                     }
 
-                    // Trigger HBlank DMA
-                    self.cpu
-                        .memory
-                        .dma
-                        .notify_timing(dma::DmaStartTiming::HBlank);
-                    let dma_cycles = self.execute_dma();
-                    self.total_cycles += dma_cycles;
-                    self.scanline_cycles += dma_cycles;
-
-                    // Render this scanline via PPU
+                    // Render this scanline before entering HBlank
                     self.ppu.render_scanline(
                         self.scanline,
                         &self.cpu.memory.io,
@@ -936,14 +1074,36 @@ impl System for GbaSystem {
                         &self.cpu.memory.vram,
                         &self.cpu.memory.oam,
                     );
+
+                    // Trigger HBlank DMA (only during visible scanlines)
+                    self.cpu
+                        .memory
+                        .dma
+                        .notify_timing(dma::DmaStartTiming::HBlank);
+                    let dma_cycles = self.execute_dma();
+                    self.total_cycles += dma_cycles;
+                    self.scanline_cycles += dma_cycles;
                 }
+            }
+
+            // Scanline boundary: advance to next scanline
+            if self.scanline_cycles >= CYCLES_PER_SCANLINE {
+                self.scanline_cycles -= CYCLES_PER_SCANLINE;
+                self.hblank_triggered = false;
 
                 // Advance to next scanline
                 self.scanline += 1;
 
-                // VBlank start
+                // VBlank start (scanline 160)
                 if self.scanline == VISIBLE_SCANLINES {
                     self.ppu.on_vblank(&self.cpu.memory.io);
+                    self.cpu.memory.affine_ref_dirty = 0; // VBlank latch overrides pending writes
+
+                    // VBlank IRQ
+                    let dispstat = self.cpu.memory.io[REG_DISPSTAT];
+                    if dispstat & DISPSTAT_VBLANK_IRQ != 0 {
+                        self.cpu.memory.request_interrupt(IRQ_VBLANK);
+                    }
 
                     // Trigger VBlank DMA
                     self.cpu
@@ -955,13 +1115,22 @@ impl System for GbaSystem {
                     self.scanline_cycles += dma_cycles;
                 }
 
+                // Frame wrap
                 if self.scanline >= TOTAL_SCANLINES {
                     self.scanline = 0;
                     // Re-latch affine registers at frame start
                     self.ppu.latch_affine_registers(&self.cpu.memory.io);
+                    self.cpu.memory.affine_ref_dirty = 0;
                 }
 
-                // Update display registers
+                // VCount match IRQ
+                let vcount_target = self.cpu.memory.io[REG_DISPSTAT + 1];
+                let dispstat = self.cpu.memory.io[REG_DISPSTAT];
+                if self.scanline as u8 == vcount_target && dispstat & DISPSTAT_VCOUNT_IRQ != 0 {
+                    self.cpu.memory.request_interrupt(IRQ_VCOUNT);
+                }
+
+                // Update display registers for the new scanline
                 self.update_display_status();
             }
         }

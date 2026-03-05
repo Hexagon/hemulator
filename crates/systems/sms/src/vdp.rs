@@ -51,6 +51,15 @@ pub struct Vdp {
 
     // Current scanline
     scanline: u16,
+
+    // Timing mode (PAL vs NTSC)
+    is_pal: bool,
+
+    // True once set_scanline() has crossed the display-height boundary this frame.
+    // Used by the retroactive frame-interrupt logic so that an early R1 write
+    // (before any set_scanline call) at the sentinel value 262 does not falsely
+    // trigger an interrupt before VBlank has actually been reached.
+    in_vblank: bool,
 }
 
 impl Vdp {
@@ -71,7 +80,20 @@ impl Vdp {
             sprite_overflow: false,
             sprite_collision: false,
             scanline: 262, // Start at end of frame so first set_scanline(0) wraps around
+            is_pal: false,
+            in_vblank: false,
         }
+    }
+
+    /// Set PAL/NTSC timing mode
+    pub fn set_pal(&mut self, pal: bool) {
+        self.is_pal = pal;
+    }
+
+    /// Get current PAL/NTSC timing mode (used in tests)
+    #[cfg(test)]
+    pub fn get_pal(&self) -> bool {
+        self.is_pal
     }
 
     /// Get the current video mode
@@ -169,6 +191,7 @@ impl Vdp {
                     let reg = data & 0x0F;
                     if (reg as usize) < self.registers.len() {
                         let value = (self.address_register & 0xFF) as u8;
+                        let old_value = self.registers[reg as usize];
                         self.registers[reg as usize] = value;
                         log(LogCategory::PPU, LogLevel::Info, || {
                             format!("SMS VDP: Register R{} = ${:02X}", reg, value)
@@ -178,6 +201,19 @@ impl Vdp {
                         // Registers 0 and 1 contain mode bits
                         if reg == 0 || reg == 1 {
                             self.update_frame_size();
+                        }
+
+                        // If the frame-interrupt-enable bit (R1 bit 5) transitions 0→1
+                        // while we are already in VBlank, fire the interrupt retroactively.
+                        // Use the in_vblank latch (set by set_scanline) rather than the raw
+                        // scanline value, so that the startup sentinel (262) does not cause a
+                        // spurious interrupt before any real VBlank has been reached.
+                        if reg == 1
+                            && (old_value & 0x20) == 0
+                            && (value & 0x20) != 0
+                            && self.in_vblank
+                        {
+                            self.frame_interrupt_pending = true;
                         }
                     }
                 }
@@ -246,6 +282,12 @@ impl Vdp {
         // Clear frame interrupt flag on read
         self.frame_interrupt_pending = false;
 
+        // Clear line interrupt flag on read — on real hardware, reading the
+        // status register de-asserts /INT completely, clearing both frame and
+        // line pending latches.  Without this, a stale line_interrupt_pending
+        // causes an interrupt storm (Sonic 2 black screen).
+        self.line_interrupt_pending = false;
+
         // Clear sprite flags on read
         self.sprite_overflow = false;
         self.sprite_collision = false;
@@ -255,8 +297,25 @@ impl Vdp {
 
     /// Read vertical counter
     pub fn read_vcounter(&self) -> u8 {
-        // Return current scanline (simplified)
-        let vcounter = (self.scanline & 0xFF) as u8;
+        // The SMS V-counter does not directly expose the raw scanline number.
+        // NTSC (262 lines): scanlines 0-218 (0x00-0xDA) map 1:1; scanlines 219-261
+        //   jump to 0xD5-0xFF (subtract 6 from the scanline number).
+        // PAL  (313 lines): scanlines 0-242 (0x00-0xF2) map 1:1; scanlines 243-312
+        //   jump to 0xBA-0xFF (subtract 57 from the scanline number).
+        let vcounter = if self.is_pal {
+            if self.scanline <= 0xF2 {
+                self.scanline as u8
+            } else {
+                self.scanline.wrapping_sub(57) as u8
+            }
+        } else {
+            // NTSC
+            if self.scanline <= 0xDA {
+                self.scanline as u8
+            } else {
+                self.scanline.wrapping_sub(6) as u8
+            }
+        };
         log(LogCategory::PPU, LogLevel::Debug, || {
             format!(
                 "SMS VDP: V-counter read = ${:02X} (scanline={})",
@@ -264,6 +323,17 @@ impl Vdp {
             )
         });
         vcounter
+    }
+
+    /// Read horizontal counter.
+    ///
+    /// The real SMS H-counter is latched via the TH pin and returns a value
+    /// from 0x00-0x93 (NTSC) representing the horizontal position divided by
+    /// 2.  Few games rely on precise H-counter reads; we return 0x00 as a
+    /// safe stub for maximum compatibility.
+    pub fn read_hcounter(&self) -> u8 {
+        // TODO: Implement proper H-counter latching for TH-pin triggered reads
+        0x00
     }
 
     /// Step VDP by one scanline
@@ -310,13 +380,35 @@ impl Vdp {
             for line in old_scanline..display_height {
                 self.render_scanline(line as u8);
             }
+
+            // The VBlank period reloads the line counter from R10 on every
+            // scanline.  When we skip directly from end-of-frame to early
+            // active display (the common case), we must ensure the counter
+            // is reloaded as it would have been during VBlank.
+            self.line_counter = self.registers[10];
+
             // Render scanlines from start of new frame up to and including current scanline
             for line in 0..=scanline.min(display_height - 1) {
                 self.render_scanline(line as u8);
             }
-            // Check for frame interrupt at end of visible area
-            if (self.registers[1] & 0x20) != 0 {
+            // Only trigger VBlank if we haven't already entered VBlank during
+            // normal forward progression.  If in_vblank is true, VBlank was
+            // already triggered at scanline 192 (and the ISR likely cleared the
+            // flag already).  Re-setting frame_interrupt_pending here would cause
+            // a double VBlank per frame — leading to flickering and game desync
+            // (Sonic 2 random restarts).
+            //
+            // If in_vblank is false (first frame from sentinel scanline, or a
+            // mid-frame wrap), we DO need to trigger VBlank since it was missed.
+            if !self.in_vblank {
                 self.frame_interrupt_pending = true;
+            }
+            // New frame: reset the VBlank latch, then set it if we're already past the
+            // active display area (e.g. set_scanline jumped straight to scanline 192+).
+            self.in_vblank = scanline >= display_height;
+            // Reload line counter if in VBlank area
+            if scanline >= display_height {
+                self.line_counter = self.registers[10];
             }
         } else {
             // Normal forward progress within same frame
@@ -324,34 +416,46 @@ impl Vdp {
             for line in (old_scanline + 1)..=scanline.min(display_height - 1) {
                 self.render_scanline(line as u8);
             }
-            // Check for frame interrupt when crossing into VBlank
-            if old_scanline < display_height
-                && scanline >= display_height
-                && (self.registers[1] & 0x20) != 0
-            {
+            // Check for frame interrupt when crossing into VBlank.
+            // Status register bit 7 is ALWAYS set on VBlank entry,
+            // regardless of IE0 (R1 bit 5).  IE0 only gates /INT.
+            if old_scanline < display_height && scanline >= display_height {
                 self.frame_interrupt_pending = true;
+                self.in_vblank = true;
+                // Reload line counter at start of VBlank (every VBlank scanline)
+                self.line_counter = self.registers[10];
+            }
+            // Continue reloading line counter on every VBlank scanline
+            if scanline >= display_height {
+                self.line_counter = self.registers[10];
             }
         }
     }
 
     /// Check if frame interrupt is pending
+    #[allow(dead_code)]
     pub fn frame_interrupt_pending(&self) -> bool {
         self.frame_interrupt_pending
     }
 
-    /// Clear frame interrupt
-    pub fn clear_frame_interrupt(&mut self) {
-        self.frame_interrupt_pending = false;
-    }
-
     /// Check if line interrupt is pending
+    #[allow(dead_code)]
     pub fn line_interrupt_pending(&self) -> bool {
         self.line_interrupt_pending
     }
 
     /// Clear line interrupt
+    #[allow(dead_code)]
     pub fn clear_line_interrupt(&mut self) {
         self.line_interrupt_pending = false;
+    }
+
+    /// Check if the VDP /INT line is active (any enabled interrupt pending).
+    /// On real SMS hardware, /INT = (frame_pending AND IE0) OR (line_pending AND IE1).
+    pub fn irq_line_active(&self) -> bool {
+        let frame_irq = self.frame_interrupt_pending && (self.registers[1] & 0x20) != 0;
+        let line_irq = self.line_interrupt_pending && (self.registers[0] & 0x10) != 0;
+        frame_irq || line_irq
     }
 
     /// Get tile viewer data for debugging
@@ -391,6 +495,8 @@ impl Vdp {
             "sprite_overflow": self.sprite_overflow,
             "sprite_collision": self.sprite_collision,
             "scanline": self.scanline,
+            "is_pal": self.is_pal,
+            "in_vblank": self.in_vblank,
         })
     }
 
@@ -470,6 +576,8 @@ impl Vdp {
         load_bool!(state, "sprite_overflow", self.sprite_overflow);
         load_bool!(state, "sprite_collision", self.sprite_collision);
         load_u16!(state, "scanline", self.scanline);
+        load_bool!(state, "is_pal", self.is_pal);
+        load_bool!(state, "in_vblank", self.in_vblank);
 
         Ok(())
     }
@@ -478,55 +586,54 @@ impl Vdp {
     fn render_scanline(&mut self, line: u8) {
         let display_height = self.get_display_height() as u8;
 
-        // Handle line counter and line interrupts
+        // Handle line counter and line interrupts.
+        // Per SMS Power VDP documentation: the counter is loaded from R10
+        // during VBlank.  On each active-display scanline it is decremented.
+        // When it reaches -1 (wraps to 0xFF), a line interrupt is asserted
+        // (if enabled) and the counter is reloaded from R10.
         if line < display_height {
-            if self.line_counter == 0 {
-                // Reload line counter from register 10
+            self.line_counter = self.line_counter.wrapping_sub(1);
+            if self.line_counter == 0xFF {
+                // Counter underflowed → reload from R10 and latch line interrupt
                 self.line_counter = self.registers[10];
 
                 // Trigger line interrupt if enabled (bit 4 of register 0)
                 if (self.registers[0] & 0x10) != 0 {
                     self.line_interrupt_pending = true;
                 }
-            } else {
-                self.line_counter = self.line_counter.wrapping_sub(1);
             }
-        } else if line == display_height {
-            // Reset line counter at start of VBlank
-            self.line_counter = self.registers[10];
         }
 
-        // Clear scanline to backdrop color
-        let backdrop_color = self.decode_color(self.cram[16] & 0x3F);
+        // Clear scanline to backdrop color (RGB only; alpha restored at end of scanline)
+        let backdrop_color = self.backdrop_color() & RGB_MASK;
         let line_offset = (line as usize) * 256;
         for x in 0..256 {
             self.frame.pixels[line_offset + x] = backdrop_color;
         }
 
-        // Check if Mode 4 is enabled (register 0, bit 2)
-        let mode_4_enabled = (self.registers[0] & 0x04) != 0;
+        // Register 1 bit 6 (0x40) is the screen enable bit for both Mode 4 and TMS modes:
+        // - 1 = display active, 0 = display blanked
+        // This matches SMSlib VDPFEATURE_SHOWDISPLAY (0x0140) which ORs bit 6 to enable display.
+        let display_enabled = (self.registers[1] & 0x40) != 0;
 
-        // Display enable logic differs between Mode 4 and TMS modes
-        let display_enabled = if mode_4_enabled {
-            // In Mode 4 (SMS mode):
-            // - Bit 6 of register 1 is BLK (blank bit): 1=blank, 0=display
-            (self.registers[1] & 0x40) == 0 // Display when BLK=0
-        } else {
-            // In TMS modes (0-3) for backward compatibility:
-            // - Bit 6 of register 1 controls display: 1=display, 0=blank
-            // - TMS9918A uses opposite polarity from Mode 4
-            (self.registers[1] & 0x40) != 0 // Display when bit 6=1
-        };
-
-        // Render background if display enabled
+        // Render background and sprites if display is enabled
         if display_enabled {
             self.render_background(line, line_offset);
+            // Sprites in Mode 4 are always active when display is on (no separate enable bit)
+            self.render_sprites(line, line_offset);
         }
 
-        // Render sprites if enabled (bit 3 of register 1) and display is on
-        let sprites_enabled = (self.registers[1] & 0x08) != 0;
-        if display_enabled && sprites_enabled {
-            self.render_sprites(line, line_offset);
+        // Register 0 bit 5: Left column blank - mask leftmost 8 pixels with backdrop color
+        if (self.registers[0] & 0x20) != 0 {
+            for x in 0..8 {
+                self.frame.pixels[line_offset + x] = backdrop_color;
+            }
+        }
+
+        // Restore alpha for all pixels in this scanline (priority bit and intermediate state cleared)
+        for x in 0..256 {
+            self.frame.pixels[line_offset + x] =
+                (self.frame.pixels[line_offset + x] & RGB_MASK) | 0xFF00_0000;
         }
     }
 
@@ -555,21 +662,32 @@ impl Vdp {
         let name_table_addr = ((self.registers[2] as u16) & 0x0E) << 10;
 
         // Get scroll values
-        let scroll_x = self.registers[8];
-        let scroll_y = if line < 16 && (self.registers[0] & 0x40) != 0 {
-            0 // Vertical scroll lock for top 2 rows
+        // Register 0 bit 6: Horizontal scroll inhibit for top 2 tile rows (lines 0-15)
+        let scroll_x = if line < 16 && (self.registers[0] & 0x40) != 0 {
+            0 // H-scroll lock for top 2 tile rows
         } else {
-            self.registers[9]
+            self.registers[8]
         };
+        let scroll_y = self.registers[9];
 
-        let y = line.wrapping_add(scroll_y);
-        let tile_row = (y >> 3) as u16;
-        let pixel_y = (y & 7) as u16;
+        // Register 0 bit 7: Vertical scroll inhibit for rightmost 8 columns (24-31)
+        let vscroll_inhibit = (self.registers[0] & 0x80) != 0;
 
         for x in 0..256u16 {
             let adj_x = (x as u8).wrapping_sub(scroll_x);
             let tile_col = (adj_x >> 3) as u16;
             let pixel_x = (adj_x & 7) as u16;
+
+            // Apply vertical scroll (inhibited for rightmost 8 screen columns if reg0 bit 7 set)
+            let (tile_row, pixel_y) = if vscroll_inhibit && x >= 192 {
+                // No vertical scroll for columns 24-31
+                let y = line as u16;
+                (y >> 3, y & 7)
+            } else {
+                // Vertical scroll wraps at 224 (28 rows * 8 pixels) in 192-line mode
+                let y = ((line as u16) + (scroll_y as u16)) % 224;
+                (y >> 3, y & 7)
+            };
 
             // Read name table entry (2 bytes per tile)
             let name_addr = name_table_addr + (tile_row * 32 + tile_col) * 2;
@@ -618,11 +736,11 @@ impl Vdp {
             // Pixel 0 is transparent
             if pixel != 0 {
                 let color_index = palette * 16 + pixel as usize;
-                let color = self.decode_color(self.cram[color_index] & 0x3F);
-                // Store both the color and priority bit for sprite rendering
-                // Priority: if bit 12 is set, sprites should render behind this pixel
+                // Strip alpha during rendering so PRIORITY_BIT (bit 24) is unambiguous
+                let color = self.decode_color(self.cram[color_index] & 0x3F) & RGB_MASK;
+                // Store the color and priority bit; alpha is restored at end of render_scanline
                 let pixel_data = if priority != 0 {
-                    color | PRIORITY_BIT // Set priority bit (sprite behind bg)
+                    color | PRIORITY_BIT // Bit 24 set = sprite renders behind this tile
                 } else {
                     color
                 };
@@ -634,65 +752,94 @@ impl Vdp {
     /// Render sprites for a scanline
     fn render_sprites(&mut self, line: u8, line_offset: usize) {
         let sprite_attr_table = ((self.registers[5] as u16) & 0x7E) << 7;
-        let sprite_size = if (self.registers[1] & 0x02) != 0 {
-            16 // 16x16 sprites (zoomed/double-size mode)
+        // Register 6 bit 2 selects sprite pattern generator base: 0=$0000, 1=$2000
+        let sprite_pattern_base = ((self.registers[6] as u16) & 0x04) << 11;
+        let tall_sprites = (self.registers[1] & 0x02) != 0;
+        let zoomed = (self.registers[1] & 0x01) != 0;
+        let base_height: u8 = if tall_sprites { 16 } else { 8 };
+        // Zoom doubles the effective pixel size of sprites
+        let effective_height: u8 = if zoomed {
+            base_height.saturating_mul(2)
         } else {
-            8 // 8x8 sprites
+            base_height
         };
+        let display_height = self.get_display_height();
 
         let mut sprites_on_line = 0;
 
         // Track which pixels have sprites for collision detection
         let mut sprite_pixels = [false; 256];
 
-        // Sprites are rendered in reverse order (sprite 0 has highest priority)
-        for i in (0..64).rev() {
+        // First pass: scan forward to find visible sprites on this line (respects $D0 terminator)
+        let mut visible_sprites: Vec<u16> = Vec::new();
+        for i in 0..64u16 {
             let y = self.vram[(sprite_attr_table + i) as usize];
 
-            // Check for end marker (Y = 0xD0 terminates sprite list)
-            if y == 0xD0 {
+            // Check for end-of-sprite-list marker.
+            // In 192-line mode, Y=$D0 (208) terminates the list because it is
+            // beyond the visible area.  In 224/240-line modes those Y values are
+            // valid sprite positions, so the terminator does not apply.
+            if display_height == 192 && y == 0xD0 {
                 break;
             }
 
             // Y position is offset by 1
             let y_pos = y.wrapping_add(1);
-            if line < y_pos || line >= y_pos + sprite_size {
+            let diff = line.wrapping_sub(y_pos);
+            if diff >= effective_height {
                 continue;
             }
 
             sprites_on_line += 1;
             if sprites_on_line > 8 {
-                // Sprite overflow - set the flag and stop rendering
                 self.sprite_overflow = true;
                 break;
             }
 
+            visible_sprites.push(i);
+        }
+
+        // Second pass: render in reverse order so lower-numbered sprites have priority
+        for &i in visible_sprites.iter().rev() {
+            let y = self.vram[(sprite_attr_table + i) as usize];
+            let y_pos = y.wrapping_add(1);
+
             // Get sprite X position and tile number
-            let x_pos = self.vram[(sprite_attr_table + 128 + i * 2) as usize];
-            let tile_num = self.vram[(sprite_attr_table + 128 + i * 2 + 1) as usize];
+            let mut x_pos = self.vram[(sprite_attr_table + 128 + i * 2) as usize];
 
-            // Calculate sprite row within the sprite (0-7 for 8x8, 0-15 for 16x16)
-            let sprite_y = line - y_pos;
+            // Early Clock (Register 0, bit 3): shift all sprites left 8 pixels.
+            // Used by Sonic 1 for smooth left-edge scrolling.
+            if (self.registers[0] & 0x08) != 0 {
+                x_pos = x_pos.wrapping_sub(8);
+            }
+            let mut tile_num = self.vram[(sprite_attr_table + 128 + i * 2 + 1) as usize];
 
-            // For 16x16 sprites in Mode 4:
+            // In 8x16 (tall) mode, bit 0 of tile number is forced to 0
+            if tall_sprites {
+                tile_num &= 0xFE;
+            }
+
+            // Calculate sprite row within the sprite.
+            // When zoomed, each source pixel is doubled, so divide screen offset by 2
+            // to get the actual tile-data row.
+            let raw_y = line.wrapping_sub(y_pos);
+            let sprite_y = if zoomed { raw_y / 2 } else { raw_y };
+
+            // For 8x16 (tall) sprites in Mode 4:
             // - Uses 2 tiles vertically (tile N and tile N+1)
             // - Each tile is still 8 pixels wide
-            // - Pattern reads from consecutive tiles
-            let (actual_tile, actual_y) = if sprite_size == 16 {
-                // 16x16 mode: sprite_y can be 0-15
-                // Rows 0-7: use tile N, rows 8-15: use tile N+1
+            let (actual_tile, actual_y) = if tall_sprites {
                 if sprite_y < 8 {
                     (tile_num, sprite_y)
                 } else {
                     (tile_num.wrapping_add(1), sprite_y - 8)
                 }
             } else {
-                // 8x8 mode: sprite_y is already 0-7
                 (tile_num, sprite_y)
             };
 
-            // Read tile pattern for this row
-            let tile_addr = (actual_tile as u16) * 32 + (actual_y as u16) * 4;
+            // Read tile pattern for this row (using sprite pattern generator base from Register 6)
+            let tile_addr = sprite_pattern_base + (actual_tile as u16) * 32 + (actual_y as u16) * 4;
             if tile_addr >= 0x3FFC {
                 continue;
             }
@@ -702,16 +849,18 @@ impl Vdp {
             let byte2 = self.vram[(tile_addr + 2) as usize];
             let byte3 = self.vram[(tile_addr + 3) as usize];
 
-            // Render sprite pixels (always 8 pixels wide per tile, even in 16x16 mode)
-            // For 16x16 sprites, this renders one 8x16 column
-            // SMS hardware vertically doubles sprites but keeps them 8 pixels wide
-            for px in 0..8u8 {
+            // Render sprite pixels.
+            // When zoomed, each source pixel is doubled horizontally (16 screen pixels).
+            let pixel_width: u8 = if zoomed { 16 } else { 8 };
+            for px in 0..pixel_width {
                 let x = x_pos.wrapping_add(px);
                 if x as u16 >= 256 {
                     continue;
                 }
 
-                let shift = 7 - px;
+                // Map screen pixel to source tile bit; zoom doubles each column.
+                let src_px = if zoomed { px / 2 } else { px };
+                let shift = 7 - src_px;
                 let pixel = ((byte0 >> shift) & 1)
                     | (((byte1 >> shift) & 1) << 1)
                     | (((byte2 >> shift) & 1) << 2)
@@ -736,22 +885,18 @@ impl Vdp {
                     // Only render sprite if:
                     // 1. Background pixel is transparent (backdrop color), OR
                     // 2. Background pixel doesn't have priority bit set
-                    let backdrop_color = self.decode_color(self.cram[16] & 0x3F);
+                    let backdrop_color = self.backdrop_color();
                     let bg_is_backdrop = (bg_pixel & RGB_MASK) == (backdrop_color & RGB_MASK);
 
                     if bg_is_backdrop || !bg_has_priority {
                         // Sprites always use palette 1 (colors 16-31 in CRAM)
                         let color_index = 16 + pixel as usize;
-                        let color = self.decode_color(self.cram[color_index] & 0x3F);
+                        // Strip alpha; render_scanline restores it after all rendering
+                        let color = self.decode_color(self.cram[color_index] & 0x3F) & RGB_MASK;
                         self.frame.pixels[line_offset + x_index] = color;
                     }
                 }
             }
-        }
-
-        // Clean up priority bits from final frame (keep only RGB, clear metadata)
-        for x in 0..256 {
-            self.frame.pixels[line_offset + x] &= RGB_MASK;
         }
     }
 
@@ -976,6 +1121,13 @@ impl Vdp {
         }
     }
 
+    /// Get the current backdrop/overscan color (ARGB).
+    /// Register 7 bits 3-0 select a colour from the sprite palette (CRAM 16-31).
+    fn backdrop_color(&self) -> u32 {
+        let index = 16 + (self.registers[7] & 0x0F) as usize;
+        self.decode_color(self.cram[index] & 0x3F)
+    }
+
     /// Decode 6-bit SMS color to 32-bit ARGB
     fn decode_color(&self, color: u8) -> u32 {
         // SMS uses 6-bit color: --BBGGRR
@@ -1002,17 +1154,10 @@ impl Default for Vdp {
 impl Renderer for Vdp {
     fn get_frame(&self) -> &Frame {
         // Log every time frame is retrieved
-        let backdrop = self.decode_color(self.cram[16] & 0x3F);
-        // Check if Mode 4 is enabled to determine display enable logic
-        let mode_4_enabled = (self.registers[0] & 0x04) != 0;
-        let display_enabled = if mode_4_enabled {
-            // In Mode 4: bit 6 is BLK (blank bit), 1=blank, 0=display
-            (self.registers[1] & 0x40) == 0
-        } else {
-            // In TMS modes: bit 6 controls display, 1=display, 0=blank
-            (self.registers[1] & 0x40) != 0
-        };
-        let sprite_enabled = (self.registers[1] & 0x08) != 0;
+        let backdrop = self.backdrop_color();
+        // Register 1 bit 6: screen enable (1=on, 0=blank) — same for Mode 4 and TMS
+        let display_enabled = (self.registers[1] & 0x40) != 0;
+        let sprite_enabled = display_enabled; // Sprites are active whenever display is on
         let mut non_backdrop = 0;
         for &pixel in &self.frame.pixels {
             if pixel != backdrop {
@@ -1051,6 +1196,9 @@ impl Renderer for Vdp {
         self.sprite_collision = false;
         // Set to end of frame so first set_scanline(0) will properly render frame
         self.scanline = 262;
+        // in_vblank starts false: the startup sentinel (262) must not be treated as VBlank
+        // so that early R1 writes don't fire a spurious retroactive interrupt.
+        self.in_vblank = false;
         self.clear(0xFF000000);
     }
 
@@ -1120,11 +1268,37 @@ mod tests {
     }
 
     #[test]
+    fn test_backdrop_uses_register7() {
+        let mut vdp = Vdp::new();
+
+        // Set CRAM[16] = sky blue, CRAM[17] = black
+        vdp.cram[16] = 0x30; // Blue (--11_00_00)
+        vdp.cram[17] = 0x00; // Black
+
+        // With R7 = 0 (default), backdrop should come from CRAM[16]
+        assert_eq!(vdp.backdrop_color(), vdp.decode_color(0x30));
+
+        // Set R7 = 1 → backdrop selects CRAM[17] (black)
+        vdp.registers[7] = 0x01;
+        assert_eq!(vdp.backdrop_color(), vdp.decode_color(0x00));
+
+        // Set R7 = 0x0F → backdrop selects CRAM[31]
+        vdp.cram[31] = 0x03; // Red
+        vdp.registers[7] = 0x0F;
+        assert_eq!(vdp.backdrop_color(), vdp.decode_color(0x03));
+
+        // Upper bits of R7 are ignored
+        vdp.registers[7] = 0xF1;
+        assert_eq!(vdp.backdrop_color(), vdp.decode_color(0x00)); // CRAM[17]
+    }
+
+    #[test]
     fn test_sprite_overflow_detection() {
         let mut vdp = Vdp::new();
 
-        // Enable display and sprites (bit 6 for display, bit 3 for sprites in register 1)
-        vdp.registers[1] = 0x40 | 0x08;
+        // Enable display (bit 6 of register 1 = 1 enables display in TMS mode used here)
+        // Note: registers[0] = 0 means TMS mode (not Mode 4), so bit 6 = 1 enables display
+        vdp.registers[1] = 0x40;
 
         // Set sprite attribute table at 0x3F00 (register 5)
         vdp.registers[5] = 0x7E; // (0x7E << 7) = 0x3F00
@@ -1154,8 +1328,8 @@ mod tests {
     fn test_sprite_collision_detection() {
         let mut vdp = Vdp::new();
 
-        // Enable display and sprites
-        vdp.registers[1] = 0x40 | 0x08;
+        // Enable display (bit 6 = 1 in TMS mode, used by these tests)
+        vdp.registers[1] = 0x40;
 
         // Set sprite attribute table
         vdp.registers[5] = 0x7E; // 0x3F00
@@ -1210,11 +1384,19 @@ mod tests {
         // Set line counter reload value (register 10)
         vdp.registers[10] = 5;
 
-        // Initialize line counter to register 10 value (simulating start of frame)
+        // Initialize line counter to register 10 value (simulating VBlank reload)
         vdp.line_counter = vdp.registers[10];
 
-        // Render scanlines and check line interrupt triggering
-        // First scanline should decrement counter
+        // With R10=5, the counter decrements each scanline and underflows
+        // after R10+1 = 6 scanlines:
+        //   scanline 0: 5 → 4
+        //   scanline 1: 4 → 3
+        //   scanline 2: 3 → 2
+        //   scanline 3: 2 → 1
+        //   scanline 4: 1 → 0
+        //   scanline 5: 0 → 0xFF (underflow!) → reload to 5 + fire interrupt
+
+        // First scanline should decrement counter from 5 to 4
         vdp.render_scanline(0);
         assert_eq!(vdp.line_counter, 4);
         assert!(!vdp.line_interrupt_pending);
@@ -1226,7 +1408,7 @@ mod tests {
         assert_eq!(vdp.line_counter, 0);
         assert!(!vdp.line_interrupt_pending);
 
-        // Next scanline (when counter is 0) should trigger interrupt and reload
+        // Next scanline: counter underflows (0 → 0xFF), triggers interrupt and reloads
         vdp.render_scanline(5);
         assert!(vdp.line_interrupt_pending);
         assert_eq!(vdp.line_counter, 5);
@@ -1242,6 +1424,7 @@ mod tests {
 
         // Set all flags
         vdp.frame_interrupt_pending = true;
+        vdp.line_interrupt_pending = true;
         vdp.sprite_overflow = true;
         vdp.sprite_collision = true;
 
@@ -1253,13 +1436,154 @@ mod tests {
         assert_eq!(status & 0x40, 0x40); // Sprite overflow
         assert_eq!(status & 0x20, 0x20); // Sprite collision
 
-        // After read, flags should be cleared
+        // After read, ALL flags should be cleared (including line_interrupt_pending)
         assert!(!vdp.frame_interrupt_pending);
+        assert!(!vdp.line_interrupt_pending);
         assert!(!vdp.sprite_overflow);
         assert!(!vdp.sprite_collision);
 
         // Second read should return 0
         let status2 = vdp.read_status();
         assert_eq!(status2 & 0xE0, 0);
+    }
+
+    /// Enabling the frame-interrupt bit (R1 bit 5) while the scanline is already inside
+    /// VBlank must immediately set frame_interrupt_pending (retroactive fire).
+    /// This mirrors what SMS_init does: it writes R1=0x20 after the VBlank boundary has
+    /// been crossed, so without the retroactive check the first interrupt would never fire.
+    #[test]
+    fn test_frame_interrupt_retroactive_when_already_in_vblank() {
+        let mut vdp = Vdp::new();
+
+        // Advance into VBlank via set_scanline so the in_vblank latch is set.
+        // Vdp::new() starts at scanline 262; set_scanline(192) wraps (new frame) and
+        // ends at scanline 192 >= display_height(192), so in_vblank becomes true.
+        vdp.set_scanline(192);
+        assert!(
+            vdp.in_vblank,
+            "in_vblank should be true after crossing display_height"
+        );
+
+        // Status bit 7 is always set on VBlank entry, regardless of IE0
+        assert!(vdp.frame_interrupt_pending);
+        // Clear it by reading status, simulating the game reading status before
+        // enabling interrupts
+        vdp.read_status();
+        assert!(!vdp.frame_interrupt_pending);
+
+        // Write R1 = 0x20 (frame interrupt enable) via the control port
+        vdp.write_control(0x20); // First byte: value
+        vdp.write_control(0x81); // Second byte: register 1 write
+
+        // The interrupt must have fired retroactively
+        assert!(
+            vdp.frame_interrupt_pending,
+            "frame_interrupt_pending should be set retroactively when R1 bit 5 is enabled during VBlank"
+        );
+    }
+
+    /// Setting frame-interrupt enable while still in the active display must NOT
+    /// fire the interrupt — it should only fire when VBlank is entered.
+    #[test]
+    fn test_frame_interrupt_not_retroactive_outside_vblank() {
+        let mut vdp = Vdp::new();
+
+        // Advance into active display via set_scanline.
+        // From initial scanline 262, set_scanline(100) wraps to a new frame and
+        // ends at scanline 100 < display_height(192), so in_vblank becomes false.
+        // The wrap crosses VBlank, so frame_interrupt_pending is set.
+        vdp.set_scanline(100);
+        assert!(
+            !vdp.in_vblank,
+            "in_vblank should be false inside active display"
+        );
+
+        // The VBlank crossing during the wrap unconditionally set the flag.
+        // Clear it to simulate the game having read status already.
+        vdp.read_status();
+        assert!(!vdp.frame_interrupt_pending);
+
+        // Write R1 = 0x20 (frame interrupt enable)
+        vdp.write_control(0x20);
+        vdp.write_control(0x81);
+
+        // Must NOT fire — we are not in VBlank, and the flag was already consumed
+        assert!(
+            !vdp.frame_interrupt_pending,
+            "frame_interrupt_pending must not be set when scanline is inside active display"
+        );
+    }
+
+    /// Verifies that the startup sentinel value (scanline = 262) does NOT cause a
+    /// spurious retroactive interrupt before any real VBlank has been entered.
+    #[test]
+    fn test_frame_interrupt_no_spurious_at_startup() {
+        let mut vdp = Vdp::new();
+
+        // VDP just created: scanline = 262 (sentinel), in_vblank = false
+        assert!(!vdp.in_vblank, "in_vblank must be false at startup");
+
+        // Write R1 = 0x20 without calling set_scanline first
+        vdp.write_control(0x20);
+        vdp.write_control(0x81);
+
+        // No interrupt should fire — we haven't actually entered VBlank yet
+        assert!(
+            !vdp.frame_interrupt_pending,
+            "startup sentinel scanline must not trigger a spurious retroactive interrupt"
+        );
+    }
+
+    #[test]
+    fn test_vcounter_ntsc_mapping() {
+        let mut vdp = Vdp::new();
+        vdp.is_pal = false;
+
+        // Active display: direct mapping
+        vdp.scanline = 0;
+        assert_eq!(vdp.read_vcounter(), 0x00);
+        vdp.scanline = 0xDA; // last direct-mapped scanline
+        assert_eq!(vdp.read_vcounter(), 0xDA);
+
+        // After the jump: scanline 219 (0xDB) → 0xD5
+        vdp.scanline = 219;
+        assert_eq!(vdp.read_vcounter(), 0xD5);
+
+        // Last scanline before wrap: 261 → 0xFF
+        vdp.scanline = 261;
+        assert_eq!(vdp.read_vcounter(), 0xFF);
+    }
+
+    #[test]
+    fn test_vcounter_pal_mapping() {
+        let mut vdp = Vdp::new();
+        vdp.is_pal = true;
+
+        // Active display: direct mapping
+        vdp.scanline = 0;
+        assert_eq!(vdp.read_vcounter(), 0x00);
+        vdp.scanline = 0xF2; // last direct-mapped PAL scanline
+        assert_eq!(vdp.read_vcounter(), 0xF2);
+
+        // After the jump: scanline 243 → 0xBA
+        vdp.scanline = 243;
+        assert_eq!(vdp.read_vcounter(), 0xBA);
+
+        // Last PAL scanline before wrap: 312 → 0xFF
+        vdp.scanline = 312;
+        assert_eq!(vdp.read_vcounter(), 0xFF);
+    }
+
+    #[test]
+    fn test_set_pal_switches_vcounter_mapping() {
+        let mut vdp = Vdp::new();
+        // Place scanline in the diverging range (scanline 250 is past both thresholds)
+        vdp.scanline = 250;
+
+        vdp.set_pal(false); // NTSC: 250 - 6 = 244 = 0xF4
+        assert_eq!(vdp.read_vcounter(), 0xF4);
+
+        vdp.set_pal(true); // PAL: 250 - 57 = 193 = 0xC1
+        assert_eq!(vdp.read_vcounter(), 0xC1);
     }
 }

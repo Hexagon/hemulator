@@ -1260,6 +1260,8 @@ mod tests {
 
         // Trigger DMA from $C000 to OAM
         sys.cpu.memory.write(0xFF46, 0xC0);
+        // DMA transfers 160 bytes at 4 cycles each = 640 cycles
+        sys.cpu.memory.step_oam_dma(640);
 
         // Verify OAM was updated
         assert_eq!(
@@ -1302,6 +1304,8 @@ mod tests {
 
         // Trigger DMA from $C000 to OAM
         sys.cpu.memory.write(0xFF46, 0xC0);
+        // DMA transfers 160 bytes at 4 cycles each = 640 cycles
+        sys.cpu.memory.step_oam_dma(640);
 
         // Verify all 160 bytes copied correctly
         for i in 0..160 {
@@ -2195,6 +2199,57 @@ mod tests {
         for i in 0..16 {
             let vram_data = sys.cpu.memory.ppu.read_vram(0x0800 + i); // VRAM offset 0x0800 = address 0x8800
             assert_eq!(vram_data, (i + 0x42) as u8, "VRAM byte {} mismatch", i);
+        }
+    }
+
+    #[test]
+    fn test_hdma_hblank_dma_lcd_off() {
+        // Regression test: HDMA must complete even when LCD is disabled.
+        // Games like Worms (GBC) turn off the LCD and use HBlank DMA to
+        // bulk-copy data into VRAM, then poll FF55 waiting for completion.
+        // On real hardware, Mode 0 (HBlank) is always active when LCD is off,
+        // so HDMA transfers one block per ~456 T-cycles.
+        let mut sys = GbSystem::new();
+        let rom = vec![0; 0x8000];
+        sys.mount("Cartridge", &rom).unwrap();
+
+        // Turn off the LCD
+        sys.cpu.memory.write(0xFF40, 0x00); // LCDC = 0 (LCD disabled)
+
+        // Set up source data in WRAM (4 blocks = 64 bytes)
+        for i in 0..64u16 {
+            sys.cpu.memory.write(0xC000 + i, i as u8);
+        }
+
+        // Configure HDMA for HBlank DMA with LCD off
+        sys.cpu.memory.write(0xFF51, 0xC0); // Source: 0xC000
+        sys.cpu.memory.write(0xFF52, 0x00);
+        sys.cpu.memory.write(0xFF53, 0x90); // Dest: 0x9000 (VRAM)
+        sys.cpu.memory.write(0xFF54, 0x00);
+        sys.cpu.memory.write(0xFF55, 0x83); // Transfer 4 blocks (64 bytes), HBlank DMA mode (bit 7 = 1)
+
+        // HDMA should be active
+        let hdma5 = sys.cpu.memory.read(0xFF55);
+        assert_eq!(hdma5 & 0x80, 0x00, "HDMA5 bit 7 should be 0 (HDMA active)");
+
+        // Step a frame - HDMA should complete even with LCD off
+        let _ = sys.step_frame();
+
+        // After frame, transfer should be complete
+        assert_eq!(
+            sys.cpu.memory.read(0xFF55),
+            0xFF,
+            "HDMA should be complete after frame with LCD off"
+        );
+
+        // Verify data was transferred to VRAM
+        for i in 0..64u16 {
+            let vram_data = sys.cpu.memory.ppu.read_vram(0x1000 + i);
+            assert_eq!(
+                vram_data, i as u8,
+                "VRAM byte {} mismatch after LCD-off HDMA",
+                i
+            );
         }
     }
 

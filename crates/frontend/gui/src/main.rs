@@ -14,8 +14,8 @@ pub mod window_backend;
 use egui_ui::EguiApp;
 use emu_core::{types::Frame, System};
 use hemu_project::HemuProject;
-use rodio::{OutputStream, Source};
-use rom_detect::{detect_rom_type_with_extension, SystemType};
+use rodio::{DeviceSinkBuilder, Source};
+use rom_detect::{detect_rom_type_with_extension, is_ps1_bios_file, SystemType};
 use save_state::GameSaves;
 use settings::Settings;
 use std::collections::HashMap;
@@ -98,6 +98,7 @@ enum EmulatorSystem {
     Chip8(Box<emu_chip8::Chip8System>),
     ColecoVision(Box<emu_colecovision::ColecoVisionSystem>),
     SG1000(Box<emu_sg1000::Sg1000System>),
+    PS1(Box<emu_ps1::Ps1System>),
 }
 
 #[allow(dead_code)]
@@ -137,6 +138,9 @@ impl EmulatorSystem {
             EmulatorSystem::SG1000(sys) => sys
                 .step_frame()
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::PS1(sys) => sys
+                .step_frame()
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         }
     }
 
@@ -153,6 +157,7 @@ impl EmulatorSystem {
             EmulatorSystem::Chip8(sys) => sys.reset(),
             EmulatorSystem::ColecoVision(sys) => sys.reset(),
             EmulatorSystem::SG1000(sys) => sys.reset(),
+            EmulatorSystem::PS1(sys) => sys.reset(),
         }
     }
 
@@ -169,6 +174,7 @@ impl EmulatorSystem {
             EmulatorSystem::Chip8(sys) => sys.debugger(),
             EmulatorSystem::ColecoVision(sys) => sys.debugger(),
             EmulatorSystem::SG1000(sys) => sys.debugger(),
+            EmulatorSystem::PS1(sys) => sys.debugger(),
         }
     }
 
@@ -185,6 +191,7 @@ impl EmulatorSystem {
             EmulatorSystem::Chip8(sys) => sys.get_total_cycles(),
             EmulatorSystem::ColecoVision(sys) => sys.get_total_cycles(),
             EmulatorSystem::SG1000(sys) => sys.get_total_cycles(),
+            EmulatorSystem::PS1(sys) => sys.get_total_cycles(),
         }
     }
 
@@ -228,6 +235,9 @@ impl EmulatorSystem {
             EmulatorSystem::SG1000(sys) => sys
                 .mount(mount_point_id, data)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::PS1(sys) => sys
+                .mount(mount_point_id, data)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         }
     }
 
@@ -245,6 +255,7 @@ impl EmulatorSystem {
             EmulatorSystem::Chip8(sys) => sys.mount_points(),
             EmulatorSystem::ColecoVision(sys) => sys.mount_points(),
             EmulatorSystem::SG1000(sys) => sys.mount_points(),
+            EmulatorSystem::PS1(sys) => sys.mount_points(),
         }
     }
 
@@ -284,6 +295,9 @@ impl EmulatorSystem {
             EmulatorSystem::SG1000(sys) => sys
                 .unmount(mount_point_id)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::PS1(sys) => sys
+                .unmount(mount_point_id)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         }
     }
 
@@ -301,6 +315,7 @@ impl EmulatorSystem {
             EmulatorSystem::Chip8(sys) => sys.is_mounted(mount_point_id),
             EmulatorSystem::ColecoVision(sys) => sys.is_mounted(mount_point_id),
             EmulatorSystem::SG1000(sys) => sys.is_mounted(mount_point_id),
+            EmulatorSystem::PS1(sys) => sys.is_mounted(mount_point_id),
         }
     }
 
@@ -328,6 +343,7 @@ impl EmulatorSystem {
             EmulatorSystem::Chip8(sys) => sys.supports_save_states(),
             EmulatorSystem::ColecoVision(sys) => sys.supports_save_states(),
             EmulatorSystem::SG1000(sys) => sys.supports_save_states(),
+            EmulatorSystem::PS1(sys) => sys.supports_save_states(),
         }
     }
 
@@ -344,6 +360,7 @@ impl EmulatorSystem {
             EmulatorSystem::Chip8(sys) => sys.save_state(),
             EmulatorSystem::ColecoVision(sys) => sys.save_state(),
             EmulatorSystem::SG1000(sys) => sys.save_state(),
+            EmulatorSystem::PS1(sys) => sys.save_state(),
         }
     }
 
@@ -360,6 +377,7 @@ impl EmulatorSystem {
             EmulatorSystem::Chip8(sys) => sys.load_state(state),
             EmulatorSystem::ColecoVision(sys) => sys.load_state(state),
             EmulatorSystem::SG1000(sys) => sys.load_state(state),
+            EmulatorSystem::PS1(sys) => sys.load_state(state),
         }
     }
 
@@ -446,11 +464,32 @@ impl EmulatorSystem {
             }
             EmulatorSystem::SMS(sys) => {
                 // SMS has 2 controller ports
-                // Map standard button layout to SMS controller
+                // Remap from NES-format (active-high) to SMS port $DC format (active-low)
+                // NES bits: A(0) B(1) Select(2) Start(3) Up(4) Down(5) Left(6) Right(7)
+                // SMS bits: Up(0) Down(1) Left(2) Right(3) B1(4) B2(5) [6-7 unused for port 1]
+                let mut sms_state: u8 = 0xFF; // All released (active-low)
+                if state & 0x10 != 0 {
+                    sms_state &= !0x01;
+                } // Up
+                if state & 0x20 != 0 {
+                    sms_state &= !0x02;
+                } // Down
+                if state & 0x40 != 0 {
+                    sms_state &= !0x04;
+                } // Left
+                if state & 0x80 != 0 {
+                    sms_state &= !0x08;
+                } // Right
+                if state & 0x02 != 0 {
+                    sms_state &= !0x10;
+                } // B -> Button 1 (fire)
+                if state & 0x01 != 0 {
+                    sms_state &= !0x20;
+                } // A -> Button 2
                 if port == 0 {
-                    sys.set_controller_1(state);
+                    sys.set_controller_1(sms_state);
                 } else if port == 1 {
-                    sys.set_controller_2(state);
+                    sys.set_controller_2(sms_state);
                 }
             }
             EmulatorSystem::Chip8(_) => {
@@ -472,6 +511,9 @@ impl EmulatorSystem {
                 } else if port == 1 {
                     sys.set_controller(2, state);
                 }
+            }
+            EmulatorSystem::PS1(_) => {
+                // PS1 controller not yet implemented
             }
         }
     }
@@ -577,6 +619,10 @@ impl EmulatorSystem {
                 // Z80 CPU - debugger implementation needed to expose PC
                 None
             }
+            EmulatorSystem::PS1(_) => {
+                // R3000A CPU - PC can be exposed here later
+                None
+            }
         }
     }
 
@@ -594,6 +640,7 @@ impl EmulatorSystem {
             EmulatorSystem::Chip8(_) => Some(0.0007), // CHIP-8 runs at ~700 instructions/sec (~0.7 kHz)
             EmulatorSystem::ColecoVision(_) => Some(3.58), // ColecoVision Z80A (3.579545 MHz NTSC)
             EmulatorSystem::SG1000(_) => Some(3.58),  // SG-1000 Z80A (3.579545 MHz NTSC)
+            EmulatorSystem::PS1(_) => Some(33.87),    // PS1 R3000A (33.8688 MHz)
         }
     }
 
@@ -618,6 +665,7 @@ impl EmulatorSystem {
             EmulatorSystem::Chip8(_) => emu_nes::RuntimeStats::default(),
             EmulatorSystem::ColecoVision(_) => emu_nes::RuntimeStats::default(),
             EmulatorSystem::SG1000(_) => emu_nes::RuntimeStats::default(),
+            EmulatorSystem::PS1(_) => emu_nes::RuntimeStats::default(),
         }
     }
 
@@ -634,6 +682,7 @@ impl EmulatorSystem {
             EmulatorSystem::Chip8(_) => emu_core::apu::TimingMode::Ntsc,
             EmulatorSystem::ColecoVision(_) => emu_core::apu::TimingMode::Ntsc,
             EmulatorSystem::SG1000(_) => emu_core::apu::TimingMode::Ntsc,
+            EmulatorSystem::PS1(_) => emu_core::apu::TimingMode::Ntsc,
         }
     }
 
@@ -641,7 +690,7 @@ impl EmulatorSystem {
         match self {
             EmulatorSystem::NES(sys) => sys.get_audio_samples(count),
             EmulatorSystem::GameBoy(sys) => sys.get_audio_samples(count),
-            EmulatorSystem::GBA(_) => vec![0; count],
+            EmulatorSystem::GBA(sys) => sys.get_audio_samples(count),
             EmulatorSystem::Atari2600(sys) => sys.get_audio_samples(count),
             EmulatorSystem::PC(sys) => sys.get_audio_samples(count),
             EmulatorSystem::SNES(sys) => sys.get_audio_samples(count),
@@ -675,6 +724,7 @@ impl EmulatorSystem {
             EmulatorSystem::SMS(sys) => sys.get_audio_samples(count),
             EmulatorSystem::ColecoVision(sys) => sys.get_audio_samples(count),
             EmulatorSystem::SG1000(sys) => sys.get_audio_samples(count),
+            EmulatorSystem::PS1(_) => vec![0; count],
         }
     }
 
@@ -691,6 +741,7 @@ impl EmulatorSystem {
             EmulatorSystem::Chip8(_) => (64, 32),
             EmulatorSystem::ColecoVision(_) => (256, 192), // TMS9918A resolution
             EmulatorSystem::SG1000(_) => (256, 192),       // TMS9918A resolution
+            EmulatorSystem::PS1(_) => (320, 240),          // PS1 standard resolution
         }
     }
 
@@ -707,6 +758,7 @@ impl EmulatorSystem {
             EmulatorSystem::Chip8(_) => "chip8",
             EmulatorSystem::ColecoVision(_) => "colecovision",
             EmulatorSystem::SG1000(_) => "sg1000",
+            EmulatorSystem::PS1(_) => "ps1",
         }
     }
 
@@ -724,6 +776,7 @@ impl EmulatorSystem {
             EmulatorSystem::Chip8(_) => SystemType::Chip8,
             EmulatorSystem::ColecoVision(_) => SystemType::ColecoVision,
             EmulatorSystem::SG1000(_) => SystemType::SG1000,
+            EmulatorSystem::PS1(_) => SystemType::PS1,
         }
     }
 
@@ -788,6 +841,7 @@ impl EmulatorSystem {
             EmulatorSystem::Chip8(_) => "Software".to_string(),
             EmulatorSystem::ColecoVision(_) => "Software".to_string(),
             EmulatorSystem::SG1000(_) => "Software".to_string(),
+            EmulatorSystem::PS1(_) => "Software".to_string(),
         }
     }
 
@@ -822,6 +876,7 @@ impl EmulatorSystem {
             EmulatorSystem::Chip8(_) => vec!["Software".to_string()],
             EmulatorSystem::ColecoVision(_) => vec!["Software".to_string()],
             EmulatorSystem::SG1000(_) => vec!["Software".to_string()],
+            EmulatorSystem::PS1(_) => vec!["Software".to_string()],
         }
     }
 
@@ -840,6 +895,7 @@ impl EmulatorSystem {
             EmulatorSystem::Chip8(sys) => sys.check_breakpoint(),
             EmulatorSystem::ColecoVision(sys) => sys.check_breakpoint(),
             EmulatorSystem::SG1000(sys) => sys.check_breakpoint(),
+            EmulatorSystem::PS1(_) => None,
         }
     }
 
@@ -857,6 +913,7 @@ impl EmulatorSystem {
             EmulatorSystem::Chip8(sys) => sys.get_breakpoint_manager().get_all(),
             EmulatorSystem::ColecoVision(sys) => sys.get_breakpoint_manager().get_all(),
             EmulatorSystem::SG1000(sys) => sys.get_breakpoint_manager().get_all(),
+            EmulatorSystem::PS1(_) => Vec::new(),
         }
     }
 
@@ -874,6 +931,7 @@ impl EmulatorSystem {
             EmulatorSystem::Chip8(sys) => Some(sys.get_instruction_tracer()),
             EmulatorSystem::ColecoVision(sys) => Some(sys.get_instruction_tracer()),
             EmulatorSystem::SG1000(sys) => Some(sys.get_instruction_tracer()),
+            EmulatorSystem::PS1(_) => None,
         }
     }
 
@@ -893,6 +951,7 @@ impl EmulatorSystem {
             EmulatorSystem::Chip8(sys) => Some(sys.get_instruction_tracer_mut()),
             EmulatorSystem::ColecoVision(sys) => Some(sys.get_instruction_tracer_mut()),
             EmulatorSystem::SG1000(sys) => Some(sys.get_instruction_tracer_mut()),
+            EmulatorSystem::PS1(_) => None,
         }
     }
 }
@@ -1213,16 +1272,16 @@ impl Iterator for StreamSource {
 }
 
 impl Source for StreamSource {
-    fn current_frame_len(&self) -> Option<usize> {
+    fn current_span_len(&self) -> Option<usize> {
         None
     }
 
-    fn channels(&self) -> u16 {
-        self.channels
+    fn channels(&self) -> std::num::NonZero<u16> {
+        std::num::NonZero::new(self.channels).unwrap()
     }
 
-    fn sample_rate(&self) -> u32 {
-        self.sample_rate
+    fn sample_rate(&self) -> std::num::NonZero<u32> {
+        std::num::NonZero::new(self.sample_rate).unwrap()
     }
 
     fn total_duration(&self) -> Option<std::time::Duration> {
@@ -1364,13 +1423,11 @@ fn save_screenshot(
 ) -> Result<String, Box<dyn std::error::Error>> {
     use chrono::Local;
     use png::Encoder;
-    use rand::Rng;
-
     // Get current local time
     let now = Local::now();
 
     // Generate random number 000-999
-    let random = rand::thread_rng().gen_range(0..1000);
+    let random = rand::random_range(0u32..1000);
 
     // Create filename: YYYYMMDDHHMMSSRRR.png
     let filename = format!("{}{:03}.png", now.format("%Y%m%d%H%M%S"), random);
@@ -1483,6 +1540,7 @@ struct CliArgs {
     show_help: bool,           // Show help message
     show_version: bool,        // Show version
     benchmark: bool,           // Benchmark mode: disable frame limiter to measure raw performance
+    no_gui: bool,              // No-GUI mode: run in a plain SDL2 window without egui overlay
     // Logging configuration
     log_level: Option<String>,      // Global log level
     log_cpu: Option<String>,        // CPU log level
@@ -1522,6 +1580,9 @@ impl CliArgs {
                 }
                 "--benchmark" => {
                     args.benchmark = true;
+                }
+                "--no-gui" => {
+                    args.no_gui = true;
                 }
                 "--system" | "-S" => {
                     if let Some(system) = arg_iter.next() {
@@ -1784,9 +1845,12 @@ impl CliArgs {
             "  --benchmark              Disable frame limiter to measure raw emulation performance"
         );
         eprintln!(
+            "  --no-gui                 Run in a plain SDL2 window without the egui overlay (faster startup, minimal UI)"
+        );
+        eprintln!(
             "  -S, --system <SYSTEM>    Start clean system (pc, nes, gb, gba, atari2600, snes, n64)"
         );
-        eprintln!("  --bios <file>            Load BIOS file (for ColecoVision, SMS, PC)");
+        eprintln!("  --bios <file>            Load BIOS file (for PS1, ColecoVision, SMS, PC)");
         eprintln!("  --slot1 <file>           Load file into slot 1 (BIOS for PC)");
         eprintln!("  --slot2 <file>           Load file into slot 2 (Floppy A for PC)");
         eprintln!("  --slot3 <file>           Load file into slot 3 (Floppy B for PC)");
@@ -1842,6 +1906,9 @@ impl CliArgs {
         eprintln!();
         eprintln!("Examples:");
         eprintln!("  hemu game.nes                                  # Load NES ROM (auto-detect)");
+        eprintln!(
+            "  hemu --no-gui game.nes                         # Load NES ROM without GUI overlay"
+        );
         eprintln!(
             "  hemu --benchmark game.nes                      # Benchmark mode (no frame limiter)"
         );
@@ -2172,6 +2239,9 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
                     s.get_instruction_tracer_mut().set_max_history(limit);
                 }
             }
+            EmulatorSystem::PS1(_) => {
+                // PS1 instruction tracing not yet implemented
+            }
         }
     }
 
@@ -2189,6 +2259,7 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
             EmulatorSystem::PC(s) => s.add_breakpoint(addr),
             EmulatorSystem::ColecoVision(s) => s.add_breakpoint(addr),
             EmulatorSystem::SG1000(s) => s.add_breakpoint(addr),
+            EmulatorSystem::PS1(_) => {} // PS1 breakpoints not yet implemented
         }
     }
 
@@ -2206,6 +2277,7 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
             EmulatorSystem::PC(s) => s.add_read_breakpoint(addr),
             EmulatorSystem::ColecoVision(s) => s.add_read_breakpoint(addr),
             EmulatorSystem::SG1000(s) => s.add_read_breakpoint(addr),
+            EmulatorSystem::PS1(_) => {}
         }
     }
 
@@ -2223,6 +2295,7 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
             EmulatorSystem::PC(s) => s.add_write_breakpoint(addr),
             EmulatorSystem::ColecoVision(s) => s.add_write_breakpoint(addr),
             EmulatorSystem::SG1000(s) => s.add_write_breakpoint(addr),
+            EmulatorSystem::PS1(_) => {}
         }
     }
 }
@@ -2364,7 +2437,7 @@ fn generate_debug_dump(
 
             if region.readable {
                 // Dump memory in hex format (16 bytes per line)
-                let size = region.size().min(65536) as usize; // Limit to 64KB per region
+                let size = region.size().min(256 * 1024) as usize; // Limit to 256KB per region
                 if let Some(data) = debugger.read_memory(region.start, size) {
                     for (offset, chunk) in data.chunks(16).enumerate() {
                         let addr: u32 = region.start + (offset * 16) as u32;
@@ -2618,10 +2691,13 @@ fn main() {
     // Determine what to load based on CLI args
     let rom_path = cli_args.rom_path.as_ref().cloned();
 
-    let mut sys: EmulatorSystem;
+    let mut sys: EmulatorSystem = EmulatorSystem::NES(Box::default());
     let mut rom_hash: Option<String> = None;
     let mut rom_loaded = false;
     let mut status_message = String::new();
+    // Deferred N64 ROM loading: N64 requires GL context, which is only available
+    // after the event loop starts. Store ROM data + path here for deferred creation.
+    let mut pending_n64_rom: Option<(Vec<u8>, String)> = None;
 
     // Initialize system based on --system parameter if specified
     if let Some(ref system_name) = cli_args.system {
@@ -2835,41 +2911,26 @@ fn main() {
                 }
             }
             "n64" => {
-                // Create N64 system with null GL context for early initialization
-                // Real GL context will be provided when egui_backend is created
-                let n64_sys = emu_n64::N64System::new_for_test();
-                sys = EmulatorSystem::N64(Box::new(n64_sys));
-                rom_loaded = true; // Mark system as loaded even without ROM
-                status_message = "Clean N64 system started".to_string();
-                println!("Started clean N64 system");
+                // N64 requires a real GL context for its renderer, which isn't
+                // available until the event loop starts. Defer creation.
+                status_message = "N64 system (pending GL init)".to_string();
+                println!("N64 system will be created when GL context is available");
 
-                // If a file is provided with --system n64, load it directly
+                // If a file is provided with --system n64, store it for deferred loading
                 if let Some(ref p) = rom_path {
                     if !p.to_lowercase().ends_with(".hemu") {
                         match std::fs::read(p) {
                             Ok(data) => {
-                                rom_hash = Some(GameSaves::rom_hash(&data));
-                                if let EmulatorSystem::N64(n64_sys) = &mut sys {
-                                    if let Err(e) = n64_sys.mount("Cartridge", &data) {
-                                        eprintln!("Failed to load N64 ROM: {}", e);
-                                        status_message = format!("Error: {}", e);
-                                        rom_hash = None;
-                                    } else {
-                                        rom_loaded = true;
-                                        runtime_state.set_mount("Cartridge".to_string(), p.clone());
-                                        if let Err(e) = settings.save() {
-                                            eprintln!("Warning: Failed to save settings: {}", e);
-                                        }
-                                        status_message = "N64 ROM loaded".to_string();
-                                        println!("Loaded N64 ROM: {}", p);
-                                    }
-                                }
+                                pending_n64_rom = Some((data, p.clone()));
                             }
                             Err(e) => {
                                 eprintln!("Failed to read file: {}", e);
                             }
                         }
                     }
+                } else {
+                    // --system n64 with no ROM: still defer creation
+                    pending_n64_rom = Some((vec![], String::new()));
                 }
             }
             _ => {
@@ -3148,22 +3209,10 @@ fn main() {
                             }
                         }
                         Ok(SystemType::N64) => {
-                            rom_hash = Some(GameSaves::rom_hash(&data));
-                            let mut n64_sys = emu_n64::N64System::new_for_test();
-                            if let Err(e) = n64_sys.mount("Cartridge", &data) {
-                                eprintln!("Failed to load N64 ROM: {}", e);
-                                status_message = format!("Error: {}", e);
-                                rom_hash = None;
-                            } else {
-                                rom_loaded = true;
-                                sys = EmulatorSystem::N64(Box::new(n64_sys));
-                                runtime_state.set_mount("Cartridge".to_string(), p.clone());
-                                if let Err(e) = settings.save() {
-                                    eprintln!("Warning: Failed to save settings: {}", e);
-                                }
-                                status_message = "N64 ROM loaded".to_string();
-                                println!("Loaded N64 ROM: {}", p);
-                            }
+                            // N64 requires GL context — defer creation to event loop
+                            pending_n64_rom = Some((data.clone(), p.clone()));
+                            status_message = "N64 ROM detected (pending GL init)".to_string();
+                            println!("N64 ROM will be loaded when GL context is available: {}", p);
                         }
                         Ok(SystemType::SMS) => {
                             rom_hash = Some(GameSaves::rom_hash(&data));
@@ -3295,6 +3344,97 @@ fn main() {
                                 }
                                 status_message = "SG-1000 cartridge loaded".to_string();
                                 println!("Loaded SG-1000 cartridge: {}", p);
+                            }
+                        }
+                        Ok(SystemType::PS1) => {
+                            rom_hash = Some(GameSaves::rom_hash(&data));
+                            let mut ps1_sys = emu_ps1::Ps1System::new();
+
+                            // Check if the loaded file IS the BIOS itself
+                            let loaded_file_is_bios = is_ps1_bios_file(&data);
+
+                            if loaded_file_is_bios {
+                                // User opened the BIOS file directly — mount it as BIOS
+                                if ps1_sys.mount("bios", &data).is_ok() {
+                                    runtime_state.set_mount("bios".to_string(), p.clone());
+                                    sys = EmulatorSystem::PS1(Box::new(ps1_sys));
+                                    rom_loaded = true;
+                                    status_message =
+                                        "PS1 BIOS loaded — ready (load a game or run BIOS)"
+                                            .to_string();
+                                    println!("Loaded PS1 BIOS: {}", p);
+                                } else {
+                                    eprintln!("Failed to mount PS1 BIOS from: {}", p);
+                                    status_message = "Failed to load PS1 BIOS".to_string();
+                                }
+                            } else {
+                                // Loaded a game/disc image — search for BIOS separately
+                                let bios_candidates = [
+                                    "scph1001.bin",
+                                    "scph5501.bin",
+                                    "scph5500.bin",
+                                    "scph5502.bin",
+                                    "scph7001.bin",
+                                    "scph7502.bin",
+                                    "ps1.bin",
+                                    "psx.bin",
+                                    "bios.bin",
+                                    "bios.rom",
+                                ];
+
+                                let bios_result = load_bios(
+                                    cli_args.bios_path.as_ref(),
+                                    Some(p),
+                                    &bios_candidates,
+                                    Some(512 * 1024), // PS1 BIOS must be 512KB
+                                );
+
+                                let bios_loaded_ok =
+                                    if let Some((bios_data, bios_path)) = bios_result {
+                                        if ps1_sys.mount("bios", &bios_data).is_ok() {
+                                            runtime_state.set_mount("bios".to_string(), bios_path);
+                                            true
+                                        } else {
+                                            eprintln!("Failed to mount PS1 BIOS");
+                                            false
+                                        }
+                                    } else {
+                                        false
+                                    };
+
+                                if !bios_loaded_ok {
+                                    eprintln!(
+                                        "Warning: PS1 BIOS not found. System will not boot properly."
+                                    );
+                                    eprintln!("  Use --bios <file> or place a 512KB BIOS in the ROM directory");
+                                }
+
+                                sys = EmulatorSystem::PS1(Box::new(ps1_sys));
+
+                                // If data is a PS-X EXE, mount it as disc
+                                if data.len() >= 8 && &data[0..8] == b"PS-X EXE" {
+                                    if let Err(e) = sys.mount("disc", &data) {
+                                        eprintln!("Failed to load PS-X EXE: {}", e);
+                                    }
+                                } else {
+                                    // Mount as raw disc image
+                                    if let Err(e) = sys.mount("disc", &data) {
+                                        eprintln!("Failed to load PS1 disc image: {}", e);
+                                    }
+                                }
+                                rom_loaded = true;
+                                runtime_state.set_mount("disc".to_string(), p.clone());
+                                if bios_loaded_ok {
+                                    status_message = "PS1 disc loaded".to_string();
+                                } else {
+                                    status_message =
+                                        "PS1 disc loaded (BIOS missing - will not boot)"
+                                            .to_string();
+                                }
+                                println!("Loaded PS1 disc: {}", p);
+                            }
+                            if let Err(e) = settings.save() {
+                                eprintln!("Warning: Failed to save settings: {}", e);
                             }
                         }
                         Err(e) => {
@@ -3578,6 +3718,135 @@ fn main() {
     }
     // ===== END HEADLESS MODE =====
 
+    // ===== NO-GUI MODE =====
+    // If --no-gui is requested, run in a plain SDL2 window without egui overhead
+    if cli_args.no_gui {
+        // N64 requires an OpenGL context which --no-gui does not set up
+        if matches!(&sys, EmulatorSystem::N64(_)) {
+            eprintln!("Error: --no-gui does not support N64 (requires an OpenGL context). Use the full GUI instead.");
+            std::process::exit(1);
+        }
+
+        let title = format!("Hemulator - {}", sys.system_name());
+        let mut window =
+            match window_backend::Sdl2Backend::new(&title, window_width, window_height, false) {
+                Ok(w) => w,
+                Err(e) => {
+                    eprintln!("Failed to create window: {}", e);
+                    return;
+                }
+            };
+
+        // Initialize audio output
+        let _stream = match DeviceSinkBuilder::open_default_sink() {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Error: Failed to initialize audio (exiting): {}.", e);
+                std::process::exit(1);
+            }
+        };
+        let (audio_tx, audio_rx) = sync_channel::<i16>(44100 * 2);
+        _stream.mixer().add(StreamSource {
+            rx: audio_rx,
+            sample_rate: 44100,
+            channels: 2,
+        });
+
+        const SAMPLE_RATE: usize = 44100;
+        let mut audio_sample_remainder: f64 = 0.0;
+        let mut last_frame = Instant::now();
+
+        loop {
+            window.poll_events();
+            if !window.is_open() {
+                break;
+            }
+
+            let timing = sys.timing();
+            let frame_rate = timing.frame_rate_hz();
+            let target_frame_duration = Duration::from_secs_f64(1.0 / frame_rate);
+
+            match sys.step_frame() {
+                Ok(frame) => {
+                    // Handle audio
+                    let samples_per_frame_f =
+                        (SAMPLE_RATE as f64 / frame_rate) + audio_sample_remainder;
+                    let samples_per_frame = samples_per_frame_f.floor() as usize;
+                    audio_sample_remainder = samples_per_frame_f - samples_per_frame as f64;
+                    let audio_samples = sys.get_audio_samples(samples_per_frame);
+                    let expected_stereo = samples_per_frame * 2;
+                    if audio_samples.len() == expected_stereo {
+                        for sample in audio_samples {
+                            let _ = audio_tx.try_send(sample);
+                        }
+                    } else {
+                        for i in 0..samples_per_frame {
+                            let sample = audio_samples.get(i).copied().unwrap_or(0);
+                            let _ = audio_tx.try_send(sample);
+                            let _ = audio_tx.try_send(sample);
+                        }
+                    }
+
+                    // Render frame
+                    if let Err(e) = window.update_with_buffer(
+                        &frame.pixels,
+                        frame.width as usize,
+                        frame.height as usize,
+                    ) {
+                        eprintln!("Render error: {}", e);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Emulation error: {}", e);
+                    break;
+                }
+            }
+
+            // Handle controller input
+            if !matches!(&sys, EmulatorSystem::PC(_)) {
+                let controller_state = get_controller_state(&window, &settings.input.player1);
+                let snes_state = get_snes_controller_state(&window, &settings.input.player1);
+                let chip8_state = get_chip8_controller_state(&window);
+                let coleco_p1_state =
+                    get_colecovision_controller_state(&window, &settings.input.player1);
+                let coleco_p2_state =
+                    get_colecovision_controller_state(&window, &settings.input.player2);
+
+                match &mut sys {
+                    EmulatorSystem::SNES(s) => s.set_controller(0, snes_state),
+                    EmulatorSystem::Chip8(s) => s.set_controller(chip8_state),
+                    EmulatorSystem::ColecoVision(s) => {
+                        s.set_controller(1, coleco_p1_state);
+                        s.set_controller(2, coleco_p2_state);
+                    }
+                    _ => sys.set_controller(0, controller_state),
+                }
+            } else {
+                let pressed = window.get_sdl2_scancodes_pressed().clone();
+                let released = window.get_sdl2_scancodes_released().clone();
+                if let EmulatorSystem::PC(pc_sys) = &mut sys {
+                    for scancode in &pressed {
+                        pc_sys.key_press_sdl2(*scancode);
+                    }
+                    for scancode in &released {
+                        pc_sys.key_release_sdl2(*scancode);
+                    }
+                }
+            }
+
+            // Frame timing
+            if !cli_args.benchmark {
+                let elapsed = last_frame.elapsed();
+                if elapsed < target_frame_duration {
+                    std::thread::sleep(target_frame_duration - elapsed);
+                }
+            }
+            last_frame = Instant::now();
+        }
+        return;
+    }
+    // ===== END NO-GUI MODE =====
+
     // Create egui backend
     let mut egui_backend = match Sdl2EguiBackend::new(
         "Hemulator - Multi-System Emulator",
@@ -3626,7 +3895,7 @@ fn main() {
     }
 
     // Initialize audio output
-    let (_stream, stream_handle) = match OutputStream::try_default() {
+    let _stream = match DeviceSinkBuilder::open_default_sink() {
         Ok(s) => s,
         Err(e) => {
             eprintln!(
@@ -3637,16 +3906,11 @@ fn main() {
         }
     };
     let (audio_tx, audio_rx) = sync_channel::<i16>(44100 * 2);
-    if let Err(e) = stream_handle.play_raw(
-        StreamSource {
-            rx: audio_rx,
-            sample_rate: 44100,
-            channels: 2,
-        }
-        .convert_samples(),
-    ) {
-        eprintln!("Warning: Failed to start audio playback: {}", e);
-    }
+    _stream.mixer().add(StreamSource {
+        rx: audio_rx,
+        sample_rate: 44100,
+        channels: 2,
+    });
 
     // Timing trackers - reset when ROM is loaded
     let mut emulation_start_time = Instant::now(); // Time when emulation started
@@ -3724,6 +3988,48 @@ fn main() {
 
     // Main event loop with egui
     loop {
+        // Handle deferred N64 creation (needs GL context from event loop)
+        if let Some((rom_data, rom_path_str)) = pending_n64_rom.take() {
+            let gl_ctx = egui_backend.gl_context();
+            match create_n64_system(gl_ctx, &settings) {
+                Ok(mut n64_sys) => {
+                    if !rom_data.is_empty() {
+                        rom_hash = Some(GameSaves::rom_hash(&rom_data));
+                        if let Err(e) = n64_sys.mount("Cartridge", &rom_data) {
+                            eprintln!("Failed to load N64 ROM: {}", e);
+                            status_message = format!("Error: {}", e);
+                            rom_hash = None;
+                        } else {
+                            rom_loaded = true;
+                            runtime_state.set_mount("Cartridge".to_string(), rom_path_str.clone());
+                            settings.add_recent_file(rom_path_str);
+                            if let Err(e) = settings.save() {
+                                eprintln!("Warning: Failed to save settings: {}", e);
+                            }
+                            egui_app.update_recent_files(settings.get_recent_files().to_vec());
+                            status_message = "N64 ROM loaded".to_string();
+                            println!("N64 system created with GL context, ROM loaded");
+                        }
+                    } else {
+                        rom_loaded = true;
+                        status_message = "Clean N64 system started".to_string();
+                        println!("N64 system created with GL context");
+                    }
+                    sys = EmulatorSystem::N64(Box::new(n64_sys));
+                    egui_app.property_pane.system_name = "N64".to_string();
+                    egui_app.property_pane.rendering_backend = sys.get_current_renderer_name();
+                    egui_app.property_pane.available_renderers = sys.get_available_renderers();
+                    egui_app.status_bar.set_message(status_message.clone());
+                }
+                Err(e) => {
+                    eprintln!("Failed to create N64 system: {}", e);
+                    egui_app
+                        .status_bar
+                        .set_error(format!("Failed to create N64 system: {}", e));
+                }
+            }
+        }
+
         // Detect transition: ROM has just been loaded or unloaded this frame
         let rom_state_changed = rom_loaded != prev_rom_loaded;
 
@@ -3918,6 +4224,13 @@ fn main() {
                         SystemDebugInfo::new("SG-1000".to_string())
                     }
                 }
+                EmulatorSystem::PS1(s) => {
+                    if let Some(debugger) = s.debugger() {
+                        SystemDebugInfo::from_debugger("PS1", debugger)
+                    } else {
+                        SystemDebugInfo::new("PS1".to_string())
+                    }
+                }
             };
             egui_app.tab_manager.update_debug_info(debug_info);
 
@@ -3968,6 +4281,7 @@ fn main() {
                     let debugger: &dyn Debugger = s.as_ref();
                     Some(create_enhanced_debug_state("SG-1000", debugger, &sys))
                 }
+                EmulatorSystem::PS1(_) => None,
             };
 
             if let Some(enhanced_state) = enhanced_state_opt {
@@ -3988,6 +4302,7 @@ fn main() {
                     EmulatorSystem::Chip8(s) => Some(s.as_ref()),
                     EmulatorSystem::ColecoVision(s) => Some(s.as_ref()),
                     EmulatorSystem::SG1000(s) => Some(s.as_ref()),
+                    EmulatorSystem::PS1(_) => None,
                 };
 
                 if let Some(debugger) = debugger {
@@ -4274,6 +4589,45 @@ fn main() {
                     });
                     egui_app.tab_manager.update_system_tile_data(tile_data);
                 }
+                EmulatorSystem::PS1(s) => {
+                    let gpu_data = s.get_gpu_inspector_data();
+                    let ps1_gpu = egui_ui::Ps1GpuData {
+                        gpustat: gpu_data.gpustat,
+                        display_vram_x: gpu_data.display_vram_x,
+                        display_vram_y: gpu_data.display_vram_y,
+                        display_horiz_start: gpu_data.display_horiz_start,
+                        display_horiz_end: gpu_data.display_horiz_end,
+                        display_vert_start: gpu_data.display_vert_start,
+                        display_vert_end: gpu_data.display_vert_end,
+                        hres: gpu_data.hres_str,
+                        vres: gpu_data.vres_str,
+                        is_pal: gpu_data.is_pal,
+                        display_24bit: gpu_data.display_24bit,
+                        interlace: gpu_data.interlace,
+                        display_disabled: gpu_data.display_disabled,
+                        draw_area_left: gpu_data.draw_area_left,
+                        draw_area_top: gpu_data.draw_area_top,
+                        draw_area_right: gpu_data.draw_area_right,
+                        draw_area_bottom: gpu_data.draw_area_bottom,
+                        draw_offset_x: gpu_data.draw_offset_x,
+                        draw_offset_y: gpu_data.draw_offset_y,
+                        texpage_x: gpu_data.texpage_x,
+                        texpage_y: gpu_data.texpage_y,
+                        tex_depth: gpu_data.tex_depth_str,
+                        semi_transparency: gpu_data.semi_transparency_str,
+                        dithering: gpu_data.dithering,
+                        set_mask_bit: gpu_data.set_mask_bit,
+                        check_mask_bit: gpu_data.check_mask_bit,
+                        tex_window_mask_x: gpu_data.tex_window_mask_x,
+                        tex_window_mask_y: gpu_data.tex_window_mask_y,
+                        tex_window_offset_x: gpu_data.tex_window_offset_x,
+                        tex_window_offset_y: gpu_data.tex_window_offset_y,
+                        scanline: gpu_data.scanline,
+                        in_vblank: gpu_data.in_vblank,
+                        irq: gpu_data.irq,
+                    };
+                    egui_app.tab_manager.update_ps1_gpu_data(ps1_gpu);
+                }
                 _ => {
                     // Other systems don't have tile viewers yet
                 }
@@ -4399,6 +4753,17 @@ fn main() {
                                 "SG-1000",
                                 &mut rom_loaded,
                                 "Created new SG-1000 system",
+                                &runtime_state,
+                            );
+                        }
+                        "PS1" => {
+                            sys = EmulatorSystem::PS1(Box::new(emu_ps1::Ps1System::new()));
+                            configure_system_ui(
+                                &mut egui_app,
+                                &sys,
+                                "PS1",
+                                &mut rom_loaded,
+                                "Created new PS1 system",
                                 &runtime_state,
                             );
                         }
@@ -4975,6 +5340,35 @@ fn main() {
                                             if let Some(ref hash) = rom_hash {
                                                 _game_saves = GameSaves::load(hash);
                                             }
+                                        }
+                                    }
+                                    Ok(SystemType::PS1) => {
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        let ps1_sys = emu_ps1::Ps1System::new();
+                                        sys = EmulatorSystem::PS1(Box::new(ps1_sys));
+                                        // If data is a PS-X EXE, mount it as disc
+                                        if data.len() >= 8 && &data[0..8] == b"PS-X EXE" {
+                                            if let Err(e) = sys.mount("disc", &data) {
+                                                eprintln!("Failed to load PS-X EXE: {}", e);
+                                            }
+                                        }
+                                        rom_loaded = true;
+                                        egui_app.property_pane.system_name = "PS1".to_string();
+                                        runtime_state
+                                            .set_mount("disc".to_string(), path_str.clone());
+                                        settings.add_recent_file(path_str.clone());
+                                        if let Err(e) = settings.save() {
+                                            eprintln!("Warning: Failed to save settings: {}", e);
+                                        }
+                                        egui_app.update_recent_files(
+                                            settings.get_recent_files().to_vec(),
+                                        );
+                                        egui_app
+                                            .status_bar
+                                            .set_message("PS1 disc loaded".to_string());
+                                        let _ = sys.resolution();
+                                        if let Some(ref hash) = rom_hash {
+                                            _game_saves = GameSaves::load(hash);
                                         }
                                     }
                                     Err(e) => {
@@ -5646,6 +6040,38 @@ fn main() {
                                             if let Some(ref hash) = rom_hash {
                                                 _game_saves = GameSaves::load(hash);
                                             }
+                                        }
+                                    }
+                                    Ok(SystemType::PS1) => {
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        let ps1_sys = emu_ps1::Ps1System::new();
+                                        sys = EmulatorSystem::PS1(Box::new(ps1_sys));
+                                        if data.len() >= 8 && &data[0..8] == b"PS-X EXE" {
+                                            if let Err(e) = sys.mount("disc", &data) {
+                                                eprintln!("Failed to load PS-X EXE: {}", e);
+                                            }
+                                        }
+                                        rom_loaded = true;
+                                        egui_app.property_pane.system_name = "PS1".to_string();
+                                        egui_app.property_pane.rendering_backend =
+                                            sys.get_current_renderer_name();
+                                        egui_app.property_pane.available_renderers =
+                                            sys.get_available_renderers();
+                                        runtime_state
+                                            .set_mount("disc".to_string(), file_path.clone());
+                                        settings.add_recent_file(file_path.clone());
+                                        if let Err(e) = settings.save() {
+                                            eprintln!("Warning: Failed to save settings: {}", e);
+                                        }
+                                        egui_app.update_recent_files(
+                                            settings.get_recent_files().to_vec(),
+                                        );
+                                        egui_app
+                                            .status_bar
+                                            .set_message("PS1 disc loaded".to_string());
+                                        let _ = sys.resolution();
+                                        if let Some(ref hash) = rom_hash {
+                                            _game_saves = GameSaves::load(hash);
                                         }
                                     }
                                     Err(e) => {
@@ -6607,6 +7033,20 @@ fn main() {
                             egui_app
                                 .status_bar
                                 .set_message("Created new SG-1000 system".to_string());
+                        }
+                        "PS1" => {
+                            sys = EmulatorSystem::PS1(Box::new(emu_ps1::Ps1System::new()));
+                            rom_loaded = true; // Mark system as created even without ROM
+                            rom_hash = None;
+                            runtime_state.clear_mounts();
+                            egui_app.property_pane.system_name = "PS1".to_string();
+                            egui_app.property_pane.rendering_backend =
+                                sys.get_current_renderer_name();
+                            egui_app.property_pane.available_renderers =
+                                sys.get_available_renderers();
+                            egui_app
+                                .status_bar
+                                .set_message("Created new PS1 system".to_string());
                         }
                         _ => {
                             egui_app

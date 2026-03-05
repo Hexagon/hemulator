@@ -113,6 +113,12 @@ impl SmsSystem {
 
         // Load ROM into existing memory (preserves BIOS)
         self.cpu.memory.load_rom(rom_data);
+
+        // Log detected mapper
+        log(LogCategory::CPU, LogLevel::Info, || {
+            format!("SMS: Mapper={}", self.cpu.memory.mapper_type().name())
+        });
+
         self.reset();
     }
 
@@ -203,7 +209,11 @@ impl System for SmsSystem {
             "SMS: System reset".to_string()
         });
         self.cpu.reset();
-        self.vdp.borrow_mut().reset();
+        {
+            let mut vdp = self.vdp.borrow_mut();
+            vdp.set_pal(matches!(self.timing_mode, emu_core::apu::TimingMode::Pal));
+            vdp.reset();
+        }
         self.psg.borrow_mut().reset();
         self.cycles = 0;
         self.total_cycles = 0;
@@ -266,16 +276,13 @@ impl System for SmsSystem {
                 (self.cycles * total_scanlines / target_cycles) % total_scanlines;
             self.vdp.borrow_mut().set_scanline(current_scanline as u16);
 
-            // Check for VDP interrupts (frame interrupt has priority over line interrupt)
-            if self.vdp.borrow().frame_interrupt_pending() {
-                // Trigger Z80 interrupt (IM 1: RST 38h = jump to 0x0038)
-                // Data byte doesn't matter in IM 1, but pass 0xFF as default
+            // Check if VDP /INT line is active (any enabled interrupt pending).
+            // On real SMS hardware, the Z80 has a single /IRQ line driven by
+            // the VDP:  /INT = (frame_pending AND IE0) OR (line_pending AND IE1).
+            // The ISR reads the status register to identify the interrupt type,
+            // which clears ALL pending flags and de-asserts /INT.
+            if self.vdp.borrow().irq_line_active() {
                 self.cpu.interrupt(0xFF);
-                self.vdp.borrow_mut().clear_frame_interrupt();
-            } else if self.vdp.borrow().line_interrupt_pending() {
-                // Trigger Z80 interrupt for line interrupt
-                self.cpu.interrupt(0xFF);
-                self.vdp.borrow_mut().clear_line_interrupt();
             }
         }
 
@@ -340,6 +347,7 @@ impl System for SmsSystem {
                 "controller_1": self.cpu.memory.get_controller_1(),
                 "controller_2": self.cpu.memory.get_controller_2(),
                 "memory_control": self.cpu.memory.get_memory_control(),
+                "mapper": self.cpu.memory.get_mapper_state(),
             },
             "vdp": vdp.get_state(),
             "psg": psg.get_state(),
@@ -393,6 +401,11 @@ impl System for SmsSystem {
                 "pal" => emu_core::apu::TimingMode::Pal,
                 _ => emu_core::apu::TimingMode::Ntsc,
             };
+            // Sync VDP timing so that old save states (without is_pal in VDP JSON)
+            // still produce correct V-counter reads after restore.
+            self.vdp
+                .borrow_mut()
+                .set_pal(matches!(self.timing_mode, emu_core::apu::TimingMode::Pal));
         }
 
         // Load CPU state
@@ -451,6 +464,10 @@ impl System for SmsSystem {
             }
             if let Some(mem_ctrl) = mem_state.get("memory_control").and_then(|v| v.as_u64()) {
                 self.cpu.memory.set_memory_control(mem_ctrl as u8);
+            }
+            // Restore full mapper state (new format, backward-compatible)
+            if let Some(mapper_state) = mem_state.get("mapper") {
+                self.cpu.memory.set_mapper_state(mapper_state);
             }
         }
 
@@ -562,6 +579,9 @@ impl SmsSystem {
     pub fn set_timing(&mut self, timing: emu_core::apu::TimingMode) {
         self.timing_mode = timing;
         self.psg.borrow_mut().set_timing(timing);
+        self.vdp
+            .borrow_mut()
+            .set_pal(matches!(timing, emu_core::apu::TimingMode::Pal));
     }
 
     /// Get current timing mode
@@ -882,8 +902,12 @@ mod tests {
         system.load_rom(rom);
         system.reset();
 
-        system.cpu.step(); // EI
-        assert!(system.cpu.iff1, "Interrupts should be enabled");
+        system.cpu.step(); // EI (sets delay, doesn't enable yet)
+        system.cpu.step(); // HALT (EI delay expires, iff1/iff2 now enabled)
+        assert!(
+            system.cpu.iff1,
+            "Interrupts should be enabled after EI delay"
+        );
 
         let initial_pc = system.cpu.pc;
 
@@ -1263,6 +1287,52 @@ mod tests {
         // Load state - should restore PAL
         system.load_state(&state).unwrap();
         assert_eq!(system.get_timing(), TimingMode::Pal);
+        // VDP is_pal must match the restored timing mode
+        assert!(
+            system.vdp.borrow().get_pal(),
+            "VDP is_pal should be true after restoring PAL save state"
+        );
+    }
+
+    /// Verifies that is_pal round-trips correctly through get_state()/set_state() and
+    /// that an old save state (without is_pal in VDP JSON) falls back correctly to the
+    /// system timing_mode when loading.
+    #[test]
+    fn test_save_load_state_vdp_is_pal_roundtrip() {
+        use emu_core::apu::TimingMode;
+        let mut system = SmsSystem::new();
+        system.load_rom(vec![0; 0x8000]);
+
+        // Switch to PAL so is_pal=true propagates to VDP
+        system.set_timing(TimingMode::Pal);
+        assert!(system.vdp.borrow().get_pal());
+
+        // Full round-trip: save → NTSC → load
+        let state = system.save_state();
+        system.set_timing(TimingMode::Ntsc);
+        assert!(!system.vdp.borrow().get_pal());
+        system.load_state(&state).unwrap();
+        assert!(
+            system.vdp.borrow().get_pal(),
+            "VDP is_pal must be restored to true after load"
+        );
+
+        // Simulate an old save state that lacks is_pal in the vdp sub-object
+        let mut old_state = state.clone();
+        if let Some(vdp_obj) = old_state.get_mut("vdp") {
+            if let Some(obj) = vdp_obj.as_object_mut() {
+                obj.remove("is_pal");
+                obj.remove("in_vblank");
+            }
+        }
+        system.set_timing(TimingMode::Ntsc);
+        assert!(!system.vdp.borrow().get_pal());
+        system.load_state(&old_state).unwrap();
+        // timing_mode="pal" in the old state must still restore VDP is_pal correctly
+        assert!(
+            system.vdp.borrow().get_pal(),
+            "VDP is_pal must be derived from timing_mode when is_pal is absent from old save state"
+        );
     }
 
     #[test]
@@ -1341,5 +1411,44 @@ mod tests {
         // Should read BIOS again
         assert!(system.cpu.memory.is_bios_enabled());
         assert_eq!(system.cpu.memory.read(0x0000), 0xAA);
+    }
+
+    /// Smoke test for the SMSTestSuite ROM (v0.37 by sverx).
+    /// Verifies the ROM boots, executes past crt0/SMS_init, and produces valid frames.
+    ///
+    /// ROM source: https://github.com/sverx/SMSTestSuite
+    #[test]
+    fn smoke_test_sms_test_suite() {
+        let rom = include_bytes!("../../../../test_roms/sms/SMSTestSuite.sms");
+        let mut system = SmsSystem::new();
+        system.load_rom(rom.to_vec());
+        system.reset();
+
+        // Run enough frames to get past crt0 + SMS_init
+        for _ in 0..10 {
+            let _ = system.step_frame();
+        }
+
+        let frame = system.step_frame().unwrap();
+
+        // Verify basic frame dimensions
+        assert_eq!(frame.width, 256);
+        assert_eq!(frame.height, 192);
+
+        // All pixels must carry a fully-opaque alpha channel (0xFF in bits 31-24)
+        for &pixel in &frame.pixels {
+            assert_eq!(
+                pixel >> 24,
+                0xFF,
+                "Pixel {pixel:#010X} is missing alpha channel"
+            );
+        }
+
+        // CPU must have advanced past reset vector and be executing game code
+        assert!(
+            system.cpu.pc > 0x0010,
+            "CPU PC={:04X} — looks like crt0 never ran",
+            system.cpu.pc
+        );
     }
 }

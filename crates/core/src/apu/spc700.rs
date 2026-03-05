@@ -129,10 +129,10 @@ struct Spc700Memory {
     /// 64KB RAM
     ram: Box<[u8; 0x10000]>,
     /// Control register ($F1)
-    /// Reference: https://wiki.superfamicom.org/spc700-reference
+    /// Reference: https://wiki.superfamicom.org/spc700-reference, fullsnes.htm
     /// Bit 7: IPL ROM enable (1 = enabled, maps $FFC0-$FFFF to IPL ROM)
-    /// Bit 5: Clear OUTPUT ports $F6-$F7 (write-only, auto-clears, clears what main CPU reads)
-    /// Bit 4: Clear OUTPUT ports $F4-$F5 (write-only, auto-clears, clears what main CPU reads)
+    /// Bit 5: Clear INPUT ports $F6-$F7 (write-only, auto-clears, clears what SPC700 reads from CPU)
+    /// Bit 4: Clear INPUT ports $F4-$F5 (write-only, auto-clears, clears what SPC700 reads from CPU)
     /// Bit 2: Timer 2 enable
     /// Bit 1: Timer 1 enable
     /// Bit 0: Timer 0 enable
@@ -311,17 +311,18 @@ impl MemorySpc700 for Spc700Memory {
     }
     fn write(&mut self, addr: u16, val: u8) {
         match addr {
-            // IPL ROM region is read-only
+            // IPL ROM region - writes ALWAYS go to RAM regardless of ROM enable
+            // Reference: fullsnes "ROM at FFC0h-FFFFh (0=RAM, 1=ROM) (writes do always go to RAM)"
             0xFFC0..=0xFFFF => {
-                if self.control & 0x80 == 0 {
-                    // Only writable when IPL ROM is disabled
-                    self.ram[addr as usize] = val;
-                }
+                self.ram[addr as usize] = val;
             }
             // Communication ports (SPC700 writes, main CPU reads)
+            // Reference: fullsnes "I/O Ports (writes are also passed to RAM)"
             CPUIO0..=CPUIO3 => {
                 let port = (addr - CPUIO0) as usize;
                 self.apu_out[port] = val;
+                // Writes also go to RAM (fullsnes: "writes are also passed to RAM")
+                self.ram[addr as usize] = val;
                 // Log port writes for debugging (reduced to Debug level to avoid spam)
                 log(LogCategory::APU, LogLevel::Debug, || {
                     format!("SPC700: Write port $F{} = ${:02X} (apu_out now: ${:02X} ${:02X} ${:02X} ${:02X})", 
@@ -329,10 +330,11 @@ impl MemorySpc700 for Spc700Memory {
                 });
             }
             // Control register
+            // Reference: fullsnes "I/O Ports (writes are also passed to RAM)"
             CONTROL_REG => {
+                self.ram[addr as usize] = val; // Writes also go to RAM
                 let old_control = self.control;
                 self.control = val;
-
                 // Log IPL ROM enable/disable
                 if (old_control & 0x80) != (val & 0x80) {
                     log(LogCategory::APU, LogLevel::Info, || {
@@ -363,28 +365,34 @@ impl MemorySpc700 for Spc700Memory {
                 }
 
                 if val & 0x10 != 0 {
-                    // Clear ports $F4-$F5 (SPC700 output ports, main CPU input)
-                    // Reference: https://wiki.superfamicom.org/spc700-reference
-                    // Bits 4-5 clear the OUTPUT ports (what main CPU reads)
-                    self.apu_out[0] = 0;
-                    self.apu_out[1] = 0;
+                    // Bit 4: Reset Port $F4/$F5 Input-Latches (CPU→SPC INPUT side only).
+                    // `cpuio` holds what the main CPU wrote; `apu_out` holds what the SPC700 wrote
+                    // and is NOT affected by these bits.
+                    // Reference: fullsnes "Bit4 - Reset Port 00F4h/00F5h Input-Latches"
+                    // Reference: ares/bsnes sfc/smp/io.cpp — clears io.apu0/apu1
+                    self.cpuio[0] = 0;
+                    self.cpuio[1] = 0;
                 }
                 if val & 0x20 != 0 {
-                    // Clear ports $F6-$F7 (SPC700 output ports, main CPU input)
-                    self.apu_out[2] = 0;
-                    self.apu_out[3] = 0;
+                    // Bit 5: Reset Port $F6/$F7 Input-Latches (CPU→SPC INPUT side only).
+                    // Reference: fullsnes "Bit5 - Reset Port 00F6h/00F7h Input-Latches"
+                    self.cpuio[2] = 0;
+                    self.cpuio[3] = 0;
                 }
             }
             // DSP address register
             DSP_ADDR => {
+                self.ram[addr as usize] = val; // Writes also go to RAM
                 self.dsp_addr = val & 0x7F; // Only 7 bits used
             }
             // DSP data register
             DSP_DATA => {
+                self.ram[addr as usize] = val; // Writes also go to RAM
                 self.dsp.write_register(self.dsp_addr & 0x7F, val);
             }
             // Timer divisors
             TIMER0 => {
+                self.ram[addr as usize] = val; // Writes also go to RAM
                 self.timer_divisor[0] = val;
                 log(LogCategory::APU, LogLevel::Info, || {
                     format!(
@@ -395,6 +403,7 @@ impl MemorySpc700 for Spc700Memory {
                 });
             }
             TIMER1 => {
+                self.ram[addr as usize] = val; // Writes also go to RAM
                 self.timer_divisor[1] = val;
                 log(LogCategory::APU, LogLevel::Info, || {
                     format!(
@@ -405,6 +414,7 @@ impl MemorySpc700 for Spc700Memory {
                 });
             }
             TIMER2 => {
+                self.ram[addr as usize] = val; // Writes also go to RAM
                 self.timer_divisor[2] = val;
                 log(LogCategory::APU, LogLevel::Info, || {
                     format!(
@@ -414,34 +424,16 @@ impl MemorySpc700 for Spc700Memory {
                     )
                 });
             }
-            // Test register and counters are read-only
-            TEST_REG | COUNTER0 | COUNTER1 | COUNTER2 | AUX_IO4 | AUX_IO5 => {}
+            // Test register, counters (read-only), and AUX ports
+            // All I/O writes pass through to RAM
+            TEST_REG | COUNTER0 | COUNTER1 | COUNTER2 => {
+                self.ram[addr as usize] = val; // Writes also go to RAM
+            }
+            AUX_IO4 | AUX_IO5 => {
+                self.ram[addr as usize] = val; // Writes also go to RAM
+            }
             // RAM
             _ => {
-                // Log writes to zero page during upload (especially $00-$01 for indirect addressing)
-                if self.control & 0x80 != 0 && addr <= 0x01 {
-                    log(LogCategory::APU, LogLevel::Info, || {
-                        format!(
-                            "SPC700: ZP write RAM[${:04X}] = ${:02X} (base address for upload)",
-                            addr, val
-                        )
-                    });
-                }
-                // Log all other writes to low RAM during upload
-                else if self.control & 0x80 != 0 && addr < 0x0100 {
-                    log(LogCategory::APU, LogLevel::Debug, || {
-                        format!("SPC700: Upload write to RAM[${:04X}] = ${:02X}", addr, val)
-                    });
-                }
-                // Log writes to uploaded code area (likely $0200-$XXXX)
-                else if self.control & 0x80 != 0 && (0x0200..0x1000).contains(&addr) {
-                    log(LogCategory::APU, LogLevel::Info, || {
-                        format!(
-                            "SPC700: Upload data to RAM[${:04X}] = ${:02X} (uploaded code area)",
-                            addr, val
-                        )
-                    });
-                }
                 self.ram[addr as usize] = val;
             }
         }
@@ -459,10 +451,6 @@ pub struct Spc700 {
     /// DSP cycle accumulator (DSP runs at 32kHz, CPU at 1.024MHz)
     /// DSP clocks every 32 CPU cycles (1024000/32000 = 32)
     dsp_cycle_acc: u32,
-    /// Total cycles requested from run_cycles (for debugging)
-    total_cycles_requested: u64,
-    /// Number of run_cycles calls (for debugging)
-    run_cycles_call_count: u64,
     /// Last DSP sample output (for interpolation between DSP clock cycles)
     last_sample: i16,
     /// Previous DSP sample (for linear interpolation)
@@ -488,8 +476,6 @@ impl Spc700 {
             timing: TimingMode::Ntsc,
             cycle_acc: 0.0,
             dsp_cycle_acc: 0,
-            total_cycles_requested: 0,
-            run_cycles_call_count: 0,
             last_sample: 0,
             prev_sample: 0,
             sample_buffer: Vec::with_capacity(2048),
@@ -524,25 +510,6 @@ impl Spc700 {
 
     /// Execute CPU for a number of cycles
     pub fn run_cycles(&mut self, cycles: u32) {
-        // Track statistics
-        self.run_cycles_call_count += 1;
-        self.total_cycles_requested += cycles as u64;
-
-        // Log summary every 10000 calls to avoid spam
-        if self.run_cycles_call_count.is_multiple_of(10000) {
-            log(LogCategory::APU, LogLevel::Info, || {
-                format!(
-                    "SPC700: run_cycles called {} times, total_requested={}, SPC700_cycles={}, PC=${:04X}",
-                    self.run_cycles_call_count, self.total_cycles_requested, self.cpu.cycles, self.cpu.pc
-                )
-            });
-        }
-
-        // Track if we're in critical IPL ROM areas
-        let was_in_upload_loop = self.cpu.pc >= 0xFFD6 && self.cpu.pc <= 0xFFEE;
-        let was_in_entry_setup = self.cpu.pc >= 0xFFEF;
-
-        // Log calls to verify this is being called (debug level)
         log(LogCategory::APU, LogLevel::Debug, || {
             format!(
                 "SPC700: run_cycles({}) called, PC=${:04X}, total_cycles={}",
@@ -552,47 +519,7 @@ impl Spc700 {
 
         let mut remaining = cycles;
         while remaining > 0 {
-            let old_pc = self.cpu.pc;
             let executed = self.cpu.step() as u32;
-
-            // Log when entering critical IPL ROM sections
-            if self.cpu.memory.control & 0x80 != 0 {
-                if !was_in_upload_loop && self.cpu.pc >= 0xFFD6 && self.cpu.pc <= 0xFFEE {
-                    log(LogCategory::APU, LogLevel::Info, || {
-                        format!(
-                            "SPC700: Entered upload loop at PC=${:04X} (from PC=${:04X})",
-                            self.cpu.pc, old_pc
-                        )
-                    });
-                }
-                if !was_in_entry_setup && self.cpu.pc >= 0xFFEF {
-                    log(LogCategory::APU, LogLevel::Info, || {
-                        format!("SPC700: Entered entry point setup at PC=${:04X} (from PC=${:04X}, ZP=$00={:02X}, ZP=$01={:02X})",
-                            self.cpu.pc, old_pc,
-                            self.cpu.memory.ram[0x00], self.cpu.memory.ram[0x01])
-                    });
-                }
-                // Log when IPL ROM is disabled or jumped out of
-                if old_pc >= 0xFFC0 && self.cpu.pc < 0xFFC0 {
-                    log(LogCategory::APU, LogLevel::Info, || {
-                        format!("SPC700: Jumped out of IPL ROM from PC=${:04X} to PC=${:04X} (uploaded code start)", 
-                            old_pc, self.cpu.pc)
-                    });
-                    // Dump first 64 bytes of uploaded code area for diagnosis
-                    let mut dump = String::from("SPC700: First 64 bytes at jump target:\n");
-                    for i in 0..4 {
-                        dump.push_str(&format!("${:04X}: ", self.cpu.pc + i * 16));
-                        for j in 0..16 {
-                            let addr = (self.cpu.pc + i * 16 + j) as usize;
-                            if addr < self.cpu.memory.ram.len() {
-                                dump.push_str(&format!("{:02X} ", self.cpu.memory.ram[addr]));
-                            }
-                        }
-                        dump.push('\n');
-                    }
-                    log(LogCategory::APU, LogLevel::Info, || dump);
-                }
-            }
 
             // Update timers based on executed cycles
             self.cpu.memory.tick_timers(executed);
@@ -1181,78 +1108,96 @@ mod tests {
     }
 
     /// Test port clearing functionality via control register
-    /// Reference: https://wiki.superfamicom.org/spc700-reference
-    /// Bits 4-5 of control register ($F1) clear OUTPUT ports (what main CPU reads)
+    ///
+    /// Per hardware documentation (fullsnes.htm, S-SMP wiki):
+    /// - Control register ($F1) bit 4: Reset Port $F4/$F5 Input-Latches (cpuio[0]/[1])
+    ///   These are the latches that hold what the MAIN CPU wrote (what SPC700 reads).
+    /// - Control register ($F1) bit 5: Reset Port $F6/$F7 Input-Latches (cpuio[2]/[3])
+    ///
+    /// The OUTPUT ports (apu_out) are NOT cleared by the control register;
+    /// only the input side (cpuio) is affected.
+    ///
+    /// References:
+    /// - fullsnes: "Bit4  - Reset Port 00F4h/00F5h Input-Latches"
+    /// - https://snes.nesdev.org/wiki/S-SMP (CONTROL register section)
     #[test]
     fn test_port_clear_via_control() {
         let mut apu = Spc700::new();
 
-        // SPC700 writes some values to output ports (for main CPU to read)
-        apu.cpu.memory.write(CPUIO0, 0x12);
-        apu.cpu.memory.write(CPUIO1, 0x34);
-        apu.cpu.memory.write(CPUIO2, 0x56);
-        apu.cpu.memory.write(CPUIO3, 0x78);
+        // Main CPU writes values to the INPUT ports (what SPC700 will read)
+        apu.write_port(0, 0x12); // cpuio[0]
+        apu.write_port(1, 0x34); // cpuio[1]
+        apu.write_port(2, 0x56); // cpuio[2]
+        apu.write_port(3, 0x78); // cpuio[3]
 
-        // Verify they were written to output ports
-        assert_eq!(apu.cpu.memory.apu_out[0], 0x12);
-        assert_eq!(apu.cpu.memory.apu_out[1], 0x34);
-        assert_eq!(apu.cpu.memory.apu_out[2], 0x56);
-        assert_eq!(apu.cpu.memory.apu_out[3], 0x78);
+        // Verify values are in input latches
+        assert_eq!(apu.cpu.memory.cpuio[0], 0x12);
+        assert_eq!(apu.cpu.memory.cpuio[1], 0x34);
+        assert_eq!(apu.cpu.memory.cpuio[2], 0x56);
+        assert_eq!(apu.cpu.memory.cpuio[3], 0x78);
 
-        // Main CPU should be able to read these values
-        assert_eq!(apu.read_port(0), 0x12);
-        assert_eq!(apu.read_port(1), 0x34);
-        assert_eq!(apu.read_port(2), 0x56);
-        assert_eq!(apu.read_port(3), 0x78);
+        // SPC700 also writes to output ports (these should NOT be affected by ctrl bits)
+        apu.cpu.memory.write(CPUIO0, 0xAB);
+        apu.cpu.memory.write(CPUIO1, 0xCD);
+        apu.cpu.memory.write(CPUIO2, 0xEF);
+        apu.cpu.memory.write(CPUIO3, 0x99);
+        assert_eq!(apu.cpu.memory.apu_out[0], 0xAB);
+        assert_eq!(apu.cpu.memory.apu_out[1], 0xCD);
+        assert_eq!(apu.cpu.memory.apu_out[2], 0xEF);
+        assert_eq!(apu.cpu.memory.apu_out[3], 0x99);
 
-        // Clear OUTPUT ports 0-1 via control register (bit 4)
-        // This is what SPC700 would do to reset its output state
+        // Bit 4: Clear INPUT ports $F4/$F5 (cpuio[0] and cpuio[1])
         apu.cpu.memory.write(CONTROL_REG, 0x10);
+
+        // Input latches 0 and 1 should be cleared
         assert_eq!(
-            apu.cpu.memory.apu_out[0], 0x00,
-            "Output port 0 should be cleared"
+            apu.cpu.memory.cpuio[0], 0x00,
+            "Input port 0 (cpuio[0]) should be cleared by bit 4"
         );
         assert_eq!(
-            apu.cpu.memory.apu_out[1], 0x00,
-            "Output port 1 should be cleared"
+            apu.cpu.memory.cpuio[1], 0x00,
+            "Input port 1 (cpuio[1]) should be cleared by bit 4"
+        );
+        // Input latches 2 and 3 should be unchanged
+        assert_eq!(
+            apu.cpu.memory.cpuio[2], 0x56,
+            "Input port 2 should not be cleared by bit 4"
         );
         assert_eq!(
-            apu.cpu.memory.apu_out[2], 0x56,
-            "Output port 2 should not be cleared"
-        );
-        assert_eq!(
-            apu.cpu.memory.apu_out[3], 0x78,
-            "Output port 3 should not be cleared"
+            apu.cpu.memory.cpuio[3], 0x78,
+            "Input port 3 should not be cleared by bit 4"
         );
 
-        // Main CPU reads should now see cleared ports
-        assert_eq!(apu.read_port(0), 0x00, "Main CPU should read 0 from port 0");
-        assert_eq!(apu.read_port(1), 0x00, "Main CPU should read 0 from port 1");
+        // Output ports should NOT be affected
         assert_eq!(
-            apu.read_port(2),
-            0x56,
-            "Main CPU should still read $56 from port 2"
+            apu.cpu.memory.apu_out[0], 0xAB,
+            "Output port 0 should not be affected by control register"
         );
         assert_eq!(
-            apu.read_port(3),
-            0x78,
-            "Main CPU should still read $78 from port 3"
+            apu.cpu.memory.apu_out[1], 0xCD,
+            "Output port 1 should not be affected by control register"
         );
 
-        // Clear OUTPUT ports 2-3 via control register (bit 5)
+        // Bit 5: Clear INPUT ports $F6/$F7 (cpuio[2] and cpuio[3])
         apu.cpu.memory.write(CONTROL_REG, 0x20);
         assert_eq!(
-            apu.cpu.memory.apu_out[2], 0x00,
-            "Output port 2 should be cleared"
+            apu.cpu.memory.cpuio[2], 0x00,
+            "Input port 2 (cpuio[2]) should be cleared by bit 5"
         );
         assert_eq!(
-            apu.cpu.memory.apu_out[3], 0x00,
-            "Output port 3 should be cleared"
+            apu.cpu.memory.cpuio[3], 0x00,
+            "Input port 3 (cpuio[3]) should be cleared by bit 5"
         );
 
-        // Main CPU reads should see all ports cleared
-        assert_eq!(apu.read_port(2), 0x00, "Main CPU should read 0 from port 2");
-        assert_eq!(apu.read_port(3), 0x00, "Main CPU should read 0 from port 3");
+        // Output ports should still not be affected
+        assert_eq!(
+            apu.cpu.memory.apu_out[2], 0xEF,
+            "Output port 2 should not be affected by control register"
+        );
+        assert_eq!(
+            apu.cpu.memory.apu_out[3], 0x99,
+            "Output port 3 should not be affected by control register"
+        );
     }
 
     /// Test that reproduces the multi-session upload issue from Super Mario World.

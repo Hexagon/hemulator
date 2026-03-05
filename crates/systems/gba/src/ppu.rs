@@ -52,14 +52,12 @@ const BG0HOFS: usize = 0x010;
 
 // Affine background parameters (BG2/BG3)
 const BG2PA: usize = 0x020;
-#[allow(dead_code)] // Used in affine calculations
 const BG2PB: usize = 0x022;
 const BG2PC: usize = 0x024;
 const BG2PD: usize = 0x026;
 const BG2X: usize = 0x028;
 const BG2Y: usize = 0x02C;
 const BG3PA: usize = 0x030;
-#[allow(dead_code)] // Used in affine calculations
 const BG3PB: usize = 0x032;
 const BG3PC: usize = 0x034;
 const BG3PD: usize = 0x036;
@@ -305,12 +303,33 @@ impl Ppu {
     }
 
     /// Latch the affine reference points from I/O registers.
-    /// Called when BG2X/BG2Y/BG3X/BG3Y are written.
+    /// Called at VBlank and frame start to reload all reference points.
     pub fn latch_affine_registers(&mut self, io: &[u8]) {
         self.bg2_ref_x = read_io_28bit_signed(io, BG2X);
         self.bg2_ref_y = read_io_28bit_signed(io, BG2Y);
         self.bg3_ref_x = read_io_28bit_signed(io, BG3X);
         self.bg3_ref_y = read_io_28bit_signed(io, BG3Y);
+    }
+
+    /// Selectively update affine reference points based on dirty flags.
+    /// Called when the game writes to BG2X/BG2Y/BG3X/BG3Y registers
+    /// (via CPU or DMA). On real hardware these are write-only latches
+    /// that immediately update the internal reference point.
+    ///
+    /// dirty_bits: bit 0=BG2X, bit 1=BG2Y, bit 2=BG3X, bit 3=BG3Y
+    pub fn apply_affine_ref_writes(&mut self, io: &[u8], dirty_bits: u8) {
+        if dirty_bits & 1 != 0 {
+            self.bg2_ref_x = read_io_28bit_signed(io, BG2X);
+        }
+        if dirty_bits & 2 != 0 {
+            self.bg2_ref_y = read_io_28bit_signed(io, BG2Y);
+        }
+        if dirty_bits & 4 != 0 {
+            self.bg3_ref_x = read_io_28bit_signed(io, BG3X);
+        }
+        if dirty_bits & 8 != 0 {
+            self.bg3_ref_y = read_io_28bit_signed(io, BG3Y);
+        }
     }
 
     /// Get a reference to the current frame buffer
@@ -435,9 +454,11 @@ impl Ppu {
         self.composite_scanline(line, dispcnt, io, palette);
 
         // Update affine reference points for next scanline
-        if bg_mode == 2 || bg_mode == 1 {
+        // BG2 affine refs are used in modes 1-5 (affine + all bitmap modes)
+        if (1..=5).contains(&bg_mode) {
             self.increment_affine_refs(2, io);
         }
+        // BG3 affine refs are only used in mode 2
         if bg_mode == 2 {
             self.increment_affine_refs(3, io);
         }
@@ -601,12 +622,13 @@ impl Ppu {
             (self.bg3_ref_x, self.bg3_ref_y)
         };
 
-        // Get affine parameters (PA, PB, PC for horizontal increments)
+        // Get affine parameters for per-pixel horizontal stepping
         // Affine matrix: [PA PB]   where PA/PB affect X coordinate
         //                [PC PD]   and   PC/PD affect Y coordinate
         let pa_offset = if bg_idx == 2 { BG2PA } else { BG3PA };
+        let pc_offset = if bg_idx == 2 { BG2PC } else { BG3PC };
         let pa = read_io_i16(io, pa_offset) as i32; // X increment per screen X
-        let pc = read_io_i16(io, pa_offset + 4) as i32; // Y increment per screen X
+        let pc = read_io_i16(io, pc_offset) as i32; // Y increment per screen X
 
         // Affine BGs are always 8bpp with a single 256-color palette
         for x in 0..SCREEN_WIDTH {
@@ -673,18 +695,23 @@ impl Ppu {
         }
     }
 
-    /// Increment affine reference points by PD/PC for the next scanline
+    /// Increment affine reference points by PB/PD for the next scanline.
+    ///
+    /// Per GBA hardware, after each scanline the internal reference points
+    /// are updated:
+    ///   ref_x += PB  (dmx: horizontal displacement per scanline)
+    ///   ref_y += PD  (dmy: vertical displacement per scanline)
     fn increment_affine_refs(&mut self, bg_idx: usize, io: &[u8]) {
+        let pb_offset = if bg_idx == 2 { BG2PB } else { BG3PB };
         let pd_offset = if bg_idx == 2 { BG2PD } else { BG3PD };
-        let pc_offset = if bg_idx == 2 { BG2PC } else { BG3PC };
-        let pc = read_io_i16(io, pc_offset) as i32;
+        let pb = read_io_i16(io, pb_offset) as i32;
         let pd = read_io_i16(io, pd_offset) as i32;
 
         if bg_idx == 2 {
-            self.bg2_ref_x += pc;
+            self.bg2_ref_x += pb;
             self.bg2_ref_y += pd;
         } else {
-            self.bg3_ref_x += pc;
+            self.bg3_ref_x += pb;
             self.bg3_ref_y += pd;
         }
     }
@@ -693,12 +720,32 @@ impl Ppu {
     // Bitmap mode rendering (Modes 3, 4, 5)
     // =========================================================================
 
-    fn render_bitmap_mode3(&mut self, line: u32, io: &[u8], vram: &[u8]) {
+    fn render_bitmap_mode3(&mut self, _line: u32, io: &[u8], vram: &[u8]) {
         let bgcnt = read_io_u16(io, BG0CNT + 2 * 2); // BG2CNT
         let priority = (bgcnt & BGCNT_PRIORITY_MASK) as u8;
 
+        // Use BG2 affine parameters for rotation/scaling
+        let ref_x = self.bg2_ref_x;
+        let ref_y = self.bg2_ref_y;
+        let pa = read_io_i16(io, BG2PA) as i32;
+        let pc = read_io_i16(io, BG2PC) as i32;
+
         for x in 0..SCREEN_WIDTH {
-            let offset = (line as usize * SCREEN_WIDTH + x) * 2;
+            let src_x = ref_x + pa * x as i32;
+            let src_y = ref_y + pc * x as i32;
+            let tex_x = src_x >> 8;
+            let tex_y = src_y >> 8;
+
+            // Clamp to screen bounds (no wrapping for bitmap modes)
+            if tex_x < 0
+                || tex_y < 0
+                || tex_x >= SCREEN_WIDTH as i32
+                || tex_y >= SCREEN_HEIGHT as i32
+            {
+                continue;
+            }
+
+            let offset = (tex_y as usize * SCREEN_WIDTH + tex_x as usize) * 2;
             if offset + 1 < vram.len() {
                 let color = vram[offset] as u16 | ((vram[offset + 1] as u16) << 8);
                 self.bg_lines[2][x] = LayerPixel {
@@ -714,7 +761,7 @@ impl Ppu {
 
     fn render_bitmap_mode4(
         &mut self,
-        line: u32,
+        _line: u32,
         dispcnt: u16,
         io: &[u8],
         palette: &[u8],
@@ -728,8 +775,27 @@ impl Ppu {
             0
         };
 
+        // Use BG2 affine parameters for rotation/scaling
+        let ref_x = self.bg2_ref_x;
+        let ref_y = self.bg2_ref_y;
+        let pa = read_io_i16(io, BG2PA) as i32;
+        let pc = read_io_i16(io, BG2PC) as i32;
+
         for x in 0..SCREEN_WIDTH {
-            let offset = page + line as usize * SCREEN_WIDTH + x;
+            let src_x = ref_x + pa * x as i32;
+            let src_y = ref_y + pc * x as i32;
+            let tex_x = src_x >> 8;
+            let tex_y = src_y >> 8;
+
+            if tex_x < 0
+                || tex_y < 0
+                || tex_x >= SCREEN_WIDTH as i32
+                || tex_y >= SCREEN_HEIGHT as i32
+            {
+                continue;
+            }
+
+            let offset = page + tex_y as usize * SCREEN_WIDTH + tex_x as usize;
             if offset < vram.len() {
                 let idx = vram[offset] as usize;
                 if idx != 0 {
@@ -746,7 +812,7 @@ impl Ppu {
         }
     }
 
-    fn render_bitmap_mode5(&mut self, line: u32, dispcnt: u16, io: &[u8], vram: &[u8]) {
+    fn render_bitmap_mode5(&mut self, _line: u32, dispcnt: u16, io: &[u8], vram: &[u8]) {
         let bgcnt = read_io_u16(io, BG0CNT + 2 * 2);
         let priority = (bgcnt & BGCNT_PRIORITY_MASK) as u8;
         let page = if dispcnt & DISPCNT_FRAME_SELECT != 0 {
@@ -755,12 +821,27 @@ impl Ppu {
             0
         };
 
-        if line >= 128 {
-            return;
-        }
+        // Mode 5: 160x128 resolution
+        const MODE5_WIDTH: i32 = 160;
+        const MODE5_HEIGHT: i32 = 128;
 
-        for x in 0..160 {
-            let offset = page + (line as usize * 160 + x) * 2;
+        // Use BG2 affine parameters for rotation/scaling
+        let ref_x = self.bg2_ref_x;
+        let ref_y = self.bg2_ref_y;
+        let pa = read_io_i16(io, BG2PA) as i32;
+        let pc = read_io_i16(io, BG2PC) as i32;
+
+        for x in 0..SCREEN_WIDTH {
+            let src_x = ref_x + pa * x as i32;
+            let src_y = ref_y + pc * x as i32;
+            let tex_x = src_x >> 8;
+            let tex_y = src_y >> 8;
+
+            if tex_x < 0 || tex_y < 0 || tex_x >= MODE5_WIDTH || tex_y >= MODE5_HEIGHT {
+                continue;
+            }
+
+            let offset = page + (tex_y as usize * MODE5_WIDTH as usize + tex_x as usize) * 2;
             if offset + 1 < vram.len() {
                 let color = vram[offset] as u16 | ((vram[offset + 1] as u16) << 8);
                 self.bg_lines[2][x] = LayerPixel {
@@ -935,9 +1016,11 @@ impl Ppu {
                         tile_base_id + tile_offset as usize
                     }
                 } else {
-                    // 2D mapping: 32 tiles per row in VRAM
+                    // 2D mapping: 32 tile-IDs per row in VRAM regardless of BPP.
+                    // For 8bpp, each 8x8 tile spans 2 consecutive tile IDs,
+                    // but the row stride remains 32 tile-IDs.
                     if is_8bpp {
-                        tile_base_id + (tile_y as usize * 32 + tile_x as usize) * 2
+                        tile_base_id + tile_y as usize * 32 + tile_x as usize * 2
                     } else {
                         tile_base_id + tile_y as usize * 32 + tile_x as usize
                     }
@@ -1575,6 +1658,166 @@ mod tests {
         ppu.render_scanline(0, &io, &palette, &vram, &oam);
 
         assert_eq!(ppu.frame.pixels[0], gba_color_to_rgb(0x03E0));
+    }
+
+    #[test]
+    fn test_mode4_full_frame_diverse_palette() {
+        // This test simulates what a game like Doom does:
+        // 1. Set up Mode 4 with identity affine transform
+        // 2. Fill palette with 16 distinct colors (a grayscale ramp)
+        // 3. Fill VRAM framebuffer with varied pixel indices
+        // 4. Render all 160 scanlines
+        // 5. Verify output has correct colors at specific positions
+
+        let mut ppu = Ppu::new();
+        let mut io = vec![0u8; 0x400];
+        let mut palette = vec![0u8; 0x400];
+        let mut vram = vec![0u8; 0x18000];
+        let oam = vec![0u8; 0x400];
+
+        // Mode 4, BG2 enabled, page 0
+        io[DISPCNT] = 4;
+        io[DISPCNT + 1] = (DISPCNT_BG2_ENABLE >> 8) as u8;
+
+        // Set BG2PA = 0x0100 (1.0) and BG2PD = 0x0100 (1.0) for identity transform
+        io[BG2PA] = 0x00;
+        io[BG2PA + 1] = 0x01;
+        io[BG2PB] = 0x00;
+        io[BG2PB + 1] = 0x00;
+        io[BG2PC] = 0x00;
+        io[BG2PC + 1] = 0x00;
+        io[BG2PD] = 0x00;
+        io[BG2PD + 1] = 0x01;
+
+        // Set up a 16-color grayscale palette (entries 0-15)
+        // Entry 0 = black (0x0000)
+        palette[0] = 0x00;
+        palette[1] = 0x00;
+        // Entries 1-15: grayscale ramp
+        for i in 1u16..16 {
+            let gray = (i * 2) & 0x1F; // 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30
+            let color = gray | (gray << 5) | (gray << 10);
+            palette[(i as usize) * 2] = color as u8;
+            palette[(i as usize) * 2 + 1] = (color >> 8) as u8;
+        }
+
+        // Fill VRAM with a pattern: pixel value = (x + y) % 16
+        for y in 0..160usize {
+            for x in 0..240usize {
+                vram[y * 240 + x] = ((x + y) % 16) as u8;
+            }
+        }
+
+        // Latch affine registers (like frame start)
+        ppu.latch_affine_registers(&io);
+
+        // Render all 160 scanlines
+        // Note: render_scanline already calls increment_affine_refs internally
+        for line in 0..160u32 {
+            ppu.render_scanline(line, &io, &palette, &vram, &oam);
+        }
+
+        // Verify specific pixels
+        // Pixel (0,0): index = (0+0)%16 = 0 → transparent → backdrop (palette[0] = black)
+        assert_eq!(
+            ppu.frame.pixels[0],
+            gba_color_to_rgb(0x0000),
+            "Pixel (0,0) should be black (palette[0])"
+        );
+
+        // Pixel (1,0): index = (1+0)%16 = 1 → palette entry 1 = gray level 2
+        let expected_gray1 = 2u16 | (2u16 << 5) | (2u16 << 10);
+        assert_eq!(
+            ppu.frame.pixels[1],
+            gba_color_to_rgb(expected_gray1),
+            "Pixel (1,0) should be palette[1]"
+        );
+
+        // Pixel (15,0): index = (15+0)%16 = 15 → palette entry 15 = gray level 30
+        let expected_gray15 = 30u16 | (30u16 << 5) | (30u16 << 10);
+        assert_eq!(
+            ppu.frame.pixels[15],
+            gba_color_to_rgb(expected_gray15),
+            "Pixel (15,0) should be palette[15]"
+        );
+
+        // Pixel (0,1): index = (0+1)%16 = 1 → same as palette entry 1
+        assert_eq!(
+            ppu.frame.pixels[240],
+            gba_color_to_rgb(expected_gray1),
+            "Pixel (0,1) should be palette[1]"
+        );
+
+        // Pixel (100,80): index = (100+80)%16 = 180%16 = 4 → palette entry 4 = gray level 8
+        let expected_gray4 = 8u16 | (8u16 << 5) | (8u16 << 10);
+        assert_eq!(
+            ppu.frame.pixels[80 * 240 + 100],
+            gba_color_to_rgb(expected_gray4),
+            "Pixel (100,80) should be palette[4]"
+        );
+
+        // Count unique colors in the frame - should have 16 distinct values
+        let mut unique: std::collections::HashSet<u32> = std::collections::HashSet::new();
+        for y in 0..160 {
+            for x in 0..240 {
+                unique.insert(ppu.frame.pixels[y * 240 + x]);
+            }
+        }
+        assert!(
+            unique.len() >= 16,
+            "Expected at least 16 unique colors, got {}",
+            unique.len()
+        );
+    }
+
+    #[test]
+    fn test_mode4_page_flip() {
+        // Test that page flipping (DISPCNT bit 4) reads from the correct VRAM page
+        let mut ppu = Ppu::new();
+        let mut io = vec![0u8; 0x400];
+        let mut palette = vec![0u8; 0x400];
+        let mut vram = vec![0u8; 0x18000];
+        let oam = vec![0u8; 0x400];
+
+        // Mode 4, BG2 enabled
+        io[DISPCNT] = 4;
+        io[DISPCNT + 1] = (DISPCNT_BG2_ENABLE >> 8) as u8;
+
+        // Identity affine
+        io[BG2PA] = 0x00;
+        io[BG2PA + 1] = 0x01;
+        io[BG2PD] = 0x00;
+        io[BG2PD + 1] = 0x01;
+
+        // Palette: entry 1 = red, entry 2 = blue
+        palette[2] = 0x1F;
+        palette[3] = 0x00; // Red
+        palette[4] = 0x00;
+        palette[5] = 0x7C; // Blue
+
+        // Page 0: pixel (0,0) = index 1 (red)
+        vram[0] = 1;
+        // Page 1: pixel (0,0) = index 2 (blue)
+        vram[0xA000] = 2;
+
+        // Render page 0
+        ppu.latch_affine_registers(&io);
+        ppu.render_scanline(0, &io, &palette, &vram, &oam);
+        assert_eq!(
+            ppu.frame.pixels[0],
+            gba_color_to_rgb(0x001F),
+            "Page 0 should show red"
+        );
+
+        // Switch to page 1 (set DISPCNT bit 4)
+        io[DISPCNT] = 4 | 0x10; // mode 4 + frame select
+        ppu.latch_affine_registers(&io);
+        ppu.render_scanline(0, &io, &palette, &vram, &oam);
+        assert_eq!(
+            ppu.frame.pixels[0],
+            gba_color_to_rgb(0x7C00),
+            "Page 1 should show blue"
+        );
     }
 
     #[test]

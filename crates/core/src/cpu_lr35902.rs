@@ -49,8 +49,10 @@ pub struct CpuLr35902<M: MemoryLr35902> {
     pub pc: u16,
     /// Interrupt Master Enable flag
     pub ime: bool,
-    /// IME enable pending (EI enables after next instruction)
-    ime_enable_pending: bool,
+    /// IME enable delay counter.  EI sets this to 2; it is decremented at the
+    /// end of every step.  When it reaches 0, IME becomes true.  This ensures
+    /// the instruction immediately following EI still executes with IME == false.
+    ime_enable_delay: u8,
     /// Halted state
     pub halted: bool,
     /// HALT bug flag (next opcode fetch does not increment PC)
@@ -84,7 +86,7 @@ impl<M: MemoryLr35902> CpuLr35902<M> {
             sp: 0,
             pc: 0,
             ime: false,
-            ime_enable_pending: false,
+            ime_enable_delay: 0,
             halted: false,
             halt_bug: false,
             stopped: false,
@@ -113,7 +115,7 @@ impl<M: MemoryLr35902> CpuLr35902<M> {
         self.sp = 0xFFFE;
         self.pc = 0x100; // Game Boy entry point after boot ROM
         self.ime = false;
-        self.ime_enable_pending = false;
+        self.ime_enable_delay = 0;
         self.halted = false;
         self.halt_bug = false;
         self.stopped = false;
@@ -135,9 +137,14 @@ impl<M: MemoryLr35902> CpuLr35902<M> {
         let opcode = self.read_pc();
         let cycles = self.execute(opcode);
 
-        if self.ime_enable_pending {
-            self.ime = true;
-            self.ime_enable_pending = false;
+        // EI sets ime_enable_delay to 2.  Decrement each step; when it reaches
+        // 0, enable IME.  This ensures the instruction immediately after EI
+        // still executes with IME == false (correct hardware behavior).
+        if self.ime_enable_delay > 0 {
+            self.ime_enable_delay -= 1;
+            if self.ime_enable_delay == 0 {
+                self.ime = true;
+            }
         }
 
         cycles
@@ -1175,11 +1182,11 @@ impl<M: MemoryLr35902> CpuLr35902<M> {
             // DI / EI
             0xF3 => {
                 self.ime = false;
-                self.ime_enable_pending = false;
+                self.ime_enable_delay = 0;
                 4
             }
             0xFB => {
-                self.ime_enable_pending = true;
+                self.ime_enable_delay = 2;
                 4
             }
 

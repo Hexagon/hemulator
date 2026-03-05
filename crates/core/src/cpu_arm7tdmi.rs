@@ -159,6 +159,20 @@ pub trait MemoryArm7 {
     fn irq_pending(&self) -> bool {
         false
     }
+
+    /// Check if IE & IF match (for HALT wakeup, independent of IME/CPSR I flag)
+    /// On real hardware, HALT exits when (IE & IF) != 0 regardless of IME.
+    fn halt_irq_pending(&self) -> bool {
+        self.irq_pending()
+    }
+
+    /// Called before the CPU enters an IRQ exception.
+    ///
+    /// On the GBA, the real BIOS IRQ handler acknowledges IF and updates
+    /// BIOS IF at 0x03007FF8 before calling the game's ISR. Since we use
+    /// an HLE BIOS stub, this method allows the memory bus to perform
+    /// those critical bookkeeping steps.
+    fn pre_irq_acknowledge(&mut self) {}
 }
 
 // =============================================================================
@@ -636,6 +650,13 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
     /// Emulate GBA BIOS SWI calls (when BIOS ROM is not present).
     /// Returns true if the SWI was handled here and no exception is needed.
     fn handle_bios_swi(&mut self, imm: u32) -> bool {
+        // Log all SWI calls for debugging
+        log(LogCategory::Stubs, LogLevel::Debug, || {
+            format!(
+                "SWI 0x{:02X} called at PC=${:08X} R0={:08X} R1={:08X} R2={:08X}",
+                imm, self.gpr[15], self.gpr[0], self.gpr[1], self.gpr[2]
+            )
+        });
         match imm {
             0x06 => {
                 // Div (signed) - R0 / R1
@@ -720,6 +741,33 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
                 let src = self.gpr[0];
                 let dst = self.gpr[1];
                 self.bios_rl_decompress(src, dst, true);
+                true
+            }
+            0x16 => {
+                // Diff8bitUnFilterWram
+                let src = self.gpr[0];
+                let dst = self.gpr[1];
+                self.bios_diff_filter(src, dst, 1, false);
+                true
+            }
+            0x17 => {
+                // Diff8bitUnFilterVram
+                let src = self.gpr[0];
+                let dst = self.gpr[1];
+                self.bios_diff_filter(src, dst, 1, true);
+                true
+            }
+            0x18 => {
+                // Diff16bitUnFilter
+                let src = self.gpr[0];
+                let dst = self.gpr[1];
+                self.bios_diff_filter(src, dst, 2, true);
+                true
+            }
+            0x25 => {
+                // MultiBoot - link cable boot, stub as no-op for single player
+                // Return error in r0 (1 = failure, no linked GBA)
+                self.gpr[0] = 1;
                 true
             }
             0x00 => {
@@ -807,6 +855,9 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
                 // Enable IME so interrupts can fire
                 self.memory.write_halfword(0x0400_0208, 1);
 
+                // Ensure IRQs are enabled in CPSR so we can wake from halt
+                self.cpsr &= !FLAG_I;
+
                 // Halt until an interrupt wakes us
                 self.halted = true;
                 true
@@ -823,6 +874,9 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
 
                 // Enable IME
                 self.memory.write_halfword(0x0400_0208, 1);
+
+                // Ensure IRQs are enabled in CPSR so we can wake from halt
+                self.cpsr &= !FLAG_I;
 
                 // Halt until interrupt
                 self.halted = true;
@@ -938,20 +992,22 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
     }
 
     fn bios_cpu_fast_set(&mut self, mut src: u32, mut dst: u32, control: u32) {
+        // CpuFastSet transfers 32 bytes (8 words) at a time for efficiency.
+        // The count field (bits 0-20) is the number of words to transfer,
+        // and must be a multiple of 8. We don't multiply by 8 — count IS the word count.
         let count = control & 0x001F_FFFF;
         if count == 0 {
             return;
         }
 
         let fixed = (control & 0x0100_0000) != 0;
-        let total_words = count * 8;
 
         let mut value = 0u32;
         if fixed {
             value = self.memory.read_word(src & !3);
         }
 
-        for _ in 0..total_words {
+        for _ in 0..count {
             let v = if fixed {
                 value
             } else {
@@ -966,7 +1022,8 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
 
     fn bios_lz77_decompress(&mut self, src: u32, dst: u32, vram: bool) {
         let header = self.memory.read_byte(src);
-        if header != 0x10 {
+        // Header byte: bits 7-4 = compression type (1 = LZ77), bits 3-0 = reserved
+        if (header >> 4) != 1 {
             return;
         }
 
@@ -1015,7 +1072,8 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
 
     fn bios_rl_decompress(&mut self, src: u32, dst: u32, vram: bool) {
         let header = self.memory.read_byte(src);
-        if header != 0x30 {
+        // Header byte: bits 7-4 = compression type (3 = RLE), bits 3-0 = reserved
+        if (header >> 4) != 3 {
             return;
         }
 
@@ -1078,6 +1136,50 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
                 addr = addr.wrapping_add(1);
             }
         }
+    }
+
+    /// Differential unfilter (SWI 0x16/0x17/0x18)
+    ///
+    /// Reverses delta encoding: each output value = previous output + current input.
+    /// `unit_size`: 1 for 8-bit (SWI 0x16/0x17), 2 for 16-bit (SWI 0x18).
+    /// `vram`: if true, write in 16-bit units (required for VRAM).
+    fn bios_diff_filter(&mut self, src: u32, dst: u32, unit_size: u32, vram: bool) {
+        let header = self.memory.read_byte(src);
+        // Header byte: bits 7-4 = compression type (8 = diff), bits 3-0 = data size
+        if (header >> 4) != 8 {
+            return;
+        }
+
+        let len = (self.memory.read_byte(src + 1) as u32)
+            | ((self.memory.read_byte(src + 2) as u32) << 8)
+            | ((self.memory.read_byte(src + 3) as u32) << 16);
+
+        let mut src_ptr = src + 4;
+        let mut out: Vec<u8> = Vec::with_capacity(len as usize);
+
+        if unit_size == 1 {
+            // 8-bit differential unfilter
+            let mut prev: u8 = 0;
+            while out.len() < len as usize {
+                let b = self.memory.read_byte(src_ptr);
+                src_ptr = src_ptr.wrapping_add(1);
+                prev = prev.wrapping_add(b);
+                out.push(prev);
+            }
+        } else {
+            // 16-bit differential unfilter
+            let mut prev: u16 = 0;
+            while out.len() + 1 < len as usize {
+                let lo = self.memory.read_byte(src_ptr) as u16;
+                let hi = self.memory.read_byte(src_ptr.wrapping_add(1)) as u16;
+                src_ptr = src_ptr.wrapping_add(2);
+                prev = prev.wrapping_add(lo | (hi << 8));
+                out.push(prev as u8);
+                out.push((prev >> 8) as u8);
+            }
+        }
+
+        self.bios_write_decompressed(dst, &out, vram);
     }
 
     fn bios_bg_affine_set(&mut self, mut src: u32, mut dst: u32, count: u32) {
@@ -1205,26 +1307,32 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
 
     /// Huffman decompression (BIOS SWI 0x13)
     ///
-    /// Format:
-    /// - Header [0]: Compression type (bit 7-4: data width 4/8, bit 3-0: 0x2 for Huffman)
-    /// - Header [1-3]: Decompressed size in bytes (24-bit little endian)
-    /// - Tree size: (tree_size+1)*2 bytes, aligned to 4 bytes
-    /// - Tree data: Binary tree nodes
-    /// - Compressed data: Bitstream referencing the tree
+    /// Format (per GBATEK):
+    /// - Header word `[0..3]`: bits 0-3 = data width (4 or 8), bits 4-7 = type (2),
+    ///   bits 8-31 = decompressed size in bytes
+    /// - Tree table `[(tree_size+1)*2 bytes, starting at header+4]`:
+    ///   - Byte 0: Tree size = (tree\_table\_bytes / 2) - 1
+    ///   - Byte 1: Root node
+    ///   - Bytes 2+: Child/leaf nodes
     ///
-    /// The tree is encoded as: Each node is 1 byte:
-    /// - If bit 7 = 1: Internal node, bits 5-0 = offset to right child node
-    /// - If bit 7 = 0: Leaf node, bits 7-0 = data value (or 4 bits for 4-bit mode)
+    ///   Each non-leaf node byte:
+    ///   - Bit 7: Left child is a data/leaf node (1) or routing node (0)
+    ///   - Bit 6: Right child is a data/leaf node (1) or routing node (0)
+    ///   - Bits 0-5: Offset to next node pair
     ///
-    /// Decompression walks the tree: 0 bit = left child, 1 bit = right child
+    ///   Child positions: `left = (pos & !1) + offset*2 + 2`,
+    ///   `right = left + 1`, where pos is within the tree table (root=1).
+    /// - Compressed bitstream: 32-bit words, MSB first (0=left, 1=right)
     fn bios_huff_uncomp(&mut self, src: u32, dst: u32) {
         // Read header
         let header = self.memory.read_word(src);
         let compression_type = (header & 0xFF) as u8;
         let decompressed_size = (header >> 8) & 0x00FF_FFFF;
 
-        // Extract data width (4 or 8 bits)
-        let data_width = (compression_type >> 4) & 0x0F;
+        // Extract data width (4 or 8 bits) from the low nibble
+        // Header byte format: bits 4-7 = type (2=Huffman), bits 0-3 = data width (4 or 8)
+        let data_width = compression_type & 0x0F;
+
         if data_width != 4 && data_width != 8 {
             log(LogCategory::Stubs, LogLevel::Warn, || {
                 format!(
@@ -1235,13 +1343,16 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
             return;
         }
 
-        // Tree size byte (number of tree nodes)
+        // Tree size byte: (tree_table_bytes / 2) - 1
+        // Per GBATEK, the tree table includes the tree_size byte at position 0.
+        // The root node is at position 1 (first byte to skip is the tree_size).
+        // "CurrentAddr" in the GBATEK offset formula is relative to this base.
         let tree_size = self.memory.read_byte(src + 4) as u32;
-        let tree_byte_size = (tree_size + 1) * 2; // Each node is 1 byte, pairs stored
-        let tree_offset = 5; // Header (4 bytes) + tree size (1 byte)
+        let tree_byte_size = (tree_size + 1) * 2; // Total tree table size (incl. tree_size byte)
+        let tree_base = src + 4; // Tree table base (position 0 = tree_size byte)
 
-        // Calculate where compressed data starts (aligned to 4 bytes after tree)
-        let data_start = src + tree_offset + ((tree_byte_size + 3) & !3);
+        // Compressed data starts at next word-aligned position after tree table
+        let data_start = (tree_base + tree_byte_size + 3) & !3;
 
         let mut dst_addr = dst;
         let mut bytes_written = 0u32;
@@ -1251,73 +1362,95 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
         let mut bits_available = 0u32;
         let mut data_addr = data_start;
 
+        // Accumulator for building output words (VRAM-safe: write 32 bits at a time)
+        let mut out_word = 0u32;
+        let mut out_bits = 0u32;
+
         while bytes_written < decompressed_size {
-            // Start at root of tree (node 0)
-            let mut node_offset = 0u32;
+            // Start at root of tree (position 1, skipping tree_size byte at position 0)
+            let mut node_pos = 1u32;
 
             loop {
-                // Read the current tree node
-                let node_addr = src + tree_offset + node_offset;
-                let node_byte = self.memory.read_byte(node_addr);
+                // Read the current routing node
+                let node_byte = self.memory.read_byte(tree_base + node_pos);
+                let offset = (node_byte & 0x3F) as u32;
+                let left_is_leaf = node_byte & 0x80 != 0;
+                let right_is_leaf = node_byte & 0x40 != 0;
 
-                // Check if this is an internal node (bit 7 = 1) or leaf (bit 7 = 0)
-                if node_byte & 0x80 != 0 {
-                    // Internal node - need to read a bit to decide left or right
-                    if bits_available == 0 {
-                        bit_buffer = self.memory.read_word(data_addr);
-                        data_addr += 4;
-                        bits_available = 32;
-                    }
+                // Read a bit from the compressed stream
+                if bits_available == 0 {
+                    bit_buffer = self.memory.read_word(data_addr);
+                    data_addr += 4;
+                    bits_available = 32;
+                }
 
-                    let bit = (bit_buffer >> 31) & 1;
-                    bit_buffer <<= 1;
-                    bits_available -= 1;
+                let bit = (bit_buffer >> 31) & 1;
+                bit_buffer <<= 1;
+                bits_available -= 1;
 
-                    // Calculate child node offset
-                    // Bit 6 indicates if offset is in upper or lower 6 bits
-                    let offset_data = (node_byte & 0x3F) as u32;
-                    if bit == 0 {
-                        // Left child - offset*2 + 2 from current node
-                        node_offset = node_offset + (offset_data * 2) + 2;
-                    } else {
-                        // Right child - offset*2 + 2 + 1 from current node
-                        node_offset = node_offset + (offset_data * 2) + 2 + 1;
-                    }
+                // Navigate to child node per GBATEK:
+                //   disp = (CurrentAddr AND NOT 1) + Offset*2 + 2
+                //   child node0 (bit=0, left) at disp
+                //   child node1 (bit=1, right) at disp + 1
+                let disp = (node_pos & !1) + offset * 2 + 2;
+                let is_leaf;
+                if bit == 0 {
+                    // Left child (node0)
+                    is_leaf = left_is_leaf;
+                    node_pos = disp;
                 } else {
-                    // Leaf node - extract data value
-                    let data_value = node_byte;
+                    // Right child (node1)
+                    is_leaf = right_is_leaf;
+                    node_pos = disp + 1;
+                }
+
+                if is_leaf {
+                    // Child is a data node: read the byte at the child position
+                    let data_value = self.memory.read_byte(tree_base + node_pos);
 
                     if data_width == 8 {
-                        // 8-bit mode: write the byte directly
-                        self.memory.write_byte(dst_addr, data_value);
-                        dst_addr += 1;
+                        // 8-bit mode: accumulate into 32-bit output word
+                        out_word |= (data_value as u32) << out_bits;
+                        out_bits += 8;
                         bytes_written += 1;
                     } else {
-                        // 4-bit mode: need to pack two 4-bit values into one byte
-                        // The node contains both nibbles: high nibble first, low nibble second
-                        let nibble1 = (data_value >> 4) & 0x0F;
-                        let nibble2 = data_value & 0x0F;
-
-                        self.memory.write_byte(dst_addr, nibble1);
-                        dst_addr += 1;
-                        bytes_written += 1;
-
-                        if bytes_written < decompressed_size {
-                            self.memory.write_byte(dst_addr, nibble2);
-                            dst_addr += 1;
+                        // 4-bit mode: each leaf contains one 4-bit value
+                        out_word |= (data_value as u32 & 0xF) << out_bits;
+                        out_bits += 4;
+                        // Two 4-bit values make one byte
+                        if out_bits.is_multiple_of(8) {
                             bytes_written += 1;
                         }
                     }
 
-                    // Done with this symbol, break inner loop to start at root again
+                    // Write a full 32-bit word when accumulated
+                    if out_bits >= 32 {
+                        self.memory.write_word(dst_addr, out_word);
+                        dst_addr += 4;
+                        out_word = 0;
+                        out_bits = 0;
+                    }
+
+                    // Done decoding this symbol, restart at root
                     break;
                 }
+                // Otherwise, continue navigating the tree from the child node
             }
+        }
+
+        // Write any remaining partial word
+        if out_bits > 0 {
+            self.memory.write_word(dst_addr, out_word);
         }
     }
 
     /// Handle an IRQ
     fn handle_irq(&mut self) {
+        // Acknowledge IF and update BIOS IF before entering the exception.
+        // On real hardware, the BIOS IRQ handler does this before calling
+        // the game's ISR. Since our BIOS stub is minimal, we do it here.
+        self.memory.pre_irq_acknowledge();
+
         // In our emulator, PC = address of next instruction to execute.
         // ARM7TDMI convention: LR_irq = next_instruction_addr + 4
         // The BIOS returns with SUBS PC, LR, #4 → PC = LR - 4 = next_instruction_addr
@@ -1585,9 +1718,15 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
     pub fn step(&mut self) -> u32 {
         let start_cycles = self.cycles;
 
-        // Check for pending interrupts
+        // Wake from halt when (IE & IF) != 0 — independent of IME and CPSR I flag
+        // On real hardware, HALT exits on this condition; the IRQ vector only fires
+        // if IME=1 and I=0 (checked separately by check_interrupts).
+        if self.halted && self.memory.halt_irq_pending() {
+            self.halted = false;
+        }
+
+        // Check for pending interrupts (requires CPSR I=0 and hardware irq_pending)
         if self.check_interrupts() {
-            self.halted = false; // IRQ wakes CPU from halt
             self.cycles += 3; // IRQ entry takes ~3 cycles
             return (self.cycles - start_cycles) as u32;
         }
@@ -1669,8 +1808,9 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
                 self.arm_halfword_transfer(instr);
             }
 
-            // MRS (transfer PSR to register)
-            (0b000, 0b0000) if bits_27_20 & 0x1F == 0x10 => {
+            // MRS (transfer PSR to register) — matches both CPSR (R=0) and SPSR (R=1)
+            // R bit is bit 22 which is bit 2 of bits_27_20, so mask with 0x1B to ignore it
+            (0b000, 0b0000) if bits_27_20 & 0x1B == 0x10 => {
                 self.arm_mrs(instr);
             }
 
@@ -1687,8 +1827,12 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
                 self.arm_data_processing(instr);
             }
 
-            // Single data transfer (LDR/STR)
-            (0b010, _) | (0b011, _) => {
+            // Single data transfer (LDR/STR) — immediate offset or register offset
+            // Note: bits 27:25 = 011 with bit 4 = 1 is UNDEFINED on ARM7TDMI
+            (0b010, _) => {
+                self.arm_single_data_transfer(instr);
+            }
+            (0b011, _) if bits_7_4 & 1 == 0 => {
                 self.arm_single_data_transfer(instr);
             }
 
@@ -1863,7 +2007,8 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
                 let spsr = self.get_spsr();
                 let new_mode = ProcessorMode::from_bits(spsr).unwrap_or(ProcessorMode::System);
                 self.switch_mode(new_mode);
-                self.cpsr = spsr;
+                // Ensure CPSR has valid mode bits even if SPSR was corrupted
+                self.cpsr = (spsr & !MODE_MASK) | new_mode.to_bits();
             }
         } else {
             self.gpr[rd] = result;
@@ -2221,7 +2366,8 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
                             let new_mode =
                                 ProcessorMode::from_bits(spsr).unwrap_or(ProcessorMode::System);
                             self.switch_mode(new_mode);
-                            self.cpsr = spsr;
+                            // Ensure CPSR has valid mode bits even if SPSR was corrupted
+                            self.cpsr = (spsr & !MODE_MASK) | new_mode.to_bits();
                         }
                     } else {
                         self.gpr[i as usize] = val;
@@ -2333,12 +2479,16 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
             self.set_spsr((spsr & !mask) | (value & mask));
         } else {
             let old_cpsr = self.cpsr;
-            let new_cpsr = (old_cpsr & !mask) | (value & mask);
+            let mut new_cpsr = (old_cpsr & !mask) | (value & mask);
 
             // If mode bits changed, switch modes
             if (old_cpsr & MODE_MASK) != (new_cpsr & MODE_MASK) {
                 if let Some(new_mode) = ProcessorMode::from_bits(new_cpsr) {
                     self.switch_mode(new_mode);
+                } else {
+                    // Invalid mode bits: force System mode to prevent corruption
+                    new_cpsr = (new_cpsr & !MODE_MASK) | MODE_SYSTEM;
+                    self.switch_mode(ProcessorMode::System);
                 }
             }
             self.cpsr = new_cpsr;

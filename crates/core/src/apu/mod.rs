@@ -66,7 +66,7 @@ pub use polynomial::PolynomialCounter;
 pub use pulse::PulseChannel;
 pub use rp2a03::Rp2a03Apu;
 pub use rp2a07::Rp2a07Apu;
-pub use sn76489::Sn76489Psg;
+pub use sn76489::{Sn76489Adapter, Sn76489Psg};
 pub use spc700::Spc700;
 pub use sweep::SweepUnit;
 pub use timing::TimingMode;

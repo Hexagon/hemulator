@@ -6,7 +6,7 @@ nav_order: 5
 
 # Supported Systems
 
-This emulator supports 11 different retro gaming systems. **NES emulation is fully working** with ~90% game coverage. Other systems are in various stages of development.
+This emulator supports 12 different retro gaming systems. **NES emulation is fully working** with ~90% game coverage. Other systems are in various stages of development.
 
 | System | Status | What Works | What's Missing | Recommended For |
 |--------|--------|------------|----------------|-----------------|
@@ -18,8 +18,9 @@ This emulator supports 11 different retro gaming systems. **NES emulation is ful
 | **SMS** | 🚧 In Development | Z80 CPU, VDP, PSG, ROM banking | Not producing image, test ROM | Development only |
 | **ColecoVision** | 🚧 In Development | Z80 CPU, TMS9918A VDP, SN76489 PSG | Not producing image, audio output, BIOS required | Development only |
 | **SG-1000** | ⚠️ Experimental | Z80 CPU, TMS9918A VDP, SN76489 PSG | Audio output, test ROM | Development/testing |
-| **SNES** | ✅ Functional | CPU, all PPU modes 0-7, sprites, DMA/HDMA | Audio (DSP), some enhancement chips | Playing most games (silent) |
+| **SNES** | ✅ Functional | CPU, all PPU modes 0-7, sprites, DMA/HDMA, SPC700+DSP audio | Some enhancement chips | Playing most games with audio |
 | **N64** | 🚧 In Development | 3D rendering, CPU | Full graphics, audio, games | Development/testing |
+| **PS1** | 🚧 In Development | MIPS R3000A CPU, GPU (2D/3D), DMA, timers | Audio, CD-ROM, save states | Development/testing |
 | **PC/DOS** | 🧪 Experimental | Multi-slot mounts, disk controller, custom BIOS, CGA/EGA/VGA | Full disk I/O, boot | Development/testing |
 
 ### NES (Nintendo Entertainment System)
@@ -537,8 +538,8 @@ For detailed technical information, see [crates/systems/sg1000/README.md](../../
 
 ### SNES (Super Nintendo Entertainment System)
 
-**Status**: ✅ Functional (Graphics Working!)  
-**Coverage**: Complete CPU, comprehensive PPU with all modes 0-7, full DMA/HDMA
+**Status**: ✅ Functional  
+**Coverage**: Complete CPU, comprehensive PPU with all modes 0-7, full DMA/HDMA, SPC700+DSP audio
 
 **ROM Format**: SMC/SFC (.smc, .sfc files) - automatically detected
 
@@ -557,13 +558,13 @@ For detailed technical information, see [crates/systems/sg1000/README.md](../../
   - Offset-per-tile scrolling (Modes 2, 4, 6)
   - Hi-res 512px modes (Modes 5-6)
 - ✅ **DMA/HDMA** - Complete 8-channel implementation, all transfer modes
-- ✅ **SPC700 APU CPU** - Full audio processor implementation:
+- ✅ **SPC700 APU + DSP** - Full audio implementation:
   - Complete SPC700 instruction set
   - 64KB audio RAM (ARAM)
   - IPL boot ROM with upload protocol
-  - Communication ports ($2140-$2143) working
-  - Games can upload and execute audio drivers
-  - ❌ DSP not implemented (no sound output)
+  - DSP with BRR sample playback and hardware-accurate interpolation
+  - 8-voice synthesis with ADPCM (BRR) sample support
+  - Audio output working — games play sound!
 - ✅ **Cartridge Support**:
   - LoROM, HiROM, and ExHiROM auto-detection
   - SRAM save support
@@ -572,9 +573,7 @@ For detailed technical information, see [crates/systems/sg1000/README.md](../../
 - ✅ **Save States** - F5-F9 for save, Shift+F5-F9 for load
 
 **Known Limitations**:
-- **Audio**: SPC700 CPU fully functional but DSP not implemented - **silent gameplay**
-  - Games can upload audio drivers and communicate with APU
-  - No 8-voice synthesis, ADPCM playback, or echo effects
+- **Audio**: Echo/reverb effects and some DSP flags not fully implemented
 - **Enhancement Chips**: 
   - DSP-1 partially implemented (missing some math operations)
   - SuperFX/SuperFX2 core functionality implemented
@@ -586,10 +585,9 @@ For detailed technical information, see [crates/systems/sg1000/README.md](../../
 - **Timing**: Frame-based rendering (not cycle-accurate), NTSC only
 
 **Recommended For**:
-- Playing most SNES games (silently)
+- Playing most SNES games — Super Mario World runs well
 - Games using Modes 0-1 (vast majority of commercial titles)
 - Testing enhancement chip games (DSP-1, SuperFX)
-- Not recommended if audio is essential
 
 **See Also**: [SNES Implementation README](../../../crates/systems/snes/README.md) for technical details
 
@@ -756,6 +754,68 @@ For N64 games, the standard controller mappings apply with these button equivale
   - Memory alignment not validated (assumes proper alignment)
   - Cache is direct-mapped only (no full coherency)
 - **Status**: Core infrastructure in place (CPU, RDP, RSP HLE with partial F3DEX support, PIF). RSP supports full matrix stack operations and conditional branching. **Textured triangle rendering fully implemented** with TMEM texture loading and sampling. Next steps: complete RSP commands, audio microcode, save system, perspective-correct mapping, lighting, frontend controller integration. Test ROMs can run and render transformed 3D graphics with textures.
+
+### PS1 (Sony PlayStation)
+
+**Status**: 🚧 In Development  
+**Coverage**: Early development - BIOS boot, PS-X EXE loading
+
+**File Formats**:
+- PS-X Executables: .exe, .psexe files (auto-detected by "PS-X EXE" header)
+- Disc images: .bin, .iso, .cue files
+- BIOS: .bin, .rom files (512KB, required)
+
+**Features**:
+- **MIPS R3000A CPU** (33.8688 MHz) with full MIPS I instruction set
+  - 32-bit registers, HI/LO multiply/divide registers
+  - Branch delay slots and load delay slots
+  - COP0 system control processor (exception handling, status register)
+  - COP2 GTE (Geometry Transformation Engine) stub with NCLIP, AVSZ3/AVSZ4
+  - Address translation (KUSEG/KSEG0/KSEG1 segments)
+  - Cache isolation support
+  - Unaligned memory access (LWL/LWR/SWL/SWR)
+- **GPU** with 1MB VRAM (1024×512, 16-bit pixels)
+  - GP0 rendering commands: flat-shaded and Gouraud-shaded triangles/quads
+  - Rectangle and line drawing (Bresenham)
+  - VRAM transfers: CPU↔VRAM, VRAM↔VRAM
+  - GP1 display control: resolution (256-640), interlace, PAL/NTSC, 24-bit color
+  - Texture window, draw area, mask bit settings
+  - Semi-transparency modes (average, add, subtract, add quarter)
+- **DMA Controller** (7 channels)
+  - Block transfer and linked-list modes (GPU channel 2)
+  - MDEC, GPU, CD-ROM, SPU, PIO, OTC channels
+  - Interrupt handling (DICR register)
+- **3 Hardware Timers** with target match and overflow IRQs
+- **Interrupt Controller** (I_STAT/I_MASK) with VBlank, timer, DMA, CD-ROM IRQs
+- **SPU** register interface (24 voices, ADPCM addressing, key on/off)
+- **CD-ROM** controller stub (GetStat, GetID, Test, SetMode commands)
+- **Memory Map**: 2MB RAM, 512KB BIOS ROM, 1KB scratchpad, I/O registers
+- **PS-X EXE Loader**: Parses executable headers, copies code to RAM
+- 320×240 default resolution (NTSC)
+
+**Mount Points**:
+- **BIOS** (required): 512KB PlayStation BIOS ROM (.bin/.rom)
+- **Disc** (optional): Game disc image or PS-X EXE (.bin/.iso/.exe/.psexe)
+
+**Usage**:
+```bash
+# Load a PS-X EXE with BIOS
+hemu --bios scph1001.bin game.exe
+
+# Load via GUI: File → New Project → PS1, then mount BIOS and disc
+```
+
+**Known Limitations**:
+- **Audio**: SPU has register interface only - no ADPCM decoding or audio output
+- **CD-ROM**: Stub implementation - only basic status commands, no disc reading
+- **GTE**: Geometry Transformation Engine is stubbed - only NCLIP and AVSZ3/AVSZ4 commands implemented
+- **Save States**: Not yet implemented
+- **Controllers**: Joypad registers present but controller input not connected
+- **Textures**: Textured polygon rendering not yet implemented
+- **MDEC**: Movie decoder not implemented
+- **Memory Cards**: Not implemented
+
+For more technical information, see [crates/systems/ps1/](../../../crates/systems/ps1/).
 
 ### PC/DOS (IBM PC/XT)
 
