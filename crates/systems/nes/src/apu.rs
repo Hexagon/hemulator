@@ -40,7 +40,8 @@
 //! non-linear output curves.
 
 use emu_core::apu::{
-    DmcChannel, Envelope, NoiseChannel, PulseChannel, TimingMode, TriangleChannel, LENGTH_TABLE,
+    DcBlockFilter, DmcChannel, Envelope, NoiseChannel, PulseChannel, TimingMode, TriangleChannel,
+    LENGTH_TABLE,
 };
 use emu_core::logging::{log, LogCategory, LogLevel};
 use std::cell::Cell;
@@ -209,11 +210,9 @@ pub struct APU {
     /// When true, clock envelopes/length counters immediately (5-step mode write)
     pending_immediate_clock: bool,
 
-    /// High-pass filter state for DC offset removal
-    /// Simple 1-pole high-pass filter to remove DC bias from mixer output
-    /// Stores previous input and previous output for y[n] = x[n] - x[n-1] + α*y[n-1]
-    hp_prev_input: f64,
-    hp_prev_output: f64,
+    /// High-pass filter for DC offset removal.
+    /// Simple 1-pole high-pass filter to remove DC bias from mixer output.
+    hp_filter: DcBlockFilter,
 }
 
 impl APU {
@@ -241,8 +240,7 @@ impl APU {
             irq_inhibit: true, // Default is inhibited
             irq_pending: Cell::new(false),
             pending_immediate_clock: false,
-            hp_prev_input: 0.0,
-            hp_prev_output: 0.0,
+            hp_filter: DcBlockFilter::new(0.999),
         }
     }
 
@@ -874,13 +872,8 @@ impl APU {
             // where α = 0.999 gives us a cutoff around 7 Hz at 44.1 kHz sample rate
             let total = pulse_out + tnd_out;
 
-            // High-pass filter to remove DC offset
-            // Formula: y[n] = x[n] - x[n-1] + α * y[n-1]
-            // where α = 0.999 gives us a cutoff around 7 Hz at 44.1 kHz sample rate
-            const ALPHA: f64 = 0.999;
-            let filtered = total - self.hp_prev_input + ALPHA * self.hp_prev_output;
-            self.hp_prev_input = total;
-            self.hp_prev_output = filtered;
+            // High-pass filter to remove DC offset (α = 0.999 → ~7 Hz at 44.1 kHz)
+            let filtered = self.hp_filter.process(total as f32) as f64;
 
             // Scale to 16-bit signed range
             // The range after filtering is approximately [-1.96, +1.96]

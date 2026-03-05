@@ -43,7 +43,9 @@
 //! - Frame sequencer: 512 Hz (every 32,768 CPU cycles)
 //! - DMA sound: 1 sample per timer overflow (typically 16-65 kHz)
 
-use emu_core::apu::{Envelope, LengthCounter, NoiseChannel, PulseChannel, SweepUnit, WaveChannel};
+use emu_core::apu::{
+    DcBlockFilter, Envelope, LengthCounter, NoiseChannel, PulseChannel, SweepUnit, WaveChannel,
+};
 
 /// GBA CPU clock frequency
 const CPU_CLOCK: f64 = 16_777_216.0;
@@ -216,10 +218,8 @@ pub struct GbaApu {
     sample_buffer: Vec<i16>,
 
     // ---- Audio Filtering ----
-    dc_prev_in_l: f32,
-    dc_prev_out_l: f32,
-    dc_prev_in_r: f32,
-    dc_prev_out_r: f32,
+    dc_filter_l: DcBlockFilter,
+    dc_filter_r: DcBlockFilter,
 }
 
 impl Default for GbaApu {
@@ -285,10 +285,8 @@ impl GbaApu {
 
             sample_buffer: Vec::with_capacity(1600),
 
-            dc_prev_in_l: 0.0,
-            dc_prev_out_l: 0.0,
-            dc_prev_in_r: 0.0,
-            dc_prev_out_r: 0.0,
+            dc_filter_l: DcBlockFilter::new(0.995),
+            dc_filter_r: DcBlockFilter::new(0.995),
         }
     }
 
@@ -575,12 +573,8 @@ impl GbaApu {
         }
 
         // DC-blocking filter only (removes DC offset, preserves signal).
-        let left_out = dc_block(left as f32, &mut self.dc_prev_in_l, &mut self.dc_prev_out_l);
-        let right_out = dc_block(
-            right as f32,
-            &mut self.dc_prev_in_r,
-            &mut self.dc_prev_out_r,
-        );
+        let left_out = dc_filter_sample(&mut self.dc_filter_l, left);
+        let right_out = dc_filter_sample(&mut self.dc_filter_r, right);
 
         (left_out, right_out)
     }
@@ -1114,18 +1108,15 @@ fn gba_noise_period_index(val: u8) -> u8 {
     best_idx
 }
 
-/// DC-blocking high-pass filter.
-///
-/// Removes DC offset while preserving the audio signal.
-/// Transfer function: y[n] = x[n] - x[n-1] + α * y[n-1]
-/// α = 0.995 gives a ~35 Hz cutoff at 44.1 kHz.
-fn dc_block(input: f32, prev_in: &mut f32, prev_out: &mut f32) -> i16 {
-    let y = input - *prev_in + 0.995 * *prev_out;
-    *prev_in = input;
-    *prev_out = y;
+// =============================================================================
+// Audio helpers
+// =============================================================================
 
-    // Hard clamp to i16 range (no soft clipping)
-    y.clamp(i16::MIN as f32, i16::MAX as f32) as i16
+/// Apply a DC-blocking filter to `input` and clamp the result to i16 range.
+fn dc_filter_sample(filter: &mut DcBlockFilter, input: i32) -> i16 {
+    filter
+        .process(input as f32)
+        .clamp(i16::MIN as f32, i16::MAX as f32) as i16
 }
 
 // =============================================================================
