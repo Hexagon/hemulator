@@ -164,8 +164,9 @@ Exception: Game Boy Advance uses `hemu_gba`.
 
 **Approach 2 — Full binary with `--no-gui` (visual output, audio, and controllers)**
 
-`cargo run` always builds the **entire workspace** regardless of which ROM you pass. The `--no-gui`
-flag skips the egui overlay at runtime, giving a lighter SDL2 window:
+`cargo run -p emu_gui` builds the `emu_gui` package and all of its dependencies, which in this repo
+pulls in most/all system crates. The ROM you pass and the `--no-gui` flag affect runtime behavior
+only; `--no-gui` skips the egui overlay at runtime, giving a lighter SDL2 window:
 
 ```bash
 # Load a ROM (system auto-detected from file format)
