@@ -545,7 +545,7 @@ impl Ppu {
                 // of $2004 return whatever the hardware is currently reading:
                 // - Dots 1-64: Secondary OAM clear → returns $FF
                 // - Dots 65-256: Sprite evaluation → returns current primary OAM byte being read
-                // - Dots 257-320: Sprite tile fetches → returns $FF
+                // - Dots 257-340: Sprite tile fetches / idle → returns $FF
                 //
                 // Bee 52 and other Codemasters games read $2004 during rendering to synchronize
                 // with the PPU and time their HUD scroll splits. Returning incorrect values
@@ -1633,17 +1633,23 @@ impl Ppu {
                     // either copies the remaining 3 bytes (if in range) or moves to
                     // the next sprite.
                     //
-                    // Approximation: advance 1 byte per 2 dots. This assumes no sprites
-                    // are in range (worst case: 2 dots per sprite check). When sprites ARE
-                    // in range, the real hardware spends 8 cycles per matching sprite
+                    // Approximation: advance through sprites at 1 check per 2 dots. This assumes
+                    // no sprites are in range (worst case: 2 dots per sprite check). When sprites
+                    // ARE in range, the real hardware spends 8 cycles per matching sprite
                     // (reading all 4 bytes), which slows the evaluation. A more accurate
                     // implementation would track a full evaluation state machine with
                     // sprite-in-range checks, secondary OAM fill count, and the overflow
                     // bug's m/n pointer behavior. This approximation is sufficient for
                     // games like Bee 52 that use $2004 reads for coarse timing.
                     let eval_dot = dot - 65;
-                    let byte_index = (eval_dot / 2) as u8;
-                    self.oam_eval_index.set(byte_index);
+                    // Map evaluation progress to sprite Y-byte addresses (sprite_index * 4)
+                    // so that $2004 reads during rendering see the same Y-byte pattern
+                    // that hardware would read from primary OAM.
+                    let eval_step = (eval_dot / 2) as u8;
+                    // Wrap after 64 sprites (all of OAM) in case evaluation spans more dots
+                    let sprite_index = eval_step % 64;
+                    let y_addr = sprite_index.wrapping_mul(4);
+                    self.oam_eval_index.set(y_addr);
                 }
             }
         }
@@ -4665,6 +4671,180 @@ mod tests {
         assert!(
             !ppu.is_in_vblank_region(),
             "Scanline 311 should not be in VBlank region (PAL)"
+        );
+    }
+
+    #[test]
+    fn test_odd_frame_cycle_skip() {
+        // Test that on odd frames with rendering enabled, dot 340 of the pre-render scanline
+        // is skipped (PPU jumps from (261, 339) directly to (0, 0)).
+        // When rendering is disabled, the skip should NOT happen.
+        // Reference: NESdev wiki PPU frame timing
+
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
+
+        // --- Case 1: Odd frame, rendering enabled → skip dot 340 ---
+        ppu.odd_frame.set(true);
+        ppu.mask = 0x18; // Enable background + sprites
+        ppu.scanline.set(261); // pre-render scanline
+        ppu.dot.set(339);
+
+        // Tick: at (261, 339) with odd_frame=true and rendering enabled,
+        // the skip forces next_dot to 341 which wraps the scanline.
+        ppu.tick();
+
+        // The PPU should have wrapped to (0, 0) — skipping dot 340 entirely.
+        assert_eq!(
+            ppu.scanline.get(),
+            0,
+            "Odd frame skip: should wrap to scanline 0"
+        );
+        assert_eq!(ppu.dot.get(), 0, "Odd frame skip: should wrap to dot 0");
+        // odd_frame should have been toggled (was true, now false after frame boundary)
+        assert!(
+            !ppu.odd_frame.get(),
+            "Odd frame skip: odd_frame flag should toggle at frame boundary"
+        );
+
+        // --- Case 2: Odd frame, rendering DISABLED → no skip ---
+        ppu.odd_frame.set(true);
+        ppu.mask = 0x00; // Rendering disabled
+        ppu.scanline.set(261);
+        ppu.dot.set(339);
+
+        ppu.tick();
+
+        // Should advance normally to (261, 340) — no skip
+        assert_eq!(
+            ppu.scanline.get(),
+            261,
+            "No skip when rendering disabled: should stay on scanline 261"
+        );
+        assert_eq!(
+            ppu.dot.get(),
+            340,
+            "No skip when rendering disabled: should advance to dot 340"
+        );
+
+        // --- Case 3: Even frame, rendering enabled → no skip ---
+        ppu.odd_frame.set(false);
+        ppu.mask = 0x18; // Rendering enabled
+        ppu.scanline.set(261);
+        ppu.dot.set(339);
+
+        ppu.tick();
+
+        // Should advance normally to (261, 340) — no skip on even frames
+        assert_eq!(
+            ppu.scanline.get(),
+            261,
+            "No skip on even frame: should stay on scanline 261"
+        );
+        assert_eq!(
+            ppu.dot.get(),
+            340,
+            "No skip on even frame: should advance to dot 340"
+        );
+    }
+
+    #[test]
+    fn test_oamdata_read_during_rendering() {
+        // Test that $2004 (OAMDATA) reads return different values depending on
+        // the PPU's current rendering phase.
+        // Reference: NESdev wiki PPU sprite evaluation, PPU registers
+
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
+
+        // Fill OAM with distinct values so we can verify which bytes are returned.
+        // Sprite 0: Y=0x00 at addr 0, Tile=0x01 at 1, Attr=0x02 at 2, X=0x03 at 3
+        // Sprite 1: Y=0x04 at addr 4, ...
+        for i in 0..256 {
+            ppu.oam[i] = i as u8;
+        }
+
+        // Enable rendering (background + sprites)
+        ppu.mask = 0x18;
+
+        // --- Dots 1-64: Secondary OAM clear phase → should return $FF ---
+        ppu.scanline.set(0); // Visible scanline
+        ppu.dot.set(1);
+        assert_eq!(
+            ppu.read_register(4),
+            0xFF,
+            "Dot 1 during rendering: should return $FF (secondary OAM clear)"
+        );
+
+        ppu.dot.set(32);
+        assert_eq!(
+            ppu.read_register(4),
+            0xFF,
+            "Dot 32 during rendering: should return $FF (secondary OAM clear)"
+        );
+
+        ppu.dot.set(64);
+        assert_eq!(
+            ppu.read_register(4),
+            0xFF,
+            "Dot 64 during rendering: should return $FF (secondary OAM clear)"
+        );
+
+        // --- Dots 65-256: Sprite evaluation → returns primary OAM Y-byte ---
+        // Note: oam_eval_index is updated inside tick() based on the *current* dot before
+        // advancing. We call tick() to trigger the update, then reset the dot position so
+        // that read_register() sees a dot in the evaluation range (65-256).
+        // At dot 65, eval_step = (65-65)/2 = 0, sprite_index = 0, y_addr = 0
+        ppu.dot.set(65);
+        ppu.tick(); // processes dot 65 (sets oam_eval_index=0), advances to dot 66
+        ppu.dot.set(66); // keep in eval range for read_register
+        let val_eval_sprite0 = ppu.read_register(4);
+        assert_eq!(
+            val_eval_sprite0, ppu.oam[0],
+            "During sprite evaluation: should return OAM byte at sprite 0 Y-addr (0)"
+        );
+
+        // At dot 67, eval_step = (67-65)/2 = 1, sprite_index = 1, y_addr = 4
+        ppu.dot.set(67);
+        ppu.tick(); // processes dot 67 (sets oam_eval_index=4), advances to dot 68
+        ppu.dot.set(68); // keep in eval range for read_register
+        let val_eval_sprite1 = ppu.read_register(4);
+        assert_eq!(
+            val_eval_sprite1, ppu.oam[4],
+            "During sprite evaluation: should return OAM byte at sprite 1 Y-addr (4)"
+        );
+
+        // --- Dots 257+: Sprite tile fetch → should return $FF ---
+        ppu.dot.set(257);
+        assert_eq!(
+            ppu.read_register(4),
+            0xFF,
+            "Dot 257 during rendering: should return $FF (sprite tile fetch)"
+        );
+
+        ppu.dot.set(320);
+        assert_eq!(
+            ppu.read_register(4),
+            0xFF,
+            "Dot 320 during rendering: should return $FF (sprite tile fetch)"
+        );
+
+        // --- During VBlank: should return OAM[OAMADDR] ---
+        ppu.scanline.set(241); // VBlank
+        ppu.oam_addr.set(5);
+        assert_eq!(
+            ppu.read_register(4),
+            ppu.oam[5],
+            "During VBlank: should return OAM[OAMADDR]"
+        );
+
+        // --- Rendering disabled: should return OAM[OAMADDR] ---
+        ppu.scanline.set(0); // Visible scanline
+        ppu.mask = 0x00; // Rendering disabled
+        ppu.dot.set(100);
+        ppu.oam_addr.set(10);
+        assert_eq!(
+            ppu.read_register(4),
+            ppu.oam[10],
+            "Rendering disabled: should return OAM[OAMADDR]"
         );
     }
 }
