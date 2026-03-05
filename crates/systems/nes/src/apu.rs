@@ -212,7 +212,8 @@ pub struct APU {
 
     /// High-pass filter for DC offset removal.
     /// Simple 1-pole high-pass filter to remove DC bias from mixer output.
-    hp_filter: DcBlockFilter,
+    /// Uses f64 precision to match the surrounding f64 signal path.
+    hp_filter: DcBlockFilter<f64>,
 }
 
 impl APU {
@@ -240,7 +241,7 @@ impl APU {
             irq_inhibit: true, // Default is inhibited
             irq_pending: Cell::new(false),
             pending_immediate_clock: false,
-            hp_filter: DcBlockFilter::new(0.999),
+            hp_filter: DcBlockFilter::new(0.999_f64),
         }
     }
 
@@ -873,7 +874,7 @@ impl APU {
             let total = pulse_out + tnd_out;
 
             // High-pass filter to remove DC offset (α = 0.999 → ~7 Hz at 44.1 kHz)
-            let filtered = self.hp_filter.process(total as f32) as f64;
+            let filtered = self.hp_filter.process(total);
 
             // Scale to 16-bit signed range
             // The range after filtering is approximately [-1.96, +1.96]
