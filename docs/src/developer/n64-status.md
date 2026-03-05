@@ -12,8 +12,8 @@ nav_order: 3
 ## Overview
 
 For detailed implementation information, see:
-- **[N64 System README](../crates/systems/n64/README.md)** - Complete implementation details
-- **[Architecture Documentation](ARCHITECTURE.md)** - Overall emulator architecture
+- **[N64 System README](../../../crates/systems/n64/README.md)** - Complete implementation details
+- **[Architecture Documentation](architecture.md)** - Overall emulator architecture
 - **[User Manual](../user/)** - End-user features and limitations
 
 ## Current Implementation Status
@@ -154,7 +154,7 @@ See [User Manual - N64 section](../user/systems.md#n64-nintendo-64) for complete
 
 ## Development Priorities
 
-For detailed development roadmap, see the [N64 README](../crates/systems/n64/README.md#future-development).
+For detailed development roadmap, see the [N64 README](../../../crates/systems/n64/README.md#future-development).
 
 ### Short Term
 1. Complete texture sampling implementation
@@ -197,13 +197,13 @@ cargo run --profile release-quick -- rom.z64 --log-ppu info
 ## References
 
 ### Documentation
-- **[N64 System README](../crates/systems/n64/README.md)** - Detailed implementation docs
-- **[ARCHITECTURE.md](ARCHITECTURE.md)** - Overall emulator architecture
+- **[N64 System README](../../../crates/systems/n64/README.md)** - Detailed implementation docs
+- **[ARCHITECTURE.md](architecture.md)** - Overall emulator architecture
 - **[User Manual](../user/)** - User manual and features
-- **[AGENTS.md](../AGENTS.md)** - Implementation guidelines
+- **[AGENTS.md](https://github.com/Hexagon/hemulator/blob/master/AGENTS.md)** - Implementation guidelines
 
 ### Hardware Reference
-- **[MIPS R4300i CPU Reference](references/cpu_mips_r4300i.md)** - CPU documentation
+- **[MIPS R4300i CPU Reference](../references/mips-r4300i.md)** - CPU documentation
 - See N64 README for additional hardware references
 
 ## Change History
@@ -221,4 +221,4 @@ This document tracks high-level status. For detailed change history:
 
 ---
 
-**Document Status**: This is a high-level status overview. For implementation details, always refer to the [N64 System README](../crates/systems/n64/README.md).
+**Document Status**: This is a high-level status overview. For implementation details, always refer to the [N64 System README](../../../crates/systems/n64/README.md).
