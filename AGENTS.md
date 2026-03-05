@@ -191,7 +191,8 @@ When iterating on a single system's code, use this two-step cycle to stay fast:
    ```
 
 2. **Run a debug dump** — once the logic looks right, run the full binary to capture a trace or dump.
-   The first build is slow (~2.5min), but subsequent runs only recompile the changed crate (incremental):
+   The first build is slow (~2.5min), but subsequent runs reuse cached artifacts and generally rebuild
+   only the affected crates (typically the system crate + `emu_gui`):
    ```bash
    # From the repo root, run the GUI binary and dump CPU state and memory when PC reaches a specific address
    cargo run -p emu_gui --profile release-quick -- --debug-dump-pc 0x8000 game.nes
