@@ -1658,6 +1658,23 @@ impl Ppu {
         let mut next_dot = dot + 1;
         let mut next_scanline = scanline;
 
+        // Odd frame cycle skip: on odd frames with rendering enabled,
+        // the pre-render scanline is one dot shorter. Dot 340 is skipped:
+        // the scanline ends at dot 339 and wraps directly to the next scanline.
+        // This is the hardware-accurate position for the skip (at the END of
+        // the pre-render scanline, not the start of the next frame).
+        // Reference: https://www.nesdev.org/wiki/PPU_frame_timing
+        // "For odd frames, the cycle at the end of the scanline is skipped"
+        if scanline == pre_render_scanline && dot == 339 && self.odd_frame.get() {
+            let rendering_enabled = (self.mask & 0x18) != 0;
+            if rendering_enabled {
+                next_dot = 341; // Force end-of-scanline wrap
+                log(LogCategory::PPU, LogLevel::Trace, || {
+                    "PPU: Odd frame cycle skip at (pre-render, 339) → skipping dot 340".to_string()
+                });
+            }
+        }
+
         // Handle end of scanline (341 dots per scanline, indexed 0-340)
         if next_dot >= 341 {
             next_dot = 0;
@@ -1677,17 +1694,8 @@ impl Ppu {
             }
         }
 
-        // Odd frame cycle skip: on odd frames with rendering enabled,
-        // skip from scanline 261 dot 340 directly to scanline 0 dot 1
-        if next_scanline == 0 && next_dot == 0 && self.odd_frame.get() {
-            let rendering_enabled = (self.mask & 0x18) != 0;
-            if rendering_enabled {
-                next_dot = 1;
-                log(LogCategory::PPU, LogLevel::Trace, || {
-                    "PPU: Odd frame cycle skip (0,0 -> 0,1)".to_string()
-                });
-            }
-        }
+        // NOTE: Odd frame cycle skip is now handled above at (pre-render, 339),
+        // which is the hardware-accurate position. No skip needed at (0,0).
 
         if let Some(frame_number) = ended_frame_number {
             if frame_number % 60 == 0 {

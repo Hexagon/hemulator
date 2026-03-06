@@ -232,6 +232,7 @@ impl Cartridge {
         // Calculate CRC32 and check ROM database for overrides
         let crc32 = crate::rom_db::calculate_crc32(data);
         let (mut final_mapper, mut final_mirroring) = (mapper, mirroring);
+        let mut final_timing = timing;
         let mut db_mapper_override = false;
         let mut db_mirroring_override = false;
         let mut board_name: Option<String> = None;
@@ -269,6 +270,21 @@ impl Cartridge {
                 final_mirroring = db_mirroring;
                 db_mirroring_override = true;
             }
+
+            // Apply timing override if present
+            // Many European ROMs in iNES 1.0 format don't set the PAL flag,
+            // causing them to be misdetected as NTSC. This corrects the timing
+            // for known PAL ROMs, which is critical for games that rely on the
+            // longer VBlank period (70 scanlines vs 20) for VRAM uploads.
+            if let Some(db_timing) = db_entry.timing {
+                log(LogCategory::Bus, LogLevel::Info, || {
+                    format!(
+                        "NES ROM DB: Overriding timing {:?} -> {:?} for CRC32 0x{:08X}{}",
+                        timing, db_timing, crc32, board_info
+                    )
+                });
+                final_timing = db_timing;
+            }
         }
 
         log(LogCategory::Bus, LogLevel::Info, || {
@@ -278,7 +294,7 @@ impl Cartridge {
                 prg_size / 1024,
                 chr_size / 1024,
                 final_mirroring,
-                timing
+                final_timing
             )
         });
 
@@ -288,7 +304,7 @@ impl Cartridge {
             mapper: final_mapper,
             submapper,
             mirroring: final_mirroring,
-            timing,
+            timing: final_timing,
             crc32,
             header_mapper: mapper,
             header_submapper: submapper,

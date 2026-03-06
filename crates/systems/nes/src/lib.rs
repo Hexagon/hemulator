@@ -630,7 +630,20 @@ impl System for NesSystem {
             let pc_before = self.cpu.pc();
             let used = self.cpu.step();
             cpu_steps = cpu_steps.wrapping_add(1);
-            cpu_cycles_used = cpu_cycles_used.wrapping_add(used);
+
+            // Check for OAM DMA stall cycles.
+            // On real NES hardware, writing $4014 stalls the CPU for 513 cycles
+            // while the DMA controller copies 256 bytes to PPU OAM. The PPU and
+            // APU continue running during this stall. Without these cycles, the
+            // PPU falls ~4.5 scanlines behind the CPU every frame, which causes
+            // sprite 0 hit detection and mid-frame scroll splits to be misaligned.
+            let dma_cycles = if let Some(b) = self.cpu.bus_mut() {
+                b.take_pending_dma_cycles()
+            } else {
+                0
+            };
+            let total_cycles = used + dma_cycles;
+            cpu_cycles_used = cpu_cycles_used.wrapping_add(total_cycles);
 
             // CYCLE-ACCURATE PPU EXECUTION
             // Tick the PPU 3 times for each CPU cycle (PPU runs at 3x CPU clock)
@@ -642,7 +655,7 @@ impl System for NesSystem {
             // This is critical for sprite 0 hit detection which depends on correct background
             // rendering at the sprite's screen position.
             if let Some(b) = self.cpu.bus_mut() {
-                for _ in 0..used {
+                for _ in 0..total_cycles {
                     for _ in 0..3 {
                         let dot_before = b.ppu.get_dot();
                         let scanline_before = b.ppu.get_scanline();
@@ -725,18 +738,18 @@ impl System for NesSystem {
 
             // Update bus cycle counter for mapper timing
             if let Some(b) = self.cpu.bus_mut() {
-                b.add_cycles(used);
+                b.add_cycles(total_cycles);
             }
 
             // Clock APU IRQ counter
             if let Some(b) = self.cpu.bus_mut() {
-                b.apu.clock_irq(used);
+                b.apu.clock_irq(total_cycles);
             }
 
             // Clock DMC channel and handle memory reads
             if let Some(b) = self.cpu.bus_mut() {
                 // Clock DMC for the number of CPU cycles just executed
-                for _ in 0..used {
+                for _ in 0..total_cycles {
                     if let Some(addr) = b.apu.clock_dmc() {
                         // DMC needs to read a byte from memory
                         // Use the Bus::read trait method to properly access memory
@@ -756,19 +769,57 @@ impl System for NesSystem {
                 }
             }
 
+            // CYCLE-ACCURATE INTERRUPT DISPATCH
+            //
+            // On real hardware, NMI/IRQ dispatch takes 7 CPU cycles (21 PPU dots).
+            // During those cycles the PPU continues running. We measure the actual
+            // cycles consumed and tick PPU/APU for them to keep timing synchronized.
             if irq_to_fire {
-                log(LogCategory::Interrupts, LogLevel::Info, || {
-                    "System: Firing IRQ! Mapper/APU pending.".to_string()
-                });
+                let cycles_before = self.cpu.cycles();
                 self.cpu.trigger_irq();
-                irqs = irqs.wrapping_add(1);
+                let irq_cycles = (self.cpu.cycles().wrapping_sub(cycles_before)) as u32;
+                if irq_cycles > 0 {
+                    log(LogCategory::Interrupts, LogLevel::Info, || {
+                        format!("System: IRQ dispatched ({} cycles)", irq_cycles)
+                    });
+                    irqs = irqs.wrapping_add(1);
+                    cpu_cycles_used = cpu_cycles_used.wrapping_add(irq_cycles);
+                    // Tick PPU for the interrupt overhead (3 PPU dots per CPU cycle)
+                    if let Some(b) = self.cpu.bus_mut() {
+                        for _ in 0..irq_cycles {
+                            for _ in 0..3 {
+                                let nmi_triggered = b.ppu.tick();
+                                if nmi_triggered {
+                                    nmi_to_fire = true;
+                                }
+                            }
+                        }
+                        b.add_cycles(irq_cycles);
+                        b.apu.clock_irq(irq_cycles);
+                    }
+                }
             }
             if nmi_to_fire {
-                log(LogCategory::Interrupts, LogLevel::Debug, || {
-                    "System: Firing NMI".to_string()
-                });
+                let cycles_before = self.cpu.cycles();
                 self.cpu.trigger_nmi();
-                nmis = nmis.wrapping_add(1);
+                let nmi_cycles = (self.cpu.cycles().wrapping_sub(cycles_before)) as u32;
+                if nmi_cycles > 0 {
+                    log(LogCategory::Interrupts, LogLevel::Debug, || {
+                        format!("System: NMI dispatched ({} cycles)", nmi_cycles)
+                    });
+                    nmis = nmis.wrapping_add(1);
+                    cpu_cycles_used = cpu_cycles_used.wrapping_add(nmi_cycles);
+                    // Tick PPU for the interrupt overhead (3 PPU dots per CPU cycle)
+                    if let Some(b) = self.cpu.bus_mut() {
+                        for _ in 0..nmi_cycles {
+                            for _ in 0..3 {
+                                let _ = b.ppu.tick();
+                            }
+                        }
+                        b.add_cycles(nmi_cycles);
+                        b.apu.clock_irq(nmi_cycles);
+                    }
+                }
             }
         }
 
