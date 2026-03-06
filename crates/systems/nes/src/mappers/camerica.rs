@@ -35,11 +35,12 @@ pub struct Camerica {
 
 impl Camerica {
     pub fn new(cart: Cartridge, ppu: &mut Ppu) -> Self {
-        // Initialize mirroring from the cartridge header.
-        // For Camerica/Codemasters games, mirroring is hard-wired on the PCB and the
-        // iNES header correctly reflects it. For example, Bee 52 uses horizontal mirroring
-        // (BIC-64 PCB / BF9093 chip, confirmed by NESdev wiki and hardware documentation).
-        // Fire Hawk can override to single-screen via mapper writes to $9000-$9FFF.
+        // Initialize mirroring using the safe initial mode.
+        // For Camerica, this defaults to Vertical mirroring (hard-wired on most cartridges).
+        // ROM headers are often incorrect (e.g., bee52 header says Horizontal but cartridge
+        // is actually hard-wired to Vertical).
+        // Games can override to single-screen via mapper writes to $9000-$9FFF if needed
+        // (e.g., Fire Hawk uses dynamic single-screen mirroring).
         ppu.set_mirroring(cart.get_initial_mirroring());
 
         // Camerica uses 8KB CHR-RAM (no CHR-ROM in cartridge).
