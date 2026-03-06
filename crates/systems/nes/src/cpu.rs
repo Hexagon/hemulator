@@ -123,9 +123,6 @@ impl NesCpu {
     pub fn pc(&self) -> u16 {
         self.cpu.pc
     }
-    pub fn cycles(&self) -> u64 {
-        self.cpu.cycles
-    }
 
     // Mutable accessors (used by NES system for initialization)
     pub fn set_pc(&mut self, pc: u16) {

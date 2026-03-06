@@ -220,6 +220,12 @@ pub struct Ppu {
     /// This is set during render_scanline() and the flag is actually set during tick()
     /// when we reach the corresponding dot position (X + 1, per Mesen2 reference).
     sprite_0_hit_pending: Cell<Option<(u16, u16)>>,
+    /// When PPUMASK transitions from rendering-disabled to rendering-enabled during a visible
+    /// scanline, the scanline may have already been rendered at dot 0 with the old mask (as
+    /// backdrop). This field stores the scanline number that needs re-rendering with the new
+    /// scroll/mask state. Games like Bee 52 disable and re-enable rendering mid-frame for HUD
+    /// scroll splits; without re-rendering, transition scanlines show backdrop instead of HUD.
+    rerender_scanline: Cell<Option<u16>>,
 }
 
 impl fmt::Debug for Ppu {
@@ -281,6 +287,7 @@ impl Ppu {
             frame_counter: Cell::new(0),
             timing_mode,
             sprite_0_hit_pending: Cell::new(None),
+            rerender_scanline: Cell::new(None),
         }
     }
 
@@ -376,6 +383,14 @@ impl Ppu {
     #[inline(always)]
     pub fn mask(&self) -> u8 {
         self.mask
+    }
+
+    /// Take the pending re-render scanline, if any. Returns the scanline number
+    /// that needs re-rendering due to a mid-scanline PPUMASK transition, and
+    /// clears the flag. Called by the main loop after each CPU step.
+    #[inline]
+    pub fn take_rerender_scanline(&self) -> Option<u16> {
+        self.rerender_scanline.take()
     }
 
     /// Extract scroll values from loopy registers for potential future use.
@@ -740,7 +755,22 @@ impl Ppu {
                     return;
                 }
 
+                let old_mask = self.mask;
                 self.mask = val;
+
+                // Detect rendering being re-enabled mid-scanline on a visible scanline.
+                // If rendering was disabled and is now enabled, the current scanline may
+                // have been rendered at dot 0 with the old mask (as backdrop). Mark it
+                // for re-rendering so that the main loop can refresh it with the new
+                // scroll/mask values. This handles Bee 52 and other Codemasters games
+                // that disable/re-enable rendering mid-frame for HUD scroll splits.
+                let old_rendering = (old_mask & 0x18) != 0;
+                let new_rendering = (val & 0x18) != 0;
+                let scanline = self.scanline.get();
+                if !old_rendering && new_rendering && scanline < 240 {
+                    self.rerender_scanline.set(Some(scanline));
+                }
+
                 log(LogCategory::PPU, LogLevel::Trace, || {
                     format!("PPUMASK write: 0x{:02X}", val)
                 });
@@ -1541,7 +1571,7 @@ impl Ppu {
     /// - VBlank flag setting at scanline 241, dot 1
     /// - NMI generation at scanline 241, dot 1 (if enabled)
     /// - Sprite overflow/sprite 0 hit clearing at scanline 261 (pre-render), dot 1
-    /// - Odd frame cycle skip at scanline 0, dot 0
+    /// - Odd frame cycle skip at pre-render scanline, dot 339 (NTSC only)
     ///
     /// Returns true if an NMI should be triggered.
     #[inline]
