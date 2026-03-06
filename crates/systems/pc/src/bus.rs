@@ -472,11 +472,15 @@ impl PcBus {
 
     /// Load BIOS ROM
     ///
-    /// Any BIOS size from 0 bytes up to 256 KB is accepted. If the input is
-    /// larger than 256 KB, only the last 256 KB are used. In all cases, the
-    /// data is placed at the highest possible ROM offset so that the image is
-    /// end-aligned in the ROM area, ensuring the last byte maps to physical
-    /// address 0xFFFFF (reset vector always at the correct location).
+    /// For non-empty input, any BIOS size up to 256 KB is accepted. If the input
+    /// is larger than 256 KB, only the last 256 KB are used. The data is placed
+    /// at the highest possible ROM offset so that the image is end-aligned in
+    /// the ROM area, ensuring its last 16 bytes map to physical addresses
+    /// 0xFFFF0..=0xFFFFF (where the CPU fetches the reset entry at 0xFFFF0).
+    ///
+    /// If an empty slice is provided, this function leaves the existing ROM
+    /// contents unchanged. At the system level, `PcSystem::mount("BIOS", …)`
+    /// currently rejects empty BIOS images.
     pub fn load_bios(&mut self, data: &[u8]) {
         let rom_size = self.rom.len(); // 256KB = 0x40000
         let len = data.len().min(rom_size);
