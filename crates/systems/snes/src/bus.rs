@@ -38,6 +38,10 @@ struct HdmaState {
     repeat: bool,
     /// Channel is active
     active: bool,
+    /// Do transfer flag: true = perform transfer this scanline
+    /// Set to true when a new entry is read, then set to the repeat flag value
+    /// after each scanline. In non-repeat mode, only the first scanline transfers.
+    do_transfer: bool,
 }
 
 /// APU state machine for handling multi-session upload protocol
@@ -126,6 +130,9 @@ pub struct SnesBus {
     apu_response_delay: u32,
     /// Counter for data transfer sequences to detect completion
     apu_transfer_counter: u8,
+    /// Expected next counter value for SPC700 IPL upload protocol
+    /// The real SPC700 IPL detects end-of-block when port 0 value != expected counter
+    apu_expected_counter: u8,
     /// Current APU state machine state
     apu_state: ApuState,
     /// Session identifier to track different upload sequences
@@ -215,6 +222,7 @@ impl SnesBus {
             apu_last_written: [0; 4],
             apu_response_delay: 0,
             apu_transfer_counter: 0,
+            apu_expected_counter: 0,
             apu_state: ApuState::BootReady, // Start in BootReady state with $BBAA signature
             apu_session_id: 0,
             spc700: None,
@@ -356,12 +364,16 @@ impl SnesBus {
             cart.tick_chip(master_cycles);
         }
 
-        // Convert main CPU cycles to SPC700 cycles using proper clock ratio
-        // Main CPU: ~3.58 MHz (NTSC)
-        // SPC700: ~1.024 MHz
-        // Ratio: 1.024 / 3.58 ≈ 0.286 (SPC700 runs at about 28.6% of main CPU speed)
-        // Using integer math with fractional accumulator to prevent rounding error drift:
-        // SPC700 cycles = CPU cycles * 1024 / 3580
+        // Convert main CPU cycles to SPC700 cycles using proper clock ratio.
+        //
+        // Our CPU cycle counts come from the WDC 65C816 datasheet (e.g. 2 for LDA #imm).
+        // The SPC700 runs at ~1.024 MHz and the main CPU at ~3.58 MHz (NTSC).
+        // Ratio: 1024 / 3580 ≈ 0.286 SPC cycles per CPU cycle.
+        //
+        // Note: SNES_SCANLINE_CYCLES = 341 processes more CPU instructions per scanline
+        // than real hardware (~170-227 depending on memory speed), but the SPC ratio is
+        // calibrated for correct CPU:SPC instruction-level timing, which is what matters
+        // for port communication protocols (upload handshakes, echo synchronization).
 
         // Calculate SPC700 cycles with fractional tracking
         let numerator = cycles as u64 * 1024;
@@ -373,10 +385,7 @@ impl SnesBus {
         // Store remainder for next calculation to prevent drift
         self.spc700_cycle_accumulator.set(remainder);
 
-        // Run SPC700 immediately for the computed cycles (Option B: tight lockstep sync).
-        // Running inline here — rather than accumulating and flushing on port access — prevents
-        // the split-read race condition where the SPC700 could read stale port values between
-        // two main-CPU writes to adjacent ports (e.g. the block-header dest address at $2142/$2143).
+        // Run SPC700 for the computed cycles
         if spc700_cycles > 0 {
             if let Some(ref spc700_cell) = self.spc700 {
                 spc700_cell.borrow_mut().run_cycles(spc700_cycles as u32);
@@ -702,6 +711,7 @@ impl SnesBus {
                 self.hdma_state[ch].line_counter = 0;
                 self.hdma_state[ch].repeat = false;
                 self.hdma_state[ch].active = true;
+                self.hdma_state[ch].do_transfer = true;
 
                 log(LogCategory::Bus, LogLevel::Debug, || {
                     format!(
@@ -749,7 +759,7 @@ impl SnesBus {
 
             let dma = self.dma_channels[ch];
 
-            // Check if we need to fetch a new line count
+            // Step 1: Check if we need to fetch a new line count (line_counter == 0)
             if self.hdma_state[ch].line_counter == 0 {
                 // Read line count byte from table
                 let line_byte = self.read(self.hdma_state[ch].table_addr);
@@ -776,63 +786,68 @@ impl SnesBus {
                     let addr_high = self.read(self.hdma_state[ch].table_addr + 1) as u32;
                     self.hdma_state[ch].table_addr += 2;
 
-                    // Store indirect address (will be used for data fetch)
-                    // For now, we'll use the A-bus address field temporarily
+                    // Store indirect address for data fetch
                     self.dma_channels[ch].a_addr =
                         addr_low | (addr_high << 8) | ((dma.hdma_bank as u32) << 16);
                 }
+
+                // New entry always triggers a transfer
+                self.hdma_state[ch].do_transfer = true;
             }
 
-            // Perform the transfer
-            let transfer_mode = dma.control & 0x07;
-            let bytes_to_transfer = match transfer_mode {
-                0 => 1,     // Mode 0: 1 byte
-                1 | 5 => 2, // Mode 1/5: 2 bytes
-                2 | 6 => 2, // Mode 2/6: 2 bytes
-                3 | 7 => 4, // Mode 3/7: 4 bytes
-                4 => 4,     // Mode 4: 4 bytes
-                _ => 1,
-            };
-
-            let indirect = (dma.control & 0x40) != 0;
-            let source_addr = if indirect {
-                // Use indirect address
-                dma.a_addr
-            } else {
-                // Use table address directly
-                self.hdma_state[ch].table_addr
-            };
-
-            // Transfer the bytes
-            for i in 0..bytes_to_transfer {
-                let b_reg = match transfer_mode {
-                    0 => 0x2100 | (dma.b_addr as u16),
-                    1 | 5 => 0x2100 | ((dma.b_addr as u16) + (i as u16 & 1)),
-                    2 | 6 => 0x2100 | (dma.b_addr as u16),
-                    3 | 7 => 0x2100 | ((dma.b_addr as u16) + ((i as u16 >> 1) & 1)),
-                    4 => {
-                        // Four consecutive registers: b_addr, b_addr+1, b_addr+2, b_addr+3
-                        0x2100 | ((dma.b_addr as u16) + (i as u16 & 3))
-                    }
-                    _ => 0x2100 | (dma.b_addr as u16),
+            // Step 2: Only transfer if do_transfer is set
+            if self.hdma_state[ch].do_transfer {
+                let transfer_mode = dma.control & 0x07;
+                let bytes_to_transfer: u32 = match transfer_mode {
+                    0 => 1,     // Mode 0: 1 byte
+                    1 | 5 => 2, // Mode 1/5: 2 bytes
+                    2 | 6 => 2, // Mode 2/6: 2 bytes
+                    3 | 7 => 4, // Mode 3/7: 4 bytes
+                    4 => 4,     // Mode 4: 4 bytes
+                    _ => 1,
                 };
 
-                let val = self.read(source_addr + i as u32);
-                self.write(b_reg as u32, val);
-                cycles += 8; // 8 cycles per byte
+                let indirect = (dma.control & 0x40) != 0;
+                let source_addr = if indirect {
+                    dma.a_addr
+                } else {
+                    self.hdma_state[ch].table_addr
+                };
+
+                // Transfer the bytes
+                for i in 0..bytes_to_transfer {
+                    let b_reg = match transfer_mode {
+                        0 => 0x2100 | (dma.b_addr as u16),
+                        1 | 5 => 0x2100 | ((dma.b_addr as u16) + (i as u16 & 1)),
+                        2 | 6 => 0x2100 | (dma.b_addr as u16),
+                        3 | 7 => 0x2100 | ((dma.b_addr as u16) + ((i as u16 >> 1) & 1)),
+                        4 => 0x2100 | ((dma.b_addr as u16) + (i as u16 & 3)),
+                        _ => 0x2100 | (dma.b_addr as u16),
+                    };
+
+                    let val = self.read(source_addr + i);
+                    self.write(b_reg as u32, val);
+                    cycles += 8; // 8 cycles per byte
+                }
+
+                // Advance source address after transfer
+                if indirect {
+                    self.dma_channels[ch].a_addr += bytes_to_transfer;
+                } else {
+                    // In direct mode: ALWAYS advance table_addr past the data bytes.
+                    // For repeat mode: advances to next set of data bytes for next scanline.
+                    // For non-repeat mode: advances past the data so next entry read is correct.
+                    self.hdma_state[ch].table_addr += bytes_to_transfer;
+                }
             }
 
-            // Update addresses for next scanline
-            if indirect {
-                // Increment indirect address
-                self.dma_channels[ch].a_addr += bytes_to_transfer as u32;
-            } else if !self.hdma_state[ch].repeat {
-                // Increment table address (only if not in repeat mode)
-                self.hdma_state[ch].table_addr += bytes_to_transfer as u32;
-            }
-
-            // Decrement line counter
+            // Step 3: Decrement line counter
             self.hdma_state[ch].line_counter -= 1;
+
+            // Step 4: Set do_transfer to the repeat flag value
+            // In non-repeat mode (repeat=false), subsequent scanlines won't transfer
+            // In repeat mode (repeat=true), every scanline transfers
+            self.hdma_state[ch].do_transfer = self.hdma_state[ch].repeat;
         }
 
         cycles
@@ -1275,6 +1290,7 @@ impl Memory65c816 for SnesBus {
                                 self.apu_out_ports[3] = 0x00;
                                 self.apu_response_delay = 10;
                                 self.apu_transfer_counter = 0;
+                                self.apu_expected_counter = 0;
                                 self.apu_state = ApuState::BootReady;
                                 return;
                             }
@@ -1316,6 +1332,8 @@ impl Memory65c816 for SnesBus {
                                         // Echo the command byte to acknowledge
                                         self.apu_out_ports[0] = val;
                                         self.apu_transfer_counter = 1;
+                                        // First data byte will have counter = 0
+                                        self.apu_expected_counter = 0;
                                         self.apu_state = ApuState::Uploading;
                                         self.apu_response_delay = 5;
                                     }
@@ -1332,33 +1350,41 @@ impl Memory65c816 for SnesBus {
                                 }
 
                                 ApuState::Uploading => {
-                                    // In upload mode, games typically:
-                                    // - write an index/counter to port 0
-                                    // - write a data byte to port 1
-                                    // - poll port 0 until it matches the index
-                                    //
-                                    // Model that by acknowledging the last port-0 value *after* a port-1 write.
+                                    // SPC700 IPL upload protocol:
+                                    // - CPU writes data byte to port 1, counter to port 0
+                                    // - SPC echoes counter on port 0 to acknowledge
+                                    // - Counter increments by 1 each byte (wraps 0xFF → 0x00)
+                                    // - End of block: CPU writes counter value != expected_counter
+                                    //   (deliberately skips a value to signal termination)
                                     if port == 0 {
-                                        // $FF to port 0 signals end-of-upload: the SPC700 should now
-                                        // jump to the uploaded entry point and execute it.  Simulate
-                                        // the uploaded code running by restoring the $BBAA ready
-                                        // signature so the SNES CPU can proceed to a second upload or
-                                        // continue execution.
-                                        if val == 0xFF {
-                                            self.apu_out_ports[0] = 0xAA;
+                                        // Always echo port 0 writes immediately.
+                                        // Many commercial boot loaders poll $2140 right after writing.
+                                        self.apu_out_ports[0] = val;
+                                        self.apu_response_delay = 1;
+
+                                        // Check if this matches the expected counter
+                                        if val == self.apu_expected_counter {
+                                            // Normal data transfer - advance expected counter
+                                            self.apu_expected_counter =
+                                                self.apu_expected_counter.wrapping_add(1);
+                                        } else {
+                                            // Counter mismatch = end-of-block signal
+                                            // The uploaded code would now execute on real hardware.
+                                            // Simulate by transitioning to BootReady so the game
+                                            // can proceed to the next upload block or continue.
+                                            log(LogCategory::Bus, LogLevel::Debug, || {
+                                                format!(
+                                                    "SNES Bus: APU end-of-block detected (expected counter 0x{:02X}, got 0x{:02X}), {} bytes transferred",
+                                                    self.apu_expected_counter, val, self.apu_transfer_counter
+                                                )
+                                            });
+                                            self.apu_out_ports[0] = val; // Echo the termination value
                                             self.apu_out_ports[1] = 0xBB;
-                                            // Mirror boot-handshake initialization for a new ready state:
-                                            // clear ports 2/3 and reset the per-session transfer counter.
                                             self.apu_out_ports[2] = 0x00;
                                             self.apu_out_ports[3] = 0x00;
                                             self.apu_transfer_counter = 0;
                                             self.apu_state = ApuState::BootReady;
                                             self.apu_response_delay = 10;
-                                        } else {
-                                            // Many commercial boot loaders poll $2140 immediately after writing it.
-                                            // Acknowledge port-0 writes right away to avoid deadlocks.
-                                            self.apu_out_ports[0] = val;
-                                            self.apu_response_delay = 1;
                                         }
                                     } else if port == 1 {
                                         self.apu_transfer_counter =

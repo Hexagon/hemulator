@@ -215,6 +215,12 @@ pub struct Ppu {
     m7x: i16,
     /// Mode 7 center Y ($2120) - 13-bit signed value
     m7y: i16,
+    /// Mode 7 horizontal scroll ($210D) - 13-bit signed value
+    /// Separate from bg1_hofs (10-bit) because Mode 7 uses more bits
+    m7hofs: i16,
+    /// Mode 7 vertical scroll ($210E) - 13-bit signed value
+    /// Separate from bg1_vofs (10-bit) because Mode 7 uses more bits
+    m7vofs: i16,
     /// Previous write for Mode 7 double-write registers
     /// Note: According to hardware documentation, all Mode 7 write-twice registers
     /// share the same previous-write latch (M7OLD)
@@ -546,6 +552,8 @@ impl Ppu {
             m7d: 0x0100, // Identity matrix: D=1.0
             m7x: 0,
             m7y: 0,
+            m7hofs: 0,
+            m7vofs: 0,
             m7_prev: 0,
             // Window defaults
             w12sel: 0,
@@ -684,26 +692,50 @@ impl Ppu {
                 self.bg34nba = val;
             }
 
-            // $210D - BG1HOFS - BG1 Horizontal Scroll (2 writes)
+            // $210D - BG1HOFS and M7HOFS (2 writes)
+            // Sets both BG1 horizontal scroll (10-bit) and Mode 7 scroll (13-bit)
             0x210D => {
                 if !self.scroll_latch {
                     self.scroll_prev = val;
                     self.scroll_latch = true;
                 } else {
+                    // BG1HOFS: 10-bit value from bits 0-1 of second write + prev
                     self.bg1_hofs = ((val as u16 & 0x03) << 8) | (self.scroll_prev as u16);
+                    // M7HOFS: 13-bit value from bits 0-4 of second write + m7_prev
+                    let raw = ((val as u16 & 0x1F) << 8) | (self.m7_prev as u16);
+                    // Sign-extend from bit 12
+                    self.m7hofs = if raw & 0x1000 != 0 {
+                        (raw | 0xE000) as i16
+                    } else {
+                        raw as i16
+                    };
                     self.scroll_latch = false;
                 }
+                // $210D also updates the M7 latch
+                self.m7_prev = val;
             }
 
-            // $210E - BG1VOFS - BG1 Vertical Scroll (2 writes)
+            // $210E - BG1VOFS and M7VOFS (2 writes)
+            // Sets both BG1 vertical scroll (10-bit) and Mode 7 scroll (13-bit)
             0x210E => {
                 if !self.scroll_latch {
                     self.scroll_prev = val;
                     self.scroll_latch = true;
                 } else {
+                    // BG1VOFS: 10-bit value from bits 0-1 of second write + prev
                     self.bg1_vofs = ((val as u16 & 0x03) << 8) | (self.scroll_prev as u16);
+                    // M7VOFS: 13-bit value from bits 0-4 of second write + m7_prev
+                    let raw = ((val as u16 & 0x1F) << 8) | (self.m7_prev as u16);
+                    // Sign-extend from bit 12
+                    self.m7vofs = if raw & 0x1000 != 0 {
+                        (raw | 0xE000) as i16
+                    } else {
+                        raw as i16
+                    };
                     self.scroll_latch = false;
                 }
+                // $210E also updates the M7 latch
+                self.m7_prev = val;
             }
 
             // $210F - BG2HOFS - BG2 Horizontal Scroll (2 writes)
@@ -1484,10 +1516,11 @@ impl Ppu {
         // Apply color math effects based on CGWSEL ($2130) and CGADSUB ($2131) registers
         // Now that we have per-pixel layer tracking, we can implement this correctly!
 
-        // Check if color math is globally disabled
-        let color_math_prevented = (self.cgwsel & 0x40) != 0;
+        // Check if color math is globally disabled via CGWSEL bits 4-5
+        // 00 = Always enable, 01 = Inside window, 10 = Outside window, 11 = Never
+        let color_math_never = (self.cgwsel >> 4) & 0x03 == 3;
 
-        if !color_math_prevented && self.cgadsub != 0 {
+        if !color_math_never && self.cgadsub != 0 {
             self.apply_color_math(&mut frame, &layer_buffer, &sub_frame);
         }
         // ============================================================================
@@ -2026,19 +2059,29 @@ impl Ppu {
                 (addr & 0xFF00) | ((addr & 0x00E0) >> 5) | ((addr & 0x001F) << 3)
             }
             2 => {
-                // Mode 2: aaaaaaaBBBBcccc => aaaaaaaccccBBBB (9-bit)
-                // Takes bits 4-7 (BBBB) and bits 0-3 (cccc) and swaps them
-                (addr & 0xFE00) | ((addr & 0x00F0) >> 4) | ((addr & 0x000F) << 4)
+                // Mode 2: aaaaaaaBBBcccccc => aaaaaaaccccccBBB (9-bit)
+                // BBB is always 3 bits (bits 6-8), cccccc is 6 bits (bits 0-5)
+                // Rotate the low 9 bits: move BBB to the bottom
+                (addr & 0xFE00) | ((addr & 0x01C0) >> 6) | ((addr & 0x003F) << 3)
             }
             3 => {
-                // Mode 3: aaaaaaBBBBBccccc => aaaaaacccccBBBBB (10-bit)
-                // Takes bits 5-9 (BBBBB) and bits 0-4 (ccccc) and swaps them
-                (addr & 0xFC00) | ((addr & 0x03E0) >> 5) | ((addr & 0x001F) << 5)
+                // Mode 3: aaaaaaBBBccccccc => aaaaaacccccccBBB (10-bit)
+                // BBB is always 3 bits (bits 7-9), ccccccc is 7 bits (bits 0-6)
+                // Rotate the low 10 bits: move BBB to the bottom
+                (addr & 0xFC00) | ((addr & 0x0380) >> 7) | ((addr & 0x007F) << 3)
             }
             _ => addr,
         };
 
         remapped % (VRAM_SIZE / 2)
+    }
+
+    /// Read a byte from VRAM with address wrapping
+    /// Real SNES hardware has a 15-bit word address bus, so all VRAM accesses
+    /// wrap modulo 64KB. This replaces bounds-check-and-return-zero patterns.
+    #[inline(always)]
+    fn vram_read(&self, addr: usize) -> u8 {
+        self.vram[addr & (VRAM_SIZE - 1)]
     }
 
     /// Get VRAM address increment amount based on VMAIN register
@@ -2334,9 +2377,9 @@ impl Ppu {
         // Get horizontal offset
         let h_offset_addr =
             bg3_tilemap_base + self.get_tilemap_offset(h_tile_x, tile_y, bg3_tilemap_width);
-        let h_offset = if h_offset_addr + 1 < VRAM_SIZE {
-            let low = self.vram[h_offset_addr] as u16;
-            let high = self.vram[h_offset_addr + 1] as u16;
+        let h_offset = {
+            let low = self.vram_read(h_offset_addr) as u16;
+            let high = self.vram_read(h_offset_addr + 1) as u16;
             let offset_val = ((high & 0x1F) << 8) | low; // 13-bit value
                                                          // Sign extend from 13 bits
             if offset_val & 0x1000 != 0 {
@@ -2344,16 +2387,14 @@ impl Ppu {
             } else {
                 (offset_val as i16) >> 3
             }
-        } else {
-            0
         };
 
         // Get vertical offset
         let v_offset_addr =
             bg3_tilemap_base + self.get_tilemap_offset(v_tile_x, tile_y, bg3_tilemap_width);
-        let v_offset = if v_offset_addr + 1 < VRAM_SIZE {
-            let low = self.vram[v_offset_addr] as u16;
-            let high = self.vram[v_offset_addr + 1] as u16;
+        let v_offset = {
+            let low = self.vram_read(v_offset_addr) as u16;
+            let high = self.vram_read(v_offset_addr + 1) as u16;
             let offset_val = ((high & 0x1F) << 8) | low; // 13-bit value
                                                          // Sign extend from 13 bits
             if offset_val & 0x1000 != 0 {
@@ -2361,8 +2402,6 @@ impl Ppu {
             } else {
                 (offset_val as i16) >> 3
             }
-        } else {
-            0
         };
 
         (h_offset, v_offset)
@@ -2394,16 +2433,8 @@ impl Ppu {
         let bp0_addr = tile_data_base + row_offset;
         let bp1_addr = tile_data_base + row_offset + 1;
 
-        let bp0 = if bp0_addr < VRAM_SIZE {
-            self.vram[bp0_addr]
-        } else {
-            0
-        };
-        let bp1 = if bp1_addr < VRAM_SIZE {
-            self.vram[bp1_addr]
-        } else {
-            0
-        };
+        let bp0 = self.vram_read(bp0_addr);
+        let bp1 = self.vram_read(bp1_addr);
 
         // SNES bitplanes are MSB-first (leftmost pixel is bit 7)
         let bit = 7 - actual_col;
@@ -2442,16 +2473,8 @@ impl Ppu {
             let bp0_addr = tile_data_base + row_offset;
             let bp1_addr = tile_data_base + row_offset + 1;
 
-            let bp0 = if bp0_addr < VRAM_SIZE {
-                self.vram[bp0_addr]
-            } else {
-                0
-            };
-            let bp1 = if bp1_addr < VRAM_SIZE {
-                self.vram[bp1_addr]
-            } else {
-                0
-            };
+            let bp0 = self.vram_read(bp0_addr);
+            let bp1 = self.vram_read(bp1_addr);
 
             for col in 0..8 {
                 let actual_col = if params.flip_x { 7 - col } else { col };
@@ -2511,26 +2534,10 @@ impl Ppu {
         let bp2_addr = tile_data_base + 16 + row_offset;
         let bp3_addr = tile_data_base + 16 + row_offset + 1;
 
-        let bp0 = if bp0_addr < VRAM_SIZE {
-            self.vram[bp0_addr]
-        } else {
-            0
-        };
-        let bp1 = if bp1_addr < VRAM_SIZE {
-            self.vram[bp1_addr]
-        } else {
-            0
-        };
-        let bp2 = if bp2_addr < VRAM_SIZE {
-            self.vram[bp2_addr]
-        } else {
-            0
-        };
-        let bp3 = if bp3_addr < VRAM_SIZE {
-            self.vram[bp3_addr]
-        } else {
-            0
-        };
+        let bp0 = self.vram_read(bp0_addr);
+        let bp1 = self.vram_read(bp1_addr);
+        let bp2 = self.vram_read(bp2_addr);
+        let bp3 = self.vram_read(bp3_addr);
 
         // SNES bitplanes are MSB-first (leftmost pixel is bit 7)
         let bit = 7 - actual_col;
@@ -2583,46 +2590,14 @@ impl Ppu {
         let bp6_addr = tile_data_base + 48 + row_offset;
         let bp7_addr = tile_data_base + 48 + row_offset + 1;
 
-        let bp0 = if bp0_addr < VRAM_SIZE {
-            self.vram[bp0_addr]
-        } else {
-            0
-        };
-        let bp1 = if bp1_addr < VRAM_SIZE {
-            self.vram[bp1_addr]
-        } else {
-            0
-        };
-        let bp2 = if bp2_addr < VRAM_SIZE {
-            self.vram[bp2_addr]
-        } else {
-            0
-        };
-        let bp3 = if bp3_addr < VRAM_SIZE {
-            self.vram[bp3_addr]
-        } else {
-            0
-        };
-        let bp4 = if bp4_addr < VRAM_SIZE {
-            self.vram[bp4_addr]
-        } else {
-            0
-        };
-        let bp5 = if bp5_addr < VRAM_SIZE {
-            self.vram[bp5_addr]
-        } else {
-            0
-        };
-        let bp6 = if bp6_addr < VRAM_SIZE {
-            self.vram[bp6_addr]
-        } else {
-            0
-        };
-        let bp7 = if bp7_addr < VRAM_SIZE {
-            self.vram[bp7_addr]
-        } else {
-            0
-        };
+        let bp0 = self.vram_read(bp0_addr);
+        let bp1 = self.vram_read(bp1_addr);
+        let bp2 = self.vram_read(bp2_addr);
+        let bp3 = self.vram_read(bp3_addr);
+        let bp4 = self.vram_read(bp4_addr);
+        let bp5 = self.vram_read(bp5_addr);
+        let bp6 = self.vram_read(bp6_addr);
+        let bp7 = self.vram_read(bp7_addr);
 
         // SNES bitplanes are MSB-first (leftmost pixel is bit 7)
         let bit = 7 - actual_col;
@@ -2670,7 +2645,8 @@ impl Ppu {
     fn get_obj_base_address(&self) -> usize {
         let name_base = (self.obsel & 0x07) as usize;
         // Word address = name_base << 13, byte address = name_base << 14
-        name_base << 14
+        // Wrap to VRAM size (values >= 4 would exceed 64KB)
+        (name_base << 14) & (VRAM_SIZE - 1)
     }
 
     /// Get the offset to the second sprite page when nameselect bit is set
@@ -2756,18 +2732,14 @@ impl Ppu {
                 let tilemap_offset = self.get_tilemap_offset(tile_x, tile_y, tilemap_width);
                 let tilemap_addr = tilemap_base + tilemap_offset;
 
-                if tilemap_addr + 1 >= VRAM_SIZE {
-                    continue;
-                }
-
                 // Read tile entry (format: vhopppcc cccccccc)
                 // v = vertical flip (bit 15 of 16-bit entry, bit 7 of tile_high)
                 // h = horizontal flip (bit 14 of 16-bit entry, bit 6 of tile_high)
                 // o = priority (bit 13 of 16-bit entry, bit 5 of tile_high)
                 // ppp = palette (bits 12-10 of 16-bit entry, bits 4-2 of tile_high)
                 // cccccccccc = tile number (bits 9-0)
-                let tile_low = self.vram[tilemap_addr];
-                let tile_high = self.vram[tilemap_addr + 1];
+                let tile_low = self.vram_read(tilemap_addr);
+                let tile_high = self.vram_read(tilemap_addr + 1);
 
                 // Extract full 10-bit tile number: bits 0-1 from tile_high + 8 bits from tile_low
                 let base_tile_index = (tile_low as u16) | (((tile_high & 0x03) as u16) << 8);
@@ -2922,18 +2894,14 @@ impl Ppu {
                 let tilemap_offset = self.get_tilemap_offset(tile_x, tile_y, tilemap_width);
                 let tilemap_addr = tilemap_base + tilemap_offset;
 
-                if tilemap_addr + 1 >= VRAM_SIZE {
-                    continue;
-                }
-
                 // Read tile entry (format: vhopppcc cccccccc)
                 // v = vertical flip (bit 15 of 16-bit entry, bit 7 of tile_high)
                 // h = horizontal flip (bit 14 of 16-bit entry, bit 6 of tile_high)
                 // o = priority (bit 13 of 16-bit entry, bit 5 of tile_high)
                 // ppp = palette (bits 12-10 of 16-bit entry, bits 4-2 of tile_high)
                 // cccccccccc = tile number (bits 9-0)
-                let tile_low = self.vram[tilemap_addr];
-                let tile_high = self.vram[tilemap_addr + 1];
+                let tile_low = self.vram_read(tilemap_addr);
+                let tile_high = self.vram_read(tilemap_addr + 1);
 
                 // Extract full 10-bit tile number: bits 0-1 from tile_high + 8 bits from tile_low
                 let base_tile_index = (tile_low as u16) | (((tile_high & 0x03) as u16) << 8);
@@ -3085,13 +3053,9 @@ impl Ppu {
                 let tilemap_offset = self.get_tilemap_offset(tile_x, tile_y, tilemap_width);
                 let tilemap_addr = tilemap_base + tilemap_offset;
 
-                if tilemap_addr + 1 >= VRAM_SIZE {
-                    continue;
-                }
-
                 // Read tile entry (format: vhopppcc cccccccc)
-                let tile_low = self.vram[tilemap_addr];
-                let tile_high = self.vram[tilemap_addr + 1];
+                let tile_low = self.vram_read(tilemap_addr);
+                let tile_high = self.vram_read(tilemap_addr + 1);
 
                 // Extract full 10-bit tile number: bits 0-1 from tile_high + 8 bits from tile_low
                 let base_tile_index = (tile_low as u16) | (((tile_high & 0x03) as u16) << 8);
@@ -3177,9 +3141,9 @@ impl Ppu {
         filter_priority: u8,
     ) {
         let layer_id = LAYER_BG1;
-        // Mode 7 uses BG1's scroll values
-        let hofs = self.bg1_hofs as i32;
-        let vofs = self.bg1_vofs as i32;
+        // Mode 7 uses separate 13-bit scroll values (not the 10-bit BG1 scroll)
+        let hofs = self.m7hofs as i32;
+        let vofs = self.m7vofs as i32;
 
         // Get transformation matrix (8.8 fixed point)
         let a = self.m7a as i32;
@@ -3242,16 +3206,21 @@ impl Ppu {
                 };
 
                 // Transform screen coordinates to tilemap coordinates
-                // Formula from SNESdev wiki:
-                // X' = ((A * (X - CenterX)) + (B * (Y - CenterY)) + (CenterX << 8) + (HOFS << 8)) >> 8
-                // Y' = ((C * (X - CenterX)) + (D * (Y - CenterY)) + (CenterY << 8) + (VOFS << 8)) >> 8
+                // Formula from fullsnes.htm:
+                // ORG.x = A*(HOFS-CX) + B*(VOFS-CY) + CX*256
+                // ORG.y = C*(HOFS-CX) + D*(VOFS-CY) + CY*256
+                // SCREEN.x = (ORG.x + A*SX + B*SY) >> 8
+                // SCREEN.y = (ORG.y + C*SX + D*SY) >> 8
+                // Which simplifies to:
+                // X' = (A*(SX + HOFS - CX) + B*(SY + VOFS - CY) + CX*256) >> 8
+                // Y' = (C*(SX + HOFS - CX) + D*(SY + VOFS - CY) + CY*256) >> 8
 
-                let x_offset = sx - center_x;
-                let y_offset = sy - center_y;
+                let x_offset = sx + hofs - center_x;
+                let y_offset = sy + vofs - center_y;
 
                 // Apply matrix transformation (all in 8.8 fixed point)
-                let tx = ((a * x_offset) + (b * y_offset) + (center_x << 8) + (hofs << 8)) >> 8;
-                let ty = ((c * x_offset) + (d * y_offset) + (center_y << 8) + (vofs << 8)) >> 8;
+                let tx = ((a * x_offset) + (b * y_offset) + (center_x << 8)) >> 8;
+                let ty = ((c * x_offset) + (d * y_offset) + (center_y << 8)) >> 8;
 
                 // Handle screen over modes
                 let (tile_x, tile_y) = match screen_over {
@@ -3280,24 +3249,22 @@ impl Ppu {
                 let pixel_y = ty & 7;
 
                 // Mode 7 tilemap is 128x128 tiles at VRAM address 0
-                // Each tilemap entry is 1 byte (tile index only, no attributes)
-                let tilemap_addr = ((tile_y & 0x7F) * 128 + (tile_x & 0x7F)) as usize;
-                if tilemap_addr >= VRAM_SIZE {
-                    continue;
-                }
+                // VRAM is organized as interleaved word pairs:
+                //   Even bytes (0, 2, 4, ...) = tilemap entries
+                //   Odd bytes (1, 3, 5, ...) = tile pixel data
+                // Each tilemap entry is 1 byte at the even byte of its word
+                let tilemap_word = ((tile_y & 0x7F) * 128 + (tile_x & 0x7F)) as usize;
+                let tilemap_addr = tilemap_word * 2; // Even byte = tilemap
 
-                let tile_index = self.vram[tilemap_addr];
+                let tile_index = self.vram_read(tilemap_addr);
 
-                // Mode 7 tile data starts at VRAM 0, each tile is 64 bytes (8x8 pixels, 1 byte per pixel)
-                let tile_base = (tile_index as usize) * 64;
-                let pixel_offset = ((pixel_y & 7) * 8 + (pixel_x & 7)) as usize;
-                let pixel_addr = tile_base + pixel_offset;
+                // Mode 7 tile data: 256 tiles, 8x8 pixels, 1 byte per pixel
+                // Each pixel byte is at the ODD byte of its word in VRAM
+                let pixel_word =
+                    (tile_index as usize) * 64 + ((pixel_y & 7) * 8 + (pixel_x & 7)) as usize;
+                let pixel_addr = pixel_word * 2 + 1; // Odd byte = tile data
 
-                if pixel_addr >= VRAM_SIZE {
-                    continue;
-                }
-
-                let color = self.vram[pixel_addr];
+                let color = self.vram_read(pixel_addr);
 
                 // Skip transparent pixels (color 0)
                 if color == 0 {
@@ -3400,13 +3367,9 @@ impl Ppu {
                 let tilemap_offset = self.get_tilemap_offset(tile_x, tile_y, tilemap_width);
                 let tilemap_addr = tilemap_base + tilemap_offset;
 
-                if tilemap_addr + 1 >= VRAM_SIZE {
-                    continue;
-                }
-
                 // Read tile entry
-                let tile_low = self.vram[tilemap_addr];
-                let tile_high = self.vram[tilemap_addr + 1];
+                let tile_low = self.vram_read(tilemap_addr);
+                let tile_high = self.vram_read(tilemap_addr + 1);
 
                 // Extract full 10-bit tile number: bits 0-1 from tile_high + 8 bits from tile_low
                 let base_tile_index = (tile_low as u16) | (((tile_high & 0x03) as u16) << 8);
@@ -3551,13 +3514,9 @@ impl Ppu {
                 let tilemap_offset = self.get_tilemap_offset(tile_x, tile_y, tilemap_width);
                 let tilemap_addr = tilemap_base + tilemap_offset;
 
-                if tilemap_addr + 1 >= VRAM_SIZE {
-                    continue;
-                }
-
                 // Read tile entry
-                let tile_low = self.vram[tilemap_addr];
-                let tile_high = self.vram[tilemap_addr + 1];
+                let tile_low = self.vram_read(tilemap_addr);
+                let tile_high = self.vram_read(tilemap_addr + 1);
 
                 // Extract full 10-bit tile number: bits 0-1 from tile_high + 8 bits from tile_low
                 let base_tile_index = (tile_low as u16) | (((tile_high & 0x03) as u16) << 8);
@@ -3979,26 +3938,10 @@ impl Ppu {
                         let bp2_addr = tile_addr + 16 + row_offset;
                         let bp3_addr = tile_addr + 16 + row_offset + 1;
 
-                        let bp0 = if bp0_addr < VRAM_SIZE {
-                            self.vram[bp0_addr]
-                        } else {
-                            0
-                        };
-                        let bp1 = if bp1_addr < VRAM_SIZE {
-                            self.vram[bp1_addr]
-                        } else {
-                            0
-                        };
-                        let bp2 = if bp2_addr < VRAM_SIZE {
-                            self.vram[bp2_addr]
-                        } else {
-                            0
-                        };
-                        let bp3 = if bp3_addr < VRAM_SIZE {
-                            self.vram[bp3_addr]
-                        } else {
-                            0
-                        };
+                        let bp0 = self.vram_read(bp0_addr);
+                        let bp1 = self.vram_read(bp1_addr);
+                        let bp2 = self.vram_read(bp2_addr);
+                        let bp3 = self.vram_read(bp3_addr);
 
                         // SNES bitplanes are MSB-first (leftmost pixel is bit 7)
                         let bit = 7 - actual_px;
@@ -4861,12 +4804,12 @@ mod tests {
         let base = ppu.get_obj_base_address();
         assert_eq!(base, 0x8000, "OBSEL=0x02: name_base=2 -> 2 << 14 = 0x8000");
 
-        // Name base = 7 (max value)
+        // Name base = 7 (max value, wraps within 64KB VRAM)
         ppu.obsel = 0x07;
         let base = ppu.get_obj_base_address();
         assert_eq!(
-            base, 0x1C000,
-            "OBSEL=0x07: name_base=7 -> 7 << 14 = 0x1C000"
+            base, 0xC000,
+            "OBSEL=0x07: name_base=7 -> (7 << 14) & 0xFFFF = 0xC000"
         );
 
         // Test nameselect gap calculation (bsnes: += (1 + io.nameselect) << 12 words = << 13 bytes)
@@ -5789,13 +5732,16 @@ mod tests {
         ppu.write_register(0x2120, 0x00); // M7Y = 0
 
         // Create a simple Mode 7 tilemap entry
-        // Tilemap at VRAM 0, tile 1 at position (0, 0)
-        ppu.vram[0] = 1; // Tile index 1
+        // Mode 7 VRAM is interleaved: even bytes = tilemap, odd bytes = tile pixel data
+        // Tilemap at word 0, even byte 0: tile index 1 at position (0, 0)
+        ppu.vram[0] = 1; // Even byte = tilemap entry (tile index 1)
 
         // Fill tile 1 with color 15 (white)
-        let tile_base = 64; // Tile 1 starts at byte 64
+        // Each tile pixel is at odd byte: address = (tile*64 + pixel_offset)*2 + 1
+        let tile_1_base = 64; // Tile 1 starts at word offset 64
         for i in 0..64 {
-            ppu.vram[tile_base + i] = 15;
+            let pixel_addr = (tile_1_base + i) * 2 + 1; // Tile 1, pixel i, odd byte
+            ppu.vram[pixel_addr] = 15;
         }
 
         // Set up palette - color 15 as red
@@ -6817,22 +6763,24 @@ mod tests {
         ppu.write_register(0x2117, 0x00);
         assert_eq!(ppu.get_remapped_vram_addr(), 0x0038);
 
-        // Mode 2: 9-bit remapping (aaaaaaaBBBBcccc => aaaaaaaccccBBBB)
+        // Mode 2: 9-bit rotation (aaaaaaaBBBcccccc => aaaaaaaccccccBBB)
+        // BBB is always 3 bits (bits 8-6), cccccc is 6 bits (bits 5-0)
         // Example: $0080 = 0b00000000_10000000
-        //   BBBB = 1000 (bits 4-7), cccc = 0000 (bits 0-3)
-        //   Result: 0b00000000_00001000 = $0008
+        //   BBB = 010 (bits 8-6), cccccc = 000000 (bits 5-0)
+        //   Result: 0b00000000_00000010 = $0002
         ppu.write_register(0x2115, 0x08); // Bits 2-3 = 10
         ppu.write_register(0x2116, 0x80);
         ppu.write_register(0x2117, 0x00);
-        assert_eq!(ppu.get_remapped_vram_addr(), 0x0008);
+        assert_eq!(ppu.get_remapped_vram_addr(), 0x0002);
 
-        // Mode 3: 10-bit remapping (aaaaaaBBBBBccccc => aaaaaacccccBBBBB)
+        // Mode 3: 10-bit rotation (aaaaaaBBBccccccc => aaaaaacccccccBBB)
+        // BBB is always 3 bits (bits 9-7), ccccccc is 7 bits (bits 6-0)
         // Example: $0100 = 0b00000001_00000000
-        //   BBBBB = 01000 (bits 5-9), ccccc = 00000 (bits 0-4)
-        //   Result: 0b00000000_00001000 = $0008
+        //   BBB = 010 (bits 9-7), ccccccc = 0000000 (bits 6-0)
+        //   Result: 0b00000000_00000010 = $0002
         ppu.write_register(0x2115, 0x0C); // Bits 2-3 = 11
         ppu.write_register(0x2116, 0x00);
         ppu.write_register(0x2117, 0x01);
-        assert_eq!(ppu.get_remapped_vram_addr(), 0x0008);
+        assert_eq!(ppu.get_remapped_vram_addr(), 0x0002);
     }
 }
