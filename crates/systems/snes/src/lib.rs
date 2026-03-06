@@ -177,9 +177,10 @@ pub struct SnesSystem {
 // - WRAM Refresh: CPU paused for 40 master cycles (~6-7 CPU cycles) at ~536 master cycles into each scanline
 //
 // Current Implementation:
-// We track "CPU cycles" returned by the 65C816 core, which represent abstract CPU operations.
-// Each CPU cycle corresponds to 6-12 master cycles depending on the operation.
-// For timing purposes, we use approximate cycle counts that work well for most games:
+// We track "CPU cycles" returned by the 65C816 core (WDC 65C816 datasheet counts).
+// These are abstract bus cycle counts — the effective CPU rate is higher than the real
+// ~3.58 MHz because we don't apply SNES-specific memory speed penalties.
+// The SPC700 ratio in bus.rs is calibrated for correct CPU:SPC instruction-level timing.
 const SNES_FRAME_CYCLES: u32 = 89342; // Approximate CPU cycles per frame (~60 Hz)
 const SNES_SCANLINE_CYCLES: u32 = 341; // Approximate CPU cycles per scanline
 

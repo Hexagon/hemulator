@@ -2485,11 +2485,13 @@ impl<M: MemorySpc700> CpuSpc700<M> {
             }
             // LSR X
             0x5E => {
-                let carry = (self.x & 0x01) != 0;
-                self.x >>= 1;
-                self.set_carry(carry);
-                self.update_nz(self.x);
-                2
+                // CMP Y, !abs (3 bytes, 5 cycles)
+                let addr = self.fetch_word();
+                let val = self.read(addr);
+                let result = self.y.wrapping_sub(val);
+                self.update_nz(result);
+                self.set_flag(psw_flags::CARRY, self.y >= val);
+                5
             }
 
             // CMP A, (dp)

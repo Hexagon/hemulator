@@ -286,8 +286,11 @@ impl Cartridge {
 
             match (self.chip_type, self.mapping_mode) {
                 (ChipType::Dsp1, MappingMode::LoROM) => {
-                    // DSP-1 LoROM mapping
-                    if matches!(bank, 0x30..=0x3F) && (offset >= 0x3000) {
+                    // DSP-1 LoROM mapping (Mode B, default for <16Mbit ROMs like SMK):
+                    //   Banks $20-$3F / $A0-$BF at $8000-$FFFF
+                    //   DR (Data Register):   offset bit 14 = 0 ($8000-$BFFF)
+                    //   SR (Status Register): offset bit 14 = 1 ($C000-$FFFF)
+                    if matches!(bank, 0x20..=0x3F | 0xA0..=0xBF) && offset >= 0x8000 {
                         return chip.borrow_mut().read(addr);
                     }
                 }
@@ -519,8 +522,11 @@ impl Cartridge {
 
             match (self.chip_type, self.mapping_mode) {
                 (ChipType::Dsp1, MappingMode::LoROM) => {
-                    // DSP-1 LoROM mapping (data register only)
-                    if matches!(bank, 0x30..=0x3F) && (0x3000..0x7000).contains(&offset) {
+                    // DSP-1 LoROM mapping (Mode B):
+                    //   Banks $20-$3F / $A0-$BF at $8000-$FFFF
+                    //   DR (Data Register) at $8000-$BFFF is writable
+                    //   SR (Status Register) at $C000-$FFFF is read-only
+                    if matches!(bank, 0x20..=0x3F | 0xA0..=0xBF) && offset >= 0x8000 {
                         chip.borrow_mut().write(addr, val);
                         return;
                     }
