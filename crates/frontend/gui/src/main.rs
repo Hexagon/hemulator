@@ -3191,7 +3191,9 @@ fn main() {
                             if mount_id.is_empty() {
                                 status_message = msg.to_string();
                                 if !matches!(ext_str, "img" | "ima") {
-                                    println!("Initialized PC system. Mount disk images to proceed.");
+                                    println!(
+                                        "Initialized PC system. Mount disk images to proceed."
+                                    );
                                 }
                             } else if let Err(e) = pc_sys.mount(mount_id, &data) {
                                 eprintln!("Failed to mount {}: {}", mount_id, e);
