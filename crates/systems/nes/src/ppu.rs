@@ -537,7 +537,12 @@ impl Ppu {
                 // The PPU's internal sprite evaluation hardware is using the OAM bus, and reads
                 // of $2004 return whatever the hardware is currently reading:
                 // - Dots 1-64: Secondary OAM clear → returns $FF
-                // - Dots 65-256: Sprite evaluation → returns current primary OAM byte being read
+                // - Dots 65-256: Sprite evaluation → returns internal OAM read buffer
+                //   (approximated here as the Y-byte at sprite_index * 4; on real hardware
+                //   this reflects the evaluation state machine's current read address,
+                //   which alternates between Y-bytes for range checks and other sprite
+                //   bytes when a sprite is in range. This Y-byte-only approximation is
+                //   sufficient for games like Bee 52 that use $2004 for coarse timing.)
                 // - Dots 257-340: Sprite tile fetches / idle → returns $FF
                 //
                 // Bee 52 and other Codemasters games read $2004 during rendering to synchronize
@@ -1633,16 +1638,22 @@ impl Ppu {
         let mut next_dot = dot + 1;
         let mut next_scanline = scanline;
 
-        // Hardware-accurate odd frame cycle skip:
-        // On odd frames, the PPU skips dot 340 of the pre-render scanline by jumping
+        // Hardware-accurate odd frame cycle skip (NTSC 2C02 only):
+        // On odd frames, the NTSC PPU skips dot 340 of the pre-render scanline by jumping
         // directly from (261, 339) to (0, 0). The skip ONLY occurs if rendering is
         // enabled (BG or sprites via PPUMASK $2001) at this exact dot. We check at
         // dot 339 because that's when the hardware makes the decision.
+        // The PAL PPU (2C07) does NOT perform this skip — every PAL frame is exactly
+        // 312 × 341 = 106,392 dots regardless of rendering state or frame parity.
         // Games like Bee 52 toggle rendering mid-frame (disabling it for CHR-RAM uploads),
         // so checking rendering_enabled at the wrong time (e.g., at dot 0 of the new frame)
         // causes a 1-dot CPU/PPU drift every other frame → 30Hz flicker.
-        // Reference: NESdev wiki PPU frame timing, foobles/nes-ppu (CC-BY-NC-4.0)
-        if scanline == pre_render_scanline && dot == 339 && self.odd_frame.get() {
+        // Reference: NESdev wiki PPU frame timing, NESdev wiki PAL video
+        if self.timing_mode == TimingMode::Ntsc
+            && scanline == pre_render_scanline
+            && dot == 339
+            && self.odd_frame.get()
+        {
             let rendering_enabled = (self.mask & 0x18) != 0;
             if rendering_enabled {
                 // Skip dot 340: force next_dot to 341 so end-of-scanline wraps to (0, 0)
@@ -4719,6 +4730,30 @@ mod tests {
             ppu.dot.get(),
             340,
             "No skip on even frame: should advance to dot 340"
+        );
+
+        // --- Case 4: PAL mode, odd frame, rendering enabled → NO skip ---
+        // The PAL PPU (2C07) does not perform the odd-frame cycle skip.
+        // Every PAL frame is exactly 312 × 341 dots regardless of frame parity.
+        // Reference: NESdev wiki PAL video
+        let mut pal_ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Pal);
+        pal_ppu.odd_frame.set(true);
+        pal_ppu.mask = 0x18; // Rendering enabled
+        pal_ppu.scanline.set(311); // PAL pre-render scanline
+        pal_ppu.dot.set(339);
+
+        pal_ppu.tick();
+
+        // Should advance normally to (311, 340) — PAL never skips
+        assert_eq!(
+            pal_ppu.scanline.get(),
+            311,
+            "PAL: no skip on odd frame — should stay on scanline 311"
+        );
+        assert_eq!(
+            pal_ppu.dot.get(),
+            340,
+            "PAL: no skip on odd frame — should advance to dot 340"
         );
     }
 
