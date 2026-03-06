@@ -70,6 +70,54 @@ fn nes_palette_rgb(index: u8) -> u32 {
     NES_MASTER_PALETTE[(index & 0x3F) as usize]
 }
 
+/// Apply color emphasis from PPUMASK bits 5-7 to an RGB color.
+///
+/// On NTSC NES:
+/// - Bit 5 (0x20): Emphasize red — attenuate green and blue
+/// - Bit 6 (0x40): Emphasize green — attenuate red and blue
+/// - Bit 7 (0x80): Emphasize blue — attenuate red and green
+///
+/// When emphasis is active, the de-emphasized channels are reduced to ~74% brightness.
+/// Multiple emphasis bits can be set simultaneously. If all three are set, all channels
+/// are attenuated (overall dimming).
+///
+/// Reference: https://www.nesdev.org/wiki/NTSC_video#Color_Emphasis
+#[inline]
+fn apply_color_emphasis(rgb: u32, mask: u8) -> u32 {
+    let emphasis = mask & 0xE0;
+    if emphasis == 0 {
+        return rgb;
+    }
+
+    let r = (rgb >> 16) & 0xFF;
+    let g = (rgb >> 8) & 0xFF;
+    let b = rgb & 0xFF;
+
+    // Emphasis attenuates the OTHER channels (the ones NOT emphasized).
+    // Factor: ~0.746 for de-emphasized channels, approximated as * 191 / 256.
+    let emph_red = (emphasis & 0x20) != 0;
+    let emph_green = (emphasis & 0x40) != 0;
+    let emph_blue = (emphasis & 0x80) != 0;
+
+    let r_out = if emph_green || emph_blue {
+        (r * 191) >> 8
+    } else {
+        r
+    };
+    let g_out = if emph_red || emph_blue {
+        (g * 191) >> 8
+    } else {
+        g
+    };
+    let b_out = if emph_red || emph_green {
+        (b * 191) >> 8
+    } else {
+        b
+    };
+
+    0xFF000000 | (r_out << 16) | (g_out << 8) | b_out
+}
+
 fn palette_mirror_index(i: usize) -> usize {
     // Palette mirroring:
     // - $3F10/$3F14/$3F18/$3F1C (sprite palette color 0s) mirror $3F00/$3F04/$3F08/$3F0C
@@ -1195,10 +1243,36 @@ impl Ppu {
                 }
             }
         } else {
-            // Background disabled: fill this scanline with backdrop.
+            // Background disabled: fill this scanline with backdrop color.
+            //
+            // On real NES hardware, when rendering is disabled (both BG and sprites off),
+            // the PPU outputs color based on the current VRAM address (v register):
+            // - If v points to palette space ($3F00-$3F1F): shows the palette entry at that address
+            // - Otherwise: shows the universal backdrop color ($3F00)
+            //
+            // This is important for games like Bee 52 that set PPUADDR to palette addresses
+            // during rendering-disabled gaps for specific visual effects.
+            // Reference: https://www.nesdev.org/wiki/PPU_palettes#The_background_palette_hack
+            let disabled_bg = if !sprites_enabled {
+                // Both BG and sprites disabled — check PPUADDR for palette hack
+                let v_addr = self.vram_addr.get() & 0x3FFF;
+                if v_addr >= 0x3F00 {
+                    let p = (v_addr - 0x3F00) & 0x1F;
+                    let mut pal_entry = self.palette[palette_mirror_index(p as usize)];
+                    if (self.mask & 0x01) != 0 {
+                        pal_entry &= 0x30;
+                    }
+                    nes_palette_rgb(pal_entry)
+                } else {
+                    universal_bg
+                }
+            } else {
+                // Sprites still enabled, just BG disabled — use standard backdrop
+                universal_bg
+            };
             let row_start = (y * width) as usize;
             for px in &mut frame.pixels[row_start..row_start + width as usize] {
-                *px = universal_bg;
+                *px = disabled_bg;
             }
         }
 
@@ -1384,6 +1458,16 @@ impl Ppu {
         // NOTE: v register increment now happens in tick() at dot 256 of each visible scanline.
         // render_scanline() should NOT modify the v register - it only renders based on current state.
         // This ensures proper cycle-accurate timing and prevents drift issues.
+
+        // Apply color emphasis from PPUMASK bits 5-7 to all pixels on this scanline.
+        // This attenuates the non-emphasized color channels.
+        if (self.mask & 0xE0) != 0 {
+            let row_start = (y * width) as usize;
+            let row_end = row_start + width as usize;
+            for px in &mut frame.pixels[row_start..row_end] {
+                *px = apply_color_emphasis(*px, self.mask);
+            }
+        }
 
         self.suppress_a12.set(prev_suppress);
     }

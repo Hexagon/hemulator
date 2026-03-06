@@ -56,9 +56,11 @@ impl Cartridge {
             // AxROM (007): Always uses single-screen mirroring, header is meaningless
             7 => Mirroring::SingleScreenLower,
 
-            // Camerica (071): Respect header mirroring for hard-wired mirroring on cartridge.
+            // Camerica (071): All Camerica boards have Vertical mirroring hard-wired on PCB.
+            // iNES headers are often incorrect (e.g., Bee 52 header says Horizontal).
             // Games can override to single-screen via $9000 writes if needed (e.g., Fire Hawk).
-            71 => self.mirroring,
+            // Reference: https://www.nesdev.org/wiki/INES_Mapper_071
+            71 => Mirroring::Vertical,
 
             // All other mappers: Use header mirroring
             _ => self.mirroring,
