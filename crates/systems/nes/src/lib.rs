@@ -756,19 +756,66 @@ impl System for NesSystem {
                 }
             }
 
+            // CYCLE-ACCURATE INTERRUPT DISPATCH
+            //
+            // On real hardware, NMI/IRQ dispatch takes 7 CPU cycles. During those
+            // 7 cycles the PPU continues running (21 PPU dots). Previously, the
+            // interrupt cycles were added to the CPU's internal cycle counter but
+            // never ticked in the PPU, causing a ~21-dot PPU drift per interrupt.
+            //
+            // For games that use precise cycle-counting (like Bee 52's delay loops
+            // and sprite 0 hit polling), this drift causes timing-dependent effects
+            // to appear at the wrong scanline/dot position, resulting in flickering
+            // or misaligned HUD elements on alternate frames.
+            //
+            // Fix: measure CPU cycles actually consumed by each interrupt dispatch
+            // and tick the PPU for the corresponding number of dots.
             if irq_to_fire {
-                log(LogCategory::Interrupts, LogLevel::Info, || {
-                    "System: Firing IRQ! Mapper/APU pending.".to_string()
-                });
+                let cycles_before = self.cpu.cycles();
                 self.cpu.trigger_irq();
-                irqs = irqs.wrapping_add(1);
+                let irq_cycles = (self.cpu.cycles().wrapping_sub(cycles_before)) as u32;
+                if irq_cycles > 0 {
+                    log(LogCategory::Interrupts, LogLevel::Info, || {
+                        format!("System: IRQ dispatched ({} cycles)", irq_cycles)
+                    });
+                    irqs = irqs.wrapping_add(1);
+                    cpu_cycles_used = cpu_cycles_used.wrapping_add(irq_cycles);
+                    // Tick PPU for the interrupt cycles (3 PPU dots per CPU cycle)
+                    if let Some(b) = self.cpu.bus_mut() {
+                        for _ in 0..irq_cycles {
+                            for _ in 0..3 {
+                                let nmi_triggered = b.ppu.tick();
+                                if nmi_triggered {
+                                    nmi_to_fire = true;
+                                }
+                            }
+                        }
+                        b.add_cycles(irq_cycles);
+                        b.apu.clock_irq(irq_cycles);
+                    }
+                }
             }
             if nmi_to_fire {
-                log(LogCategory::Interrupts, LogLevel::Debug, || {
-                    "System: Firing NMI".to_string()
-                });
+                let cycles_before = self.cpu.cycles();
                 self.cpu.trigger_nmi();
-                nmis = nmis.wrapping_add(1);
+                let nmi_cycles = (self.cpu.cycles().wrapping_sub(cycles_before)) as u32;
+                if nmi_cycles > 0 {
+                    log(LogCategory::Interrupts, LogLevel::Debug, || {
+                        format!("System: NMI dispatched ({} cycles)", nmi_cycles)
+                    });
+                    nmis = nmis.wrapping_add(1);
+                    cpu_cycles_used = cpu_cycles_used.wrapping_add(nmi_cycles);
+                    // Tick PPU for the interrupt cycles (3 PPU dots per CPU cycle)
+                    if let Some(b) = self.cpu.bus_mut() {
+                        for _ in 0..nmi_cycles {
+                            for _ in 0..3 {
+                                let _ = b.ppu.tick();
+                            }
+                        }
+                        b.add_cycles(nmi_cycles);
+                        b.apu.clock_irq(nmi_cycles);
+                    }
+                }
             }
         }
 
