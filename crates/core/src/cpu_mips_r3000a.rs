@@ -268,15 +268,12 @@ impl GteRegisters {
 
     // ========================================================================
     // Helper: set MAC0 (32-bit accumulator for MAC0-specific ops)
-    // Sets FLAG bits 17 (positive) / 16 (negative) on overflow.
+    // MAC0 has no dedicated FLAG overflow bits on the PS1 GTE; the value is
+    // simply truncated to 32 bits.  Overflow detection for SZ3/OTZ saturation
+    // (FLAG bit 16) and divide overflow (FLAG bit 17) is handled separately
+    // by push_sz, cmd_avsz3/4, and unr_divide respectively.
     // ========================================================================
     fn set_mac0(&mut self, val: i64) {
-        if val > i32::MAX as i64 {
-            self.control[31] |= 1 << 17;
-        }
-        if val < i32::MIN as i64 {
-            self.control[31] |= 1 << 16;
-        }
         self.data[24] = val as i32 as u32;
     }
 
@@ -302,26 +299,29 @@ impl GteRegisters {
 
     // ========================================================================
     // Helper: set IR0 (depth-cue factor), clamped to [0, 0x1000]
-    // Sets FLAG bit 13 on saturation.
+    // Sets FLAG bit 18 (IR0 saturated) and bit 13 (copy of bit 18) on saturation.
     // ========================================================================
     fn set_ir0(&mut self, val: i32) {
         let clamped = val.clamp(0, 0x1000);
         if clamped != val {
-            self.control[31] |= 1 << 13;
+            self.control[31] |= (1 << 18) | (1 << 13);
         }
         self.data[8] = clamped as u32;
     }
 
     // ========================================================================
     // Helper: push to the SZ (screen Z) FIFO: [SZ0,SZ1,SZ2,SZ3] ← [SZ1,SZ2,SZ3,new]
-    // New value is clamped to [0, 0xFFFF].
+    // New value is clamped to [0, 0xFFFF]; sets FLAG bit 16 (SZ3 saturated) if clamped.
     // ========================================================================
     fn push_sz(&mut self, val: i32) {
         self.data[16] = self.data[17];
         self.data[17] = self.data[18];
         self.data[18] = self.data[19];
-        // Clamp negative values to 0 before storing (SZ is unsigned 16-bit)
-        self.data[19] = val.clamp(0, 0xFFFF) as u32;
+        let clamped = val.clamp(0, 0xFFFF);
+        if clamped != val {
+            self.control[31] |= 1 << 16; // SZ3 saturated
+        }
+        self.data[19] = clamped as u32;
     }
 
     // ========================================================================
@@ -375,8 +375,9 @@ impl GteRegisters {
     pub fn execute(&mut self, command: u32) {
         let opcode = command & 0x3F;
 
-        // Clear FLAG register error bits before each new command
-        self.control[31] &= 0x7FFFF000;
+        // Clear all FLAG error bits before each new command (bits 31..12 reset to 0).
+        // Bits 11..0 are always zero (reserved) so a full reset to 0 is correct.
+        self.control[31] = 0;
 
         match opcode {
             0x01 => self.cmd_rtps(command),
@@ -641,6 +642,7 @@ impl GteRegisters {
 
     /// NCLIP (0x06): Normal clipping — 2D cross product to detect face orientation.
     /// MAC0 = SX0*(SY1−SY2) + SX1*(SY2−SY0) + SX2*(SY0−SY1)
+    /// No FLAG bits are set for MAC0 overflow (MAC0 has no dedicated overflow flags).
     fn cmd_nclip(&mut self) {
         let sx0 = self.data[12] as i16 as i64;
         let sy0 = (self.data[12] >> 16) as i16 as i64;
@@ -649,14 +651,7 @@ impl GteRegisters {
         let sx2 = self.data[14] as i16 as i64;
         let sy2 = (self.data[14] >> 16) as i16 as i64;
         let mac0 = sx0 * (sy1 - sy2) + sx1 * (sy2 - sy0) + sx2 * (sy0 - sy1);
-        // MAC0 overflow flags
-        if mac0 > i32::MAX as i64 {
-            self.control[31] |= 1 << 17;
-        }
-        if mac0 < i32::MIN as i64 {
-            self.control[31] |= 1 << 16;
-        }
-        self.data[24] = mac0 as i32 as u32;
+        self.set_mac0(mac0);
     }
 
     /// OP (0x0C): Outer product of IR vectors vs rotation matrix diagonal.
@@ -953,7 +948,12 @@ impl GteRegisters {
         let sz3 = (self.data[19] & 0xFFFF) as i64;
         let mac0 = zsf3 * (sz1 + sz2 + sz3);
         self.set_mac0(mac0);
-        self.data[7] = (mac0 >> 12).clamp(0, 0xFFFF) as u32; // OTZ
+        let otz = mac0 >> 12;
+        let otz_clamped = otz.clamp(0, 0xFFFF);
+        if otz_clamped != otz {
+            self.control[31] |= 1 << 16; // OTZ saturated
+        }
+        self.data[7] = otz_clamped as u32;
     }
 
     /// AVSZ4 (0x2E): Average of SZ0, SZ1, SZ2, SZ3 → OTZ.
@@ -965,7 +965,12 @@ impl GteRegisters {
         let sz3 = (self.data[19] & 0xFFFF) as i64;
         let mac0 = zsf4 * (sz0 + sz1 + sz2 + sz3);
         self.set_mac0(mac0);
-        self.data[7] = (mac0 >> 12).clamp(0, 0xFFFF) as u32; // OTZ
+        let otz = mac0 >> 12;
+        let otz_clamped = otz.clamp(0, 0xFFFF);
+        if otz_clamped != otz {
+            self.control[31] |= 1 << 16; // OTZ saturated
+        }
+        self.data[7] = otz_clamped as u32;
     }
 }
 
@@ -2097,5 +2102,204 @@ mod tests {
         assert_eq!(cpu.cop0[COP0_EPC], 0xBFC0_0000);
         // Cause exception code should be SYSCALL (8)
         assert_eq!((cpu.cop0[COP0_CAUSE] & CAUSE_EXCODE_MASK) >> 2, EXCODE_SYS);
+    }
+
+    // ========================================================================
+    // GTE FLAG register tests
+    // ========================================================================
+
+    /// FLAG is fully cleared at the start of each GTE command.
+    /// Previously the mask `0x7FFFF000` kept bits 30..12, causing error flags
+    /// to accumulate across commands.
+    #[test]
+    fn test_gte_flag_cleared_between_commands() {
+        let mut gte = GteRegisters::new();
+
+        // Set up a rotation that produces MAC overflow: set rotation matrix to
+        // large values so the product exceeds the 44-bit MAC range.
+        // RT11..RT33 = 0x7FFF (max positive i16), TR = 0.
+        for i in 0..5 {
+            gte.control[i] = 0x7FFF_7FFF;
+        }
+        // Vertex V0 = (0x7FFF, 0x7FFF, 0x7FFF)
+        gte.data[0] = 0x7FFF_7FFF;
+        gte.data[1] = 0x7FFF;
+        // H = 0x1000, OFX/OFY = 0
+        gte.control[26] = 0x1000;
+
+        // RTPS — should set MAC overflow bits (30, 29, 28 or 27, 26, 25)
+        gte.execute(0x01); // RTPS
+        let flag_after_rtps = gte.control[31];
+        assert_ne!(
+            flag_after_rtps & 0x7F87E000,
+            0,
+            "RTPS should set error bits"
+        );
+        assert_ne!(
+            flag_after_rtps & (1 << 31),
+            0,
+            "Error summary bit 31 should be set"
+        );
+
+        // Running a clean NCLIP (SXY inputs = 0) should clear ALL error bits.
+        gte.execute(0x06); // NCLIP with SXY = 0
+        let flag_after_nclip = gte.control[31];
+        assert_eq!(
+            flag_after_nclip, 0,
+            "FLAG should be fully zero after NCLIP with no overflow (was 0x{:08X})",
+            flag_after_nclip
+        );
+    }
+
+    /// MAC0 overflow from NCLIP must NOT set FLAG bits 17 or 16.
+    /// Those bits belong to "divide overflow" and "SZ3/OTZ saturated" respectively.
+    #[test]
+    fn test_gte_nclip_mac0_overflow_no_flag() {
+        let mut gte = GteRegisters::new();
+
+        // Set up SXY FIFO with large signed values so the NCLIP cross product
+        // overflows the 32-bit range (but remains within the 44-bit MAC0 range).
+        // SX0=0x7FFF, SY0=-0x8000, SX1=-0x8000, SY1=0x7FFF, SX2=0x7FFF, SY2=0x7FFF
+        gte.data[12] = 0x8000_7FFF_u32; // SXY0: SX0=0x7FFF, SY0=-0x8000
+        gte.data[13] = 0x7FFF_8000_u32; // SXY1: SX1=-0x8000, SY1=0x7FFF
+        gte.data[14] = 0x7FFF_7FFF_u32; // SXY2: SX2=0x7FFF, SY2=0x7FFF
+
+        gte.execute(0x06); // NCLIP
+
+        let flag = gte.control[31];
+        // Bits 17 (divide overflow) and 16 (SZ3 saturation) must stay clear.
+        assert_eq!(
+            flag & (1 << 17),
+            0,
+            "NCLIP must not set divide-overflow bit 17"
+        );
+        assert_eq!(
+            flag & (1 << 16),
+            0,
+            "NCLIP must not set SZ3-saturation bit 16"
+        );
+        // Error summary (bit 31) must also be clear since no real GTE error occurred.
+        assert_eq!(
+            flag & (1 << 31),
+            0,
+            "NCLIP must not set error-summary bit 31"
+        );
+    }
+
+    /// Perspective divide overflow (H >= SZ3*2) must set FLAG bit 17 only.
+    #[test]
+    fn test_gte_divide_overflow_sets_bit17() {
+        let mut gte = GteRegisters::new();
+
+        // SZ3 = 1, H = 4 → H >= SZ3*2 → divide overflow
+        gte.data[16] = 0; // SZ0
+        gte.data[17] = 0; // SZ1
+        gte.data[18] = 0; // SZ2
+        gte.data[19] = 1; // SZ3 = 1
+        gte.control[26] = 4; // H = 4
+
+        // Use UNR divide directly through RTPS with zeroed rotation matrix:
+        // TR = (0,0,1) so MAC3 → SZ push = 1, then divide H/SZ3 = 4/1 ≥ 2 → overflow.
+        gte.control[7] = 1 << 12; // TRZ = 1 (fixed-point: value >> 12 = 0, but as raw i32)
+                                  // Actually set TRZ so that MAC3>>12 = 1 after RTPS. TRZ is in control[7] as i32.
+                                  // MAC3 = TRZ*0x1000 + 0 = TRZ*4096. With sf=1 (bit 19 of command), MAC3>>12 = TRZ.
+                                  // Set command sf=1: bit 19 set.
+        gte.control[7] = 1; // TRZ = 1 → MAC3 = 4096, with sf=12: MAC3>>12 = 1 → SZ3=1
+                            // Set H=4 so H >= SZ3*2 = 2.
+        gte.control[26] = 4;
+        // sf=1 (bit 19), lm=0: command = 0x0008_0001
+        gte.execute(0x0008_0001); // RTPS with sf=1
+
+        let flag = gte.control[31];
+        assert_ne!(
+            flag & (1 << 17),
+            0,
+            "Divide overflow should set FLAG bit 17"
+        );
+    }
+
+    /// SZ3 saturation (push_sz clamping) must set FLAG bit 16.
+    #[test]
+    fn test_gte_sz3_saturation_sets_bit16() {
+        let mut gte = GteRegisters::new();
+
+        // Use RTPS with TRZ < 0 so that MAC3>>12 is negative → push_sz clamps to 0.
+        gte.control[7] = (-1i32) as u32; // TRZ = -1
+        gte.control[26] = 0x1000; // H = 0x1000
+                                  // sf=1 (bit 19), so MAC3 = TRZ*4096 = -4096, MAC3>>12 = -1 → push_sz(-1) → clamp to 0.
+        gte.execute(0x0008_0001); // RTPS with sf=1
+
+        let flag = gte.control[31];
+        assert_ne!(
+            flag & (1 << 16),
+            0,
+            "SZ3 negative value should set FLAG bit 16"
+        );
+    }
+
+    /// OTZ saturation (cmd_avsz3 clamp) must set FLAG bit 16.
+    #[test]
+    fn test_gte_otz_saturation_sets_bit16() {
+        let mut gte = GteRegisters::new();
+
+        // AVSZ3: OTZ = (ZSF3 * (SZ1+SZ2+SZ3)) >> 12
+        // Set ZSF3 = -1 and SZ1..SZ3 = 1 → mac0 = -3, mac0>>12 < 0 → clamp to 0.
+        gte.control[29] = (-1i32) as u32; // ZSF3 = -1
+        gte.data[17] = 1; // SZ1 = 1
+        gte.data[18] = 1; // SZ2 = 1
+        gte.data[19] = 1; // SZ3 = 1
+
+        gte.execute(0x2D); // AVSZ3
+
+        let flag = gte.control[31];
+        assert_ne!(flag & (1 << 16), 0, "Negative OTZ should set FLAG bit 16");
+        assert_eq!(gte.data[7], 0, "OTZ should be clamped to 0");
+    }
+
+    /// AVSZ4 OTZ saturation (overflow above 0xFFFF) must set FLAG bit 16.
+    #[test]
+    fn test_gte_avsz4_otz_overflow_sets_bit16() {
+        let mut gte = GteRegisters::new();
+
+        // ZSF4=0x4000, SZ0..SZ3=0xFFFF → mac0 = 0x4000*(4*0xFFFF) = very large → >>12 > 0xFFFF
+        gte.control[30] = 0x4000; // ZSF4 = 0x4000
+        gte.data[16] = 0xFFFF; // SZ0
+        gte.data[17] = 0xFFFF; // SZ1
+        gte.data[18] = 0xFFFF; // SZ2
+        gte.data[19] = 0xFFFF; // SZ3
+
+        gte.execute(0x2E); // AVSZ4
+
+        let flag = gte.control[31];
+        assert_ne!(
+            flag & (1 << 16),
+            0,
+            "OTZ overflow above 0xFFFF should set FLAG bit 16"
+        );
+        assert_eq!(gte.data[7], 0xFFFF, "OTZ should be clamped to 0xFFFF");
+    }
+
+    /// IR0 saturation must set both FLAG bit 18 and its copy in bit 13.
+    #[test]
+    fn test_gte_ir0_saturation_sets_bits_18_and_13() {
+        let mut gte = GteRegisters::new();
+
+        // RTPS depth-cue: MAC0 = DQB + DQA * (H / SZ3).
+        // Choose H=1, SZ3=1 so that the depth-cue term is effectively DQB + DQA.
+        // With TRZ=1, DQA=0x3FFF and DQB=0x0100_0000, MAC0 is large enough that
+        // the IR0 result saturates at its upper limit, setting the IR0 saturation flags.
+        gte.control[7] = 1; // TRZ=1 → push_sz(1)
+        gte.control[26] = 1; // H=1
+        gte.control[27] = 0x3FFF; // DQA
+        gte.control[28] = 0x0100_0000; // DQB: large positive → causes IR0 saturation
+        gte.execute(0x0008_0001); // RTPS sf=1
+
+        let flag = gte.control[31];
+        assert_ne!(flag & (1 << 18), 0, "IR0 saturation should set FLAG bit 18");
+        assert_ne!(
+            flag & (1 << 13),
+            0,
+            "IR0 saturation should set FLAG bit 13 (copy)"
+        );
     }
 }
