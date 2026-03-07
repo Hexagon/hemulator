@@ -266,7 +266,6 @@ Contributions are welcome in the following areas:
 - **NES**: Additional mapper implementations (MMC5, VRC6, etc.)
 - **Atari 2600**: Bug fixes for major gameplay issues, improved compatibility
 - **Game Boy**: Bug fixes for major gameplay issues, improved compatibility
-- **SNES**: APU (SPC700) implementation, additional PPU modes (2-7), bug fixes
 - **N64**: RSP microcode execution, texture mapping improvements
 - **PC**: More complete DOS API (INT 21h), PC speaker audio
 - **All Systems**: Performance optimizations, UI/UX improvements, bug fixes
