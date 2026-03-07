@@ -35,13 +35,16 @@ pub struct Camerica {
 
 impl Camerica {
     pub fn new(cart: Cartridge, ppu: &mut Ppu) -> Self {
-        // Initialize mirroring using the safe initial mode.
-        // For Camerica, this defaults to Vertical mirroring (hard-wired on most cartridges).
-        // ROM headers are often incorrect (e.g., bee52 header says Horizontal but cartridge
-        // is actually hard-wired to Vertical).
-        // Games can override to single-screen via mapper writes to $9000-$9FFF if needed
-        // (e.g., Fire Hawk uses dynamic single-screen mirroring).
-        ppu.set_mirroring(cart.get_initial_mirroring());
+        // ALL Camerica/Codemasters boards have Vertical mirroring hard-wired on the PCB.
+        // The iNES header is often incorrect (e.g., Bee 52 header says Horizontal).
+        // BF9093, BF9097: always Vertical; BF9096 (Fire Hawk): Vertical default, can switch
+        // to single-screen via $9000-$9FFF writes.
+        //
+        // CRITICAL: Always force Vertical mirroring regardless of header or ROM DB.
+        // No Camerica game uses Horizontal mirroring natively.
+        // Games that need single-screen (Fire Hawk) will override via $9000 writes.
+        // Reference: https://www.nesdev.org/wiki/INES_Mapper_071
+        ppu.set_mirroring(Mirroring::Vertical);
 
         // Camerica uses 8KB CHR-RAM (no CHR-ROM in cartridge).
         // The game writes tile data to PPU $0000-$1FFF at runtime.
@@ -225,37 +228,37 @@ mod tests {
 
     #[test]
     fn camerica_fixed_mirroring() {
-        // Test that games not using mapper-controlled mirroring keep their initial mirroring
-        // This simulates Micro Machines behavior: writes to $8000 for bank switching only
+        // Test that Camerica mapper ALWAYS initializes with Vertical mirroring,
+        // regardless of the ROM header value.
         //
-        // NOTE: Camerica mapper respects header mirroring for hard-wired mirroring on cartridge.
-        // For example, bee52 has Horizontal mirroring hard-wired on the PCB, correctly reflected
-        // in its ROM header. Games can optionally override to single-screen via $9000 writes.
+        // ALL Camerica/Codemasters boards have Vertical mirroring hard-wired on the PCB.
+        // The iNES header is often incorrect (e.g., Bee 52 says Horizontal).
+        // Games can optionally override to single-screen via $9000 writes.
         let prg = vec![0; 0x8000]; // 2 banks
 
         let cart = Cartridge::new_test(prg, vec![], 71, Mirroring::Horizontal, TimingMode::Ntsc);
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc); // Initialized with Horizontal
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal, TimingMode::Ntsc);
         let mut camerica = Camerica::new(cart, &mut ppu);
 
-        // Should initialize with Horizontal mirroring (respecting ROM header for hard-wired PCB)
-        assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal);
+        // Should initialize with Vertical mirroring regardless of header (hard-wired on PCB)
+        assert_eq!(ppu.get_mirroring(), Mirroring::Vertical);
 
         // Write multiple times to $8000 (typical Micro Machines behavior)
         camerica.write_prg(0x8000, 0x00, &mut ppu, 0); // bit 4 = 0
-        assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal); // Stays horizontal
+        assert_eq!(ppu.get_mirroring(), Mirroring::Vertical); // Stays vertical
 
         camerica.write_prg(0x8000, 0x01, &mut ppu, 0); // bit 4 = 0
-        assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal); // Still horizontal
+        assert_eq!(ppu.get_mirroring(), Mirroring::Vertical); // Still vertical
 
         camerica.write_prg(0x8000, 0x10, &mut ppu, 0); // bit 4 = 1
-        assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal); // Still horizontal
+        assert_eq!(ppu.get_mirroring(), Mirroring::Vertical); // Still vertical (not $9000)
 
         camerica.write_prg(0xC000, 0x02, &mut ppu, 0); // bit 4 = 0
-        assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal); // Still horizontal
+        assert_eq!(ppu.get_mirroring(), Mirroring::Vertical); // Still vertical
 
         // Since all writes were to $8000-$8FFF and $C000-$FFFF (not $9000-$9FFF),
-        // mirroring should remain as the initial value (horizontal from ROM header)
+        // mirroring should remain as Vertical (hard-wired on PCB)
     }
 
     #[test]

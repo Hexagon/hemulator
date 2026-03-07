@@ -78,13 +78,12 @@ impl NesSweep {
         }
     }
 
-    fn set_params(&mut self, period: u8, negate: bool, shift: u8) {
+    fn set_params(&mut self, enabled: bool, period: u8, negate: bool, shift: u8) {
+        self.enabled = enabled;
         self.period = period & 0x07;
         self.negate = negate;
         self.shift = shift & 0x07;
         self.reload = true;
-        // Sweep is enabled if period or shift is non-zero
-        self.enabled = self.period > 0 || self.shift > 0;
     }
 
     fn trigger(&mut self) {
@@ -269,15 +268,16 @@ impl APU {
             }
             0x4001 => {
                 // Sweep: EPPP NSSS
-                // E = enabled (bit 7) - not used, sweep is always enabled if period/shift > 0
+                // E = enabled (bit 7)
                 // P = period (bits 6-4)
                 // N = negate (bit 3)
                 // S = shift (bits 2-0)
+                let enabled = (val & 0x80) != 0;
                 let period = (val >> 4) & 0x07;
                 let negate = (val & 0x08) != 0;
                 let shift = val & 0x07;
 
-                self.sweep1.set_params(period, negate, shift);
+                self.sweep1.set_params(enabled, period, negate, shift);
                 // Note: Sweep is triggered when channel is triggered at $4003
             }
             0x4002 => {
@@ -320,15 +320,16 @@ impl APU {
             }
             0x4005 => {
                 // Sweep: EPPP NSSS (same format as $4001)
-                // E = enabled (bit 7) - not used, sweep is always enabled if period/shift > 0
+                // E = enabled (bit 7)
                 // P = period (bits 6-4)
                 // N = negate (bit 3)
                 // S = shift (bits 2-0)
+                let enabled = (val & 0x80) != 0;
                 let period = (val >> 4) & 0x07;
                 let negate = (val & 0x08) != 0;
                 let shift = val & 0x07;
 
-                self.sweep2.set_params(period, negate, shift);
+                self.sweep2.set_params(enabled, period, negate, shift);
             }
             0x4006 => {
                 let low = val as u16;
@@ -450,6 +451,9 @@ impl APU {
                 self.pulse2.enabled = (val & 0x02) != 0;
                 self.triangle.enabled = (val & 0x04) != 0;
                 self.noise.enabled = (val & 0x08) != 0;
+
+                // Writing to $4015 always clears the DMC interrupt flag
+                self.dmc.irq_pending = false;
 
                 // DMC enable at bit 4
                 let dmc_enable = (val & 0x10) != 0;
@@ -763,9 +767,11 @@ impl APU {
 
                 // Get raw channel outputs (before scaling)
                 // Pulse channels output envelope value (0-15) when active
+                // Sweep muting silences the channel even when sweep is disabled
                 let p1_raw = if self.pulse1.enabled
                     && self.pulse1.length_counter > 0
                     && self.pulse1.duty_output()
+                    && !self.sweep1.mutes_channel(self.pulse1.timer_reload)
                 {
                     pulse1_vol as u32
                 } else {
@@ -775,6 +781,7 @@ impl APU {
                 let p2_raw = if self.pulse2.enabled
                     && self.pulse2.length_counter > 0
                     && self.pulse2.duty_output()
+                    && !self.sweep2.mutes_channel(self.pulse2.timer_reload)
                 {
                     pulse2_vol as u32
                 } else {
@@ -902,18 +909,20 @@ mod tests {
     fn test_sweep_register_write() {
         let mut apu = APU::new();
 
-        // Write to sweep 1 register: period=3, negate=true, shift=2
-        // Binary: EPPP NSSS = 0011 1010 = period 3, negate 1, shift 2
+        // Write to sweep 1 register: enabled=false, period=3, negate=true, shift=2
+        // Binary: EPPP NSSS = 0011 1010 = E=0, period 3, negate 1, shift 2
         apu.write_register(0x4001, 0b00111010);
 
+        assert!(!apu.sweep1.enabled);
         assert_eq!(apu.sweep1.period, 3);
         assert!(apu.sweep1.negate);
         assert_eq!(apu.sweep1.shift, 2);
 
-        // Write to sweep 2 register: period=5, negate=false, shift=1
-        // Binary: EPPP NSSS = 0101 0001 = period 5, negate 0, shift 1
-        apu.write_register(0x4005, 0b01010001);
+        // Write to sweep 2 register: enabled=true, period=5, negate=false, shift=1
+        // Binary: EPPP NSSS = 1101 0001 = E=1, period 5, negate 0, shift 1
+        apu.write_register(0x4005, 0b11010001);
 
+        assert!(apu.sweep2.enabled);
         assert_eq!(apu.sweep2.period, 5);
         assert!(!apu.sweep2.negate);
         assert_eq!(apu.sweep2.shift, 1);
@@ -925,8 +934,8 @@ mod tests {
         let mut sweep1 = NesSweep::new(true); // one's complement
         let mut sweep2 = NesSweep::new(false); // two's complement
 
-        sweep1.set_params(1, true, 1); // period=1, negate=true, shift=1
-        sweep2.set_params(1, true, 1);
+        sweep1.set_params(true, 1, true, 1); // enabled, period=1, negate=true, shift=1
+        sweep2.set_params(true, 1, true, 1);
 
         let current_freq = 100u16;
 
@@ -942,7 +951,7 @@ mod tests {
     #[test]
     fn test_sweep_increase_frequency() {
         let mut sweep = NesSweep::new(false);
-        sweep.set_params(1, false, 1); // period=1, negate=false (increase), shift=1
+        sweep.set_params(true, 1, false, 1); // enabled, period=1, negate=false (increase), shift=1
 
         let current_freq = 100u16;
         // New frequency = 100 + (100 >> 1) = 100 + 50 = 150
@@ -973,7 +982,7 @@ mod tests {
     #[test]
     fn test_sweep_clock_with_period() {
         let mut sweep = NesSweep::new(false);
-        sweep.set_params(2, false, 1); // period=2, shift=1
+        sweep.set_params(true, 2, false, 1); // period=2, shift=1
 
         let freq = 100u16;
 
@@ -998,7 +1007,7 @@ mod tests {
     #[test]
     fn test_sweep_no_change_with_shift_zero() {
         let mut sweep = NesSweep::new(false);
-        sweep.set_params(1, false, 0); // shift=0
+        sweep.set_params(true, 1, false, 0); // shift=0
 
         let freq = 100u16;
 
@@ -1012,7 +1021,7 @@ mod tests {
     #[test]
     fn test_sweep_reload_flag() {
         let mut sweep = NesSweep::new(false);
-        sweep.set_params(1, false, 1);
+        sweep.set_params(true, 1, false, 1);
 
         // Reload flag should be set after set_params
         assert!(sweep.reload);
@@ -1025,7 +1034,7 @@ mod tests {
     #[test]
     fn test_sweep_trigger() {
         let mut sweep = NesSweep::new(false);
-        sweep.set_params(1, false, 1);
+        sweep.set_params(true, 1, false, 1);
 
         // Clear reload flag
         sweep.reload = false;

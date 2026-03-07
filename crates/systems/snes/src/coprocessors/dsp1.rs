@@ -10,9 +10,10 @@
 //!
 //! ## Memory Mapping
 //!
-//! In LoROM games (most DSP-1 games):
-//! - $3000-$3FFF in banks $30-$3F: Data Register (DR)
-//! - $7000-$7FFF in banks $30-$3F: Status Register (SR)
+//! In LoROM games (Mode B, <16Mbit, most DSP-1 games like SMK/Pilotwings):
+//! - Banks $20-$3F / $A0-$BF at $8000-$FFFF
+//! - DR (Data Register): offset bit 14 = 0 ($8000-$BFFF)
+//! - SR (Status Register): offset bit 14 = 1 ($C000-$FFFF)
 //!
 //! In HiROM games:
 //! - $6000-$6FFF in banks $00-$1F: DR
@@ -508,13 +509,25 @@ impl EnhancementChip for Dsp1 {
     fn read(&mut self, addr: u32) -> u8 {
         let offset = (addr & 0xFFFF) as u16;
 
-        // Check if reading from status register area ($7000-$7FFF in LoROM banks $30-$3F)
-        // or data register area ($3000-$3FFF in LoROM banks $30-$3F)
-        if offset >= 0x7000 {
-            // Status register
+        // For LoROM Mode B ($8000-$FFFF):
+        //   Bit 14 of offset distinguishes DR vs SR:
+        //   - $8000-$BFFF (bit 14 = 0): Data Register
+        //   - $C000-$FFFF (bit 14 = 1): Status Register
+        // For HiROM ($6000-$7FFF):
+        //   - $6000-$6FFF: Data Register
+        //   - $7000-$7FFF: Status Register (bit 12)
+        if offset >= 0x8000 {
+            // LoROM Mode B mapping
+            if (offset & 0x4000) != 0 {
+                self.read_status()
+            } else {
+                self.read_data()
+            }
+        } else if offset >= 0x7000 {
+            // HiROM status register area
             self.read_status()
-        } else if offset >= 0x3000 {
-            // Data register
+        } else if offset >= 0x6000 {
+            // HiROM data register area
             self.read_data()
         } else {
             0
@@ -524,8 +537,17 @@ impl EnhancementChip for Dsp1 {
     fn write(&mut self, addr: u32, value: u8) {
         let offset = (addr & 0xFFFF) as u16;
 
-        // Data register is at $3000-$3FFF in LoROM banks $30-$3F
-        if (0x3000..0x7000).contains(&offset) {
+        // For LoROM Mode B ($8000-$FFFF):
+        //   DR at $8000-$BFFF (bit 14 = 0) is writable
+        //   SR at $C000-$FFFF is read-only
+        // For HiROM:
+        //   DR at $6000-$6FFF is writable
+        if offset >= 0x8000 {
+            if (offset & 0x4000) == 0 {
+                self.write_data(value);
+            }
+            // SR ($C000-$FFFF) is read-only
+        } else if (0x6000..0x7000).contains(&offset) {
             self.write_data(value);
         }
         // Status register is read-only
@@ -831,5 +853,41 @@ mod tests {
         // Simplified implementation passes through values
         assert_eq!(x, 100);
         assert_eq!(y, 50);
+    }
+
+    #[test]
+    fn test_dsp1_lorom_address_routing() {
+        // Verify that LoROM Mode B address routing correctly
+        // dispatches DR ($8000-$BFFF) and SR ($C000-$FFFF) via bit 14
+        let mut dsp = Dsp1::new();
+
+        // SR at $C000 (bit 14 = 1) should return status
+        let sr = dsp.read(0x20_C000);
+        assert_eq!(sr, 0x80, "SR should return status (ready)");
+
+        // SR at $FFFF should also return status
+        let sr2 = dsp.read(0x20_FFFF);
+        assert_eq!(sr2, 0x80, "SR at $FFFF should return status");
+
+        // DR at $8000 (bit 14 = 0) should be data register
+        // Write a multiply command through the trait method
+        dsp.write(0x20_8000, 0x00); // Multiply command
+        dsp.write(0x20_8000, 0x02); // param1 low = 2
+        dsp.write(0x20_8000, 0x00); // param1 high = 0
+        dsp.write(0x20_8000, 0x03); // param2 low = 3
+        dsp.write(0x20_8000, 0x00); // param2 high = 0
+
+        // Read result through DR
+        let b0 = dsp.read(0x20_8000);
+        let b1 = dsp.read(0x20_8000);
+        let b2 = dsp.read(0x20_8000);
+        let b3 = dsp.read(0x20_8000);
+        let result = i32::from_le_bytes([b0, b1, b2, b3]);
+        assert_eq!(result, 6, "2 * 3 = 6");
+
+        // Writes to SR range ($C000+) should be ignored (read-only)
+        dsp.write(0x20_C000, 0x00);
+        // DSP should still be in WaitingForCommand state
+        assert_eq!(dsp.read_status(), 0x80);
     }
 }
