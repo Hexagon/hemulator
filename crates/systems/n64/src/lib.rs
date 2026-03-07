@@ -301,6 +301,25 @@ impl N64System {
     pub fn set_save_data(&mut self, data: Vec<u8>) -> Result<(), String> {
         self.cpu.bus_mut().set_save_data(data)
     }
+
+    /// Export controller pak (mempak) data for the given controller slot (0-based).
+    ///
+    /// Returns `None` when no pak is currently inserted in that slot.
+    pub fn get_mempak_data(&self, channel: usize) -> Option<Vec<u8>> {
+        self.cpu.bus().get_mempak_data(channel)
+    }
+
+    /// Import previously persisted controller pak data for a controller slot.
+    pub fn set_mempak_data(&mut self, channel: usize, data: Vec<u8>) -> Result<(), String> {
+        self.cpu.bus_mut().set_mempak_data(channel, data)
+    }
+
+    /// Enable or disable the controller pak in a given controller slot.
+    ///
+    /// Slot 0 (controller 1) is enabled by default.
+    pub fn set_mempak_enabled(&mut self, channel: usize, enabled: bool) {
+        self.cpu.bus_mut().set_mempak_enabled(channel, enabled);
+    }
 }
 
 impl System for N64System {
