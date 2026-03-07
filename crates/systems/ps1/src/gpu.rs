@@ -476,7 +476,7 @@ impl Gpu {
             Gp0Mode::Polyline => {
                 // Polyline termination check: word matches 0x5???5??? pattern
                 // (bits 12-15 == 0x5 AND bits 28-31 == 0x5)
-                if is_polyline_terminator(val) {
+                if val & 0xF000_F000 == 0x5000_5000 {
                     self.gp0_mode = Gp0Mode::Command;
                     self.polyline_pending_color = None;
                     return;
@@ -1846,25 +1846,25 @@ impl Gpu {
                     // Pixel at screen X maps to byte offset = (vram_x*2 + x*3) in VRAM byte stream
                     let byte_offset = (vram_x * 2 + x * 3) & (VRAM_WIDTH * 2 - 1);
                     let vram_byte_y = (vram_y + y) & (VRAM_HEIGHT - 1);
-                    // Each VRAM word = 2 bytes; word index = byte_offset / 2
-                    let word_idx0 = byte_offset / 2;
-                    let word_idx1 = (byte_offset + 1).div_ceil(2);
-                    let word_idx2 = (byte_offset + 2).div_ceil(2);
+                    // Each VRAM word = 2 bytes; word index = byte_offset >> 1
+                    let word_idx0 = byte_offset >> 1;
+                    let word_idx1 = (byte_offset + 1) >> 1;
+                    let word_idx2 = (byte_offset + 2) >> 1;
                     let w0 = self.vram[vram_byte_y * VRAM_WIDTH + (word_idx0 & (VRAM_WIDTH - 1))];
                     let w1 = self.vram[vram_byte_y * VRAM_WIDTH + (word_idx1 & (VRAM_WIDTH - 1))];
                     let w2 = self.vram[vram_byte_y * VRAM_WIDTH + (word_idx2 & (VRAM_WIDTH - 1))];
-                    // Extract the 3 bytes from the VRAM words (even byte_offset = low byte, odd = high byte)
-                    let r = if byte_offset.is_multiple_of(2) {
+                    // Even byte_offset = low byte of word, odd = high byte
+                    let r = if byte_offset & 1 == 0 {
                         w0 as u8
                     } else {
                         (w0 >> 8) as u8
                     };
-                    let g = if (byte_offset + 1).is_multiple_of(2) {
+                    let g = if (byte_offset + 1) & 1 == 0 {
                         w1 as u8
                     } else {
                         (w1 >> 8) as u8
                     };
-                    let b = if (byte_offset + 2).is_multiple_of(2) {
+                    let b = if (byte_offset + 2) & 1 == 0 {
                         w2 as u8
                     } else {
                         (w2 >> 8) as u8
@@ -1951,12 +1951,6 @@ fn pixel15_to_argb(pixel: u16) -> u32 {
 /// Cross product for triangle rasterization.
 fn cross(a: (i32, i32), b: (i32, i32), c: (i32, i32)) -> i32 {
     (b.0 - a.0) * (c.1 - a.1) - (b.1 - a.1) * (c.0 - a.0)
-}
-
-/// Check if a GP0 word is a polyline termination code.
-/// The PS1 uses 0x50005000-type words: (word & 0xF000F000) == 0x50005000.
-fn is_polyline_terminator(word: u32) -> bool {
-    (word & 0xF000_F000) == 0x5000_5000
 }
 
 /// Apply PS1 semi-transparency blending to a pixel.

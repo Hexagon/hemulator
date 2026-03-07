@@ -244,89 +244,16 @@ struct Voice {
 }
 
 impl Voice {
-    /// Advance by one output sample. Returns the (left, right) sample pair.
-    /// `ram` is the full SPU RAM slice.
-    fn next_sample(&mut self, ram: &[u8]) -> (i16, i16) {
-        if !self.active {
-            return (0, 0);
-        }
-
-        // Advance pitch counter
-        self.pitch_counter += self.sample_rate as u32;
-
-        // Consume ADPCM samples until pitch counter < 0x1000
-        while self.pitch_counter >= 0x1000 {
-            self.pitch_counter -= 0x1000;
-            self.adpcm.sample_idx += 1;
-
-            if self.adpcm.sample_idx >= 28 {
-                // Need to decode the next block
-                self.adpcm.sample_idx = 0;
-                self.current_addr += 16; // Each ADPCM block is 16 bytes
-
-                // Wrap SPU RAM address
-                self.current_addr %= SPU_RAM_SIZE as u32;
-
-                // Read and decode the new block
-                let addr = self.current_addr as usize;
-                if addr + 16 <= ram.len() {
-                    let block = &ram[addr..addr + 16];
-                    self.adpcm.decode_block(block);
-                }
-
-                // Handle loop flags
-                let flags = self.adpcm.block_flags;
-                if flags & 0x04 != 0 {
-                    // Loop-end: jump to loop start address
-                    if flags & 0x02 != 0 {
-                        // Loop-repeat: go to repeat addr
-                        self.current_addr = (self.repeat_addr as u32) << 3;
-                    } else {
-                        // Loop-stop: deactivate voice
-                        self.active = false;
-                        self.adsr_state.phase = AdsrPhase::Off;
-                        self.adsr_volume = 0;
-                        return (0, 0);
-                    }
-                }
-                // If loop-start flag (0x01), record for later
-                if flags & 0x01 != 0 {
-                    self.repeat_addr = (self.current_addr >> 3) as u16;
-                }
-            }
-        }
-
-        // Get current decoded sample
-        let sample = self.adpcm.decoded[self.adpcm.sample_idx as usize];
-
-        // Tick ADSR envelope
-        let env_vol = self.adsr_state.tick(self.adsr);
-        self.adsr_volume = env_vol;
-
-        // Apply envelope to sample
-        let scaled = (sample as i32 * env_vol as i32) >> 15;
-        let scaled = scaled.clamp(-32768, 32767) as i16;
-
-        // Apply voice volume
-        let l = ((scaled as i32 * self.vol_left as i32) >> 15).clamp(-32768, 32767) as i16;
-        let r = ((scaled as i32 * self.vol_right as i32) >> 15).clamp(-32768, 32767) as i16;
-        (l, r)
-    }
-
-    /// Key-on: start voice playback from start_addr.
-    fn key_on(&mut self, ram: &[u8]) {
+    /// Key-on: start voice playback from a given address, decoding the first block.
+    /// `start_addr` is a byte address into SPU RAM.
+    /// `first_block` is the 16-byte first ADPCM block at that address.
+    fn key_on_with_block(&mut self, start_addr: u32, first_block: &[u8; 16]) {
         self.active = true;
-        self.current_addr = (self.start_addr as u32) << 3;
+        self.current_addr = start_addr;
         self.pitch_counter = 0;
         self.adpcm = AdpcmState::default();
         self.adsr_state.key_on();
-
-        // Decode the first block immediately
-        let addr = self.current_addr as usize;
-        if addr + 16 <= ram.len() {
-            let block = &ram[addr..addr + 16];
-            self.adpcm.decode_block(block);
-        }
+        self.adpcm.decode_block(first_block);
     }
 
     /// Key-off: begin release phase.
@@ -560,21 +487,32 @@ impl Spu {
     }
 
     fn apply_key_on_lo(&mut self, bits: u16) {
-        let ram = self.ram.clone(); // Borrow workaround
         for i in 0..16usize {
             if bits & (1 << i) != 0 && i < NUM_VOICES {
-                self.voices[i].key_on(&ram);
+                // Read the first block (16 bytes) from RAM into a local array
+                let start_addr = (self.voices[i].start_addr as u32) << 3;
+                let mut block = [0u8; 16];
+                let addr = start_addr as usize;
+                if addr + 16 <= self.ram.len() {
+                    block.copy_from_slice(&self.ram[addr..addr + 16]);
+                }
+                self.voices[i].key_on_with_block(start_addr, &block);
             }
         }
     }
 
     fn apply_key_on_hi(&mut self, bits: u16) {
-        let ram = self.ram.clone();
         for i in 0..8usize {
             if bits & (1 << i) != 0 {
                 let idx = 16 + i;
                 if idx < NUM_VOICES {
-                    self.voices[idx].key_on(&ram);
+                    let start_addr = (self.voices[idx].start_addr as u32) << 3;
+                    let mut block = [0u8; 16];
+                    let addr = start_addr as usize;
+                    if addr + 16 <= self.ram.len() {
+                        block.copy_from_slice(&self.ram[addr..addr + 16]);
+                    }
+                    self.voices[idx].key_on_with_block(start_addr, &block);
                 }
             }
         }
@@ -605,11 +543,78 @@ impl Spu {
         let mut left_sum: i32 = 0;
         let mut right_sum: i32 = 0;
 
-        // Snapshot RAM for borrow safety
-        let ram = self.ram.clone();
+        for i in 0..NUM_VOICES {
+            if !self.voices[i].active {
+                continue;
+            }
 
-        for voice in self.voices.iter_mut() {
-            let (l, r) = voice.next_sample(&ram);
+            // Advance pitch counter
+            self.voices[i].pitch_counter += self.voices[i].sample_rate as u32;
+
+            // Consume ADPCM samples until pitch counter < 0x1000
+            loop {
+                if self.voices[i].pitch_counter < 0x1000 {
+                    break;
+                }
+                self.voices[i].pitch_counter -= 0x1000;
+                self.voices[i].adpcm.sample_idx += 1;
+
+                if self.voices[i].adpcm.sample_idx >= 28 {
+                    self.voices[i].adpcm.sample_idx = 0;
+                    self.voices[i].current_addr += 16;
+                    self.voices[i].current_addr %= SPU_RAM_SIZE as u32;
+
+                    // Copy only 16 bytes (one ADPCM block) — avoids full 512KB clone
+                    let addr = self.voices[i].current_addr as usize;
+                    if addr + 16 <= self.ram.len() {
+                        let mut block = [0u8; 16];
+                        block.copy_from_slice(&self.ram[addr..addr + 16]);
+                        self.voices[i].adpcm.decode_block(&block);
+                    }
+
+                    let flags = self.voices[i].adpcm.block_flags;
+                    if flags & 0x04 != 0 {
+                        if flags & 0x02 != 0 {
+                            // Loop-repeat: jump to loop start address
+                            let loop_addr = (self.voices[i].repeat_addr as u32) << 3;
+                            self.voices[i].current_addr = loop_addr;
+                        } else {
+                            // Loop-stop: deactivate voice
+                            self.voices[i].active = false;
+                            self.voices[i].adsr_state.phase = AdsrPhase::Off;
+                            self.voices[i].adsr_volume = 0;
+                            break;
+                        }
+                    }
+                    // Record loop-start address if flag set
+                    if flags & 0x01 != 0 {
+                        self.voices[i].repeat_addr = (self.voices[i].current_addr >> 3) as u16;
+                    }
+                }
+            }
+
+            if !self.voices[i].active {
+                continue;
+            }
+
+            // Get current decoded sample
+            let sample = self.voices[i].adpcm.decoded[self.voices[i].adpcm.sample_idx as usize];
+
+            // Tick ADSR envelope — copy adsr value to avoid borrow conflict
+            let adsr = self.voices[i].adsr;
+            let env_vol = self.voices[i].adsr_state.tick(adsr);
+            self.voices[i].adsr_volume = env_vol;
+
+            // Apply envelope to sample
+            let scaled = (sample as i32 * env_vol as i32) >> 15;
+            let scaled = scaled.clamp(-32768, 32767) as i16;
+
+            // Apply voice volume
+            let l = ((scaled as i32 * self.voices[i].vol_left as i32) >> 15).clamp(-32768, 32767)
+                as i16;
+            let r = ((scaled as i32 * self.voices[i].vol_right as i32) >> 15).clamp(-32768, 32767)
+                as i16;
+
             left_sum += l as i32;
             right_sum += r as i32;
         }
