@@ -38,7 +38,7 @@ chrono = "0.4"
 
 # Window and rendering support
 sdl2 = { version = "0.38", features = ["bundled"] }
-glow = "0.16"
+glow = "0.17"
 bytemuck = "1.14"
 
 # egui support
