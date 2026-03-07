@@ -92,20 +92,25 @@ impl AdsrEnvelope {
         let adsr_hi = (adsr >> 16) as u16;
 
         // ---- Decode ADSR fields ----
-        // Low word: [6:0]=attack_rate  [7]=attack_mode  [11:8]=decay_rate  [15:12]=sustain_level
+        // Low word (ADSR1): [6:0]=attack_rate  [7]=attack_mode
+        //                    [11:8]=decay_rate  [15:12]=sustain_level
         let attack_rate = (adsr_lo & 0x7F) as u8;
         let attack_mode_exp = adsr_lo & (1 << 7) != 0;
         // Decay rate: 4-bit field; internally the shift is decay_rate * 4
         let decay_rate = (((adsr_lo >> 8) & 0xF) as u8) << 2; // range 0..60
         let sustain_level = ((adsr_lo >> 12) & 0xF) as i32 * 0x800; // 0..0x7800
 
-        // High word: [6:0]=sustain_rate  [7]=sustain_dir  [8]=sustain_mode
-        //            [14:9]=release_rate  [15]=release_mode
-        let sustain_rate = (adsr_hi & 0x7F) as u8;
-        let sustain_dir_down = adsr_hi & (1 << 7) != 0;
-        let sustain_mode_exp = adsr_hi & (1 << 8) != 0;
-        let release_rate = (((adsr_hi >> 9) & 0x1F) as u8) << 2; // range 0..60
-        let release_mode_exp = adsr_hi & (1 << 14) != 0;
+        // High word (ADSR2), per nocash PSX-SPX:
+        // Bits 0–4 : Release Shift (release rate)
+        // Bit  5   : Release Mode (0=Linear, 1=Exponential)
+        // Bit  6   : Sustain Mode (0=Linear, 1=Exponential)
+        // Bits 7–13: Sustain Rate (7-bit)
+        // Bit  14  : Sustain Direction (0=Increase, 1=Decrease)
+        let release_rate = ((adsr_hi & 0x1F) as u8) << 2; // range 0..60
+        let release_mode_exp = adsr_hi & (1 << 5) != 0;
+        let sustain_mode_exp = adsr_hi & (1 << 6) != 0;
+        let sustain_rate = ((adsr_hi >> 7) & 0x7F) as u8;
+        let sustain_dir_down = adsr_hi & (1 << 14) != 0;
 
         // Phase transitions
         match self.phase {
