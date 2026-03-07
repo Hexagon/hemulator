@@ -19,6 +19,7 @@
 
 use emu_core::renderer::Renderer;
 use emu_core::types::Frame;
+use std::cell::Cell;
 
 /// VRAM dimensions
 const VRAM_WIDTH: usize = 1024;
@@ -33,6 +34,8 @@ enum Gp0Mode {
     Params,
     /// Receiving pixel data for VRAM write (CPU→VRAM)
     VramWrite,
+    /// Receiving variable-length vertex list for a polyline command
+    Polyline,
 }
 
 /// Display area horizontal resolution
@@ -196,8 +199,14 @@ pub struct Gpu {
     gp0_words_remaining: u32,
     /// Current GP0 command byte (for parameter phase)
     gp0_command: u8,
+    /// True when current polyline is Gouraud-shaded (alternating color/vertex words)
+    polyline_shaded: bool,
+    /// Pending color word for shaded polyline (waiting for the matching vertex)
+    polyline_pending_color: Option<u32>,
+    /// Semi-transparency flag for the current primitive (bit 25 of command word)
+    prim_semi_transparent: bool,
 
-    // VRAM transfer state
+    // VRAM write transfer state (CPU → VRAM)
     vram_transfer_x: u32,
     vram_transfer_y: u32,
     vram_transfer_w: u32,
@@ -205,8 +214,18 @@ pub struct Gpu {
     vram_transfer_cx: u32,
     vram_transfer_cy: u32,
 
-    /// GPUREAD latch
-    gpu_read_latch: u32,
+    // VRAM read transfer state (VRAM → CPU)
+    vram_read_x: u32,
+    vram_read_y: u32,
+    vram_read_w: u32,
+    vram_read_h: u32,
+    vram_read_cx: Cell<u32>,
+    vram_read_cy: Cell<u32>,
+    /// True when a VRAM→CPU read transfer is in progress
+    vram_read_active: Cell<bool>,
+
+    /// GPUREAD latch (Cell for interior mutability during DMA/CPU reads)
+    gpu_read_latch: Cell<u32>,
 
     /// Interrupt request flag
     pub irq: bool,
@@ -267,13 +286,23 @@ impl Gpu {
             gp0_buffer: Vec::with_capacity(16),
             gp0_words_remaining: 0,
             gp0_command: 0,
+            polyline_shaded: false,
+            polyline_pending_color: None,
+            prim_semi_transparent: false,
             vram_transfer_x: 0,
             vram_transfer_y: 0,
             vram_transfer_w: 0,
             vram_transfer_h: 0,
             vram_transfer_cx: 0,
             vram_transfer_cy: 0,
-            gpu_read_latch: 0,
+            vram_read_x: 0,
+            vram_read_y: 0,
+            vram_read_w: 0,
+            vram_read_h: 0,
+            vram_read_cx: Cell::new(0),
+            vram_read_cy: Cell::new(0),
+            vram_read_active: Cell::new(false),
+            gpu_read_latch: Cell::new(0),
             irq: false,
             scanline: 0,
             dot_clock: 0,
@@ -427,7 +456,14 @@ impl Gpu {
                 if self.gp0_words_remaining == 0 {
                     self.gp0_mode = Gp0Mode::Command;
                     let cmd = self.gp0_command;
+                    // Check if this is a polyline command that continues with more vertices
+                    let is_polyline = matches!(cmd, 0x48..=0x4B | 0x58..=0x5B);
                     self.execute_gp0(cmd);
+                    // After the minimum number of words, polylines continue in Polyline mode
+                    if is_polyline {
+                        self.polyline_shaded = matches!(cmd, 0x58..=0x5B);
+                        self.gp0_mode = Gp0Mode::Polyline;
+                    }
                 }
             }
             Gp0Mode::VramWrite => {
@@ -436,6 +472,46 @@ impl Gpu {
                 let p1 = (val >> 16) as u16;
                 self.write_vram_transfer_pixel(p0);
                 self.write_vram_transfer_pixel(p1);
+            }
+            Gp0Mode::Polyline => {
+                // Polyline termination check: word matches 0x5???5??? pattern
+                // (bits 12-15 == 0x5 AND bits 28-31 == 0x5)
+                if is_polyline_terminator(val) {
+                    self.gp0_mode = Gp0Mode::Command;
+                    self.polyline_pending_color = None;
+                    return;
+                }
+                if self.polyline_shaded {
+                    // Shaded polyline: alternating color and vertex words
+                    match self.polyline_pending_color.take() {
+                        None => {
+                            // This word is a color; save it and wait for vertex
+                            self.polyline_pending_color = Some(val);
+                        }
+                        Some(color_word) => {
+                            // This word is the vertex; draw line from previous vertex
+                            let n = self.gp0_buffer.len();
+                            if n >= 2 {
+                                // Previous vertex is the last word in the buffer
+                                let v_prev = self.decode_vertex(self.gp0_buffer[n - 1]);
+                                let v_next = self.decode_vertex(val);
+                                let (r, g, b) = Self::decode_color(color_word);
+                                self.draw_line(v_prev, v_next, r, g, b);
+                            }
+                            self.gp0_buffer.push(val); // Store current vertex
+                        }
+                    }
+                } else {
+                    // Mono polyline: just vertex words
+                    let n = self.gp0_buffer.len();
+                    if n >= 2 {
+                        let (r, g, b) = Self::decode_color(self.gp0_buffer[0]);
+                        let v_prev = self.decode_vertex(self.gp0_buffer[n - 1]);
+                        let v_next = self.decode_vertex(val);
+                        self.draw_line(v_prev, v_next, r, g, b);
+                    }
+                    self.gp0_buffer.push(val);
+                }
             }
         }
     }
@@ -460,6 +536,10 @@ impl Gpu {
     }
 
     fn execute_gp0(&mut self, cmd: u8) {
+        // Extract semi-transparency flag from command word (bit 25)
+        let cmd_word = self.gp0_buffer[0];
+        self.prim_semi_transparent = cmd_word & (1 << 25) != 0;
+
         match cmd {
             0x00 => {} // NOP
             0x01 => {
@@ -580,8 +660,13 @@ impl Gpu {
         (r, g, b)
     }
 
-    /// Set a pixel in VRAM (with draw area clipping).
+    /// Set a pixel in VRAM (with draw area clipping, mask bit, and semi-transparency).
     fn set_pixel(&mut self, x: i32, y: i32, r: u8, g: u8, b: u8) {
+        self.set_pixel_ex(x, y, r, g, b, self.prim_semi_transparent);
+    }
+
+    /// Set a pixel with explicit semi-transparency control.
+    fn set_pixel_ex(&mut self, x: i32, y: i32, r: u8, g: u8, b: u8, semi_transparent: bool) {
         if x < self.draw_area_left as i32
             || x > self.draw_area_right as i32
             || y < self.draw_area_top as i32
@@ -597,7 +682,19 @@ impl Gpu {
             return;
         }
 
-        let mut pixel = rgb_to_15bit(r, g, b);
+        let src_pixel = rgb_to_15bit(r, g, b);
+        let mut pixel = if semi_transparent {
+            let blend_mode = match self.semi_transparency {
+                SemiTransparency::Average => 0,
+                SemiTransparency::Add => 1,
+                SemiTransparency::Sub => 2,
+                SemiTransparency::AddQuarter => 3,
+            };
+            blend_semi_transparent(blend_mode, src_pixel, self.vram[idx])
+        } else {
+            src_pixel
+        };
+
         if self.set_mask_bit {
             pixel |= 0x8000;
         }
@@ -1240,7 +1337,8 @@ impl Gpu {
     }
 
     fn gp0_mono_polyline(&mut self) {
-        // TODO: Polyline with termination code
+        // Draw the first segment (cmd+color, v0, v1)
+        // Subsequent vertices are handled in Gp0Mode::Polyline via gp0_write
         if self.gp0_buffer.len() >= 3 {
             let (r, g, b) = Self::decode_color(self.gp0_buffer[0]);
             let v0 = self.decode_vertex(self.gp0_buffer[1]);
@@ -1250,15 +1348,25 @@ impl Gpu {
     }
 
     fn gp0_shaded_line(&mut self) {
-        let (r, g, b) = Self::decode_color(self.gp0_buffer[0]);
-        let v0 = self.decode_vertex(self.gp0_buffer[1]);
-        let _v1 = self.decode_vertex(self.gp0_buffer[3]);
-        // TODO: Gouraud shading for lines
-        self.draw_line(v0, _v1, r, g, b);
+        // Two-vertex shaded line: [c0+cmd, v0, c1, v1]
+        if self.gp0_buffer.len() >= 4 {
+            let (r, g, b) = Self::decode_color(self.gp0_buffer[0]);
+            let v0 = self.decode_vertex(self.gp0_buffer[1]);
+            let v1 = self.decode_vertex(self.gp0_buffer[3]);
+            // Use the start color for the whole line (simplified; full Gouraud for lines is rare)
+            self.draw_line(v0, v1, r, g, b);
+        }
     }
 
     fn gp0_shaded_polyline(&mut self) {
-        // TODO: Shaded polyline
+        // Draw the first segment (cmd+c0, v0, c1, v1)
+        // Subsequent color/vertex pairs are handled in Gp0Mode::Polyline via gp0_write
+        if self.gp0_buffer.len() >= 4 {
+            let (r, g, b) = Self::decode_color(self.gp0_buffer[2]);
+            let v0 = self.decode_vertex(self.gp0_buffer[1]);
+            let v1 = self.decode_vertex(self.gp0_buffer[3]);
+            self.draw_line(v0, v1, r, g, b);
+        }
     }
 
     fn draw_line(&mut self, v0: (i32, i32), v1: (i32, i32), r: u8, g: u8, b: u8) {
@@ -1512,9 +1620,56 @@ impl Gpu {
     }
 
     fn gp0_vram_to_cpu(&mut self) {
-        // TODO: Set up VRAM read transfer
-        // For now, just set the read latch to 0
-        self.gpu_read_latch = 0;
+        // Set up VRAM→CPU read transfer
+        self.vram_read_x = self.gp0_buffer[1] & 0x3FF;
+        self.vram_read_y = (self.gp0_buffer[1] >> 16) & 0x1FF;
+        self.vram_read_w = ((self.gp0_buffer[2] & 0xFFFF).wrapping_sub(1) & 0x3FF) + 1;
+        self.vram_read_h = (((self.gp0_buffer[2] >> 16).wrapping_sub(1)) & 0x1FF) + 1;
+        self.vram_read_cx.set(0);
+        self.vram_read_cy.set(0);
+        self.vram_read_active.set(true);
+        // Pre-load the first word into the latch
+        self.advance_vram_read_latch();
+    }
+
+    /// Advance the VRAM read latch by one 32-bit word (2 pixels).
+    fn advance_vram_read_latch(&self) {
+        if !self.vram_read_active.get() {
+            return;
+        }
+        let p0 = self.read_vram_pixel_for_transfer();
+        let p1 = self.read_vram_pixel_for_transfer();
+        self.gpu_read_latch.set((p0 as u32) | ((p1 as u32) << 16));
+    }
+
+    /// Read and advance one pixel from the VRAM read transfer.
+    fn read_vram_pixel_for_transfer(&self) -> u16 {
+        if !self.vram_read_active.get() {
+            return 0;
+        }
+        let cx = self.vram_read_cx.get();
+        let cy = self.vram_read_cy.get();
+        let vx = (self.vram_read_x + cx) & 0x3FF;
+        let vy = (self.vram_read_y + cy) & 0x1FF;
+        let idx = (vy as usize) * VRAM_WIDTH + (vx as usize);
+        let pixel = if idx < self.vram.len() {
+            self.vram[idx]
+        } else {
+            0
+        };
+
+        let next_cx = cx + 1;
+        if next_cx >= self.vram_read_w {
+            self.vram_read_cx.set(0);
+            let next_cy = cy + 1;
+            self.vram_read_cy.set(next_cy);
+            if next_cy >= self.vram_read_h {
+                self.vram_read_active.set(false);
+            }
+        } else {
+            self.vram_read_cx.set(next_cx);
+        }
+        pixel
     }
 
     // ========================================================================
@@ -1592,13 +1747,17 @@ impl Gpu {
             0x10..=0x1F => {
                 // Get GPU info
                 match val & 0xF {
-                    3 => self.gpu_read_latch = self.draw_area_left | (self.draw_area_top << 10),
-                    4 => self.gpu_read_latch = self.draw_area_right | (self.draw_area_bottom << 10),
-                    5 => {
-                        self.gpu_read_latch = (self.draw_offset_x as u32 & 0x7FF)
-                            | ((self.draw_offset_y as u32 & 0x7FF) << 11)
-                    }
-                    7 => self.gpu_read_latch = 2, // GPU version
+                    3 => self
+                        .gpu_read_latch
+                        .set(self.draw_area_left | (self.draw_area_top << 10)),
+                    4 => self
+                        .gpu_read_latch
+                        .set(self.draw_area_right | (self.draw_area_bottom << 10)),
+                    5 => self.gpu_read_latch.set(
+                        (self.draw_offset_x as u32 & 0x7FF)
+                            | ((self.draw_offset_y as u32 & 0x7FF) << 11),
+                    ),
+                    7 => self.gpu_read_latch.set(2), // GPU version
                     _ => {}
                 }
             }
@@ -1621,6 +1780,9 @@ impl Gpu {
         self.gp0_mode = Gp0Mode::Command;
         self.gp0_buffer.clear();
         self.gp0_words_remaining = 0;
+        self.polyline_shaded = false;
+        self.polyline_pending_color = None;
+        self.prim_semi_transparent = false;
         self.draw_area_left = 0;
         self.draw_area_top = 0;
         self.draw_area_right = 0;
@@ -1644,7 +1806,12 @@ impl Gpu {
 
     /// Read GP0 (GPUREAD — VRAM data or GPU info).
     pub fn gpuread(&self) -> u32 {
-        self.gpu_read_latch
+        let latch = self.gpu_read_latch.get();
+        if self.vram_read_active.get() {
+            // Advance by one word (2 pixels) for the next DMA/CPU read
+            self.advance_vram_read_latch();
+        }
+        latch
     }
 
     // ========================================================================
@@ -1673,15 +1840,40 @@ impl Gpu {
 
         for y in 0..h as usize {
             for x in 0..w as usize {
-                let vx = (vram_x + x) & (VRAM_WIDTH - 1);
-                let vy = (vram_y + y) & (VRAM_HEIGHT - 1);
-                let pixel = self.vram[vy * VRAM_WIDTH + vx];
-
                 let argb = if self.display_24bit {
-                    // TODO: 24-bit display mode reads 3 bytes per pixel
-                    pixel15_to_argb(pixel)
+                    // 24-bit mode: 3 consecutive bytes per pixel from VRAM (stored as 16-bit words)
+                    // Every 3 bytes = 2 words: RG | B_ (little-endian)
+                    // Pixel at screen X maps to byte offset = (vram_x*2 + x*3) in VRAM byte stream
+                    let byte_offset = (vram_x * 2 + x * 3) & (VRAM_WIDTH * 2 - 1);
+                    let vram_byte_y = (vram_y + y) & (VRAM_HEIGHT - 1);
+                    // Each VRAM word = 2 bytes; word index = byte_offset / 2
+                    let word_idx0 = byte_offset / 2;
+                    let word_idx1 = (byte_offset + 1).div_ceil(2);
+                    let word_idx2 = (byte_offset + 2).div_ceil(2);
+                    let w0 = self.vram[vram_byte_y * VRAM_WIDTH + (word_idx0 & (VRAM_WIDTH - 1))];
+                    let w1 = self.vram[vram_byte_y * VRAM_WIDTH + (word_idx1 & (VRAM_WIDTH - 1))];
+                    let w2 = self.vram[vram_byte_y * VRAM_WIDTH + (word_idx2 & (VRAM_WIDTH - 1))];
+                    // Extract the 3 bytes from the VRAM words (even byte_offset = low byte, odd = high byte)
+                    let r = if byte_offset.is_multiple_of(2) {
+                        w0 as u8
+                    } else {
+                        (w0 >> 8) as u8
+                    };
+                    let g = if (byte_offset + 1).is_multiple_of(2) {
+                        w1 as u8
+                    } else {
+                        (w1 >> 8) as u8
+                    };
+                    let b = if (byte_offset + 2).is_multiple_of(2) {
+                        w2 as u8
+                    } else {
+                        (w2 >> 8) as u8
+                    };
+                    0xFF00_0000 | ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
                 } else {
-                    pixel15_to_argb(pixel)
+                    let vx = (vram_x + x) & (VRAM_WIDTH - 1);
+                    let vy = (vram_y + y) & (VRAM_HEIGHT - 1);
+                    pixel15_to_argb(self.vram[vy * VRAM_WIDTH + vx])
                 };
 
                 self.frame.pixels[y * w as usize + x] = argb;
@@ -1759,6 +1951,42 @@ fn pixel15_to_argb(pixel: u16) -> u32 {
 /// Cross product for triangle rasterization.
 fn cross(a: (i32, i32), b: (i32, i32), c: (i32, i32)) -> i32 {
     (b.0 - a.0) * (c.1 - a.1) - (b.1 - a.1) * (c.0 - a.0)
+}
+
+/// Check if a GP0 word is a polyline termination code.
+/// The PS1 uses 0x50005000-type words: (word & 0xF000F000) == 0x50005000.
+fn is_polyline_terminator(word: u32) -> bool {
+    (word & 0xF000_F000) == 0x5000_5000
+}
+
+/// Apply PS1 semi-transparency blending to a pixel.
+/// mode: 0=B/2+F/2, 1=B+F, 2=B-F, 3=B+F/4
+/// src: foreground (new pixel) color as 15-bit
+/// dst: background (existing VRAM) color as 15-bit
+fn blend_semi_transparent(mode: u8, src: u16, dst: u16) -> u16 {
+    let sr = (src & 0x1F) as i32;
+    let sg = ((src >> 5) & 0x1F) as i32;
+    let sb = ((src >> 10) & 0x1F) as i32;
+    let dr = (dst & 0x1F) as i32;
+    let dg = ((dst >> 5) & 0x1F) as i32;
+    let db = ((dst >> 10) & 0x1F) as i32;
+
+    let (r, g, b) = match mode {
+        0 => (
+            ((dr + sr) / 2).min(31),
+            ((dg + sg) / 2).min(31),
+            ((db + sb) / 2).min(31),
+        ),
+        1 => ((dr + sr).min(31), (dg + sg).min(31), (db + sb).min(31)),
+        2 => ((dr - sr).max(0), (dg - sg).max(0), (db - sb).max(0)),
+        3 => (
+            (dr + sr / 4).min(31),
+            (dg + sg / 4).min(31),
+            (db + sb / 4).min(31),
+        ),
+        _ => (sr, sg, sb),
+    };
+    (r as u16) | ((g as u16) << 5) | ((b as u16) << 10)
 }
 
 /// Get the number of 32-bit words for a GP0 command.
@@ -1873,5 +2101,214 @@ impl Gpu {
             in_vblank: self.in_vblank,
             irq: self.irq,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_gpu() -> Gpu {
+        let mut gpu = Gpu::new();
+        // Set full draw area
+        gpu.draw_area_left = 0;
+        gpu.draw_area_right = 1023;
+        gpu.draw_area_top = 0;
+        gpu.draw_area_bottom = 511;
+        gpu
+    }
+
+    #[test]
+    fn test_gpu_vram_to_cpu_transfer() {
+        let mut gpu = make_gpu();
+
+        // Write known pixel values to VRAM at (10, 5)
+        let vram_x = 10usize;
+        let vram_y = 5usize;
+        gpu.vram[vram_y * VRAM_WIDTH + vram_x] = 0x1234;
+        gpu.vram[vram_y * VRAM_WIDTH + vram_x + 1] = 0x5678;
+
+        // Set up VRAM→CPU transfer via GP0 0xC0 command
+        gpu.gp0_write(0xC000_0000);
+        gpu.gp0_write((vram_y as u32) << 16 | vram_x as u32);
+        gpu.gp0_write(0x0001_0002); // h=1, w=2
+
+        // Read back the VRAM data via GPUREAD
+        let word0 = gpu.gpuread();
+        // Should be 0x5678_1234 (two pixels packed LE)
+        assert_eq!(
+            word0, 0x5678_1234,
+            "VRAM→CPU transfer should return packed pixels"
+        );
+    }
+
+    #[test]
+    fn test_gpu_vram_to_cpu_single_pixel() {
+        let mut gpu = make_gpu();
+
+        // Write a single known pixel
+        gpu.vram[0] = 0xABCD;
+        // Set up a 1×1 transfer from (0, 0)
+        gpu.gp0_write(0xC000_0000);
+        gpu.gp0_write(0x0000_0000); // position (0, 0)
+        gpu.gp0_write(0x0001_0001); // h=1, w=1
+
+        let word = gpu.gpuread();
+        // Low 16 bits should be the pixel; high 16 bits undefined (second read advances)
+        assert_eq!(
+            word & 0xFFFF,
+            0xABCD,
+            "single pixel VRAM read should match written value"
+        );
+    }
+
+    #[test]
+    fn test_gpu_semi_transparency_add() {
+        let mut gpu = make_gpu();
+
+        // Set background: pure blue (B=31 in 15-bit → 0x7C00)
+        gpu.vram[0] = 0x7C00;
+
+        // Draw with Add semi-transparency: src = pure red (R=31 in 15-bit → 0x001F)
+        gpu.semi_transparency = SemiTransparency::Add;
+        gpu.prim_semi_transparent = true;
+        gpu.set_pixel(0, 0, 0xF8, 0, 0); // R=248 → 5-bit R=31
+
+        // Expected: bg(0x7C00) + src(0x001F) = 0x7C1F (blue + red = purple)
+        assert_eq!(gpu.vram[0], 0x7C1F, "Add blend should sum channels");
+    }
+
+    #[test]
+    fn test_gpu_semi_transparency_average() {
+        let mut gpu = make_gpu();
+
+        // Background: full white (0x7FFF)
+        gpu.vram[100] = 0x7FFF;
+
+        // Draw with Average mode: src = full white (0x7FFF)
+        gpu.semi_transparency = SemiTransparency::Average;
+        gpu.prim_semi_transparent = true;
+        gpu.set_pixel(100, 0, 0xF8, 0xF8, 0xF8); // near-white (R=G=B=31 after 5-bit)
+
+        // Average(0x7FFF, 0x7FFF) = 0x7FFF (all channels stay at max)
+        assert_eq!(
+            gpu.vram[100], 0x7FFF,
+            "average blend of two full-whites should stay white"
+        );
+    }
+
+    #[test]
+    fn test_gpu_polyline_draws_multiple_segments() {
+        let mut gpu = make_gpu();
+
+        // Mono polyline: draw two segments (0,0)→(10,0)→(20,0) then terminate
+        gpu.gp0_write(0x4800_FF00); // cmd=0x48, G=255 → green polyline
+        gpu.gp0_write(0x0000_0000); // v0 = (0, 0)
+        gpu.gp0_write(0x0000_000A); // v1 = (10, 0) — first segment drawn here
+                                    // Now in Polyline mode
+        gpu.gp0_write(0x0000_0014); // v2 = (20, 0) — second segment
+        gpu.gp0_write(0x5000_5000); // terminator
+
+        // Pixel at (0,0) should have been written (start of first segment)
+        let p0 = gpu.vram[0];
+        let g0 = (p0 >> 5) & 0x1F;
+        assert!(
+            g0 > 0,
+            "pixel at (0,0) should be green (G channel > 0), got 0x{:04X}",
+            p0
+        );
+
+        // Pixel at (15,0) should have been written (middle of second segment)
+        let p15 = gpu.vram[15];
+        let g15 = (p15 >> 5) & 0x1F;
+        assert!(
+            g15 > 0,
+            "pixel at (15,0) should be green (G channel > 0), got 0x{:04X}",
+            p15
+        );
+    }
+
+    #[test]
+    fn test_gpu_polyline_terminator_exits_polyline_mode() {
+        let mut gpu = make_gpu();
+
+        // Start a mono polyline
+        gpu.gp0_write(0x48FF_0000); // red polyline
+        gpu.gp0_write(0x0000_0000); // v0
+        gpu.gp0_write(0x0000_0005); // v1 — now in Polyline mode
+        gpu.gp0_write(0x5000_5000); // terminator — should return to Command mode
+
+        // Send a NOP — should work without panic or garbage
+        gpu.gp0_write(0x0000_0000);
+        assert_eq!(
+            gpu.gp0_mode,
+            Gp0Mode::Command,
+            "GPU should be in Command mode after polyline terminator"
+        );
+    }
+
+    #[test]
+    fn test_gpu_fill_rect_ignores_mask_check() {
+        let mut gpu = make_gpu();
+
+        // Fill rect (0x02) should NOT check mask bit — it always writes
+        gpu.vram[0] = 0x8000; // set mask bit in background
+        gpu.check_mask_bit = true;
+
+        // Draw a fill rect that covers pixel (0,0)
+        gpu.gp0_write(0x0200_00FF); // R=255 → 5-bit R=31
+        gpu.gp0_write(0x0000_0000); // x=0, y=0
+        gpu.gp0_write(0x0001_0010); // h=1, w=16
+
+        // fill_rect (0x02) always writes regardless of mask
+        let p = gpu.vram[0];
+        assert_eq!(p & 0x1F, 31, "fill_rect should write to masked pixels");
+    }
+
+    #[test]
+    fn test_gpu_set_pixel_respects_draw_area() {
+        let mut gpu = Gpu::new();
+        gpu.draw_area_left = 10;
+        gpu.draw_area_right = 20;
+        gpu.draw_area_top = 10;
+        gpu.draw_area_bottom = 20;
+        gpu.prim_semi_transparent = false;
+
+        // Pixel outside draw area should not be written
+        gpu.set_pixel(5, 5, 255, 0, 0);
+        assert_eq!(
+            gpu.vram[5 * VRAM_WIDTH + 5],
+            0,
+            "pixel outside draw area should not be written"
+        );
+
+        // Pixel inside draw area should be written
+        gpu.set_pixel(15, 15, 255, 0, 0);
+        assert_ne!(
+            gpu.vram[15 * VRAM_WIDTH + 15],
+            0,
+            "pixel inside draw area should be written"
+        );
+    }
+
+    #[test]
+    fn test_gpu_gpuinfo_draw_area_latch() {
+        let mut gpu = make_gpu();
+        gpu.draw_area_left = 100;
+        gpu.draw_area_top = 50;
+
+        // GP1 0x10_0003 should load draw area top-left into GPU read latch
+        gpu.gp1_write(0x1000_0003);
+        let latch = gpu.gpuread();
+        assert_eq!(
+            latch & 0x3FF,
+            100,
+            "draw area left should be in bits 0-9 of GPU info latch"
+        );
+        assert_eq!(
+            (latch >> 10) & 0x1FF,
+            50,
+            "draw area top should be in bits 10-18 of GPU info latch"
+        );
     }
 }

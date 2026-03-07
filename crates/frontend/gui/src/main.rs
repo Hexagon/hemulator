@@ -750,7 +750,7 @@ impl EmulatorSystem {
             EmulatorSystem::SMS(sys) => sys.get_audio_samples(count),
             EmulatorSystem::ColecoVision(sys) => sys.get_audio_samples(count),
             EmulatorSystem::SG1000(sys) => sys.get_audio_samples(count),
-            EmulatorSystem::PS1(_) => vec![0; count],
+            EmulatorSystem::PS1(sys) => sys.get_audio_samples(count),
             EmulatorSystem::GameAndWatch(sys) => sys.generate_audio_samples(count),
         }
     }
