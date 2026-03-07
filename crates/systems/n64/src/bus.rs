@@ -13,6 +13,26 @@ use emu_core::cpu_mips_r4300i::MemoryMips;
 use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::types::Frame;
 
+/// Macronix MX29L1100 FlashRAM operating mode.
+///
+/// The FlashRAM uses a command-register protocol: the game writes a command
+/// byte (in the most-significant byte of a 32-bit word) to address 0x08000000,
+/// which transitions the chip between these modes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FlashRamMode {
+    /// Normal read-array mode (default after reset/power-on)
+    Read,
+    /// Status-register mode: reads return the 32-bit status word
+    Status,
+    /// Erase mode: waiting for the 0x78 confirm write to erase the sector
+    Erase,
+    /// Page-write mode: subsequent byte/word writes go into flash data
+    Write,
+}
+
+/// FlashRAM sector size in bytes (Macronix MX29L1100 uses 128-byte pages)
+const FLASH_SECTOR_SIZE: usize = 128;
+
 /// N64 memory bus
 pub struct N64Bus {
     /// 4MB RDRAM
@@ -21,11 +41,19 @@ pub struct N64Bus {
     pif: Pif,
     /// Cartridge (optional)
     cartridge: Option<Cartridge>,
-    /// Cartridge save storage (32 KB for SRAM, 128 KB for FlashRAM placeholder).
-    /// Named `cart_save` because it holds both SRAM and the FlashRAM byte-array
-    /// stand-in; the two are physically different chips with different access
-    /// protocols, but share the same address space at 0x08000000.
+    /// Cartridge save storage (32 KB for SRAM, 128 KB for FlashRAM).
+    /// Named `cart_save` because it holds both SRAM and the FlashRAM data;
+    /// the two are physically different chips — access is dispatched through
+    /// `save_is_flashram` so the correct protocol is applied.
     cart_save: Option<Vec<u8>>,
+    /// True when `cart_save` holds FlashRAM data; false for plain SRAM.
+    save_is_flashram: bool,
+    /// Current FlashRAM operating mode (only valid when `save_is_flashram`).
+    flashram_mode: FlashRamMode,
+    /// Sector start offset for a pending erase operation (set by the 0x4B command).
+    flashram_erase_offset: usize,
+    /// Current write position within the flash data buffer (advances per write in Write mode).
+    flashram_write_offset: usize,
     /// RDP (Reality Display Processor)
     rdp: Rdp,
     /// RSP (Reality Signal Processor)
@@ -58,6 +86,10 @@ impl N64Bus {
             pif: Pif::new(),
             cartridge: None,
             cart_save: None,
+            save_is_flashram: false,
+            flashram_mode: FlashRamMode::Read,
+            flashram_erase_offset: 0,
+            flashram_write_offset: 0,
             rdp,
             rsp: Rsp::new(),
             vi: VideoInterface::new(),
@@ -136,8 +168,12 @@ impl N64Bus {
         use crate::cartridge::SaveType;
         use crate::pif::EepromType;
 
-        // Reset any existing save storage
+        // Reset any existing save storage and FlashRAM state machine
         self.cart_save = None;
+        self.save_is_flashram = false;
+        self.flashram_mode = FlashRamMode::Read;
+        self.flashram_erase_offset = 0;
+        self.flashram_write_offset = 0;
         self.pif.set_eeprom_type(EepromType::None);
 
         match save_type {
@@ -151,13 +187,15 @@ impl N64Bus {
             SaveType::Sram => {
                 // 32 KB SRAM, initialised to all-0xFF (blank)
                 self.cart_save = Some(vec![0xFF; 32768]);
+                self.save_is_flashram = false;
             }
             SaveType::FlashRam => {
-                // 128 KB FlashRAM, initialised to all-0xFF (blank).
-                // The Macronix MX29L1100 command protocol (erase/write commands) is not yet
-                // implemented — games will not save correctly until it is.
-                // See TODO.md N64 section: "FlashRAM command protocol"
+                // 128 KB FlashRAM (Macronix MX29L1100), initialised to all-0xFF (blank).
+                // Uses the Macronix command protocol: erase/write commands are
+                // dispatched through the write handlers.
                 self.cart_save = Some(vec![0xFF; 131072]);
+                self.save_is_flashram = true;
+                self.flashram_mode = FlashRamMode::Read;
             }
         }
     }
@@ -197,14 +235,226 @@ impl N64Bus {
         self.pif.load_eeprom(data)
     }
 
+    /// Export controller pak (mempak) data for a given controller slot (0-based).
+    ///
+    /// Returns `None` when no pak is inserted in the slot.
+    pub fn get_mempak_data(&self, channel: usize) -> Option<Vec<u8>> {
+        self.pif.save_mempak(channel)
+    }
+
+    /// Import previously persisted mempak data for a controller slot.
+    pub fn set_mempak_data(&mut self, channel: usize, data: Vec<u8>) -> Result<(), String> {
+        self.pif.load_mempak(channel, data)
+    }
+
+    /// Enable or disable the controller pak in a given controller slot.
+    pub fn set_mempak_enabled(&mut self, channel: usize, enabled: bool) {
+        self.pif.set_mempak_enabled(channel, enabled);
+    }
+
     /// Get the entry point from the loaded cartridge (for CPU initialization)
     pub fn get_entry_point(&self) -> Option<u64> {
         self.entry_point
     }
 
+    // -----------------------------------------------------------------------
+    // FlashRAM (Macronix MX29L1100) command protocol
+    // -----------------------------------------------------------------------
+
+    /// Process a 32-bit word write that targets the FlashRAM address space.
+    ///
+    /// The Macronix MX29L1100 uses a command-register protocol:
+    /// - Writes to offset 0x00000 with a known command byte (MSB) transition the state machine.
+    /// - In Write mode, every word write is stored at the advancing write pointer.
+    /// - In Erase mode, a 0x78 confirmation write erases the sector selected by the prior 0x4B command.
+    ///
+    /// Reference: Macronix MX29L1100 data sheet; ares N64 FlashRAM implementation.
+    fn flashram_write_word(&mut self, offset: usize, val: u32) {
+        let command = (val >> 24) as u8;
+
+        match self.flashram_mode {
+            FlashRamMode::Erase => {
+                // In Erase mode the next write with command 0x78 triggers the sector erase
+                if command == 0x78 {
+                    if let Some(ref mut flash) = self.cart_save {
+                        let start = self.flashram_erase_offset;
+                        let end = (start + FLASH_SECTOR_SIZE).min(flash.len());
+                        flash[start..end].fill(0xFF);
+                        log(LogCategory::Bus, LogLevel::Info, || {
+                            format!(
+                                "N64 FlashRAM: Erased sector at offset 0x{:05X} ({}B)",
+                                start, FLASH_SECTOR_SIZE
+                            )
+                        });
+                    }
+                    self.flashram_mode = FlashRamMode::Read;
+                } else {
+                    // Any other command at offset 0 in Erase mode is treated as a new command
+                    self.flashram_mode = FlashRamMode::Read;
+                    self.flashram_handle_command(offset, command, val);
+                }
+            }
+            FlashRamMode::Write => {
+                // In Write mode, writes at offset 0 are commands (state machine transitions);
+                // writes at any other offset store data at the advancing write pointer.
+                if offset == 0 {
+                    self.flashram_handle_command(offset, command, val);
+                } else if let Some(ref mut flash) = self.cart_save {
+                    let dst = self.flashram_write_offset;
+                    if dst + 3 < flash.len() {
+                        let bytes = val.to_be_bytes();
+                        flash[dst] = bytes[0];
+                        flash[dst + 1] = bytes[1];
+                        flash[dst + 2] = bytes[2];
+                        flash[dst + 3] = bytes[3];
+                    }
+                    self.flashram_write_offset = self.flashram_write_offset.wrapping_add(4);
+                }
+            }
+            FlashRamMode::Read | FlashRamMode::Status => {
+                // In Read/Status mode, writes at offset 0 are commands
+                if offset == 0 {
+                    self.flashram_handle_command(offset, command, val);
+                }
+                // Writes to other offsets in Read/Status mode are ignored
+            }
+        }
+    }
+
+    /// Process a FlashRAM command byte.
+    fn flashram_handle_command(&mut self, _offset: usize, command: u8, val: u32) {
+        match command {
+            0x4B => {
+                // Set erase offset + enter Erase mode.
+                // Low 16 bits of the word hold the sector index; multiplied by sector
+                // size (128 bytes) to get the byte offset within flash storage.
+                let sector_index = (val & 0xFFFF) as usize;
+                self.flashram_erase_offset = sector_index * FLASH_SECTOR_SIZE;
+                self.flashram_mode = FlashRamMode::Erase;
+                log(LogCategory::Bus, LogLevel::Debug, || {
+                    format!(
+                        "N64 FlashRAM: CMD 0x4B — erase mode, sector={} (offset 0x{:05X})",
+                        sector_index, self.flashram_erase_offset
+                    )
+                });
+            }
+            0x78 => {
+                // Erase entire chip
+                if let Some(ref mut flash) = self.cart_save {
+                    flash.fill(0xFF);
+                    log(LogCategory::Bus, LogLevel::Info, || {
+                        "N64 FlashRAM: CMD 0x78 — chip erase".to_string()
+                    });
+                }
+                self.flashram_mode = FlashRamMode::Read;
+            }
+            0xA0 | 0xE1 => {
+                // Enter Write mode.
+                // Low 16 bits encode the write start position as a word (4-byte) index;
+                // multiply by 4 to get the byte offset within flash storage.
+                let byte_offset = ((val & 0x0000_FFFF) as usize) * 4;
+                self.flashram_write_offset = byte_offset;
+                self.flashram_mode = FlashRamMode::Write;
+                log(LogCategory::Bus, LogLevel::Debug, || {
+                    format!(
+                        "N64 FlashRAM: CMD 0x{:02X} — write mode, offset 0x{:05X}",
+                        command, byte_offset
+                    )
+                });
+            }
+            0xB4 | 0xFF => {
+                // Enter Read (array) mode
+                self.flashram_mode = FlashRamMode::Read;
+                log(LogCategory::Bus, LogLevel::Debug, || {
+                    format!("N64 FlashRAM: CMD 0x{:02X} — read mode", command)
+                });
+            }
+            0xD2 => {
+                // Enter Status mode
+                self.flashram_mode = FlashRamMode::Status;
+                log(LogCategory::Bus, LogLevel::Debug, || {
+                    "N64 FlashRAM: CMD 0xD2 — status mode".to_string()
+                });
+            }
+            0xC2 => {
+                // Page write: set write address and stay in Write mode
+                let byte_offset = ((val & 0x0000_FFFF) as usize) * FLASH_SECTOR_SIZE;
+                self.flashram_write_offset = byte_offset;
+                self.flashram_mode = FlashRamMode::Write;
+                log(LogCategory::Bus, LogLevel::Debug, || {
+                    format!(
+                        "N64 FlashRAM: CMD 0xC2 — page write offset 0x{:05X}",
+                        byte_offset
+                    )
+                });
+            }
+            _ => {
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!(
+                        "N64 FlashRAM: Unknown command 0x{:02X} (word=0x{:08X})",
+                        command, val
+                    )
+                });
+            }
+        }
+    }
+
+    /// Process a 32-bit word read from the FlashRAM address space.
+    fn flashram_read_word(&self, offset: usize) -> u32 {
+        match self.flashram_mode {
+            FlashRamMode::Status => {
+                // Status word: 0x11118001 = ready, no error, page written
+                // Bit meanings: [31:28]=0x1 silicon ID, [27:16]=0x111 device type,
+                //               [15:0]=0x8001 ready | no error
+                if offset == 0 {
+                    0x1111_8001
+                } else {
+                    0x0000_0000
+                }
+            }
+            FlashRamMode::Read | FlashRamMode::Erase | FlashRamMode::Write => {
+                if let Some(ref flash) = self.cart_save {
+                    if offset + 3 < flash.len() {
+                        u32::from_be_bytes([
+                            flash[offset],
+                            flash[offset + 1],
+                            flash[offset + 2],
+                            flash[offset + 3],
+                        ])
+                    } else {
+                        0xFFFF_FFFF
+                    }
+                } else {
+                    0xFFFF_FFFF
+                }
+            }
+        }
+    }
+
+    /// Process a byte read from the FlashRAM address space.
+    fn flashram_read_byte(&self, offset: usize) -> u8 {
+        match self.flashram_mode {
+            FlashRamMode::Status => {
+                // Return individual bytes of status word 0x11118001
+                let status: u32 = 0x1111_8001;
+                let byte_offset = offset & 3;
+                status.to_be_bytes()[byte_offset]
+            }
+            _ => {
+                if let Some(ref flash) = self.cart_save {
+                    *flash.get(offset).unwrap_or(&0xFF)
+                } else {
+                    0xFF
+                }
+            }
+        }
+    }
+
     pub fn unload_cartridge(&mut self) {
         self.cartridge = None;
         self.cart_save = None;
+        self.save_is_flashram = false;
+        self.flashram_mode = FlashRamMode::Read;
     }
 
     pub fn has_cartridge(&self) -> bool {
@@ -266,7 +516,7 @@ impl N64Bus {
     pub fn process_rsp_task(&mut self) -> bool {
         // Use disjoint field borrows to avoid cloning 4MB RDRAM
         // Rust allows borrowing separate struct fields simultaneously
-        let (_cycles, should_interrupt) = self.rsp.execute_task(&self.rdram, &mut self.rdp);
+        let (_cycles, should_interrupt) = self.rsp.execute_task(&mut self.rdram, &mut self.rdp);
 
         if should_interrupt {
             log(LogCategory::PPU, LogLevel::Info, || {
@@ -420,8 +670,10 @@ impl MemoryMips for N64Bus {
             }
             // Cartridge SRAM / FlashRAM (0x08000000 - 0x0FFFFFFF, cartridge domain 2)
             0x0800_0000..=0x0FFF_FFFF => {
-                if let Some(ref sram) = self.cart_save {
-                    let offset = (phys_addr - 0x0800_0000) as usize;
+                let offset = (phys_addr - 0x0800_0000) as usize;
+                if self.save_is_flashram {
+                    self.flashram_read_byte(offset)
+                } else if let Some(ref sram) = self.cart_save {
                     *sram.get(offset).unwrap_or(&0xFF)
                 } else {
                     0xFF
@@ -575,8 +827,10 @@ impl MemoryMips for N64Bus {
             }
             // Cartridge SRAM / FlashRAM (0x08000000 - 0x0FFFFFFF, cartridge domain 2)
             0x0800_0000..=0x0FFF_FFFF => {
-                if let Some(ref sram) = self.cart_save {
-                    let offset = (phys_addr - 0x0800_0000) as usize;
+                let offset = (phys_addr - 0x0800_0000) as usize;
+                if self.save_is_flashram {
+                    self.flashram_read_word(offset)
+                } else if let Some(ref sram) = self.cart_save {
                     u32::from_be_bytes([
                         *sram.get(offset).unwrap_or(&0xFF),
                         *sram.get(offset + 1).unwrap_or(&0xFF),
@@ -637,8 +891,28 @@ impl MemoryMips for N64Bus {
             }
             // Cartridge SRAM / FlashRAM (0x08000000 - 0x0FFFFFFF)
             0x0800_0000..=0x0FFF_FFFF => {
-                if let Some(ref mut sram) = self.cart_save {
-                    let offset = (phys_addr - 0x0800_0000) as usize;
+                let offset = (phys_addr - 0x0800_0000) as usize;
+                if self.save_is_flashram {
+                    // Single-byte writes to FlashRAM:
+                    // - At offset 0, the byte is a command byte; forward it as a word
+                    //   with the byte in the MSB position (hardware command encoding).
+                    // - At other offsets in Write mode, store the single byte at the
+                    //   advancing write pointer (do NOT zero-pad to a word, which would
+                    //   corrupt adjacent bytes).
+                    // - In all other modes, single-byte writes outside offset 0 are ignored.
+                    if offset == 0 {
+                        let word = (val as u32) << 24;
+                        self.flashram_write_word(0, word);
+                    } else if self.flashram_mode == FlashRamMode::Write {
+                        if let Some(ref mut flash) = self.cart_save {
+                            let dst = self.flashram_write_offset;
+                            if dst < flash.len() {
+                                flash[dst] = val;
+                            }
+                            self.flashram_write_offset = self.flashram_write_offset.wrapping_add(1);
+                        }
+                    }
+                } else if let Some(ref mut sram) = self.cart_save {
                     if offset < sram.len() {
                         sram[offset] = val;
                     }
@@ -862,8 +1136,10 @@ impl MemoryMips for N64Bus {
             }
             // Cartridge SRAM / FlashRAM (0x08000000 - 0x0FFFFFFF)
             0x0800_0000..=0x0FFF_FFFF => {
-                if let Some(ref mut sram) = self.cart_save {
-                    let offset = (phys_addr - 0x0800_0000) as usize;
+                let offset = (phys_addr - 0x0800_0000) as usize;
+                if self.save_is_flashram {
+                    self.flashram_write_word(offset, val);
+                } else if let Some(ref mut sram) = self.cart_save {
                     if offset + 3 < sram.len() {
                         let bytes = val.to_be_bytes();
                         sram[offset] = bytes[0];

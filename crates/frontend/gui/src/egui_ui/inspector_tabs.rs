@@ -173,6 +173,9 @@ pub fn get_tabs_for_system(system_type: Option<&SystemType>) -> Vec<InspectorTab
                 tabs.push(InspectorTab::Mounts); // PS1 uses Mounts tab (BIOS, disc)
                 tabs.push(InspectorTab::Ps1Gpu);
             }
+            SystemType::GameAndWatch => {
+                tabs.push(InspectorTab::Mounts); // Game & Watch uses Mounts tab for "Program"
+            }
             _ => {
                 // Fallback for cartridge-based systems not explicitly listed above
                 // This includes N64, SG-1000, and any future cartridge systems

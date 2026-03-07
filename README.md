@@ -25,7 +25,7 @@ A cross-platform, multi-system console emulator written in Rust. **NES emulation
 | **ColecoVision** | 🚧 In Development | Not producing image; full hardware emulation |
 | **SG-1000** | ⚠️ Experimental | Full hardware emulation |
 | **Atari 2600** | 🚧 In Development | Most cartridge formats; rendering WIP |
-| **SNES** | 🚧 In Development | Graphics working; modes 0-1 complete; no audio |
+| **SNES** | ✅ Functional | All PPU modes 0-7, sprites, DMA/HDMA, SPC700+DSP audio |
 | **N64** | 🚧 In Development | 3D rendering works; limited game support |
 | **PS1** | 🚧 In Development | MIPS R3000A CPU, GPU (2D/3D), DMA, timers; Audio/CD-ROM WIP |
 | **PC/DOS** | ⚠️ Experimental | COM/EXE loading; CGA/EGA/VGA modes |

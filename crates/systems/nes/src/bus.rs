@@ -52,6 +52,13 @@ pub struct NesBus {
     // Used when reading from unmapped addresses (e.g., $6000-$7FFF on carts without WRAM)
     // Reference: https://www.nesdev.org/wiki/Open_bus_behavior
     open_bus: Cell<u8>,
+    /// Pending OAM DMA stall cycles.
+    /// On real NES hardware, writing $4014 stalls the CPU for 513 cycles
+    /// (1 wait cycle + 256 read-write pairs) while the DMA controller copies
+    /// 256 bytes from CPU address space to PPU OAM. The PPU and APU continue
+    /// running during this stall. Without accounting for these cycles, the PPU
+    /// falls ~4.5 scanlines behind the CPU every frame.
+    pending_dma_cycles: Cell<u32>,
 }
 
 impl NesBus {
@@ -68,6 +75,7 @@ impl NesBus {
             strobe: Cell::new(false),
             cpu_cycles: Cell::new(0),
             open_bus: Cell::new(0),
+            pending_dma_cycles: Cell::new(0),
         }
     }
 
@@ -148,6 +156,14 @@ impl NesBus {
     pub fn add_cycles(&self, cycles: u32) {
         let current = self.cpu_cycles.get();
         self.cpu_cycles.set(current.wrapping_add(cycles as u64));
+    }
+
+    /// Consume and return any pending OAM DMA stall cycles.
+    /// Returns 513 if a DMA was triggered this CPU step, 0 otherwise.
+    pub fn take_pending_dma_cycles(&self) -> u32 {
+        let c = self.pending_dma_cycles.get();
+        self.pending_dma_cycles.set(0);
+        c
     }
 }
 
@@ -288,6 +304,10 @@ impl Bus for NesBus {
                     buf[i as usize] = self.read(base.wrapping_add(i));
                 }
                 self.ppu.dma_oam_from_slice(&buf);
+                // Signal 513 CPU stall cycles for the main loop to tick PPU/APU.
+                // Real hardware: 1 wait cycle + 256 alternating read/write = 513 cycles.
+                // (514 if starting on an odd CPU cycle; we use 513 as a good approximation)
+                self.pending_dma_cycles.set(513);
             }
             0x4000..=0x4017 => {
                 // APU registers and controller strobe
