@@ -344,8 +344,8 @@ fn disassemble_xy(memory: &[u8], address: u32, xy: &str) -> Option<DisassembledI
         }};
     }
 
-    // LD r,(XY+d) : op = 0x46 | 0x4E | 0x56 | 0x5E | 0x66 | 0x6E | 0x7E | 0x76
-    // LD (XY+d),r : op = 0x70–0x77
+    // LD r,(XY+d) : op = 0x46 | 0x4E | 0x56 | 0x5E | 0x66 | 0x6E | 0x7E
+    // LD (XY+d),r : op = 0x70–0x75, 0x77  (0x76 is HALT; DD/FD prefixes are ignored)
     // ALU (XY+d)  : op = 0x86 | 0x8E | … | 0xBE
 
     let (mnemonic, len): (String, usize) = match op {
