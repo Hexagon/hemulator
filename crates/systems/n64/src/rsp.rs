@@ -390,7 +390,7 @@ impl Rsp {
     /// Execute RSP task via HLE
     /// Called when RSP is un-halted by writing to SP_STATUS
     /// Returns (cycles, should_interrupt)
-    pub fn execute_task(&mut self, rdram: &[u8], rdp: &mut Rdp) -> (u32, bool) {
+    pub fn execute_task(&mut self, rdram: &mut [u8], rdp: &mut Rdp) -> (u32, bool) {
         use emu_core::logging::{log, LogCategory, LogLevel};
 
         // Check if RSP is halted

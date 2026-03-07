@@ -8,9 +8,9 @@ nav_order: 1
 
 # Hemulator Architecture Overview
 
-> **📄 For complete architecture documentation, see [ARCHITECTURE.md](https://github.com/Hexagon/hemulator/blob/master/ARCHITECTURE.md) in the repository root**
+> **📄 For complete architecture documentation, see [ARCHITECTURE.md](https://github.com/Hexagon/hemulator/blob/main/ARCHITECTURE.md) in the repository root**
 
-This page provides a high-level overview of Hemulator's architecture. For detailed implementation information, system design patterns, and technical specifics, please refer to the complete [ARCHITECTURE.md](https://github.com/Hexagon/hemulator/blob/master/ARCHITECTURE.md) in the repository.
+This page provides a high-level overview of Hemulator's architecture. For detailed implementation information, system design patterns, and technical specifics, please refer to the complete [ARCHITECTURE.md](https://github.com/Hexagon/hemulator/blob/main/ARCHITECTURE.md) in the repository.
 
 ## System Architecture
 
@@ -100,7 +100,7 @@ For complete details including:
 - Memory management specifics
 - System-specific architectures
 
-Please refer to the **[complete ARCHITECTURE.md](https://github.com/Hexagon/hemulator/blob/master/ARCHITECTURE.md)** in the repository.
+Please refer to the **[complete ARCHITECTURE.md](https://github.com/Hexagon/hemulator/blob/main/ARCHITECTURE.md)** in the repository.
 
 **Related Documentation**:
 - [Contributing Guide](contributing.md) - Development workflow
