@@ -268,8 +268,8 @@ pub fn disassemble_r3000a(memory: &[u8], address: u32) -> Option<DisassembledIns
         0x2E => format!("SWR {}, {}({})", REG_NAMES[rt], simm, REG_NAMES[rs]),
 
         // COP2 loads/stores (GTE)
-        0x32 => format!("LWC2 ${}, {}({})", rd, simm, REG_NAMES[rs]),
-        0x3A => format!("SWC2 ${}, {}({})", rd, simm, REG_NAMES[rs]),
+        0x32 => format!("LWC2 ${}, {}({})", rt, simm, REG_NAMES[rs]),
+        0x3A => format!("SWC2 ${}, {}({})", rt, simm, REG_NAMES[rs]),
 
         _ => format!(".word 0x{:08X}", word),
     };
