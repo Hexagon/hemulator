@@ -94,6 +94,17 @@ pub struct Sm510 {
     /// Bits 4-7: action (Game A, Game B, Time, Alarm)
     /// Bit 8: ACL
     pub controller_state: u16,
+
+    // === Keyboard mapping (from .mgw ROM) ===
+    /// Optional keyboard mapping from .mgw ROM data.
+    /// keyboard[0..7] = S1..S8: each u32 has 4 bytes encoding K1-K4 button masks
+    /// keyboard[8] = BA direct button mask, keyboard[9] = B direct button mask
+    pub keyboard_mapping: Option<[u32; 10]>,
+
+    /// Raw button state for keyboard-mapped input.
+    /// Uses .mgw button encoding: LEFT=0x01, UP=0x02, RIGHT=0x04, DOWN=0x08,
+    /// A=0x10, B=0x20, TIME=0x40, GAME=0x80
+    pub pressed_buttons: u8,
 }
 
 impl Sm510 {
@@ -133,6 +144,8 @@ impl Sm510 {
             param: 0,
             prg_mask: 0xFFF,
             controller_state: 0,
+            keyboard_mapping: None,
+            pressed_buttons: 0,
         }
     }
 
@@ -242,33 +255,67 @@ impl Sm510 {
 
     // === Input matrix ===
 
-    /// Update K input based on S output and controller state
+    /// Update K input based on S output and controller state.
+    ///
+    /// When a keyboard mapping from an .mgw ROM is available, uses the per-game
+    /// wiring table to map physical buttons to the SM510 S/K input matrix.
+    /// Otherwise falls back to a simple hardcoded mapping.
     fn update_input(&mut self) {
-        let mut k = 0u8;
+        if let Some(ref kbd) = self.keyboard_mapping {
+            // .mgw keyboard-mapped input
+            let buttons = self.pressed_buttons;
+            let mut k = 0u8;
 
-        // Input matrix: S output selects which button row is read on K port
-        // S bit 0 → directional buttons (controller bits 0-3)
-        if self.output_s & 0x1 != 0 {
-            k |= (self.controller_state & 0xF) as u8;
-        }
-        // S bit 1 → action buttons (controller bits 4-7)
-        if self.output_s & 0x2 != 0 {
-            k |= ((self.controller_state >> 4) & 0xF) as u8;
-        }
-        // S bit 2 → ACL (controller bit 8)
-        if self.output_s & 0x4 != 0 {
-            k |= ((self.controller_state >> 8) & 0x1) as u8;
-        }
-        // S bit 3 → additional inputs
-        if self.output_s & 0x8 != 0 {
-            k |= ((self.controller_state >> 8) & 0xF) as u8;
-        }
+            for (s, &mapping) in kbd.iter().enumerate().take(8) {
+                if self.output_s & (1 << s) != 0 {
+                    // K1: byte 0 (bits 0-7) = button mask for K1
+                    if (mapping as u8) & buttons != 0 {
+                        k |= 0x1;
+                    }
+                    // K2: byte 1 (bits 8-15)
+                    if ((mapping >> 8) as u8) & buttons != 0 {
+                        k |= 0x2;
+                    }
+                    // K3: byte 2 (bits 16-23)
+                    if ((mapping >> 16) as u8) & buttons != 0 {
+                        k |= 0x4;
+                    }
+                    // K4: byte 3 (bits 24-31)
+                    if ((mapping >> 24) as u8) & buttons != 0 {
+                        k |= 0x8;
+                    }
+                }
+            }
 
-        self.input_k = k & 0xF;
+            self.input_k = k & 0xF;
+            // BA and B are direct inputs (not matrix-scanned)
+            self.input_ba = (kbd[8] as u8) & buttons != 0;
+            self.input_b = (kbd[9] as u8) & buttons != 0;
+        } else {
+            // Fallback: hardcoded mapping for raw ROMs
+            let mut k = 0u8;
 
-        // BA and B inputs (directly from controller state)
-        self.input_ba = (self.controller_state & 0x10) != 0; // Game A
-        self.input_b = (self.controller_state & 0x20) != 0; // Game B
+            // S bit 0 → directional buttons (controller bits 0-3)
+            if self.output_s & 0x1 != 0 {
+                k |= (self.controller_state & 0xF) as u8;
+            }
+            // S bit 1 → action buttons (controller bits 4-7)
+            if self.output_s & 0x2 != 0 {
+                k |= ((self.controller_state >> 4) & 0xF) as u8;
+            }
+            // S bit 2 → ACL (controller bit 8)
+            if self.output_s & 0x4 != 0 {
+                k |= ((self.controller_state >> 8) & 0x1) as u8;
+            }
+            // S bit 3 → additional inputs
+            if self.output_s & 0x8 != 0 {
+                k |= ((self.controller_state >> 8) & 0xF) as u8;
+            }
+
+            self.input_k = k & 0xF;
+            self.input_ba = (self.controller_state & 0x10) != 0;
+            self.input_b = (self.controller_state & 0x20) != 0;
+        }
     }
 
     // === Frequency divider ===
