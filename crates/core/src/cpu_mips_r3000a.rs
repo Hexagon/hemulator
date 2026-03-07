@@ -2284,13 +2284,14 @@ mod tests {
     fn test_gte_ir0_saturation_sets_bits_18_and_13() {
         let mut gte = GteRegisters::new();
 
-        // RTPS depth-cue: MAC0 = DQB + DQA*(H/SZ3).
-        // Set DQB = 0x7FFF_0000 so that MAC0 >> 12 >> 12 > 0x1000 → IR0 saturated.
-        // Use: DQA=0x3FFF (control[27]), DQB=0x7FFF_FFFF (control[28]), H=1, SZ3=1
+        // RTPS depth-cue: MAC0 = DQB + DQA * (H / SZ3).
+        // Choose H=1, SZ3=1 so that the depth-cue term is effectively DQB + DQA.
+        // With TRZ=1, DQA=0x3FFF and DQB=0x0100_0000, MAC0 is large enough that
+        // the IR0 result saturates at its upper limit, setting the IR0 saturation flags.
         gte.control[7] = 1; // TRZ=1 → push_sz(1)
         gte.control[26] = 1; // H=1
         gte.control[27] = 0x3FFF; // DQA
-        gte.control[28] = 0x0100_0000; // DQB: large positive → MAC0>>12 > 0x1000
+        gte.control[28] = 0x0100_0000; // DQB: large positive → causes IR0 saturation
         gte.execute(0x0008_0001); // RTPS sf=1
 
         let flag = gte.control[31];
