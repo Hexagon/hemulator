@@ -1362,7 +1362,7 @@ impl Gpu {
         // Draw the first segment (cmd+c0, v0, c1, v1)
         // Subsequent color/vertex pairs are handled in Gp0Mode::Polyline via gp0_write
         if self.gp0_buffer.len() >= 4 {
-            let (r, g, b) = Self::decode_color(self.gp0_buffer[2]);
+            let (r, g, b) = Self::decode_color(self.gp0_buffer[0]);
             let v0 = self.decode_vertex(self.gp0_buffer[1]);
             let v1 = self.decode_vertex(self.gp0_buffer[3]);
             self.draw_line(v0, v1, r, g, b);
