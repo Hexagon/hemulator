@@ -630,15 +630,15 @@ impl CdRom {
             }
             0x1A => {
                 // GetID — identify disc
+                self.motor_on = true;
+                let s = self.stat_byte();
+                self.set_response(&[s], 3); // INT3: acknowledge (always first)
                 if self.disc_data.is_empty() {
-                    // No disc
-                    self.set_response(&[0x11, 0x80], 5); // INT5: error
+                    // No disc: queue INT5 error response
+                    self.queue_pending(&[0x11, 0x80], 5);
                 } else {
-                    // Game disc present: two-stage response
-                    self.motor_on = true;
-                    let s = self.stat_byte();
-                    self.set_response(&[s], 3); // INT3: acknowledge
-                                                // Queue INT2: stat, flags=0(licensed), type=0x20(mode2), atip=0, "SCEA"
+                    // Game disc present: queue INT2 with disc info
+                    // stat=0x02, flags=0(licensed), type=0x20(mode2), atip=0, "SCEA"
                     self.queue_pending(&[0x02, 0x00, 0x20, 0x00, b'S', b'C', b'E', b'A'], 2);
                 }
             }
@@ -852,6 +852,8 @@ impl Ps1Bus {
                     _ => unreachable!(),
                 }
             }
+            // Expansion Region 2 (0x1F802000-0x1F802FFF) — return 0xFF (no expansion hw)
+            0x1F80_2000..=0x1F80_2FFF => 0xFF,
             _ => 0,
         }
     }
@@ -883,6 +885,9 @@ impl Ps1Bus {
             0x1F80_1040 => self.joy_data,
             0x1F80_1044 => (self.joy_stat | 0x05) as u16, // Always report TX Ready
             0x1F80_104A => self.joy_ctrl,
+
+            // Expansion Region 2 — no expansion hardware
+            0x1F80_2000..=0x1F80_2FFF => 0xFFFF,
 
             _ => 0,
         }
@@ -950,6 +955,9 @@ impl Ps1Bus {
                 let hi = self.spu.read_register(offset + 2) as u32;
                 lo | (hi << 16)
             }
+
+            // Expansion Region 2 — no expansion hardware
+            0x1F80_2000..=0x1F80_2FFF => 0xFFFF_FFFF,
 
             _ => 0,
         }
@@ -1024,13 +1032,17 @@ impl Ps1Bus {
                         if val & 0x40 != 0 {
                             self.cdrom.params.clear();
                         }
-                        // If IRQ now clear and we have a pending 2nd response, deliver it
-                        if self.cdrom.irq_flag == 0 && self.cdrom.pending_irq != 0 {
-                            self.cdrom.deliver_pending();
-                            // Raise CD-ROM IRQ for newly delivered response
-                            if (self.cdrom.irq_flag & self.cdrom.irq_enable) != 0 {
-                                self.irq.raise(IRQ_CDROM);
-                            }
+                        // DON'T deliver pending 2nd responses here — they must be
+                        // delivered via step() with proper timing. Immediate delivery
+                        // causes the BIOS to lose the INT2/INT5 when it acknowledges
+                        // I_STAT in the same interrupt handler that processed INT3.
+                        // Instead, ensure step() will deliver soon by setting a
+                        // minimal delivery delay if it hasn't been set or has expired.
+                        if self.cdrom.irq_flag == 0
+                            && self.cdrom.pending_irq != 0
+                            && self.cdrom.delivery_delay == 0
+                        {
+                            self.cdrom.delivery_delay = 1;
                         }
                         // If we just acknowledged a sector data INT1, advance to next sector
                         if was_data_irq && self.cdrom.irq_flag == 0 {
