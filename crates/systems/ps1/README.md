@@ -14,11 +14,14 @@ full disc (CD-ROM) game compatibility is not yet implemented.
   - 1 MB VRAM (1024×512, 16-bit pixels)
   - Flat-shaded and Gouraud-shaded polygons (triangles and quads)
   - Textured primitives with 4-bit, 8-bit, and 15-bit texture modes
-  - Semi-transparency blending
+  - Semi-transparency blending (4 modes); texel STP bit controls per-pixel transparency
   - Sprite (rectangle) rendering
-  - Display resolutions up to 640×480
+  - Dithering (4×4 Bayer matrix when GP0(0xE1) dithering bit is set)
+  - Display resolutions up to 640×480 with correct 5→8-bit color expansion
   - GP0 rendering commands and GP1 display-control commands
-  - VRAM-to-VRAM copies and CPU→VRAM transfers
+  - VRAM-to-VRAM copies with mask-bit support and CPU→VRAM transfers
+  - Large-primitive culling (> 1023px wide or > 511px tall)
+  - Interlace odd/even field tracking in GPUSTAT
   - VBlank interrupt generation
 - ✅ **DMA Controller** — 7 channels (MDEC-in/out, GPU, CD-ROM, SPU, PIO, OTC)
   - Block-transfer and linked-list modes
@@ -43,7 +46,6 @@ full disc (CD-ROM) game compatibility is not yet implemented.
 - ⏳ **Save States** — Serialization stubs present but not implemented
 - ⏳ **MDEC** — Motion Decoder (FMV) stubbed
 - ⏳ **GPU Lines** — Polylines and Gouraud-shaded lines incomplete
-- ⏳ **24-bit Display Mode** — 24-bit pixel read path not implemented
 - ⏳ **Game Compatibility** — Real game discs require CD-ROM support
 
 ## Hardware Overview
@@ -119,7 +121,8 @@ See the [User Manual](https://hemulator.56k.guru/user/systems.html#ps1-sony-play
 
 ## References
 
-- **nocash PSX-SPX Specifications**: <https://problemkaputt.de/psx-spx.htm> — comprehensive PS1 hardware reference
+- **nocash PSX-SPX Specifications**: <https://psx-spx.consoledev.net/graphicsprocessingunitgpu/> — comprehensive PS1 hardware reference (GPU chapter used for all rendering fixes)
+- **nocash PSX-SPX (mirror)**: <https://problemkaputt.de/psx-spx.htm>
 - **Avocado PS1 emulator** — reference implementation
 - **Rustation PS1 emulator** — reference implementation
 
