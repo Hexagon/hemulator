@@ -60,7 +60,7 @@ pub use audio_chip::AudioChip;
 pub use dmc::DmcChannel;
 pub use dsp::Dsp;
 pub use envelope::Envelope;
-pub use filters::{DcBlockFilter, FilterFloat, LowPassFilter};
+pub use filters::{DcBlockFilter, LowPassFilter};
 pub use frame_counter::FrameCounter;
 pub use length_counter::{LengthCounter, LENGTH_TABLE};
 pub use noise::NoiseChannel;
