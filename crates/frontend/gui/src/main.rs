@@ -1213,6 +1213,48 @@ fn get_chip8_controller_state(window: &dyn WindowBackend) -> u16 {
     state
 }
 
+/// Get Game & Watch controller state using .mgw button encoding (8-bit).
+///
+/// Button encoding matches the LCD-Game-Shrinker / gw-libretro format:
+///   Bit 0: LEFT   (Arrow Left)
+///   Bit 1: UP     (Arrow Up)
+///   Bit 2: RIGHT  (Arrow Right)
+///   Bit 3: DOWN   (Arrow Down)
+///   Bit 4: A      (Z key — Game A / primary action)
+///   Bit 5: B      (X key — Game B / secondary action)
+///   Bit 6: TIME   (T key)
+///   Bit 7: GAME   (G key — Game select / Alarm)
+fn get_gw_controller_state(window: &dyn WindowBackend) -> u16 {
+    let mut state: u16 = 0;
+
+    if window.is_key_down(Key::Left) {
+        state |= 0x01;
+    }
+    if window.is_key_down(Key::Up) {
+        state |= 0x02;
+    }
+    if window.is_key_down(Key::Right) {
+        state |= 0x04;
+    }
+    if window.is_key_down(Key::Down) {
+        state |= 0x08;
+    }
+    if window.is_key_down(Key::Z) {
+        state |= 0x10; // A
+    }
+    if window.is_key_down(Key::X) {
+        state |= 0x20; // B
+    }
+    if window.is_key_down(Key::T) {
+        state |= 0x40; // TIME
+    }
+    if window.is_key_down(Key::G) {
+        state |= 0x80; // GAME
+    }
+
+    state
+}
+
 /// Get ColecoVision controller state from current keyboard state (8-bit)
 ///
 /// ColecoVision controller layout:
@@ -3903,6 +3945,7 @@ fn main() {
                 let controller_state = get_controller_state(&window, &settings.input.player1);
                 let snes_state = get_snes_controller_state(&window, &settings.input.player1);
                 let chip8_state = get_chip8_controller_state(&window);
+                let gw_state = get_gw_controller_state(&window);
                 let coleco_p1_state =
                     get_colecovision_controller_state(&window, &settings.input.player1);
                 let coleco_p2_state =
@@ -3911,7 +3954,7 @@ fn main() {
                 match &mut sys {
                     EmulatorSystem::SNES(s) => s.set_controller(0, snes_state),
                     EmulatorSystem::Chip8(s) => s.set_controller(chip8_state),
-                    EmulatorSystem::GameAndWatch(s) => s.set_controller(chip8_state),
+                    EmulatorSystem::GameAndWatch(s) => s.set_controller(gw_state),
                     EmulatorSystem::ColecoVision(s) => {
                         s.set_controller(1, coleco_p1_state);
                         s.set_controller(2, coleco_p2_state);
@@ -4960,7 +5003,7 @@ fn main() {
                             &[
                                 "nes", "unf", "gb", "gbc", "gba", "bin", "a26", "smc", "sfc",
                                 "z64", "n64", "v64", "com", "exe", "sms", "ch8", "c8", "col", "sg",
-                                "sc", "gw", "gnw",
+                                "sc", "gw", "gnw", "mgw",
                             ],
                         )
                         .add_filter("NES ROMs", &["nes", "unf"])
@@ -4973,7 +5016,7 @@ fn main() {
                         .add_filter("ColecoVision ROMs", &["col", "bin"])
                         .add_filter("SG-1000 ROMs", &["sg", "sc", "bin"])
                         .add_filter("CHIP-8 Programs", &["ch8", "c8"])
-                        .add_filter("Game & Watch ROMs", &["gw", "gnw"])
+                        .add_filter("Game & Watch ROMs", &["gw", "gnw", "mgw"])
                         .add_filter("PC Executables", &["com", "exe", "bin"])
                         .add_filter("All Files", &["*"])
                         .pick_file()
@@ -7766,6 +7809,7 @@ fn main() {
                 let controller_state = get_controller_state(&egui_backend, &settings.input.player1);
                 let snes_state = get_snes_controller_state(&egui_backend, &settings.input.player1);
                 let chip8_state = get_chip8_controller_state(&egui_backend);
+                let gw_state = get_gw_controller_state(&egui_backend);
 
                 // ColecoVision needs special handling for 2-player input
                 let coleco_p1_state =
@@ -7776,7 +7820,7 @@ fn main() {
                 match &mut sys {
                     EmulatorSystem::SNES(s) => s.set_controller(0, snes_state),
                     EmulatorSystem::Chip8(s) => s.set_controller(chip8_state),
-                    EmulatorSystem::GameAndWatch(s) => s.set_controller(chip8_state),
+                    EmulatorSystem::GameAndWatch(s) => s.set_controller(gw_state),
                     EmulatorSystem::ColecoVision(s) => {
                         // Set both players for ColecoVision
                         s.set_controller(1, coleco_p1_state);
