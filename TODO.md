@@ -81,30 +81,9 @@ not available in CI or in headless `cargo test` runs.  They can be run manually 
 ## SNES
 
 ### High
-- [x] **JMP/JSR absolute indexed indirect (`jmp ($addr,x)`) bank-wrap bug** — fixed: `ptr+X` now wraps within 16 bits (stays in PBR bank); cputest-basic advances from `0x01b7` → `0x025d`
-- [x] **`(dp,X)` indirect pointer read page-wrap in emulation mode (`E=1`)** — fixed: all 8 `(dp,X)` instructions (ORA/AND/EOR/ADC/STA/LDA/CMP/SBC) now use `read_word_dp_wrapped` which wraps the hi-byte read within the direct page in emulation mode; cputest-full advances from `0x0024` → `0x0025`
 - [ ] **cputest-basic fails at test `0x025d`** — next failing test after bank-wrap fix; needs investigation
   - File: `crates/core/src/cpu_65c816.rs`
   - Raise `MIN_PASSING` in `test_cputest_basic_loads_and_runs` once resolved
 - [ ] **cputest-full fails at test `0x0025`** — next failing emulation-mode test after dp-wrap fix; needs investigation
   - File: `crates/core/src/cpu_65c816.rs`
   - Raise `MIN_PASSING` in `test_cputest_full_loads_and_runs` once resolved
-
-### Critical
-- [x] **SPC700 second upload self-corruption**: Fixed. Root causes:
-  1. **INC dp ($AB)** was missing `direct_page()` base offset — fixed
-  2. **~45 other dp-addressing opcodes** were missing `direct_page()` — all fixed
-  3. **SPC700 sync timing** (Option B): SPC700 now runs inline in `tick_cycles()` instead of batching cycles and flushing on port access. This prevents the split-read race where the SPC700 could execute hundreds of instructions between two consecutive main-CPU port writes (e.g. writing the dest-addr low byte to $2142 and high byte to $2143), which caused the N-SPC upload handler at $1315 to use stale/wrong ZP $14–$15 values.
-  - See `SPC_ANALYSIS.md` for full analysis and resolution
-
-### High
-- [x] **Clean up SPC700 debug infrastructure** — all temporary tracing removed:
-  - Removed `trace_ports`, `last_pc`, `port_trace_count` fields from `Spc700Memory`
-  - Removed PORT-READ/PORT-WRITE/CTRL-WRITE file tracing to `spc700_diag.txt`
-  - Removed DIAG snapshots (every 5000 cycles)
-  - Removed SPC700-TRACE for N-SPC addresses
-  - Removed watchpoint on $1308–$130C
-  - Removed jump detection RAM dump
-  - Removed timer counter `eprintln!` in COUNTER0 read handler
-  - Removed per-instruction logging ($0100–$0FFF) in `cpu_spc700.rs` step()
-  - Removed port read/write tracing at $2140–$2143 in `bus.rs`

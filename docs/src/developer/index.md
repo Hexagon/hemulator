@@ -18,8 +18,8 @@ This section contains documentation for developers contributing to Hemulator or 
 ## Additional Resources
 
 For complete architecture documentation including detailed design patterns and implementation specifics, see:
-- [ARCHITECTURE.md](https://github.com/Hexagon/hemulator/blob/master/ARCHITECTURE.md) in the repository root
-- [AGENTS.md](https://github.com/Hexagon/hemulator/blob/master/AGENTS.md) for implementation guidelines and CI/agent information
+- [ARCHITECTURE.md](https://github.com/Hexagon/hemulator/blob/main/ARCHITECTURE.md) in the repository root
+- [AGENTS.md](https://github.com/Hexagon/hemulator/blob/main/AGENTS.md) for implementation guidelines and CI/agent information
 
 ## Quick Links
 
