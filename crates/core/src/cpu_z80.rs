@@ -2204,56 +2204,170 @@ impl<M: MemoryZ80> CpuZ80<M> {
                 11
             }
             // Undocumented: LD r,IXH / LD r,IXL (where r != H, L)
-            0x44 => { self.b = (self.ix >> 8) as u8; 8 }
-            0x45 => { self.b = (self.ix & 0xFF) as u8; 8 }
-            0x4C => { self.c = (self.ix >> 8) as u8; 8 }
-            0x4D => { self.c = (self.ix & 0xFF) as u8; 8 }
-            0x54 => { self.d = (self.ix >> 8) as u8; 8 }
-            0x55 => { self.d = (self.ix & 0xFF) as u8; 8 }
-            0x5C => { self.e = (self.ix >> 8) as u8; 8 }
-            0x5D => { self.e = (self.ix & 0xFF) as u8; 8 }
-            0x7C => { self.a = (self.ix >> 8) as u8; 8 }
-            0x7D => { self.a = (self.ix & 0xFF) as u8; 8 }
+            0x44 => {
+                self.b = (self.ix >> 8) as u8;
+                8
+            }
+            0x45 => {
+                self.b = (self.ix & 0xFF) as u8;
+                8
+            }
+            0x4C => {
+                self.c = (self.ix >> 8) as u8;
+                8
+            }
+            0x4D => {
+                self.c = (self.ix & 0xFF) as u8;
+                8
+            }
+            0x54 => {
+                self.d = (self.ix >> 8) as u8;
+                8
+            }
+            0x55 => {
+                self.d = (self.ix & 0xFF) as u8;
+                8
+            }
+            0x5C => {
+                self.e = (self.ix >> 8) as u8;
+                8
+            }
+            0x5D => {
+                self.e = (self.ix & 0xFF) as u8;
+                8
+            }
+            0x7C => {
+                self.a = (self.ix >> 8) as u8;
+                8
+            }
+            0x7D => {
+                self.a = (self.ix & 0xFF) as u8;
+                8
+            }
             // Undocumented: LD IXH,r / LD IXL,r
-            0x60 => { self.ix = (self.ix & 0x00FF) | ((self.b as u16) << 8); 8 }
-            0x61 => { self.ix = (self.ix & 0x00FF) | ((self.c as u16) << 8); 8 }
-            0x62 => { self.ix = (self.ix & 0x00FF) | ((self.d as u16) << 8); 8 }
-            0x63 => { self.ix = (self.ix & 0x00FF) | ((self.e as u16) << 8); 8 }
-            0x64 => { /* LD IXH,IXH - no-op */ 8 }
+            0x60 => {
+                self.ix = (self.ix & 0x00FF) | ((self.b as u16) << 8);
+                8
+            }
+            0x61 => {
+                self.ix = (self.ix & 0x00FF) | ((self.c as u16) << 8);
+                8
+            }
+            0x62 => {
+                self.ix = (self.ix & 0x00FF) | ((self.d as u16) << 8);
+                8
+            }
+            0x63 => {
+                self.ix = (self.ix & 0x00FF) | ((self.e as u16) << 8);
+                8
+            }
+            0x64 => {
+                /* LD IXH,IXH - no-op */
+                8
+            }
             0x65 => {
                 let ixl = (self.ix & 0xFF) as u8;
                 self.ix = (self.ix & 0x00FF) | ((ixl as u16) << 8);
                 8
             }
-            0x67 => { self.ix = (self.ix & 0x00FF) | ((self.a as u16) << 8); 8 }
-            0x68 => { self.ix = (self.ix & 0xFF00) | (self.b as u16); 8 }
-            0x69 => { self.ix = (self.ix & 0xFF00) | (self.c as u16); 8 }
-            0x6A => { self.ix = (self.ix & 0xFF00) | (self.d as u16); 8 }
-            0x6B => { self.ix = (self.ix & 0xFF00) | (self.e as u16); 8 }
+            0x67 => {
+                self.ix = (self.ix & 0x00FF) | ((self.a as u16) << 8);
+                8
+            }
+            0x68 => {
+                self.ix = (self.ix & 0xFF00) | (self.b as u16);
+                8
+            }
+            0x69 => {
+                self.ix = (self.ix & 0xFF00) | (self.c as u16);
+                8
+            }
+            0x6A => {
+                self.ix = (self.ix & 0xFF00) | (self.d as u16);
+                8
+            }
+            0x6B => {
+                self.ix = (self.ix & 0xFF00) | (self.e as u16);
+                8
+            }
             0x6C => {
                 let ixh = (self.ix >> 8) as u8;
                 self.ix = (self.ix & 0xFF00) | (ixh as u16);
                 8
             }
-            0x6D => { /* LD IXL,IXL - no-op */ 8 }
-            0x6F => { self.ix = (self.ix & 0xFF00) | (self.a as u16); 8 }
+            0x6D => {
+                /* LD IXL,IXL - no-op */
+                8
+            }
+            0x6F => {
+                self.ix = (self.ix & 0xFF00) | (self.a as u16);
+                8
+            }
             // Undocumented: ADD/ADC/SUB/SBC/AND/XOR/OR/CP A,IXH/IXL
-            0x84 => { self.add_a((self.ix >> 8) as u8, false); 8 }
-            0x85 => { self.add_a((self.ix & 0xFF) as u8, false); 8 }
-            0x8C => { self.add_a((self.ix >> 8) as u8, true); 8 }
-            0x8D => { self.add_a((self.ix & 0xFF) as u8, true); 8 }
-            0x94 => { self.sub_a((self.ix >> 8) as u8, false); 8 }
-            0x95 => { self.sub_a((self.ix & 0xFF) as u8, false); 8 }
-            0x9C => { self.sub_a((self.ix >> 8) as u8, true); 8 }
-            0x9D => { self.sub_a((self.ix & 0xFF) as u8, true); 8 }
-            0xA4 => { self.and_a((self.ix >> 8) as u8); 8 }
-            0xA5 => { self.and_a((self.ix & 0xFF) as u8); 8 }
-            0xAC => { self.xor_a((self.ix >> 8) as u8); 8 }
-            0xAD => { self.xor_a((self.ix & 0xFF) as u8); 8 }
-            0xB4 => { self.or_a((self.ix >> 8) as u8); 8 }
-            0xB5 => { self.or_a((self.ix & 0xFF) as u8); 8 }
-            0xBC => { self.cp_a((self.ix >> 8) as u8); 8 }
-            0xBD => { self.cp_a((self.ix & 0xFF) as u8); 8 }
+            0x84 => {
+                self.add_a((self.ix >> 8) as u8, false);
+                8
+            }
+            0x85 => {
+                self.add_a((self.ix & 0xFF) as u8, false);
+                8
+            }
+            0x8C => {
+                self.add_a((self.ix >> 8) as u8, true);
+                8
+            }
+            0x8D => {
+                self.add_a((self.ix & 0xFF) as u8, true);
+                8
+            }
+            0x94 => {
+                self.sub_a((self.ix >> 8) as u8, false);
+                8
+            }
+            0x95 => {
+                self.sub_a((self.ix & 0xFF) as u8, false);
+                8
+            }
+            0x9C => {
+                self.sub_a((self.ix >> 8) as u8, true);
+                8
+            }
+            0x9D => {
+                self.sub_a((self.ix & 0xFF) as u8, true);
+                8
+            }
+            0xA4 => {
+                self.and_a((self.ix >> 8) as u8);
+                8
+            }
+            0xA5 => {
+                self.and_a((self.ix & 0xFF) as u8);
+                8
+            }
+            0xAC => {
+                self.xor_a((self.ix >> 8) as u8);
+                8
+            }
+            0xAD => {
+                self.xor_a((self.ix & 0xFF) as u8);
+                8
+            }
+            0xB4 => {
+                self.or_a((self.ix >> 8) as u8);
+                8
+            }
+            0xB5 => {
+                self.or_a((self.ix & 0xFF) as u8);
+                8
+            }
+            0xBC => {
+                self.cp_a((self.ix >> 8) as u8);
+                8
+            }
+            0xBD => {
+                self.cp_a((self.ix & 0xFF) as u8);
+                8
+            }
             // Any other DD opcode: execute as base instruction (DD prefix ignored)
             _ => {
                 // The real Z80 treats unrecognized DD-prefixed opcodes as base opcodes.
@@ -2465,56 +2579,170 @@ impl<M: MemoryZ80> CpuZ80<M> {
                 11
             }
             // Undocumented: LD r,IYH / LD r,IYL
-            0x44 => { self.b = (self.iy >> 8) as u8; 8 }
-            0x45 => { self.b = (self.iy & 0xFF) as u8; 8 }
-            0x4C => { self.c = (self.iy >> 8) as u8; 8 }
-            0x4D => { self.c = (self.iy & 0xFF) as u8; 8 }
-            0x54 => { self.d = (self.iy >> 8) as u8; 8 }
-            0x55 => { self.d = (self.iy & 0xFF) as u8; 8 }
-            0x5C => { self.e = (self.iy >> 8) as u8; 8 }
-            0x5D => { self.e = (self.iy & 0xFF) as u8; 8 }
-            0x7C => { self.a = (self.iy >> 8) as u8; 8 }
-            0x7D => { self.a = (self.iy & 0xFF) as u8; 8 }
+            0x44 => {
+                self.b = (self.iy >> 8) as u8;
+                8
+            }
+            0x45 => {
+                self.b = (self.iy & 0xFF) as u8;
+                8
+            }
+            0x4C => {
+                self.c = (self.iy >> 8) as u8;
+                8
+            }
+            0x4D => {
+                self.c = (self.iy & 0xFF) as u8;
+                8
+            }
+            0x54 => {
+                self.d = (self.iy >> 8) as u8;
+                8
+            }
+            0x55 => {
+                self.d = (self.iy & 0xFF) as u8;
+                8
+            }
+            0x5C => {
+                self.e = (self.iy >> 8) as u8;
+                8
+            }
+            0x5D => {
+                self.e = (self.iy & 0xFF) as u8;
+                8
+            }
+            0x7C => {
+                self.a = (self.iy >> 8) as u8;
+                8
+            }
+            0x7D => {
+                self.a = (self.iy & 0xFF) as u8;
+                8
+            }
             // Undocumented: LD IYH,r / LD IYL,r
-            0x60 => { self.iy = (self.iy & 0x00FF) | ((self.b as u16) << 8); 8 }
-            0x61 => { self.iy = (self.iy & 0x00FF) | ((self.c as u16) << 8); 8 }
-            0x62 => { self.iy = (self.iy & 0x00FF) | ((self.d as u16) << 8); 8 }
-            0x63 => { self.iy = (self.iy & 0x00FF) | ((self.e as u16) << 8); 8 }
-            0x64 => { /* LD IYH,IYH - no-op */ 8 }
+            0x60 => {
+                self.iy = (self.iy & 0x00FF) | ((self.b as u16) << 8);
+                8
+            }
+            0x61 => {
+                self.iy = (self.iy & 0x00FF) | ((self.c as u16) << 8);
+                8
+            }
+            0x62 => {
+                self.iy = (self.iy & 0x00FF) | ((self.d as u16) << 8);
+                8
+            }
+            0x63 => {
+                self.iy = (self.iy & 0x00FF) | ((self.e as u16) << 8);
+                8
+            }
+            0x64 => {
+                /* LD IYH,IYH - no-op */
+                8
+            }
             0x65 => {
                 let iyl = (self.iy & 0xFF) as u8;
                 self.iy = (self.iy & 0x00FF) | ((iyl as u16) << 8);
                 8
             }
-            0x67 => { self.iy = (self.iy & 0x00FF) | ((self.a as u16) << 8); 8 }
-            0x68 => { self.iy = (self.iy & 0xFF00) | (self.b as u16); 8 }
-            0x69 => { self.iy = (self.iy & 0xFF00) | (self.c as u16); 8 }
-            0x6A => { self.iy = (self.iy & 0xFF00) | (self.d as u16); 8 }
-            0x6B => { self.iy = (self.iy & 0xFF00) | (self.e as u16); 8 }
+            0x67 => {
+                self.iy = (self.iy & 0x00FF) | ((self.a as u16) << 8);
+                8
+            }
+            0x68 => {
+                self.iy = (self.iy & 0xFF00) | (self.b as u16);
+                8
+            }
+            0x69 => {
+                self.iy = (self.iy & 0xFF00) | (self.c as u16);
+                8
+            }
+            0x6A => {
+                self.iy = (self.iy & 0xFF00) | (self.d as u16);
+                8
+            }
+            0x6B => {
+                self.iy = (self.iy & 0xFF00) | (self.e as u16);
+                8
+            }
             0x6C => {
                 let iyh = (self.iy >> 8) as u8;
                 self.iy = (self.iy & 0xFF00) | (iyh as u16);
                 8
             }
-            0x6D => { /* LD IYL,IYL - no-op */ 8 }
-            0x6F => { self.iy = (self.iy & 0xFF00) | (self.a as u16); 8 }
+            0x6D => {
+                /* LD IYL,IYL - no-op */
+                8
+            }
+            0x6F => {
+                self.iy = (self.iy & 0xFF00) | (self.a as u16);
+                8
+            }
             // Undocumented: ADD/ADC/SUB/SBC/AND/XOR/OR/CP A,IYH/IYL
-            0x84 => { self.add_a((self.iy >> 8) as u8, false); 8 }
-            0x85 => { self.add_a((self.iy & 0xFF) as u8, false); 8 }
-            0x8C => { self.add_a((self.iy >> 8) as u8, true); 8 }
-            0x8D => { self.add_a((self.iy & 0xFF) as u8, true); 8 }
-            0x94 => { self.sub_a((self.iy >> 8) as u8, false); 8 }
-            0x95 => { self.sub_a((self.iy & 0xFF) as u8, false); 8 }
-            0x9C => { self.sub_a((self.iy >> 8) as u8, true); 8 }
-            0x9D => { self.sub_a((self.iy & 0xFF) as u8, true); 8 }
-            0xA4 => { self.and_a((self.iy >> 8) as u8); 8 }
-            0xA5 => { self.and_a((self.iy & 0xFF) as u8); 8 }
-            0xAC => { self.xor_a((self.iy >> 8) as u8); 8 }
-            0xAD => { self.xor_a((self.iy & 0xFF) as u8); 8 }
-            0xB4 => { self.or_a((self.iy >> 8) as u8); 8 }
-            0xB5 => { self.or_a((self.iy & 0xFF) as u8); 8 }
-            0xBC => { self.cp_a((self.iy >> 8) as u8); 8 }
-            0xBD => { self.cp_a((self.iy & 0xFF) as u8); 8 }
+            0x84 => {
+                self.add_a((self.iy >> 8) as u8, false);
+                8
+            }
+            0x85 => {
+                self.add_a((self.iy & 0xFF) as u8, false);
+                8
+            }
+            0x8C => {
+                self.add_a((self.iy >> 8) as u8, true);
+                8
+            }
+            0x8D => {
+                self.add_a((self.iy & 0xFF) as u8, true);
+                8
+            }
+            0x94 => {
+                self.sub_a((self.iy >> 8) as u8, false);
+                8
+            }
+            0x95 => {
+                self.sub_a((self.iy & 0xFF) as u8, false);
+                8
+            }
+            0x9C => {
+                self.sub_a((self.iy >> 8) as u8, true);
+                8
+            }
+            0x9D => {
+                self.sub_a((self.iy & 0xFF) as u8, true);
+                8
+            }
+            0xA4 => {
+                self.and_a((self.iy >> 8) as u8);
+                8
+            }
+            0xA5 => {
+                self.and_a((self.iy & 0xFF) as u8);
+                8
+            }
+            0xAC => {
+                self.xor_a((self.iy >> 8) as u8);
+                8
+            }
+            0xAD => {
+                self.xor_a((self.iy & 0xFF) as u8);
+                8
+            }
+            0xB4 => {
+                self.or_a((self.iy >> 8) as u8);
+                8
+            }
+            0xB5 => {
+                self.or_a((self.iy & 0xFF) as u8);
+                8
+            }
+            0xBC => {
+                self.cp_a((self.iy >> 8) as u8);
+                8
+            }
+            0xBD => {
+                self.cp_a((self.iy & 0xFF) as u8);
+                8
+            }
             // Any other FD opcode: execute as base instruction (FD prefix ignored)
             _ => {
                 // The real Z80 treats unrecognized FD-prefixed opcodes as base opcodes.
@@ -2926,7 +3154,7 @@ mod tests {
         let program = [
             0xFD, 0x26, 0x56, // LD IYH,$56
             0xFD, 0x2E, 0x78, // LD IYL,$78
-            0xFD, 0x7D,       // LD A,IYL
+            0xFD, 0x7D, // LD A,IYL
         ];
         let memory = TestMemory::with_program(&program);
         let mut cpu = CpuZ80::new(memory);
@@ -2945,9 +3173,15 @@ mod tests {
         // IN F,(C) (ED 70) – reads from port C, sets flags, discards result.
         struct IoMem([u8; 0x10000]);
         impl MemoryZ80 for IoMem {
-            fn read(&self, a: u16) -> u8 { self.0[a as usize] }
-            fn write(&mut self, a: u16, v: u8) { self.0[a as usize] = v; }
-            fn io_read(&mut self, _port: u8) -> u8 { 0x42 }
+            fn read(&self, a: u16) -> u8 {
+                self.0[a as usize]
+            }
+            fn write(&mut self, a: u16, v: u8) {
+                self.0[a as usize] = v;
+            }
+            fn io_read(&mut self, _port: u8) -> u8 {
+                0x42
+            }
         }
         let mut mem = IoMem([0; 0x10000]);
         mem.0[0] = 0xED;
