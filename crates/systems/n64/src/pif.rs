@@ -621,10 +621,7 @@ impl Pif {
         }
 
         log(LogCategory::PPU, LogLevel::Debug, || {
-            format!(
-                "PIF: Mempak read ch={} addr=0x{:04X}",
-                channel, byte_addr
-            )
+            format!("PIF: Mempak read ch={} addr=0x{:04X}", channel, byte_addr)
         });
 
         // Write 32 data bytes then the CRC
@@ -640,7 +637,13 @@ impl Pif {
     }
 
     /// Write 32 bytes to a mempak slot and store the data CRC in PIF RAM.
-    fn write_mempak_block(&mut self, channel: usize, byte_addr: usize, data: &[u8; 32], resp: usize) {
+    fn write_mempak_block(
+        &mut self,
+        channel: usize,
+        byte_addr: usize,
+        data: &[u8; 32],
+        resp: usize,
+    ) {
         use emu_core::logging::{log, LogCategory, LogLevel};
 
         if !self.mempak_enabled[channel] {
@@ -651,10 +654,7 @@ impl Pif {
         }
 
         log(LogCategory::PPU, LogLevel::Debug, || {
-            format!(
-                "PIF: Mempak write ch={} addr=0x{:04X}",
-                channel, byte_addr
-            )
+            format!("PIF: Mempak write ch={} addr=0x{:04X}", channel, byte_addr)
         });
 
         let pak = &mut self.mempak_data[channel];
@@ -949,7 +949,7 @@ mod tests {
         pif.write_ram(0x7C0, 0x01); // ch0: T=1
         pif.write_ram(0x7C1, 0x04); // ch0: R=4
         pif.write_ram(0x7C2, 0x01); // ch0: cmd (read controller)
-        // 0x7C3..0x7C6 = response bytes (written by PIF)
+                                    // 0x7C3..0x7C6 = response bytes (written by PIF)
         pif.write_ram(0x7C7, 0x01); // ch1: T=1 (immediately follows ch0 response)
         pif.write_ram(0x7C8, 0x04); // ch1: R=4
         pif.write_ram(0x7C9, 0x01); // ch1: cmd (triggers re-parse)
@@ -1256,10 +1256,10 @@ mod tests {
         pif.write_ram(0x7C0, 1); // T=1
         pif.write_ram(0x7C1, 3); // R=3
         pif.write_ram(0x7C2, 0x00); // cmd 0x00 (info)
-        // Response at 0x7C3: [device_hi, device_lo, status]
+                                    // Response at 0x7C3: [device_hi, device_lo, status]
         assert_eq!(pif.read_ram(0x7C3), 0x05); // device type high
         assert_eq!(pif.read_ram(0x7C4), 0x00); // device type low
-        // slot 0 has pak enabled by default → status = 0x01
+                                               // slot 0 has pak enabled by default → status = 0x01
         assert_eq!(pif.read_ram(0x7C5), 0x01);
 
         // Disable pak and re-query

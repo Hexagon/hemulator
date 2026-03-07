@@ -468,9 +468,9 @@ impl RspHle {
     ///   0x07 MIXER,  0x08 INTERLEAVE, 0x14 LOADBUFF, 0x15 SAVEBUFF.
     fn execute_audio_task(&mut self, dmem: &mut [u8; 4096], rdram: &mut [u8]) -> u32 {
         // Read OS_TASK fields from DMEM
-        let ucode_data_ptr  = self.read_u32(dmem, 0x14); // ABI1 command list in RDRAM
+        let ucode_data_ptr = self.read_u32(dmem, 0x14); // ABI1 command list in RDRAM
         let ucode_data_size = self.read_u32(dmem, 0x18);
-        let output_buff     = self.read_u32(dmem, 0x24); // PCM output buffer in RDRAM
+        let output_buff = self.read_u32(dmem, 0x24); // PCM output buffer in RDRAM
         let output_buff_size = self.read_u32(dmem, 0x28);
 
         log(LogCategory::APU, LogLevel::Debug, || {
@@ -486,7 +486,10 @@ impl RspHle {
         let cmd_phys = Self::virt_to_phys(ucode_data_ptr);
         if cmd_phys >= rdram_len || ucode_data_size == 0 {
             log(LogCategory::APU, LogLevel::Warn, || {
-                format!("RSP HLE ABI1: invalid command list ptr 0x{:08X}", ucode_data_ptr)
+                format!(
+                    "RSP HLE ABI1: invalid command list ptr 0x{:08X}",
+                    ucode_data_ptr
+                )
             });
             return 1500;
         }
@@ -500,8 +503,18 @@ impl RspHle {
             if base + 8 > rdram_len {
                 break;
             }
-            let word0 = u32::from_be_bytes([rdram[base], rdram[base+1], rdram[base+2], rdram[base+3]]);
-            let word1 = u32::from_be_bytes([rdram[base+4], rdram[base+5], rdram[base+6], rdram[base+7]]);
+            let word0 = u32::from_be_bytes([
+                rdram[base],
+                rdram[base + 1],
+                rdram[base + 2],
+                rdram[base + 3],
+            ]);
+            let word1 = u32::from_be_bytes([
+                rdram[base + 4],
+                rdram[base + 5],
+                rdram[base + 6],
+                rdram[base + 7],
+            ]);
             let cmd = (word0 >> 24) as u8;
 
             match cmd {
@@ -522,7 +535,7 @@ impl RspHle {
                 // word1[31:16] = dmem_addr, word1[15:0] = count
                 0x02 => {
                     let dmem_addr = ((word1 >> 16) & 0x0FFF) as usize;
-                    let count     = (word1 & 0xFFFF) as usize;
+                    let count = (word1 & 0xFFFF) as usize;
                     if dmem_addr + count <= 4096 {
                         dmem[dmem_addr..dmem_addr + count].fill(0);
                     }
@@ -537,8 +550,8 @@ impl RspHle {
                 // DMEMMOVE (0x05): memcpy within DMEM
                 // word1[31:16] = src_dmem, word1[15:0] = dst_dmem,  word0[15:0] = count
                 0x05 => {
-                    let src   = ((word1 >> 16) & 0x0FFF) as usize;
-                    let dst   = (word1 & 0x0FFF) as usize;
+                    let src = ((word1 >> 16) & 0x0FFF) as usize;
+                    let dst = (word1 & 0x0FFF) as usize;
                     let count = (word0 & 0xFFFF) as usize;
                     if src + count <= 4096 && dst + count <= 4096 && src != dst {
                         dmem.copy_within(src..src + count, dst);
@@ -551,8 +564,8 @@ impl RspHle {
                 // word1[31:16] = src, word1[15:0] = dst (in DMEM)
                 0x07 => {
                     let count = (word0 & 0xFFFF) as usize;
-                    let src   = ((word1 >> 16) & 0x0FFF) as usize;
-                    let dst   = (word1 & 0x0FFF) as usize;
+                    let src = ((word1 >> 16) & 0x0FFF) as usize;
+                    let dst = (word1 & 0x0FFF) as usize;
                     // Mix by saturating addition: dst[i] = clamp(dst[i] + src[i], -32768, 32767)
                     if src + count <= 4096 && dst + count <= 4096 && count.is_multiple_of(2) {
                         for j in (0..count).step_by(2) {
@@ -560,7 +573,7 @@ impl RspHle {
                             let b = i16::from_be_bytes([dmem[src + j], dmem[src + j + 1]]) as i32;
                             let mixed = (a + b).clamp(-32768, 32767) as i16;
                             let bytes = mixed.to_be_bytes();
-                            dmem[dst + j]     = bytes[0];
+                            dmem[dst + j] = bytes[0];
                             dmem[dst + j + 1] = bytes[1];
                         }
                     }
@@ -573,7 +586,7 @@ impl RspHle {
                 // The interleaved output goes to the RDRAM output_buff set in the OS_TASK.
                 0x08 => {
                     let count = (word0 & 0xFFFF) as usize; // bytes per channel
-                    let left  = ((word1 >> 16) & 0x0FFF) as usize;
+                    let left = ((word1 >> 16) & 0x0FFF) as usize;
                     let right = (word1 & 0x0FFF) as usize;
 
                     let out_phys = Self::virt_to_phys(output_buff);
@@ -585,11 +598,11 @@ impl RspHle {
                     if count > 0 && out_phys + out_size <= rdram_len {
                         let pairs = (count / 2).min(out_size / 4);
                         for j in 0..pairs {
-                            let li = left  + j * 2;
+                            let li = left + j * 2;
                             let ri = right + j * 2;
                             let oi = out_phys + j * 4;
                             if li + 1 < 4096 && ri + 1 < 4096 && oi + 3 < rdram_len {
-                                rdram[oi]     = dmem[li];
+                                rdram[oi] = dmem[li];
                                 rdram[oi + 1] = dmem[li + 1];
                                 rdram[oi + 2] = dmem[ri];
                                 rdram[oi + 3] = dmem[ri + 1];
@@ -608,9 +621,9 @@ impl RspHle {
                 // LOADBUFF (0x14): DMA from RDRAM to DMEM
                 // word1 = RDRAM source ptr, word0[23:12] = DMEM dest, word0[11:0] = count-1
                 0x14 => {
-                    let src_rdram  = Self::virt_to_phys(word1);
-                    let dmem_dst   = ((word0 >> 12) & 0x0FFF) as usize;
-                    let count      = ((word0 & 0x0FFF) + 1) as usize;
+                    let src_rdram = Self::virt_to_phys(word1);
+                    let dmem_dst = ((word0 >> 12) & 0x0FFF) as usize;
+                    let count = ((word0 & 0x0FFF) + 1) as usize;
                     if src_rdram + count <= rdram_len && dmem_dst + count <= 4096 {
                         dmem[dmem_dst..dmem_dst + count]
                             .copy_from_slice(&rdram[src_rdram..src_rdram + count]);
@@ -622,8 +635,8 @@ impl RspHle {
                 // word1 = RDRAM destination ptr, word0[23:12] = DMEM src, word0[11:0] = count-1
                 0x15 => {
                     let dst_rdram = Self::virt_to_phys(word1);
-                    let dmem_src  = ((word0 >> 12) & 0x0FFF) as usize;
-                    let count     = ((word0 & 0x0FFF) + 1) as usize;
+                    let dmem_src = ((word0 >> 12) & 0x0FFF) as usize;
+                    let count = ((word0 & 0x0FFF) + 1) as usize;
                     if dmem_src + count <= 4096 && dst_rdram + count <= rdram_len {
                         rdram[dst_rdram..dst_rdram + count]
                             .copy_from_slice(&dmem[dmem_src..dmem_src + count]);
