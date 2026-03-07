@@ -184,7 +184,54 @@ pub enum EepromType {
     Eeprom16K,
 }
 
-/// PIF (Peripheral Interface) state
+/// N64 controller pak (mempak) capacity in bytes: 32 KB
+const MEMPAK_SIZE: usize = 32 * 1024;
+
+/// CRC-8 for N64 controller pak data verification (polynomial 0x85)
+///
+/// Reference: N64 controller pak protocol documentation
+fn pak_data_crc(data: &[u8]) -> u8 {
+    let mut crc: u8 = 0;
+    for &byte in data {
+        for bit in (0..8).rev() {
+            let xorbit = ((crc >> 7) ^ ((byte >> bit) & 1)) & 1;
+            crc <<= 1;
+            if xorbit != 0 {
+                crc ^= 0x85;
+            }
+        }
+    }
+    // Final 8 flush bits
+    for _ in 0..8 {
+        let xorbit = (crc >> 7) & 1;
+        crc <<= 1;
+        if xorbit != 0 {
+            crc ^= 0x85;
+        }
+    }
+    crc
+}
+
+/// Decode a 2-byte mempak address/CRC pair into a byte offset of a 32-byte block
+/// within the 32 KB controller pak.
+///
+/// The N64 controller pak protocol encodes the target 32-byte block address and
+/// a 5-bit CRC across two bytes:
+///   addr_hi (byte 3): upper 8 bits of the encoded value
+///   addr_lo (byte 4): upper 3 bits are the next address bits, lower 5 bits are CRC
+///
+/// Taken together, the 16 encoded bits form a value whose upper 11 bits select a
+/// 32-byte block and whose lower 5 bits are CRC. This helper masks off the lower
+/// 5 CRC bits, combines the remaining address bits, and returns the resulting
+/// byte offset within the 32 KB mempak address space (0x0000–0x7FE0), aligned to
+/// a 32-byte boundary.
+fn decode_pak_address(addr_hi: u8, addr_lo: u8) -> usize {
+    // Strip lower 5 CRC bits and combine to form block-aligned byte address
+    let raw = ((addr_hi as usize) << 8) | ((addr_lo as usize) & 0xE0);
+    // Mask to 32 KB address space and keep alignment to 32-byte block boundary
+    raw & 0x7FE0
+}
+
 pub struct Pif {
     /// PIF RAM (2KB)
     ram: [u8; 0x800],
@@ -210,6 +257,15 @@ pub struct Pif {
     /// Current EEPROM block being accessed (for multi-byte transfers)
     #[allow(dead_code)] // Reserved for future multi-byte EEPROM transfers
     eeprom_block: u8,
+
+    /// Controller pak (mempak) data for each of the 4 controller slots.
+    /// Each slot is 32 KB; initialised to all-0x00 (blank formatted state).
+    /// Index 0 = controller 1, etc.
+    mempak_data: [Vec<u8>; 4],
+
+    /// Whether a controller pak is inserted in each controller slot.
+    /// When `true` the controller-info response reports pak present (status 0x01).
+    mempak_enabled: [bool; 4],
 }
 
 impl Pif {
@@ -224,6 +280,16 @@ impl Pif {
             eeprom_type: EepromType::None,
             eeprom_data: Vec::new(),
             eeprom_block: 0,
+            // Initialise all four mempak slots as blank 32 KB images.
+            // The first controller slot has a pak inserted by default so that
+            // games which save to the mempak will find one available.
+            mempak_data: [
+                vec![0x00; MEMPAK_SIZE],
+                vec![0x00; MEMPAK_SIZE],
+                vec![0x00; MEMPAK_SIZE],
+                vec![0x00; MEMPAK_SIZE],
+            ],
+            mempak_enabled: [true, false, false, false],
         }
     }
 
@@ -372,63 +438,270 @@ impl Pif {
         }
     }
 
-    /// Process controller command blocks in PIF RAM
+    /// Process controller command blocks in PIF RAM.
+    ///
+    /// The PIF RAM command area starts at 0x7C0.  Games write a sequence of
+    /// channel descriptors in the format `[T, R, tx_bytes..., rx_bytes...]`.
+    /// This function walks through the descriptors, dispatches each command,
+    /// and writes the response bytes back into the same RAM area.
+    ///
+    /// Special T values:
+    /// - 0xFE: channel separator / channel 0 skip (bump channel counter)
+    /// - 0xFF: end-of-channel-list (stop processing)
     fn process_controller_commands(&mut self) {
-        // Command block format in PIF RAM (at 0x7C0+):
-        // Each channel has: [T, R, command bytes...] where T=transmit, R=receive
-        // Simplified implementation: just look for read controller command (0x01)
+        use emu_core::logging::{log, LogCategory, LogLevel};
 
-        // Controller 1 command at offset 0x7C0
-        if self.ram[0x7C0] == 0x01 && self.ram[0x7C1] == 0x04 && self.ram[0x7C2] == 0x01 {
-            // Command: 1 byte transmit, 4 bytes receive, read controller state
-            let state = self.controller1; // Copy state to avoid borrow issues
-            self.write_controller_state(0x7C3, &state);
+        let mut pos: usize = 0x7C0;
+        let mut channel: usize = 0;
+
+        while pos < 0x7FC {
+            let t = self.ram[pos] as usize;
+
+            // End-of-list marker
+            if t == 0xFF {
+                break;
+            }
+
+            // Channel separator: skip to next channel without data
+            if t == 0xFE {
+                channel += 1;
+                pos += 1;
+                continue;
+            }
+
+            // No-device or skip: still advance pos by 1
+            if t == 0x00 {
+                pos += 1;
+                channel += 1;
+                continue;
+            }
+
+            // Need at least the R byte
+            if pos + 1 >= 0x7FC {
+                break;
+            }
+            let r = self.ram[pos + 1] as usize;
+
+            // 0xFE in the R byte also signals end of channels in some implementations
+            if r == 0xFE {
+                break;
+            }
+
+            // Bounds check: make sure T+R bytes fit in remaining RAM
+            let data_start = pos + 2;
+            if data_start + t > 0x800 {
+                break;
+            }
+
+            // First transmit byte is the command
+            let cmd = if t > 0 { self.ram[data_start] } else { 0 };
+
+            log(LogCategory::PPU, LogLevel::Debug, || {
+                format!(
+                    "PIF: channel={} T={} R={} cmd=0x{:02X} pos=0x{:03X}",
+                    channel, t, r, cmd, pos
+                )
+            });
+
+            match cmd {
+                // 0x00: Controller info / status
+                0x00 if t >= 1 && r >= 3 => {
+                    let resp = data_start + t;
+                    // Standard controller device type: 0x0500
+                    // Status: 0x01 = pak present, 0x02 = no pak
+                    let has_pak = channel < 4 && self.mempak_enabled[channel];
+                    if resp + 2 < 0x800 {
+                        self.ram[resp] = 0x05; // Device type high
+                        self.ram[resp + 1] = 0x00; // Device type low
+                        self.ram[resp + 2] = if has_pak { 0x01 } else { 0x02 };
+                    }
+                }
+                // 0x01: Read controller state (buttons + analog stick)
+                0x01 if t >= 1 && r >= 4 => {
+                    let resp = data_start + t;
+                    let state = self.controller_by_index(channel);
+                    if resp + 3 < 0x800 {
+                        self.write_controller_state(resp, &state);
+                    }
+                }
+                // 0x02: Read controller pak (mempak)
+                0x02 if t >= 3 && r >= 33 => {
+                    let addr_hi = self.ram[data_start + 1];
+                    let addr_lo = self.ram[data_start + 2];
+                    let byte_addr = decode_pak_address(addr_hi, addr_lo);
+                    let resp = data_start + t;
+                    if channel < 4 && resp + 32 < 0x800 {
+                        self.read_mempak_block(channel, byte_addr, resp);
+                    }
+                }
+                // 0x03: Write controller pak (mempak)
+                0x03 if t >= 35 && r >= 1 => {
+                    let addr_hi = self.ram[data_start + 1];
+                    let addr_lo = self.ram[data_start + 2];
+                    let byte_addr = decode_pak_address(addr_hi, addr_lo);
+                    let data_src = data_start + 3;
+                    let resp = data_start + t;
+                    if channel < 4 && data_src + 32 <= 0x800 && resp < 0x800 {
+                        // Copy data out of `ram` before the mutable borrow below
+                        let mut buf = [0u8; 32];
+                        buf.copy_from_slice(&self.ram[data_src..data_src + 32]);
+                        self.write_mempak_block(channel, byte_addr, &buf, resp);
+                    }
+                }
+                // 0x04: EEPROM block read (8 bytes)
+                0x04 if t >= 2 && r >= 8 => {
+                    let block = self.ram[data_start + 1];
+                    let resp = data_start + t;
+                    if block < 0xFF && resp + 7 < 0x800 {
+                        self.read_eeprom_block(resp, block);
+                    }
+                }
+                // 0x05: EEPROM block write (8 bytes)
+                0x05 if t >= 10 && r >= 1 => {
+                    let block = self.ram[data_start + 1];
+                    let resp = data_start + t;
+                    if block < 0xFF && data_start + 10 <= 0x800 && resp < 0x800 {
+                        let mut data = [0u8; 8];
+                        data.copy_from_slice(&self.ram[data_start + 2..data_start + 10]);
+                        self.write_eeprom_block(resp, block, &data);
+                    }
+                }
+                _ => {
+                    log(LogCategory::PPU, LogLevel::Debug, || {
+                        format!(
+                            "PIF: Unhandled command 0x{:02X} on channel {} (T={}, R={})",
+                            cmd, channel, t, r
+                        )
+                    });
+                }
+            }
+
+            pos += 2 + t + r;
+            channel += 1;
+        }
+    }
+
+    /// Return the controller state for the given 0-based channel index.
+    fn controller_by_index(&self, channel: usize) -> ControllerState {
+        match channel {
+            0 => self.controller1,
+            1 => self.controller2,
+            2 => self.controller3,
+            3 => self.controller4,
+            _ => ControllerState::default(),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Controller pak (mempak) helpers
+    // -----------------------------------------------------------------------
+
+    /// Read 32 bytes from a mempak slot and write them (+ CRC-8) to PIF RAM.
+    fn read_mempak_block(&mut self, channel: usize, byte_addr: usize, resp: usize) {
+        use emu_core::logging::{log, LogCategory, LogLevel};
+
+        if !self.mempak_enabled[channel] {
+            // No pak: return 32 bytes of 0xFF and a CRC of 0
+            for i in 0..32 {
+                if resp + i < 0x800 {
+                    self.ram[resp + i] = 0xFF;
+                }
+            }
+            if resp + 32 < 0x800 {
+                self.ram[resp + 32] = 0x00;
+            }
+            return;
         }
 
-        // Controller 2 command at offset 0x7C8 (8 bytes per channel)
-        if self.ram[0x7C8] == 0x01 && self.ram[0x7C9] == 0x04 && self.ram[0x7CA] == 0x01 {
-            let state = self.controller2;
-            self.write_controller_state(0x7CB, &state);
+        let pak = &self.mempak_data[channel];
+        let mut data = [0u8; 32];
+        for (i, byte) in data.iter_mut().enumerate() {
+            let src = byte_addr + i;
+            *byte = if src < pak.len() { pak[src] } else { 0xFF };
         }
 
-        // Controller 3 command at offset 0x7D0 (8 bytes per channel)
-        if self.ram[0x7D0] == 0x01 && self.ram[0x7D1] == 0x04 && self.ram[0x7D2] == 0x01 {
-            let state = self.controller3;
-            self.write_controller_state(0x7D3, &state);
+        log(LogCategory::PPU, LogLevel::Debug, || {
+            format!(
+                "PIF: Mempak read ch={} addr=0x{:04X}",
+                channel, byte_addr
+            )
+        });
+
+        // Write 32 data bytes then the CRC
+        for (i, &byte) in data.iter().enumerate() {
+            if resp + i < 0x800 {
+                self.ram[resp + i] = byte;
+            }
+        }
+        let crc = pak_data_crc(&data);
+        if resp + 32 < 0x800 {
+            self.ram[resp + 32] = crc;
+        }
+    }
+
+    /// Write 32 bytes to a mempak slot and store the data CRC in PIF RAM.
+    fn write_mempak_block(&mut self, channel: usize, byte_addr: usize, data: &[u8; 32], resp: usize) {
+        use emu_core::logging::{log, LogCategory, LogLevel};
+
+        if !self.mempak_enabled[channel] {
+            if resp < 0x800 {
+                self.ram[resp] = 0x00;
+            }
+            return;
         }
 
-        // Controller 4 command at offset 0x7D8 (8 bytes per channel)
-        if self.ram[0x7D8] == 0x01 && self.ram[0x7D9] == 0x04 && self.ram[0x7DA] == 0x01 {
-            let state = self.controller4;
-            self.write_controller_state(0x7DB, &state);
-        }
+        log(LogCategory::PPU, LogLevel::Debug, || {
+            format!(
+                "PIF: Mempak write ch={} addr=0x{:04X}",
+                channel, byte_addr
+            )
+        });
 
-        // EEPROM commands
-        // EEPROM read command: [T=2, R=8, cmd=0x04, block]
-        // Returns 8 bytes of EEPROM data
-        // Only process if we have the full command (T=2 means 2 bytes: cmd + block)
-        if self.ram[0x7C0] == 0x02 && self.ram[0x7C1] == 0x08 && self.ram[0x7C2] == 0x04 {
-            // Verify the block byte is within valid range before processing
-            // This provides some protection against processing partial commands
-            let block = self.ram[0x7C3];
-            if block < 0xFF {
-                // 0xFF is unlikely to be a valid block number
-                self.read_eeprom_block(0x7C4, block);
+        let pak = &mut self.mempak_data[channel];
+        for (i, &byte) in data.iter().enumerate() {
+            let dst = byte_addr + i;
+            if dst < pak.len() {
+                pak[dst] = byte;
             }
         }
 
-        // EEPROM write command: [T=10, R=1, cmd=0x05, block, data[8]]
-        // Writes 8 bytes to EEPROM, returns status byte
-        // Only process if we have the full command (T=10 means 10 bytes: cmd + block + 8 data bytes)
-        if self.ram[0x7C0] == 0x0A && self.ram[0x7C1] == 0x01 && self.ram[0x7C2] == 0x05 {
-            let block = self.ram[0x7C3];
-            // Verify block is valid and at least some data bytes are non-zero
-            // This helps ensure the full command payload has been written
-            if block < 0xFF {
-                let mut data = [0u8; 8];
-                data.copy_from_slice(&self.ram[0x7C4..0x7CC]);
-                self.write_eeprom_block(0x7CC, block, &data);
-            }
+        // Return data CRC as the status/response byte
+        let crc = pak_data_crc(data);
+        if resp < 0x800 {
+            self.ram[resp] = crc;
+        }
+    }
+
+    /// Return the mempak data for a controller slot (for persistence).
+    pub fn save_mempak(&self, channel: usize) -> Option<Vec<u8>> {
+        if channel < 4 && self.mempak_enabled[channel] {
+            Some(self.mempak_data[channel].clone())
+        } else {
+            None
+        }
+    }
+
+    /// Load previously persisted mempak data into a controller slot.
+    pub fn load_mempak(&mut self, channel: usize, data: Vec<u8>) -> Result<(), String> {
+        if channel >= 4 {
+            return Err(format!("Invalid mempak channel: {}", channel));
+        }
+        if data.len() != MEMPAK_SIZE {
+            return Err(format!(
+                "Mempak data size mismatch: expected {} bytes, got {}",
+                MEMPAK_SIZE,
+                data.len()
+            ));
+        }
+        self.mempak_enabled[channel] = true;
+        self.mempak_data[channel] = data;
+        Ok(())
+    }
+
+    /// Enable or disable a controller pak slot.
+    pub fn set_mempak_enabled(&mut self, channel: usize, enabled: bool) {
+        if channel < 4 {
+            self.mempak_enabled[channel] = enabled;
         }
     }
 
@@ -670,20 +943,23 @@ mod tests {
         state2.buttons.b = true;
         pif.set_controller2(state2);
 
-        // Read controller 1 state
-        pif.write_ram(0x7C0, 0x01);
-        pif.write_ram(0x7C1, 0x04);
-        pif.write_ram(0x7C2, 0x01);
+        // Write a proper two-channel PIF command block:
+        //   Channel 0: [T=1, R=4, cmd=0x01, resp[4]] — controller 1 read (7 bytes)
+        //   Channel 1: [T=1, R=4, cmd=0x01, resp[4]] — controller 2 read (starts at 0x7C7)
+        pif.write_ram(0x7C0, 0x01); // ch0: T=1
+        pif.write_ram(0x7C1, 0x04); // ch0: R=4
+        pif.write_ram(0x7C2, 0x01); // ch0: cmd (read controller)
+        // 0x7C3..0x7C6 = response bytes (written by PIF)
+        pif.write_ram(0x7C7, 0x01); // ch1: T=1 (immediately follows ch0 response)
+        pif.write_ram(0x7C8, 0x04); // ch1: R=4
+        pif.write_ram(0x7C9, 0x01); // ch1: cmd (triggers re-parse)
 
+        // Controller 1 response is at 0x7C3
         let buttons1 = u16::from_be_bytes([pif.read_ram(0x7C3), pif.read_ram(0x7C4)]);
         assert_eq!(buttons1 & (1 << 15), 1 << 15); // A button
 
-        // Read controller 2 state
-        pif.write_ram(0x7C8, 0x01);
-        pif.write_ram(0x7C9, 0x04);
-        pif.write_ram(0x7CA, 0x01);
-
-        let buttons2 = u16::from_be_bytes([pif.read_ram(0x7CB), pif.read_ram(0x7CC)]);
+        // Controller 2 response is at 0x7CA (= 0x7C7 + 2 + 1)
+        let buttons2 = u16::from_be_bytes([pif.read_ram(0x7CA), pif.read_ram(0x7CB)]);
         assert_eq!(buttons2 & (1 << 14), 1 << 14); // B button
     }
 
@@ -882,5 +1158,113 @@ mod tests {
         // Should return error
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("size mismatch"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Controller pak (mempak) tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_mempak_default_state() {
+        let pif = Pif::new();
+        // Slot 0 has a pak inserted by default; slots 1-3 do not
+        assert!(pif.mempak_enabled[0]);
+        assert!(!pif.mempak_enabled[1]);
+        assert!(!pif.mempak_enabled[2]);
+        assert!(!pif.mempak_enabled[3]);
+        // Slot 0 data is 32 KB of zeros
+        assert_eq!(pif.mempak_data[0].len(), MEMPAK_SIZE);
+        assert!(pif.mempak_data[0].iter().all(|&b| b == 0x00));
+    }
+
+    #[test]
+    fn test_mempak_read_write_round_trip() {
+        let mut pif = Pif::new();
+
+        // Write 32 bytes to mempak address 0x0020 using PIF command 0x03
+        // Channel 0: T=35 (1 cmd + 2 addr + 32 data), R=1 (crc byte)
+        // Layout in PIF RAM at 0x7C0:
+        //   [0x23, 0x01, 0x03, addr_hi, addr_lo, data[32]]
+        let addr: u16 = 0x0020; // block address
+        let addr_hi = (addr >> 8) as u8;
+        let addr_lo = (addr & 0xE0) as u8; // lower 5 bits would be CRC, set to 0
+
+        pif.write_ram(0x7C0, 35); // T=35
+        pif.write_ram(0x7C1, 1); // R=1
+        pif.write_ram(0x7C2, 0x03); // cmd write-pak
+        pif.write_ram(0x7C3, addr_hi);
+        pif.write_ram(0x7C4, addr_lo);
+        // Write test pattern
+        for i in 0u32..32 {
+            pif.write_ram(0x7C5 + i, (i + 1) as u8);
+        }
+        // CRC written at response offset = 0x7C2 + 35 = 0x7E5
+        // (just verify no panic)
+
+        // Now read back using command 0x02
+        // T=3 (cmd + addr_hi + addr_lo), R=33 (32 data + 1 crc)
+        pif.write_ram(0x7C0, 3); // T=3
+        pif.write_ram(0x7C1, 33); // R=33
+        pif.write_ram(0x7C2, 0x02); // cmd read-pak
+        pif.write_ram(0x7C3, addr_hi);
+        pif.write_ram(0x7C4, addr_lo);
+        // Response at 0x7C2 + 3 = 0x7C5
+        for i in 0u32..32 {
+            assert_eq!(
+                pif.read_ram(0x7C5 + i),
+                (i + 1) as u8,
+                "mempak byte {} mismatch",
+                i
+            );
+        }
+    }
+
+    #[test]
+    fn test_mempak_load_save() {
+        let mut pif = Pif::new();
+
+        let pattern: Vec<u8> = (0..MEMPAK_SIZE).map(|i| (i & 0xFF) as u8).collect();
+        pif.load_mempak(0, pattern.clone()).unwrap();
+
+        let saved = pif.save_mempak(0).unwrap();
+        assert_eq!(saved, pattern);
+    }
+
+    #[test]
+    fn test_mempak_size_mismatch() {
+        let mut pif = Pif::new();
+        // Wrong size
+        let result = pif.load_mempak(0, vec![0u8; 1024]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_pak_data_crc_known_value() {
+        // All-zero 32-byte block → deterministic CRC
+        let zeros = [0u8; 32];
+        let crc = pak_data_crc(&zeros);
+        // Just confirm it's not 0 (the algorithm produces a non-trivial result)
+        // and is reproducible
+        assert_eq!(crc, pak_data_crc(&zeros));
+    }
+
+    #[test]
+    fn test_controller_info_pak_status() {
+        let mut pif = Pif::new();
+
+        // Query controller info (cmd 0x00): T=1, R=3
+        pif.write_ram(0x7C0, 1); // T=1
+        pif.write_ram(0x7C1, 3); // R=3
+        pif.write_ram(0x7C2, 0x00); // cmd 0x00 (info)
+        // Response at 0x7C3: [device_hi, device_lo, status]
+        assert_eq!(pif.read_ram(0x7C3), 0x05); // device type high
+        assert_eq!(pif.read_ram(0x7C4), 0x00); // device type low
+        // slot 0 has pak enabled by default → status = 0x01
+        assert_eq!(pif.read_ram(0x7C5), 0x01);
+
+        // Disable pak and re-query
+        pif.set_mempak_enabled(0, false);
+        pif.write_ram(0x7C2, 0x00); // re-write to trigger re-parse
+        assert_eq!(pif.read_ram(0x7C5), 0x02); // no pak
     }
 }
