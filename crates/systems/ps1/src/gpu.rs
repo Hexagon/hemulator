@@ -2693,7 +2693,7 @@ mod tests {
         gpu.vram[0] = 0x7C00; // Overwrite CLUT[0] with blue background first
                               // Actually we need to keep CLUT at a different location. Let's use CLUT at y=1.
                               // CLUT[0] = 0x0000, CLUT[1] = 0x801F at y=1, x=0..1
-        gpu.vram[VRAM_WIDTH + 0] = 0x0000; // CLUT entry 0
+        gpu.vram[VRAM_WIDTH] = 0x0000; // CLUT entry 0
         gpu.vram[VRAM_WIDTH + 1] = 0x801F; // CLUT entry 1 — red+STP
 
         // Set background pixel at (0, 0) = blue
