@@ -478,6 +478,9 @@ impl PcBus {
     /// the ROM area, ensuring its last 16 bytes map to physical addresses
     /// 0xFFFF0..=0xFFFFF (where the CPU fetches the reset entry at 0xFFFF0).
     ///
+    /// ROM bytes in the prefix region (below the loaded image) are filled with
+    /// `0xFF` so that a previously-loaded larger image cannot leave stale bytes.
+    ///
     /// If an empty slice is provided, this function leaves the existing ROM
     /// contents unchanged. At the system level, `PcSystem::mount("BIOS", …)`
     /// currently rejects empty BIOS images.
@@ -486,6 +489,10 @@ impl PcBus {
         let len = data.len().min(rom_size);
         // End-align: last byte of BIOS image maps to physical 0xFFFFF
         let dst_offset = rom_size - len;
+        // Fill the prefix with 0xFF (unprogrammed ROM state) so a previously-loaded
+        // larger BIOS cannot leave stale bytes in the region that the new image does
+        // not cover.
+        self.rom[..dst_offset].fill(0xFF);
         // Take the last `len` bytes of the supplied data (handles oversized images)
         let src_start = data.len() - len;
         self.rom[dst_offset..dst_offset + len].copy_from_slice(&data[src_start..]);

@@ -4,14 +4,9 @@ use std::fmt;
 
 /// Standard floppy disk image sizes in bytes.
 ///
-/// - 360 KB  (5.25", double-density)
-/// - 720 KB  (3.5", double-density)
-/// - 1.2 MB  (5.25", high-density)
-/// - 1.44 MB (3.5", high-density) – most common
-///
-/// Note: 2.88 MB (extended density) is intentionally omitted because the PC
-/// system's floppy mount validation does not support that format.
-pub const FLOPPY_IMAGE_SIZES: &[usize] = &[368_640, 737_280, 1_228_800, 1_474_560];
+/// Re-exported from `emu_pc` so the GUI and the PC mount validation use a
+/// single authoritative list and can never drift apart.
+pub use emu_pc::FLOPPY_IMAGE_SIZES;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(clippy::upper_case_acronyms)]
@@ -100,7 +95,7 @@ pub fn detect_rom_type_with_extension(
                 }
                 // Fall through to content detection for other sizes
             }
-            "bin" | "iso" | "img" | "ima" => {
+            "bin" | "iso" | "img" | "ima" | "vhd" => {
                 // Check for PS1 BIOS first (512KB .bin files)
                 if is_ps1_bios(data) {
                     return Ok(SystemType::PS1);
@@ -118,6 +113,15 @@ pub fn detect_rom_type_with_extension(
                     if data.len() >= 1024 * 1024 {
                         return Ok(SystemType::PC);
                     }
+                }
+                // .vhd is a PC virtual hard drive format (Virtual PC / VirtualBox)
+                if ext_lower == "vhd" && data.len() >= 1024 * 1024 {
+                    return Ok(SystemType::PC);
+                }
+                // .iso that is not a PS1 image is treated as a PC CD-ROM image
+                // (minimum 32 KB for ISO 9660 system area, already checked PS1 above)
+                if ext_lower == "iso" && data.len() >= 32 * 1024 {
+                    return Ok(SystemType::PC);
                 }
                 // For .bin extension (ambiguous), use preferred system if provided
                 if let Some(preferred) = preferred_system {
@@ -433,23 +437,34 @@ pub fn is_ps1_bios_file(data: &[u8]) -> bool {
 
 /// Determine the PC mount-point and a short status message for a file.
 ///
-/// Returns `("FloppyA", "PC floppy A: loaded")` for standard floppy images,
-/// `("HardDrive", "PC hard drive loaded")` for images ≥ 1 MB, or
-/// `("", "<descriptive message>")` when no automatic mount is appropriate
-/// (unrecognised size, or a non-disk-image file like `.com`/`.exe`).
+/// Returns the appropriate mount-point ID and message:
+/// - `"FloppyA"` for standard floppy image sizes (`.img`/`.ima`)
+/// - `"HardDrive"` for images ≥ 1 MB that are not floppy-sized (`.img`/`.ima`/`.vhd`)
+/// - `"CDROM"` for CD-ROM images (`.iso`/`.cue`)
+/// - `("", "<descriptive message>")` when no automatic mount is appropriate
+///   (unrecognised size, or a non-disk-image file like `.com`/`.exe`)
 ///
 /// `extension` must be supplied in lower-case.
 pub fn pc_disk_mount_target(extension: &str, size: usize) -> (&'static str, &'static str) {
-    if matches!(extension, "img" | "ima") {
-        if FLOPPY_IMAGE_SIZES.contains(&size) {
-            ("FloppyA", "PC floppy A: loaded")
-        } else if size >= 1024 * 1024 {
-            ("HardDrive", "PC hard drive loaded")
-        } else {
-            ("", "PC disk image size not recognised")
+    match extension {
+        "img" | "ima" => {
+            if FLOPPY_IMAGE_SIZES.contains(&size) {
+                ("FloppyA", "PC floppy A: loaded")
+            } else if size >= 1024 * 1024 {
+                ("HardDrive", "PC hard drive loaded")
+            } else {
+                ("", "PC disk image size not recognised")
+            }
         }
-    } else {
-        ("", "PC system started – use mount points to add disks")
+        "vhd" => {
+            if size >= 1024 * 1024 {
+                ("HardDrive", "PC hard drive loaded")
+            } else {
+                ("", "PC disk image size not recognised")
+            }
+        }
+        "iso" | "cue" => ("CDROM", "PC CD-ROM loaded"),
+        _ => ("", "PC system started – use mount points to add disks"),
     }
 }
 
@@ -825,12 +840,33 @@ mod edge_case_tests {
         let (mount, msg) = pc_disk_mount_target("img", 1024 * 1024 + 1);
         assert_eq!(mount, "HardDrive");
         assert!(!msg.is_empty());
+
+        // .vhd always maps to HardDrive when >= 1 MB
+        let (mount, msg) = pc_disk_mount_target("vhd", 1024 * 1024 + 1);
+        assert_eq!(mount, "HardDrive");
+        assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn test_pc_disk_mount_target_cdrom() {
+        // .iso → CDROM regardless of size
+        let (mount, msg) = pc_disk_mount_target("iso", 32 * 1024 * 1024);
+        assert_eq!(mount, "CDROM");
+        assert!(!msg.is_empty());
+
+        // .cue → CDROM
+        let (mount, _) = pc_disk_mount_target("cue", 1024);
+        assert_eq!(mount, "CDROM");
     }
 
     #[test]
     fn test_pc_disk_mount_target_unrecognised_size() {
         // .img file that is neither a floppy size nor >= 1 MB → no mount
         let (mount, _) = pc_disk_mount_target("img", 1024);
+        assert_eq!(mount, "");
+
+        // .vhd below 1 MB → no mount
+        let (mount, _) = pc_disk_mount_target("vhd", 512 * 1024);
         assert_eq!(mount, "");
     }
 
@@ -843,5 +879,25 @@ mod edge_case_tests {
         assert_eq!(mount, "");
         let (mount, _) = pc_disk_mount_target("", 0);
         assert_eq!(mount, "");
+    }
+
+    #[test]
+    fn test_vhd_detected_as_pc() {
+        // .vhd >= 1 MB → PC hard drive
+        let data = vec![0u8; 1024 * 1024 + 1];
+        assert_eq!(
+            detect_rom_type_with_extension(&data, Some("vhd"), None).unwrap(),
+            SystemType::PC
+        );
+    }
+
+    #[test]
+    fn test_iso_non_ps1_detected_as_pc() {
+        // A non-PS1 .iso >= 32 KB → PC CD-ROM
+        let data = vec![0u8; 32 * 1024];
+        assert_eq!(
+            detect_rom_type_with_extension(&data, Some("iso"), None).unwrap(),
+            SystemType::PC
+        );
     }
 }

@@ -48,6 +48,22 @@ pub use video_adapter_cga_graphics::{CgaGraphicsAdapter, CgaMode}; // Export CGA
 pub use video_adapter_ega_software::{EgaMode, SoftwareEgaAdapter}; // Export EGA software adapter and modes
 pub use video_adapter_vga_software::{SoftwareVgaAdapter, VgaMode}; // Export VGA software adapter and modes
 
+/// Standard floppy disk image sizes in bytes.
+///
+/// Covers the four PC-compatible floppy densities:
+/// - 360 KB  (5.25", double-density)
+/// - 720 KB  (3.5", double-density)
+/// - 1.2 MB  (5.25", high-density)
+/// - 1.44 MB (3.5", high-density) – most common
+///
+/// Note: 2.88 MB (extended density) is intentionally omitted because the PC
+/// system's floppy mount validation does not support that format (the 2.88 MB
+/// ED drive was very rare in practice and is not emulated by the BIOS).
+///
+/// This constant is the single authoritative list: both `PcSystem::mount()`
+/// and the GUI's ROM-detection logic use it so they can never drift apart.
+pub const FLOPPY_IMAGE_SIZES: &[usize] = &[368_640, 737_280, 1_228_800, 1_474_560];
+
 #[derive(Debug, Error)]
 pub enum PcError {
     #[error("No executable loaded")]
@@ -1058,8 +1074,7 @@ impl System for PcSystem {
             }
             "FloppyA" => {
                 // Validate floppy size (common formats: 360K, 720K, 1.2M, 1.44M)
-                let valid_sizes = [368640, 737280, 1228800, 1474560];
-                if !valid_sizes.contains(&data.len()) {
+                if !FLOPPY_IMAGE_SIZES.contains(&data.len()) {
                     eprintln!(
                         "Warning: Floppy A image size {} is not a standard format",
                         data.len()
@@ -1069,8 +1084,7 @@ impl System for PcSystem {
                 Ok(())
             }
             "FloppyB" => {
-                let valid_sizes = [368640, 737280, 1228800, 1474560];
-                if !valid_sizes.contains(&data.len()) {
+                if !FLOPPY_IMAGE_SIZES.contains(&data.len()) {
                     eprintln!(
                         "Warning: Floppy B image size {} is not a standard format",
                         data.len()
