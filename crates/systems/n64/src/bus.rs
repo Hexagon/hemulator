@@ -390,7 +390,10 @@ impl N64Bus {
             }
             _ => {
                 log(LogCategory::Stubs, LogLevel::Debug, || {
-                    format!("N64 FlashRAM: Unknown command 0x{:02X} (word=0x{:08X})", command, val)
+                    format!(
+                        "N64 FlashRAM: Unknown command 0x{:02X} (word=0x{:08X})",
+                        command, val
+                    )
                 });
             }
         }
@@ -906,8 +909,7 @@ impl MemoryMips for N64Bus {
                             if dst < flash.len() {
                                 flash[dst] = val;
                             }
-                            self.flashram_write_offset =
-                                self.flashram_write_offset.wrapping_add(1);
+                            self.flashram_write_offset = self.flashram_write_offset.wrapping_add(1);
                         }
                     }
                 } else if let Some(ref mut sram) = self.cart_save {
