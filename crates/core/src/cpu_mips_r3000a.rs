@@ -2157,11 +2157,12 @@ mod tests {
     fn test_gte_nclip_mac0_overflow_no_flag() {
         let mut gte = GteRegisters::new();
 
-        // Set up SXY FIFO with large signed values so the cross product overflows i32.
-        // SX0=0x3FF, SY0=−0x400, SX1=−0x400, SY1=0x3FF, SX2=0x3FF, SY2=0x3FF
-        gte.data[12] = 0xFC00_03FF_u32; // SXY0: SX0=0x3FF, SY0=-0x400
-        gte.data[13] = 0x03FF_FC00_u32; // SXY1: SX1=-0x400, SY1=0x3FF
-        gte.data[14] = 0x03FF_03FF_u32; // SXY2: SX2=0x3FF, SY2=0x3FF
+        // Set up SXY FIFO with large signed values so the NCLIP cross product
+        // overflows the 32-bit range (but remains within the 44-bit MAC0 range).
+        // SX0=0x7FFF, SY0=-0x8000, SX1=-0x8000, SY1=0x7FFF, SX2=0x7FFF, SY2=0x7FFF
+        gte.data[12] = 0x8000_7FFF_u32; // SXY0: SX0=0x7FFF, SY0=-0x8000
+        gte.data[13] = 0x7FFF_8000_u32; // SXY1: SX1=-0x8000, SY1=0x7FFF
+        gte.data[14] = 0x7FFF_7FFF_u32; // SXY2: SX2=0x7FFF, SY2=0x7FFF
 
         gte.execute(0x06); // NCLIP
 
