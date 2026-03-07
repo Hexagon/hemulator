@@ -295,8 +295,11 @@ impl N64Bus {
                 }
             }
             FlashRamMode::Write => {
-                // In Write mode, store data at the current write position
-                if let Some(ref mut flash) = self.cart_save {
+                // In Write mode, writes at offset 0 are commands (state machine transitions);
+                // writes at any other offset store data at the advancing write pointer.
+                if offset == 0 {
+                    self.flashram_handle_command(offset, command, val);
+                } else if let Some(ref mut flash) = self.cart_save {
                     let dst = self.flashram_write_offset;
                     if dst + 3 < flash.len() {
                         let bytes = val.to_be_bytes();
@@ -887,10 +890,26 @@ impl MemoryMips for N64Bus {
             0x0800_0000..=0x0FFF_FFFF => {
                 let offset = (phys_addr - 0x0800_0000) as usize;
                 if self.save_is_flashram {
-                    // Single-byte writes to FlashRAM: route through word-level command handler
-                    // by composing a 32-bit word with the byte in the MSB position
-                    let word = (val as u32) << 24;
-                    self.flashram_write_word(offset, word);
+                    // Single-byte writes to FlashRAM:
+                    // - At offset 0, the byte is a command byte; forward it as a word
+                    //   with the byte in the MSB position (hardware command encoding).
+                    // - At other offsets in Write mode, store the single byte at the
+                    //   advancing write pointer (do NOT zero-pad to a word, which would
+                    //   corrupt adjacent bytes).
+                    // - In all other modes, single-byte writes outside offset 0 are ignored.
+                    if offset == 0 {
+                        let word = (val as u32) << 24;
+                        self.flashram_write_word(0, word);
+                    } else if self.flashram_mode == FlashRamMode::Write {
+                        if let Some(ref mut flash) = self.cart_save {
+                            let dst = self.flashram_write_offset;
+                            if dst < flash.len() {
+                                flash[dst] = val;
+                            }
+                            self.flashram_write_offset =
+                                self.flashram_write_offset.wrapping_add(1);
+                        }
+                    }
                 } else if let Some(ref mut sram) = self.cart_save {
                     if offset < sram.len() {
                         sram[offset] = val;

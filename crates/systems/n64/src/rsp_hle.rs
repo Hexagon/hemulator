@@ -519,9 +519,9 @@ impl RspHle {
                 }
 
                 // CLEARBUFF (0x02): zero a DMEM range
-                // word0[23:0] = flags/count, word1[31:16] = dmem_addr, word1[15:0] = count
+                // word1[31:16] = dmem_addr, word1[15:0] = count
                 0x02 => {
-                    let dmem_addr = (word0 & 0x0FFF) as usize;
+                    let dmem_addr = ((word1 >> 16) & 0x0FFF) as usize;
                     let count     = (word1 & 0xFFFF) as usize;
                     if dmem_addr + count <= 4096 {
                         dmem[dmem_addr..dmem_addr + count].fill(0);
@@ -553,7 +553,7 @@ impl RspHle {
                     let count = (word0 & 0xFFFF) as usize;
                     let src   = ((word1 >> 16) & 0x0FFF) as usize;
                     let dst   = (word1 & 0x0FFF) as usize;
-                    // Mix by averaging: dst[i] = clamp(dst[i]/2 + src[i]/2)
+                    // Mix by saturating addition: dst[i] = clamp(dst[i] + src[i], -32768, 32767)
                     if src + count <= 4096 && dst + count <= 4096 && count.is_multiple_of(2) {
                         for j in (0..count).step_by(2) {
                             let a = i16::from_be_bytes([dmem[dst + j], dmem[dst + j + 1]]) as i32;
@@ -579,9 +579,11 @@ impl RspHle {
                     let out_phys = Self::virt_to_phys(output_buff);
                     let out_size = output_buff_size as usize;
 
-                    // Interleave left/right 16-bit samples into RDRAM output buffer
+                    // Interleave left/right 16-bit samples into RDRAM output buffer.
+                    // Limit pairs to what fits within the declared output buffer size so we
+                    // never write beyond the task's output region.
                     if count > 0 && out_phys + out_size <= rdram_len {
-                        let pairs = count / 2; // number of 16-bit samples per channel
+                        let pairs = (count / 2).min(out_size / 4);
                         for j in 0..pairs {
                             let li = left  + j * 2;
                             let ri = right + j * 2;

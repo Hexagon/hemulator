@@ -212,19 +212,23 @@ fn pak_data_crc(data: &[u8]) -> u8 {
     crc
 }
 
-/// Decode a 2-byte mempak address pair into a byte offset within the 32 KB pak.
+/// Decode a 2-byte mempak address/CRC pair into a byte offset of a 32-byte block
+/// within the 32 KB controller pak.
 ///
-/// The N64 controller pak protocol encodes the target address as:
-///   byte3 = addr[14:7] (high 8 bits of 15-bit address)
-///   byte4 = addr[6:2] << 3 | crc5   (5 address bits in MSB, 5 CRC bits in LSB)
+/// The N64 controller pak protocol encodes the target 32-byte block address and
+/// a 5-bit CRC across two bytes:
+///   addr_hi (byte 3): upper 8 bits of the encoded value
+///   addr_lo (byte 4): upper 3 bits are the next address bits, lower 5 bits are CRC
 ///
-/// The byte address is computed by masking out the CRC5 bits (lower 5 bits of
-/// addr_lo) and combining with addr_hi, then aligning to the 32-byte block boundary.
-/// Result is clamped to the 32 KB pak size to prevent out-of-bounds access.
+/// Taken together, the 16 encoded bits form a value whose upper 11 bits select a
+/// 32-byte block and whose lower 5 bits are CRC. This helper masks off the lower
+/// 5 CRC bits, combines the remaining address bits, and returns the resulting
+/// byte offset within the 32 KB mempak address space (0x0000–0x7FE0), aligned to
+/// a 32-byte boundary.
 fn decode_pak_address(addr_hi: u8, addr_lo: u8) -> usize {
-    // Strip lower 5 CRC bits and combine to form 15-bit byte address
+    // Strip lower 5 CRC bits and combine to form block-aligned byte address
     let raw = ((addr_hi as usize) << 8) | ((addr_lo as usize) & 0xE0);
-    // Align to 32-byte block boundary and clamp to pak size
+    // Mask to 32 KB address space and keep alignment to 32-byte block boundary
     raw & 0x7FE0
 }
 
@@ -450,7 +454,7 @@ impl Pif {
         let mut pos: usize = 0x7C0;
         let mut channel: usize = 0;
 
-        while pos < 0x7FC && channel < 4 {
+        while pos < 0x7FC {
             let t = self.ram[pos] as usize;
 
             // End-of-list marker
