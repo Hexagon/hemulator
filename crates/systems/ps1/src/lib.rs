@@ -30,6 +30,8 @@ pub mod gpu;
 pub mod spu;
 
 use emu_core::cpu_mips_r3000a::{CpuR3000A, MemoryR3000A};
+use emu_core::debug::Debugger;
+use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::renderer::Renderer;
 use emu_core::types::Frame;
 use emu_core::{MountPointInfo, System};
@@ -1454,6 +1456,8 @@ impl MemoryR3000A for Ps1Bus {
 pub struct Ps1System {
     cpu: CpuR3000A<Ps1Bus>,
     total_cycles: u64,
+    /// Frame counter (incremented each step_frame call)
+    frame_index: u64,
     /// Instruction tracer for debugging
     instruction_tracer: emu_core::instruction_tracer::InstructionTracer,
 }
@@ -1470,6 +1474,7 @@ impl Ps1System {
         Self {
             cpu: CpuR3000A::new(bus),
             total_cycles: 0,
+            frame_index: 0,
             instruction_tracer: emu_core::instruction_tracer::InstructionTracer::new(),
         }
     }
@@ -1511,14 +1516,27 @@ impl System for Ps1System {
         }
 
         let total_scanlines = SCANLINES_NTSC;
+        let mut cpu_steps: u32 = 0;
+        let mut timer_irqs: u32 = 0;
 
         for _scanline in 0..total_scanlines {
             // Run CPU for one scanline worth of cycles
             let mut cycles_this_line = 0u32;
             while cycles_this_line < CYCLES_PER_SCANLINE {
+                // Capture PC before step for instruction tracing
+                let pc_before = self.cpu.pc;
                 let c = self.cpu.step();
                 cycles_this_line += c;
                 self.total_cycles += c as u64;
+                cpu_steps += 1;
+
+                // Record instruction if tracing is enabled
+                if self.instruction_tracer.is_enabled() {
+                    if let Some(instr) = self.disassemble_instruction(pc_before) {
+                        let cpu_state = self.get_cpu_state();
+                        self.instruction_tracer.trace(instr, cpu_state);
+                    }
+                }
             }
 
             // Step timers
@@ -1528,12 +1546,24 @@ impl System for Ps1System {
 
             if timer0_irq {
                 self.cpu.memory.irq.raise(IRQ_TIMER0);
+                timer_irqs += 1;
+                log(LogCategory::Interrupts, LogLevel::Debug, || {
+                    "PS1: Timer0 IRQ".to_string()
+                });
             }
             if timer1_irq {
                 self.cpu.memory.irq.raise(IRQ_TIMER1);
+                timer_irqs += 1;
+                log(LogCategory::Interrupts, LogLevel::Debug, || {
+                    "PS1: Timer1 IRQ".to_string()
+                });
             }
             if timer2_irq {
                 self.cpu.memory.irq.raise(IRQ_TIMER2);
+                timer_irqs += 1;
+                log(LogCategory::Interrupts, LogLevel::Debug, || {
+                    "PS1: Timer2 IRQ".to_string()
+                });
             }
 
             // Step GPU scanline
@@ -1549,6 +1579,9 @@ impl System for Ps1System {
             // VBlank interrupt
             if self.cpu.memory.gpu.in_vblank && _scanline == 240 {
                 self.cpu.memory.irq.raise(IRQ_VBLANK);
+                log(LogCategory::Interrupts, LogLevel::Debug, || {
+                    format!("PS1: VBlank IRQ (frame={})", self.frame_index)
+                });
             }
         }
 
@@ -1556,6 +1589,18 @@ impl System for Ps1System {
         // At 44100 Hz and ~60 fps (NTSC), each frame needs ~735 stereo samples
         const SPU_SAMPLES_PER_FRAME: usize = 735;
         self.cpu.memory.spu.tick_samples(SPU_SAMPLES_PER_FRAME);
+
+        // Log frame statistics at trace level (every 60 frames)
+        if self.frame_index.is_multiple_of(60) {
+            log(LogCategory::CPU, LogLevel::Trace, || {
+                format!(
+                    "PS1 TRACE: frame={} pc=0x{:08X} steps={} cycles={} timer_irqs={}",
+                    self.frame_index, self.cpu.pc, cpu_steps, self.total_cycles, timer_irqs,
+                )
+            });
+        }
+
+        self.frame_index += 1;
 
         // Render frame from VRAM
         self.cpu.memory.gpu.render_frame();
