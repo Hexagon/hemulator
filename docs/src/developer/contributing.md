@@ -28,9 +28,9 @@ Contributions are welcome! Please follow these guidelines.
 
 **For Users**: See [User Manual](../user/) for usage instructions.
 
-**For Architecture Details**: See [Architecture Overview](architecture.md) for high-level architecture, or [ARCHITECTURE.md](https://github.com/Hexagon/hemulator/blob/master/ARCHITECTURE.md) in the repository for complete details.
+**For Architecture Details**: See [Architecture Overview](architecture.md) for high-level architecture, or [ARCHITECTURE.md](https://github.com/Hexagon/hemulator/blob/main/ARCHITECTURE.md) in the repository for complete details.
 
-**For Implementation Guidelines**: See [AGENTS.md](https://github.com/Hexagon/hemulator/blob/master/AGENTS.md) in the repository root for detailed implementation patterns and CI requirements.
+**For Implementation Guidelines**: See [AGENTS.md](https://github.com/Hexagon/hemulator/blob/main/AGENTS.md) in the repository root for detailed implementation patterns and CI requirements.
 
 ## Pre-Commit Checks (REQUIRED)
 
@@ -170,8 +170,8 @@ The `--no-gui` mode supports full audio, controller input, and most systems — 
 
 - **Documentation**: 
   - Update the [User Manual](../user/) for user-facing changes (controls, features, system limitations)
-  - Update [README.md](../README.md) for developer setup info and project overview
-  - Update [AGENTS.md](../AGENTS.md) for architecture changes and implementation guidelines
+  - Update [README.md](https://github.com/Hexagon/hemulator/blob/main/README.md) for developer setup info and project overview
+  - Update [AGENTS.md](https://github.com/Hexagon/hemulator/blob/main/AGENTS.md) for architecture changes and implementation guidelines
   - **Update system README.md references**: When implementing or debugging system features, add all technical references (datasheets, wikis, development docs, technical manuals) to the system's README.md "References" section. This creates a valuable resource for future developers and documents the authoritative sources used for implementation decisions. See `crates/systems/pc/README.md` and `crates/systems/sms/README.md` for examples of comprehensive reference sections.
 - **Code Quality**: Write clean, well-documented code with meaningful variable names
 - **Commit Messages**: Use clear, descriptive commit messages
@@ -259,14 +259,13 @@ If you discover a security vulnerability, please report it privately to the main
 
 ## Areas for Contribution
 
-**Looking for something to work on?** Check the [TODO.md](https://github.com/Hexagon/hemulator/blob/master/TODO.md) file in the repository root for a prioritized list of unimplemented features, stubs, and known issues organized by priority (Critical, High, Medium, Low).
+**Looking for something to work on?** Check the [TODO.md](https://github.com/Hexagon/hemulator/blob/main/TODO.md) file in the repository root for a prioritized list of unimplemented features, stubs, and known issues organized by priority (Critical, High, Medium, Low).
 
 Contributions are welcome in the following areas:
 
 - **NES**: Additional mapper implementations (MMC5, VRC6, etc.)
 - **Atari 2600**: Bug fixes for major gameplay issues, improved compatibility
 - **Game Boy**: Bug fixes for major gameplay issues, improved compatibility
-- **SNES**: APU (SPC700) implementation, additional PPU modes (2-7), bug fixes
 - **N64**: RSP microcode execution, texture mapping improvements
 - **PC**: More complete DOS API (INT 21h), PC speaker audio
 - **All Systems**: Performance optimizations, UI/UX improvements, bug fixes
@@ -333,7 +332,7 @@ When working on performance-sensitive code (CPU emulation, PPU rendering, mapper
 
 The emulator supports debug logging through command-line arguments.
 
-**For comprehensive logging documentation and implementation guidelines**, see [AGENTS.md](../AGENTS.md#logging-system).
+**For comprehensive logging documentation and implementation guidelines**, see [AGENTS.md](https://github.com/Hexagon/hemulator/blob/main/AGENTS.md#logging-system).
 
 ### Command-Line Logging Options
 
@@ -375,7 +374,7 @@ cargo run --release -- --log-level info --log-cpu trace game.nes
 
 For deep analysis of emulation state at specific execution points, the emulator supports generating comprehensive debug dumps in **headless mode** (no GUI, faster execution).
 
-**For complete documentation**, see [AGENTS.md](../AGENTS.md#command-line-debug-dump).
+**For complete documentation**, see [AGENTS.md](https://github.com/Hexagon/hemulator/blob/main/AGENTS.md#command-line-debug-dump).
 
 ### Quick Start
 

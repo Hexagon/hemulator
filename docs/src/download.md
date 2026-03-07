@@ -77,7 +77,7 @@ Visit the [GitHub Releases page](https://github.com/Hexagon/hemulator/releases) 
 
 ## Building from Source
 
-For developers who want to build from source, see the [README](https://github.com/Hexagon/hemulator/blob/master/README.md) for build instructions.
+For developers who want to build from source, see the [README](https://github.com/Hexagon/hemulator/blob/main/README.md) for build instructions.
 
 ### Quick Build Steps
 
@@ -94,7 +94,7 @@ cargo run --profile release-quick -- path/to/rom.nes
 ```
 
 For detailed build instructions, dependencies, and development setup, see:
-- **[README.md](https://github.com/Hexagon/hemulator/blob/master/README.md)** - Build instructions
+- **[README.md](https://github.com/Hexagon/hemulator/blob/main/README.md)** - Build instructions
 - **[Contributing Guide](developer/contributing.html)** - Development workflow
 
 ## Getting Started
@@ -113,6 +113,6 @@ After installation:
 
 ## License
 
-Hemulator is free and open source software. See the [LICENSE](https://github.com/Hexagon/hemulator/blob/master/LICENSE) for details.
+Hemulator is free and open source software. See the [LICENSE](https://github.com/Hexagon/hemulator/blob/main/LICENSE) for details.
 
 **Educational Purpose**: This emulator is for educational purposes. Users must provide their own legally obtained ROM files.
