@@ -22,7 +22,10 @@ pub mod sm510;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use emu_core::types::Frame;
 use emu_core::{MountPointInfo, System};
-use mgw::{is_mgw_format, parse_mgw, MgwRom, MGW_SCREEN_HEIGHT, MGW_SCREEN_WIDTH};
+use mgw::{
+    is_bzip2_tar, is_mgw_format, parse_mgw, parse_mgw_tar_bz2, MgwRom, MGW_SCREEN_HEIGHT,
+    MGW_SCREEN_WIDTH,
+};
 use serde_json::Value;
 use thiserror::Error;
 
@@ -534,8 +537,19 @@ impl System for GameAndWatchSystem {
     fn mount(&mut self, mount_point_id: &str, data: &[u8]) -> Result<(), Self::Error> {
         match mount_point_id {
             "Program" => {
-                if is_mgw_format(data) {
-                    // Parse .mgw container
+                if is_bzip2_tar(data) {
+                    // Parse bzip2-compressed tar archive (gnwmanager / retro-go format)
+                    let mgw_rom = parse_mgw_tar_bz2(data)
+                        .map_err(|e| GameAndWatchError::MgwParseFailed(e.to_string()))?;
+
+                    self.cpu.load_rom(&mgw_rom.program);
+                    // tar.bz2 archives don't include keyboard mapping data
+                    self.cpu.keyboard_mapping = None;
+                    self.mgw_data = Some(mgw_rom);
+                    self.cpu.reset();
+                    self.rom_loaded = true;
+                } else if is_mgw_format(data) {
+                    // Parse .mgw container (LCD-Game-Shrinker format)
                     let mgw_rom = parse_mgw(data)
                         .map_err(|e| GameAndWatchError::MgwParseFailed(e.to_string()))?;
 

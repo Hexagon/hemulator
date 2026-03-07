@@ -1,9 +1,11 @@
-//! Parser for the .mgw ROM container format (LCD-Game-Shrinker / gw-libretro).
+//! Parser for Game & Watch ROM container formats.
 //!
-//! The .mgw format packages an SM510-family CPU program ROM together with
-//! LCD segment artwork, background image, keyboard mapping, and melody data.
+//! Supports two container formats:
 //!
-//! ## File structure
+//! ## 1. LCD-Game-Shrinker / gw-libretro format (.gw / .mgw)
+//!
+//! Packages an SM510-family CPU program ROM together with LCD segment artwork,
+//! background image, keyboard mapping, and melody data.
 //!
 //! The file may be compressed (LZ4, ZLIB, or LZMA). After decompression:
 //!
@@ -20,6 +22,16 @@
 //! Each data section descriptor is (offset: u32, size: u32).
 //! Sections: background, segments_pixel, segments_offset, segments_x,
 //! segments_y, segments_height, segments_width, melody, program, keyboard.
+//!
+//! ## 2. MAME-style tar.bz2 archives (.mgw)
+//!
+//! Used by gnwmanager / retro-go community. A bzip2-compressed tar archive
+//! containing MAME-style individual ROM dump files:
+//!
+//! - `main.bs` — CPU program ROM (SM510 opcodes)
+//! - `unit1.bs` — Segment/pixel data
+//! - `*.rle` — RLE-encoded sprite/background images
+//! - `*.pcm` — PCM audio samples
 
 use thiserror::Error;
 
@@ -32,6 +44,9 @@ pub const MAX_SEGMENTS: usize = 256;
 
 /// LZ4 frame magic bytes.
 const LZ4_FRAME_MAGIC: [u8; 4] = [0x04, 0x22, 0x4D, 0x18];
+
+/// Bzip2 magic bytes ("BZh").
+const BZIP2_MAGIC: [u8; 3] = [0x42, 0x5A, 0x68];
 
 /// Header flag bits.
 const FLAG_RENDERING_LCD_INVERTED: u32 = 0x01;
@@ -64,6 +79,12 @@ pub enum MgwError {
         size: u32,
         data_len: usize,
     },
+
+    #[error("Tar archive missing required file: {0}")]
+    TarMissingFile(String),
+
+    #[error("Tar parsing error: {0}")]
+    TarParseError(String),
 }
 
 /// A single LCD segment's artwork and position.
@@ -444,10 +465,141 @@ pub fn parse_mgw(file_data: &[u8]) -> Result<MgwRom, MgwError> {
     })
 }
 
+/// Detect whether the data is a bzip2-compressed tar archive.
+pub fn is_bzip2_tar(data: &[u8]) -> bool {
+    data.len() >= 3 && data[0..3] == BZIP2_MAGIC
+}
+
+/// Decompress bzip2 data.
+fn decompress_bzip2(data: &[u8]) -> Result<Vec<u8>, MgwError> {
+    use bzip2::read::BzDecoder;
+    use std::io::Read;
+
+    let mut decoder = BzDecoder::new(data);
+    let mut decompressed = Vec::new();
+    decoder
+        .read_to_end(&mut decompressed)
+        .map_err(|e| MgwError::DecompressFailed(format!("bzip2: {}", e)))?;
+    Ok(decompressed)
+}
+
+/// A file extracted from a tar archive.
+struct TarEntry {
+    /// Filename from tar header.
+    name: String,
+    /// File data.
+    data: Vec<u8>,
+}
+
+/// Parse a tar archive (uncompressed) into its constituent files.
+///
+/// Handles standard POSIX tar format with 512-byte block headers.
+fn parse_tar(tar_data: &[u8]) -> Result<Vec<TarEntry>, MgwError> {
+    let mut entries = Vec::new();
+    let mut pos = 0;
+
+    while pos + 512 <= tar_data.len() {
+        let header = &tar_data[pos..pos + 512];
+
+        // Check for end-of-archive (two consecutive zero blocks)
+        if header.iter().all(|&b| b == 0) {
+            break;
+        }
+
+        // Extract filename (bytes 0..100, null-terminated)
+        let name_end = header[..100].iter().position(|&b| b == 0).unwrap_or(100);
+        let name = String::from_utf8_lossy(&header[..name_end]).to_string();
+
+        // Extract file size (bytes 124..136, octal ASCII, null/space terminated)
+        let size_str = String::from_utf8_lossy(&header[124..136]);
+        let size_str = size_str.trim_end_matches(['\0', ' ']);
+        let file_size = u64::from_str_radix(size_str, 8).map_err(|e| {
+            MgwError::TarParseError(format!("Invalid size '{}' for '{}': {}", size_str, name, e))
+        })?;
+
+        // Extract type flag (byte 156)
+        let type_flag = header[156];
+
+        // Data starts at next 512-byte block
+        let data_start = pos + 512;
+        let data_end = data_start + file_size as usize;
+
+        // Only extract regular files (type '0' or '\0')
+        if (type_flag == b'0' || type_flag == 0) && file_size > 0 {
+            if data_end > tar_data.len() {
+                return Err(MgwError::TarParseError(format!(
+                    "File '{}' extends past end of archive (offset {}, size {})",
+                    name, data_start, file_size
+                )));
+            }
+            entries.push(TarEntry {
+                name,
+                data: tar_data[data_start..data_end].to_vec(),
+            });
+        }
+
+        // Advance to next header (data + padding to 512-byte boundary)
+        let data_blocks = (file_size as usize).div_ceil(512);
+        pos = data_start + data_blocks * 512;
+    }
+
+    Ok(entries)
+}
+
+/// Parse a bzip2-compressed tar archive (.mgw from gnwmanager/retro-go).
+///
+/// Extracts `main.bs` as the CPU program ROM. Returns an `MgwRom` with
+/// grid-based display (no LCD-Game-Shrinker artwork).
+pub fn parse_mgw_tar_bz2(file_data: &[u8]) -> Result<MgwRom, MgwError> {
+    // Decompress bzip2
+    let tar_data = decompress_bzip2(file_data)?;
+
+    // Parse tar entries
+    let entries = parse_tar(&tar_data)?;
+
+    // Find the program ROM (main.bs)
+    let program_entry = entries
+        .iter()
+        .find(|e| {
+            let name = e.name.to_lowercase();
+            name == "main.bs" || name.ends_with("/main.bs")
+        })
+        .ok_or_else(|| MgwError::TarMissingFile("main.bs".to_string()))?;
+
+    let program = program_entry.data.clone();
+
+    // Try to determine CPU type from program ROM size
+    // SM510: <= 4096 bytes (4KB), SM511: up to 4096+, SM5A: variable
+    let cpu_type = if program.len() <= 2048 {
+        "SM510".to_string()
+    } else if program.len() <= 4096 {
+        "SM511".to_string()
+    } else {
+        "SM5A".to_string()
+    };
+
+    // Build a minimal MgwRom with just the program ROM (no artwork)
+    Ok(MgwRom {
+        cpu_type,
+        signature: String::new(),
+        flags: 0,
+        lcd_inverted: false,
+        sound_mode: 0,
+        background: Vec::new(),
+        segments: vec![None; MAX_SEGMENTS],
+        program,
+        melody: Vec::new(),
+        keyboard: [0u32; 10],
+    })
+}
+
 /// Detect whether the data is likely an .mgw container file.
 ///
-/// Returns true if the data starts with known .mgw magic bytes
-/// (SM5x header, LZ4 frame, ZLIB header, or LZMA header).
+/// Returns true if the data starts with known .mgw magic bytes:
+/// - SM5x header (uncompressed LCD-Game-Shrinker)
+/// - LZ4 frame (compressed LCD-Game-Shrinker)
+/// - ZLIB/LZMA header (compressed LCD-Game-Shrinker)
+/// - BZh (bzip2-compressed tar archive, gnwmanager/MAME style)
 pub fn is_mgw_format(data: &[u8]) -> bool {
     if data.len() < 4 {
         return false;
@@ -462,6 +614,10 @@ pub fn is_mgw_format(data: &[u8]) -> bool {
     }
     // ZLIB or LZMA
     if &data[0..4] == b"ZLIB" || &data[0..4] == b"LZMA" {
+        return true;
+    }
+    // Bzip2 tar archive (gnwmanager / retro-go community format)
+    if data[0..3] == BZIP2_MAGIC {
         return true;
     }
     false
@@ -510,6 +666,9 @@ mod tests {
         assert!(is_mgw_format(&[0x04, 0x22, 0x4D, 0x18, 0x00]));
         assert!(is_mgw_format(b"ZLIBmore_data"));
         assert!(is_mgw_format(b"LZMAmore_data"));
+        // Bzip2 magic "BZh" followed by block size digit
+        assert!(is_mgw_format(b"BZh9more_data"));
+        assert!(is_mgw_format(&[0x42, 0x5A, 0x68, 0x39, 0x31]));
         assert!(!is_mgw_format(b"NES\x1A"));
         assert!(!is_mgw_format(b"AB"));
     }
@@ -520,6 +679,95 @@ mod tests {
         assert_eq!(read_u16_le(&data, 0), 0x0201);
         assert_eq!(read_u32_le(&data, 0), 0x04030201);
         assert_eq!(read_u16_le(&data, 3), 0x0504);
+    }
+
+    #[test]
+    fn test_is_bzip2_tar() {
+        assert!(is_bzip2_tar(b"BZh9data"));
+        assert!(is_bzip2_tar(&[0x42, 0x5A, 0x68, 0x31]));
+        assert!(!is_bzip2_tar(b"SM510"));
+        assert!(!is_bzip2_tar(b"BZ")); // too short
+    }
+
+    #[test]
+    fn test_parse_tar() {
+        // Build a minimal tar archive with a single file "main.bs"
+        let mut tar = vec![0u8; 1024]; // Two 512-byte blocks
+
+        // Filename at offset 0
+        let name = b"main.bs";
+        tar[..name.len()].copy_from_slice(name);
+
+        // File mode at offset 100 (8 bytes, octal)
+        tar[100..107].copy_from_slice(b"0000644");
+
+        // File size at offset 124 (12 bytes, octal string)
+        // 4 bytes = "4" in octal is "4"
+        tar[124..128].copy_from_slice(b"4\0\0\0");
+
+        // Type flag at offset 156: '0' = regular file
+        tar[156] = b'0';
+
+        // Checksum (offset 148, 8 bytes) - compute simple unsigned sum
+        // First fill checksum field with spaces for calculation
+        tar[148..156].copy_from_slice(b"        ");
+        let checksum: u32 = tar[..512].iter().map(|&b| b as u32).sum();
+        let chk_str = format!("{:06o}\0 ", checksum);
+        tar[148..156].copy_from_slice(chk_str.as_bytes());
+
+        // File data at offset 512 (4 bytes of program ROM)
+        tar[512] = 0xAA;
+        tar[513] = 0xBB;
+        tar[514] = 0xCC;
+        tar[515] = 0xDD;
+
+        let entries = parse_tar(&tar).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "main.bs");
+        assert_eq!(entries[0].data, vec![0xAA, 0xBB, 0xCC, 0xDD]);
+    }
+
+    #[test]
+    fn test_parse_tar_bz2_roundtrip() {
+        use bzip2::write::BzEncoder;
+        use bzip2::Compression;
+        use std::io::Write;
+
+        // Build a minimal tar with main.bs
+        let mut tar = vec![0u8; 1536]; // 3 blocks (header + data + end)
+
+        // Filename
+        tar[..7].copy_from_slice(b"main.bs");
+
+        // File size: 2 bytes = "2" in octal
+        tar[124..126].copy_from_slice(b"2\0");
+
+        // Type: regular file
+        tar[156] = b'0';
+
+        // Checksum
+        tar[148..156].copy_from_slice(b"        ");
+        let checksum: u32 = tar[..512].iter().map(|&b| b as u32).sum();
+        let chk_str = format!("{:06o}\0 ", checksum);
+        tar[148..156].copy_from_slice(chk_str.as_bytes());
+
+        // Program: 2 bytes
+        tar[512] = 0x00; // NOP-like
+        tar[513] = 0x01;
+
+        // Compress with bzip2
+        let mut encoder = BzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&tar).unwrap();
+        let compressed = encoder.finish().unwrap();
+
+        // Verify detection
+        assert!(is_bzip2_tar(&compressed));
+
+        // Parse
+        let rom = parse_mgw_tar_bz2(&compressed).unwrap();
+        assert_eq!(rom.program, vec![0x00, 0x01]);
+        assert!(rom.background.is_empty());
+        assert_eq!(rom.keyboard, [0u32; 10]);
     }
 
     /// Test parsing a minimal valid uncompressed .mgw structure.
