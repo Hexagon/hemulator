@@ -580,9 +580,19 @@ impl Spu {
                     let flags = self.voices[i].adpcm.block_flags;
                     if flags & 0x04 != 0 {
                         if flags & 0x02 != 0 {
-                            // Loop-repeat: jump to loop start address
+                            // Loop-repeat: jump to loop start address and decode the block there
                             let loop_addr = (self.voices[i].repeat_addr as u32) << 3;
                             self.voices[i].current_addr = loop_addr;
+                            // Decode the block at the loop start immediately so that
+                            // sample_idx = 0 starts reading from the correct loop point.
+                            // Without this, the next block-boundary advance (+16) would
+                            // skip the loop-start block entirely.
+                            let laddr = loop_addr as usize;
+                            if laddr + 16 <= self.ram.len() {
+                                let mut loop_block = [0u8; 16];
+                                loop_block.copy_from_slice(&self.ram[laddr..laddr + 16]);
+                                self.voices[i].adpcm.decode_block(&loop_block);
+                            }
                         } else {
                             // Loop-stop: deactivate voice
                             self.voices[i].active = false;
@@ -803,6 +813,91 @@ mod tests {
         assert_eq!(samples.len(), 20);
         for &s in &samples {
             assert_eq!(s, 0, "silence when no data in buffer");
+        }
+    }
+
+    /// Test that loop-repeat correctly decodes the block at the loop start address
+    /// and does NOT skip it (the original bug would advance by +16 on the next block
+    /// boundary, skipping the loop-start block entirely).
+    #[test]
+    fn test_adpcm_loop_repeat_decodes_loop_start_block() {
+        let mut spu = Spu::new();
+
+        // Layout in SPU RAM:
+        //   addr 0x000: loop-start block  (flags=0x01, shift=0, nibble=7 → raw=+28672, positive)
+        //   addr 0x010: loop-end block    (flags=0x06, shift=0, nibble=8 → raw=-32768, negative)
+        //
+        // After the loop-end block triggers loop-repeat, the voice should jump back
+        // to 0x000 and decode it immediately. The next samples must come from the
+        // loop-start block (positive), NOT from the stale loop-end block (negative).
+        let make_block = |shift: u8, filter: u8, flags: u8, nibble: u8| -> [u8; 16] {
+            let mut block = [0u8; 16];
+            block[0] = shift | (filter << 4);
+            block[1] = flags;
+            let byte_val = (nibble & 0xF) | ((nibble & 0xF) << 4);
+            for b in block[2..].iter_mut() {
+                *b = byte_val;
+            }
+            block
+        };
+
+        // loop-start block: shift=0, nibble=7 (positive) → raw = 7 << 12 = 28672
+        let loop_start_block = make_block(0, 0, 0x01, 7);
+        // loop-end block: shift=0, nibble=8 (-8 in 4-bit signed) → raw = -8 << 12 = -32768
+        let loop_end_block = make_block(0, 0, 0x06, 8);
+
+        spu.ram[0x000..0x010].copy_from_slice(&loop_start_block);
+        spu.ram[0x010..0x020].copy_from_slice(&loop_end_block);
+
+        // Configure and key-on voice 0
+        spu.voices[0].start_addr = 0; // byte addr 0 = 0 >> 3 = 0 in 8-byte units
+        spu.voices[0].sample_rate = 0x1000; // 1:1
+        spu.voices[0].vol_left = 0x7FFF;
+        spu.voices[0].vol_right = 0x7FFF;
+        spu.voices[0].adsr = 0x007F_F07F;
+        // Pre-set ADSR to full sustain so ADSR scaling doesn't zero out the output
+        spu.voices[0].adsr_state.phase = AdsrPhase::Sustain;
+        spu.voices[0].adsr_state.volume = 0x7FFF;
+        spu.main_vol_left = 0x7FFF;
+        spu.main_vol_right = 0x7FFF;
+
+        // Manually key-on (decode first block)
+        let mut first_block = [0u8; 16];
+        first_block.copy_from_slice(&spu.ram[0..16]);
+        spu.voices[0].key_on_with_block(0, &first_block);
+        // Restore ADSR state after key_on reset it
+        spu.voices[0].adsr_state.phase = AdsrPhase::Sustain;
+        spu.voices[0].adsr_state.volume = 0x7FFF;
+
+        // Play 27 samples from loop-start block (sample_idx 1..27)
+        for _ in 0..27 {
+            let (l, _) = spu.generate_sample();
+            assert!(
+                l > 0,
+                "loop-start block (raw=+28672) should produce positive output, got {}",
+                l
+            );
+        }
+
+        // 28th sample triggers the block boundary:
+        //   advances to loop-end block at 0x010, decodes it
+        //   flags=0x06 → loop-repeat → sets current_addr=0x000 and decodes loop-start block
+        //   sample_idx=0, reads decoded[0] of loop-start block
+        let (sample_at_loop_boundary, _) = spu.generate_sample();
+        assert!(
+            sample_at_loop_boundary > 0,
+            "at loop boundary, decoded[0] of loop-start block should be positive; \
+             if negative, the loop-end block's stale data was used (bug present)"
+        );
+
+        // Continue playing — all subsequent samples should still come from loop-start block
+        for _ in 0..27 {
+            let (l, _) = spu.generate_sample();
+            assert!(
+                l > 0,
+                "post-loop samples from loop-start block should be positive, got {}",
+                l
+            );
         }
     }
 }
