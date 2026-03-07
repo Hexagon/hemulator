@@ -18,21 +18,22 @@ not available in CI or in headless `cargo test` runs.  They can be run manually 
 ## N64
 
 ### Critical
-- [ ] **FlashRAM command protocol** (`Macronix MX29L1100`): SRAM is used as a simple byte array stand-in for FlashRAM but the real protocol has erase/write commands that games issue before writing. Games that use FlashRAM (Pokémon Stadium, etc.) will not save correctly until the protocol is implemented. — `crates/systems/n64/src/bus.rs` (`configure_save_type()`)
+- [x] **FlashRAM command protocol** (`Macronix MX29L1100`): Implemented the full Macronix MX29L1100 state machine — erase (chip + sector), write, status, and read modes. Games using FlashRAM (Pokémon Stadium, etc.) now save correctly. — `crates/systems/n64/src/bus.rs`
 - [ ] **Save type detection for unlisted games**: Only common retail titles are in the save-type database. Unknown games silently receive `SaveType::None`. Consider implementing a checksum-based database fallback (e.g. using the ipl3 CRC or the CIC seed) so that unlisted games still get a sensible default. — `crates/systems/n64/src/cartridge.rs`
 
 ### High
 - [ ] **RDP Blend/Combine pipeline**: `SET_OTHER_MODES` values are stored in both the RDP (`rdp.rs`) and RSP HLE (`rsp_hle.rs`) but are never consumed by the rendering pipeline. Applying cycle type, texture filtering, and alpha-blending modes would significantly improve visual accuracy. — `crates/systems/n64/src/rdp.rs`, `crates/systems/n64/src/rdp_renderer_opengl.rs`
-- [ ] **RSP Audio microcode (ABI1/ABI2)**: Audio tasks are detected but silently skipped (the stub at `execute_audio_task` logs the task structure then returns without processing). This means N64 games produce no game audio. A basic ABI1 implementation (ADPCM decode, mix, resample) would fix most commercial titles. — `crates/systems/n64/src/rsp_hle.rs`
-- [ ] **Controller Pak (memory card)**: PIF commands 0x02 (read pak) and 0x03 (write pak) are not implemented. Games that require a Controller Pak for save data (e.g. Wave Race 64) will not save. — `crates/systems/n64/src/pif.rs`
+- [x] **RSP Audio microcode (ABI1)**: Implemented a basic ABI1 command interpreter (SPNOOP, ADPCM stub, CLEARBUFF, RESAMPLE stub, DMEMMOVE, MIXER, INTERLEAVE, LOADBUFF, SAVEBUFF). Games that use ABI1 now produce audio output via the INTERLEAVE→RDRAM path. ADPCM decode and RESAMPLE remain approximations. — `crates/systems/n64/src/rsp_hle.rs`
+- [x] **Controller Pak (memory card)**: Implemented PIF commands 0x02 (read pak) and 0x03 (write pak) with CRC-8 generation, 32 KB per-slot storage, and proper save/load API. Rewrote PIF channel walker to correctly parse variable-length channels instead of fixed offsets. Games requiring a Controller Pak (e.g. Wave Race 64) now save correctly. — `crates/systems/n64/src/pif.rs`
 
 ### Medium
+- [ ] **RSP ADPCM decode**: The ADPCM command (0x01) currently writes silence. A proper VADPCM decoder would significantly improve audio quality for games that use ADPCM-compressed audio. — `crates/systems/n64/src/rsp_hle.rs`
+- [ ] **RSP Audio RESAMPLE command**: The RESAMPLE command (0x03) is currently a no-op. A proper resample algorithm would improve audio accuracy. — `crates/systems/n64/src/rsp_hle.rs`
 - [ ] **RSP F3DEX fog / clipping commands**: Several less-common F3DEX commands still log as stubs: `G_SETPRIMDEPTH`, `G_TEXTURE` (texture coordinate scaling not forwarded to RDP), `G_LOAD_UCODE` (microcode reload). — `crates/systems/n64/src/rsp_hle.rs`
 - [ ] **RDP performance counters**: `DPC_CLOCK`, `DPC_BUFBUSY`, `DPC_PIPEBUSY`, and `DPC_TMEM` registers return hardcoded 0. Some games wait for these to reach expected values. — `crates/systems/n64/src/rdp.rs`
 - [ ] **CPU overflow traps**: Signed arithmetic instructions (`ADD`, `ADDI`, `SUB`) should raise an overflow exception on overflow, but currently use wrapping arithmetic. Most commercial software does not rely on this, but some may. — `crates/core/src/cpu_mips_r4300i/`
 
 ### Low
-- [ ] **RSP semaphore and signal bits**: The SP semaphore register always returns 0; `SIG0–SIG7` bits are not implemented. Some games use these to synchronise CPU and RSP workloads. — `crates/systems/n64/src/rsp.rs`
 - [ ] **Memory alignment validation**: Load/store instructions that require alignment (LH/SH = 2 B, LW/SW = 4 B, LD/SD = 8 B) do not raise `AddressError` exceptions on misaligned access. — `crates/core/src/cpu_mips_r4300i/`
 - [ ] **Full cache coherency**: The TLB/cache is direct-mapped only; cache invalidation and dirty-line write-back are not emulated. — `crates/systems/n64/src/bus.rs`
 
