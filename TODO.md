@@ -67,17 +67,20 @@ not available in CI or in headless `cargo test` runs.  They can be run manually 
 ## PS1
 
 ### High
-- [ ] **SPU ADPCM Audio** — 24-voice ADPCM decoding, ADSR envelopes, and reverb not yet implemented. `generate_sample()` currently returns silence. — `crates/systems/ps1/src/spu.rs`
 - [ ] **CD-ROM command handling** — Only GetStat/GetID stubs; no disc data streaming or sector reads. Required for running real game discs. — `crates/systems/ps1/src/lib.rs`
 
 ### Medium
 - [ ] **Save States** — `save_state()` / `load_state()` are stubs (return empty/no-op). Need full serialization of CPU, GPU, SPU, RAM, and DMA state. — `crates/systems/ps1/src/lib.rs`
 - [ ] **MDEC** — Motion Decoder (FMV) stubbed; no macroblock decoding. — `crates/systems/ps1/src/lib.rs`
+- [ ] **SPU Reverb** — Reverb processing unit not yet implemented; voices are mixed without reverb. — `crates/systems/ps1/src/spu.rs`
+- [ ] **SPU Pitch Modulation** — FM (pitch modulation) between voices not yet implemented. — `crates/systems/ps1/src/spu.rs`
+- [ ] **SPU Noise generator** — Noise channel not yet connected (noise_enable register decoded but not used in sample generation). — `crates/systems/ps1/src/spu.rs`
+- [ ] **GPU Gouraud shading for lines** — Gouraud (per-vertex color) for line and polyline primitives uses start color only. — `crates/systems/ps1/src/gpu.rs`
+- [ ] **Textured primitive semi-transparency** — Semi-transparency for textured primitives uses the STP bit from CLUT entries which is not yet propagated correctly. — `crates/systems/ps1/src/gpu.rs`
 
 ### Low
-- [ ] **GPU Polylines** — Polyline (multi-segment line) commands with termination-code detection and Gouraud shading not implemented. — `crates/systems/ps1/src/gpu.rs`
-- [ ] **VRAM→CPU read transfer** — GP0 command to initiate VRAM read transfer not fully implemented. — `crates/systems/ps1/src/gpu.rs`
-- [ ] **24-bit display mode** — 24-bit pixel readback path not implemented (reads 16-bit pixels instead). — `crates/systems/ps1/src/gpu.rs`
+- [ ] **Joypad/Controller input** — Controller polling via SIO is stubbed; digital pad button state not connected to the emulator input system. — `crates/systems/ps1/src/lib.rs`
+- [ ] **Memory Card** — Memory card SIO protocol not implemented. — `crates/systems/ps1/src/lib.rs`
 
 ## SNES
 
