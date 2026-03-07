@@ -188,6 +188,16 @@ impl MenuBar {
                     }
 
                     if ui
+                        .button("Game & Watch")
+                        .on_hover_text("Nintendo Game & Watch (SM510)")
+                        .clicked()
+                    {
+                        self.pending_action =
+                            Some(MenuAction::NewProjectSystem("Game & Watch".to_string()));
+                        ui.close();
+                    }
+
+                    if ui
                         .button("SNES")
                         .on_hover_text("Super Nintendo Entertainment System")
                         .clicked()

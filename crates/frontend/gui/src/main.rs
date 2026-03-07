@@ -99,6 +99,7 @@ enum EmulatorSystem {
     ColecoVision(Box<emu_colecovision::ColecoVisionSystem>),
     SG1000(Box<emu_sg1000::Sg1000System>),
     PS1(Box<emu_ps1::Ps1System>),
+    GameAndWatch(Box<emu_gameandwatch::GameAndWatchSystem>),
 }
 
 #[allow(dead_code)]
@@ -141,6 +142,9 @@ impl EmulatorSystem {
             EmulatorSystem::PS1(sys) => sys
                 .step_frame()
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::GameAndWatch(sys) => sys
+                .step_frame()
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         }
     }
 
@@ -158,6 +162,7 @@ impl EmulatorSystem {
             EmulatorSystem::ColecoVision(sys) => sys.reset(),
             EmulatorSystem::SG1000(sys) => sys.reset(),
             EmulatorSystem::PS1(sys) => sys.reset(),
+            EmulatorSystem::GameAndWatch(sys) => sys.reset(),
         }
     }
 
@@ -175,6 +180,7 @@ impl EmulatorSystem {
             EmulatorSystem::ColecoVision(sys) => sys.debugger(),
             EmulatorSystem::SG1000(sys) => sys.debugger(),
             EmulatorSystem::PS1(sys) => sys.debugger(),
+            EmulatorSystem::GameAndWatch(sys) => sys.debugger(),
         }
     }
 
@@ -192,6 +198,7 @@ impl EmulatorSystem {
             EmulatorSystem::ColecoVision(sys) => sys.get_total_cycles(),
             EmulatorSystem::SG1000(sys) => sys.get_total_cycles(),
             EmulatorSystem::PS1(sys) => sys.get_total_cycles(),
+            EmulatorSystem::GameAndWatch(sys) => sys.get_total_cycles(),
         }
     }
 
@@ -238,6 +245,9 @@ impl EmulatorSystem {
             EmulatorSystem::PS1(sys) => sys
                 .mount(mount_point_id, data)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::GameAndWatch(sys) => sys
+                .mount(mount_point_id, data)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         }
     }
 
@@ -256,6 +266,7 @@ impl EmulatorSystem {
             EmulatorSystem::ColecoVision(sys) => sys.mount_points(),
             EmulatorSystem::SG1000(sys) => sys.mount_points(),
             EmulatorSystem::PS1(sys) => sys.mount_points(),
+            EmulatorSystem::GameAndWatch(sys) => sys.mount_points(),
         }
     }
 
@@ -298,6 +309,9 @@ impl EmulatorSystem {
             EmulatorSystem::PS1(sys) => sys
                 .unmount(mount_point_id)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::GameAndWatch(sys) => sys
+                .unmount(mount_point_id)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         }
     }
 
@@ -316,6 +330,7 @@ impl EmulatorSystem {
             EmulatorSystem::ColecoVision(sys) => sys.is_mounted(mount_point_id),
             EmulatorSystem::SG1000(sys) => sys.is_mounted(mount_point_id),
             EmulatorSystem::PS1(sys) => sys.is_mounted(mount_point_id),
+            EmulatorSystem::GameAndWatch(sys) => sys.is_mounted(mount_point_id),
         }
     }
 
@@ -344,6 +359,7 @@ impl EmulatorSystem {
             EmulatorSystem::ColecoVision(sys) => sys.supports_save_states(),
             EmulatorSystem::SG1000(sys) => sys.supports_save_states(),
             EmulatorSystem::PS1(sys) => sys.supports_save_states(),
+            EmulatorSystem::GameAndWatch(sys) => sys.supports_save_states(),
         }
     }
 
@@ -361,6 +377,7 @@ impl EmulatorSystem {
             EmulatorSystem::ColecoVision(sys) => sys.save_state(),
             EmulatorSystem::SG1000(sys) => sys.save_state(),
             EmulatorSystem::PS1(sys) => sys.save_state(),
+            EmulatorSystem::GameAndWatch(sys) => sys.save_state(),
         }
     }
 
@@ -378,6 +395,7 @@ impl EmulatorSystem {
             EmulatorSystem::ColecoVision(sys) => sys.load_state(state),
             EmulatorSystem::SG1000(sys) => sys.load_state(state),
             EmulatorSystem::PS1(sys) => sys.load_state(state),
+            EmulatorSystem::GameAndWatch(sys) => sys.load_state(state),
         }
     }
 
@@ -515,6 +533,9 @@ impl EmulatorSystem {
             EmulatorSystem::PS1(_) => {
                 // PS1 controller not yet implemented
             }
+            EmulatorSystem::GameAndWatch(_) => {
+                // Game & Watch uses 16-bit controller via set_controller_16
+            }
         }
     }
 
@@ -522,6 +543,7 @@ impl EmulatorSystem {
         match self {
             EmulatorSystem::SNES(sys) => sys.set_controller(port, state),
             EmulatorSystem::Chip8(sys) => sys.set_controller(state),
+            EmulatorSystem::GameAndWatch(sys) => sys.set_controller(state),
             _ => {} // Other systems use 8-bit set_controller
         }
     }
@@ -623,6 +645,7 @@ impl EmulatorSystem {
                 // R3000A CPU - PC can be exposed here later
                 None
             }
+            EmulatorSystem::GameAndWatch(sys) => Some(sys.cpu.pc as u32),
         }
     }
 
@@ -641,6 +664,7 @@ impl EmulatorSystem {
             EmulatorSystem::ColecoVision(_) => Some(3.58), // ColecoVision Z80A (3.579545 MHz NTSC)
             EmulatorSystem::SG1000(_) => Some(3.58),  // SG-1000 Z80A (3.579545 MHz NTSC)
             EmulatorSystem::PS1(_) => Some(33.87),    // PS1 R3000A (33.8688 MHz)
+            EmulatorSystem::GameAndWatch(_) => Some(0.033), // SM510 (32.768 kHz)
         }
     }
 
@@ -666,6 +690,7 @@ impl EmulatorSystem {
             EmulatorSystem::ColecoVision(_) => emu_nes::RuntimeStats::default(),
             EmulatorSystem::SG1000(_) => emu_nes::RuntimeStats::default(),
             EmulatorSystem::PS1(_) => emu_nes::RuntimeStats::default(),
+            EmulatorSystem::GameAndWatch(_) => emu_nes::RuntimeStats::default(),
         }
     }
 
@@ -683,6 +708,7 @@ impl EmulatorSystem {
             EmulatorSystem::ColecoVision(_) => emu_core::apu::TimingMode::Ntsc,
             EmulatorSystem::SG1000(_) => emu_core::apu::TimingMode::Ntsc,
             EmulatorSystem::PS1(_) => emu_core::apu::TimingMode::Ntsc,
+            EmulatorSystem::GameAndWatch(_) => emu_core::apu::TimingMode::Ntsc,
         }
     }
 
@@ -725,6 +751,7 @@ impl EmulatorSystem {
             EmulatorSystem::ColecoVision(sys) => sys.get_audio_samples(count),
             EmulatorSystem::SG1000(sys) => sys.get_audio_samples(count),
             EmulatorSystem::PS1(_) => vec![0; count],
+            EmulatorSystem::GameAndWatch(sys) => sys.generate_audio_samples(count),
         }
     }
 
@@ -742,6 +769,7 @@ impl EmulatorSystem {
             EmulatorSystem::ColecoVision(_) => (256, 192), // TMS9918A resolution
             EmulatorSystem::SG1000(_) => (256, 192),       // TMS9918A resolution
             EmulatorSystem::PS1(_) => (320, 240),          // PS1 standard resolution
+            EmulatorSystem::GameAndWatch(_) => (160, 120), // LCD segment grid
         }
     }
 
@@ -759,6 +787,7 @@ impl EmulatorSystem {
             EmulatorSystem::ColecoVision(_) => "colecovision",
             EmulatorSystem::SG1000(_) => "sg1000",
             EmulatorSystem::PS1(_) => "ps1",
+            EmulatorSystem::GameAndWatch(_) => "gameandwatch",
         }
     }
 
@@ -777,6 +806,7 @@ impl EmulatorSystem {
             EmulatorSystem::ColecoVision(_) => SystemType::ColecoVision,
             EmulatorSystem::SG1000(_) => SystemType::SG1000,
             EmulatorSystem::PS1(_) => SystemType::PS1,
+            EmulatorSystem::GameAndWatch(_) => SystemType::GameAndWatch,
         }
     }
 
@@ -842,6 +872,7 @@ impl EmulatorSystem {
             EmulatorSystem::ColecoVision(_) => "Software".to_string(),
             EmulatorSystem::SG1000(_) => "Software".to_string(),
             EmulatorSystem::PS1(_) => "Software".to_string(),
+            EmulatorSystem::GameAndWatch(_) => "Software".to_string(),
         }
     }
 
@@ -877,6 +908,7 @@ impl EmulatorSystem {
             EmulatorSystem::ColecoVision(_) => vec!["Software".to_string()],
             EmulatorSystem::SG1000(_) => vec!["Software".to_string()],
             EmulatorSystem::PS1(_) => vec!["Software".to_string()],
+            EmulatorSystem::GameAndWatch(_) => vec!["Software".to_string()],
         }
     }
 
@@ -896,6 +928,7 @@ impl EmulatorSystem {
             EmulatorSystem::ColecoVision(sys) => sys.check_breakpoint(),
             EmulatorSystem::SG1000(sys) => sys.check_breakpoint(),
             EmulatorSystem::PS1(_) => None,
+            EmulatorSystem::GameAndWatch(_) => None,
         }
     }
 
@@ -914,6 +947,7 @@ impl EmulatorSystem {
             EmulatorSystem::ColecoVision(sys) => sys.get_breakpoint_manager().get_all(),
             EmulatorSystem::SG1000(sys) => sys.get_breakpoint_manager().get_all(),
             EmulatorSystem::PS1(_) => Vec::new(),
+            EmulatorSystem::GameAndWatch(_) => Vec::new(),
         }
     }
 
@@ -932,6 +966,7 @@ impl EmulatorSystem {
             EmulatorSystem::ColecoVision(sys) => Some(sys.get_instruction_tracer()),
             EmulatorSystem::SG1000(sys) => Some(sys.get_instruction_tracer()),
             EmulatorSystem::PS1(_) => None,
+            EmulatorSystem::GameAndWatch(_) => None,
         }
     }
 
@@ -952,6 +987,7 @@ impl EmulatorSystem {
             EmulatorSystem::ColecoVision(sys) => Some(sys.get_instruction_tracer_mut()),
             EmulatorSystem::SG1000(sys) => Some(sys.get_instruction_tracer_mut()),
             EmulatorSystem::PS1(_) => None,
+            EmulatorSystem::GameAndWatch(_) => None,
         }
     }
 }
@@ -2242,6 +2278,9 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
             EmulatorSystem::PS1(_) => {
                 // PS1 instruction tracing not yet implemented
             }
+            EmulatorSystem::GameAndWatch(_) => {
+                // Game & Watch instruction tracing not yet implemented
+            }
         }
     }
 
@@ -2260,6 +2299,7 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
             EmulatorSystem::ColecoVision(s) => s.add_breakpoint(addr),
             EmulatorSystem::SG1000(s) => s.add_breakpoint(addr),
             EmulatorSystem::PS1(_) => {} // PS1 breakpoints not yet implemented
+            EmulatorSystem::GameAndWatch(_) => {} // Game & Watch breakpoints not yet implemented
         }
     }
 
@@ -2278,6 +2318,7 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
             EmulatorSystem::ColecoVision(s) => s.add_read_breakpoint(addr),
             EmulatorSystem::SG1000(s) => s.add_read_breakpoint(addr),
             EmulatorSystem::PS1(_) => {}
+            EmulatorSystem::GameAndWatch(_) => {}
         }
     }
 
@@ -2296,6 +2337,7 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
             EmulatorSystem::ColecoVision(s) => s.add_write_breakpoint(addr),
             EmulatorSystem::SG1000(s) => s.add_write_breakpoint(addr),
             EmulatorSystem::PS1(_) => {}
+            EmulatorSystem::GameAndWatch(_) => {}
         }
     }
 }
@@ -2933,9 +2975,45 @@ fn main() {
                     pending_n64_rom = Some((vec![], String::new()));
                 }
             }
+            "gameandwatch" | "gw" => {
+                sys = EmulatorSystem::GameAndWatch(Box::new(
+                    emu_gameandwatch::GameAndWatchSystem::new(),
+                ));
+                rom_loaded = true;
+                status_message = "Clean Game & Watch system started".to_string();
+                println!("Started clean Game & Watch system");
+
+                if let Some(ref p) = rom_path {
+                    if !p.to_lowercase().ends_with(".hemu") {
+                        match std::fs::read(p) {
+                            Ok(data) => {
+                                rom_hash = Some(GameSaves::rom_hash(&data));
+                                if let EmulatorSystem::GameAndWatch(gw_sys) = &mut sys {
+                                    if let Err(e) = gw_sys.mount("Program", &data) {
+                                        eprintln!("Failed to load Game & Watch ROM: {}", e);
+                                        status_message = format!("Error: {}", e);
+                                        rom_hash = None;
+                                    } else {
+                                        rom_loaded = true;
+                                        runtime_state.set_mount("Program".to_string(), p.clone());
+                                        if let Err(e) = settings.save() {
+                                            eprintln!("Warning: Failed to save settings: {}", e);
+                                        }
+                                        status_message = "Game & Watch ROM loaded".to_string();
+                                        println!("Loaded Game & Watch ROM: {}", p);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to read file: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
             _ => {
                 eprintln!("Error: Unknown system '{}'", system_name);
-                eprintln!("Valid systems: pc, nes, gb, gba, atari2600, snes, n64");
+                eprintln!("Valid systems: pc, nes, gb, gba, atari2600, snes, n64, gameandwatch");
                 std::process::exit(1);
             }
         }
@@ -3437,6 +3515,24 @@ fn main() {
                                 eprintln!("Warning: Failed to save settings: {}", e);
                             }
                         }
+                        Ok(SystemType::GameAndWatch) => {
+                            rom_hash = Some(GameSaves::rom_hash(&data));
+                            let mut gw_sys = emu_gameandwatch::GameAndWatchSystem::new();
+                            if let Err(e) = gw_sys.mount("Program", &data) {
+                                eprintln!("Failed to load Game & Watch ROM: {}", e);
+                                status_message = format!("Error: {}", e);
+                                rom_hash = None;
+                            } else {
+                                rom_loaded = true;
+                                sys = EmulatorSystem::GameAndWatch(Box::new(gw_sys));
+                                runtime_state.set_mount("Program".to_string(), p.clone());
+                                if let Err(e) = settings.save() {
+                                    eprintln!("Warning: Failed to save settings: {}", e);
+                                }
+                                status_message = "Game & Watch program loaded".to_string();
+                                println!("Loaded Game & Watch ROM: {}", p);
+                            }
+                        }
                         Err(e) => {
                             eprintln!("Unsupported ROM: {}", e);
                             status_message = format!("Unsupported ROM: {}", e);
@@ -3815,6 +3911,7 @@ fn main() {
                 match &mut sys {
                     EmulatorSystem::SNES(s) => s.set_controller(0, snes_state),
                     EmulatorSystem::Chip8(s) => s.set_controller(chip8_state),
+                    EmulatorSystem::GameAndWatch(s) => s.set_controller(chip8_state),
                     EmulatorSystem::ColecoVision(s) => {
                         s.set_controller(1, coleco_p1_state);
                         s.set_controller(2, coleco_p2_state);
@@ -4231,6 +4328,13 @@ fn main() {
                         SystemDebugInfo::new("PS1".to_string())
                     }
                 }
+                EmulatorSystem::GameAndWatch(s) => {
+                    if let Some(debugger) = s.debugger() {
+                        SystemDebugInfo::from_debugger("Game & Watch", debugger)
+                    } else {
+                        SystemDebugInfo::new("Game & Watch".to_string())
+                    }
+                }
             };
             egui_app.tab_manager.update_debug_info(debug_info);
 
@@ -4282,6 +4386,10 @@ fn main() {
                     Some(create_enhanced_debug_state("SG-1000", debugger, &sys))
                 }
                 EmulatorSystem::PS1(_) => None,
+                EmulatorSystem::GameAndWatch(s) => {
+                    let debugger: &dyn Debugger = s.as_ref();
+                    Some(create_enhanced_debug_state("Game & Watch", debugger, &sys))
+                }
             };
 
             if let Some(enhanced_state) = enhanced_state_opt {
@@ -4303,6 +4411,7 @@ fn main() {
                     EmulatorSystem::ColecoVision(s) => Some(s.as_ref()),
                     EmulatorSystem::SG1000(s) => Some(s.as_ref()),
                     EmulatorSystem::PS1(_) => None,
+                    EmulatorSystem::GameAndWatch(s) => Some(s.as_ref()),
                 };
 
                 if let Some(debugger) = debugger {
@@ -4822,6 +4931,19 @@ fn main() {
                                 &runtime_state,
                             );
                         }
+                        "Game & Watch" => {
+                            sys = EmulatorSystem::GameAndWatch(Box::new(
+                                emu_gameandwatch::GameAndWatchSystem::new(),
+                            ));
+                            configure_system_ui(
+                                &mut egui_app,
+                                &sys,
+                                "Game & Watch",
+                                &mut rom_loaded,
+                                "Created new Game & Watch system",
+                                &runtime_state,
+                            );
+                        }
                         _ => {
                             egui_app
                                 .status_bar
@@ -4838,7 +4960,7 @@ fn main() {
                             &[
                                 "nes", "unf", "gb", "gbc", "gba", "bin", "a26", "smc", "sfc",
                                 "z64", "n64", "v64", "com", "exe", "sms", "ch8", "c8", "col", "sg",
-                                "sc",
+                                "sc", "gw", "gnw",
                             ],
                         )
                         .add_filter("NES ROMs", &["nes", "unf"])
@@ -4851,6 +4973,7 @@ fn main() {
                         .add_filter("ColecoVision ROMs", &["col", "bin"])
                         .add_filter("SG-1000 ROMs", &["sg", "sc", "bin"])
                         .add_filter("CHIP-8 Programs", &["ch8", "c8"])
+                        .add_filter("Game & Watch ROMs", &["gw", "gnw"])
                         .add_filter("PC Executables", &["com", "exe", "bin"])
                         .add_filter("All Files", &["*"])
                         .pick_file()
@@ -5369,6 +5492,41 @@ fn main() {
                                         let _ = sys.resolution();
                                         if let Some(ref hash) = rom_hash {
                                             _game_saves = GameSaves::load(hash);
+                                        }
+                                    }
+                                    Ok(SystemType::GameAndWatch) => {
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        let mut gw_sys =
+                                            emu_gameandwatch::GameAndWatchSystem::new();
+                                        if let Err(e) = gw_sys.mount("Program", &data) {
+                                            egui_app
+                                                .status_bar
+                                                .set_message(format!("Error: {}", e));
+                                            rom_hash = None;
+                                        } else {
+                                            rom_loaded = true;
+                                            sys = EmulatorSystem::GameAndWatch(Box::new(gw_sys));
+                                            egui_app.property_pane.system_name =
+                                                "Game & Watch".to_string();
+                                            runtime_state
+                                                .set_mount("Program".to_string(), path_str.clone());
+                                            settings.add_recent_file(path_str.clone());
+                                            if let Err(e) = settings.save() {
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
+                                            }
+                                            egui_app.update_recent_files(
+                                                settings.get_recent_files().to_vec(),
+                                            );
+                                            egui_app.status_bar.set_message(
+                                                "Game & Watch program loaded".to_string(),
+                                            );
+                                            let _ = sys.resolution();
+                                            if let Some(ref hash) = rom_hash {
+                                                _game_saves = GameSaves::load(hash);
+                                            }
                                         }
                                     }
                                     Err(e) => {
@@ -6072,6 +6230,47 @@ fn main() {
                                         let _ = sys.resolution();
                                         if let Some(ref hash) = rom_hash {
                                             _game_saves = GameSaves::load(hash);
+                                        }
+                                    }
+                                    Ok(SystemType::GameAndWatch) => {
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        let mut gw_sys =
+                                            emu_gameandwatch::GameAndWatchSystem::new();
+                                        if let Err(e) = gw_sys.mount("Program", &data) {
+                                            egui_app
+                                                .status_bar
+                                                .set_message(format!("Error: {}", e));
+                                            rom_hash = None;
+                                        } else {
+                                            rom_loaded = true;
+                                            sys = EmulatorSystem::GameAndWatch(Box::new(gw_sys));
+                                            egui_app.property_pane.system_name =
+                                                "Game & Watch".to_string();
+                                            egui_app.property_pane.rendering_backend =
+                                                sys.get_current_renderer_name();
+                                            egui_app.property_pane.available_renderers =
+                                                sys.get_available_renderers();
+                                            runtime_state.set_mount(
+                                                "Program".to_string(),
+                                                file_path.clone(),
+                                            );
+                                            settings.add_recent_file(file_path.clone());
+                                            if let Err(e) = settings.save() {
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
+                                            }
+                                            egui_app.update_recent_files(
+                                                settings.get_recent_files().to_vec(),
+                                            );
+                                            egui_app.status_bar.set_message(
+                                                "Game & Watch program loaded".to_string(),
+                                            );
+                                            let _ = sys.resolution();
+                                            if let Some(ref hash) = rom_hash {
+                                                _game_saves = GameSaves::load(hash);
+                                            }
                                         }
                                     }
                                     Err(e) => {
@@ -7048,6 +7247,22 @@ fn main() {
                                 .status_bar
                                 .set_message("Created new PS1 system".to_string());
                         }
+                        "Game & Watch" => {
+                            sys = EmulatorSystem::GameAndWatch(Box::new(
+                                emu_gameandwatch::GameAndWatchSystem::new(),
+                            ));
+                            rom_loaded = true;
+                            rom_hash = None;
+                            runtime_state.clear_mounts();
+                            egui_app.property_pane.system_name = "Game & Watch".to_string();
+                            egui_app.property_pane.rendering_backend =
+                                sys.get_current_renderer_name();
+                            egui_app.property_pane.available_renderers =
+                                sys.get_available_renderers();
+                            egui_app
+                                .status_bar
+                                .set_message("Created new Game & Watch system".to_string());
+                        }
                         _ => {
                             egui_app
                                 .status_bar
@@ -7561,6 +7776,7 @@ fn main() {
                 match &mut sys {
                     EmulatorSystem::SNES(s) => s.set_controller(0, snes_state),
                     EmulatorSystem::Chip8(s) => s.set_controller(chip8_state),
+                    EmulatorSystem::GameAndWatch(s) => s.set_controller(chip8_state),
                     EmulatorSystem::ColecoVision(s) => {
                         // Set both players for ColecoVision
                         s.set_controller(1, coleco_p1_state);

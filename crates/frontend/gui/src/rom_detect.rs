@@ -17,6 +17,7 @@ pub enum SystemType {
     ColecoVision,
     SG1000,
     PS1,
+    GameAndWatch,
 }
 
 #[derive(Debug)]
@@ -47,6 +48,7 @@ pub fn detect_rom_type_with_extension(
         let ext_lower = ext.to_lowercase();
         match ext_lower.as_str() {
             "ch8" | "c8" => return Ok(SystemType::Chip8),
+            "gw" | "gnw" => return Ok(SystemType::GameAndWatch),
             "nes" => {
                 // For .nes extension, still verify it has iNES header
                 if data.len() >= 16 && &data[0..4] == b"NES\x1A" {
@@ -335,12 +337,12 @@ pub fn detect_rom_type(data: &[u8]) -> Result<SystemType, UnsupportedRomError> {
     // Check if it might be a raw binary
     if data.len().is_multiple_of(1024) {
         return Err(UnsupportedRomError {
-            reason: "Unrecognized ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), GBA (.gba), Atari 2600 (.a26/.bin), DOS (.com/.exe), SNES (.smc/.sfc), N64 (.z64/.n64/.v64), SMS (.sms), CHIP-8 (.ch8/.c8), ColecoVision (.col), SG-1000 (.sg/.sc), PS1 (.exe/.psexe/.cue/.bin/.iso)".to_string(),
+            reason: "Unrecognized ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), GBA (.gba), Atari 2600 (.a26/.bin), DOS (.com/.exe), SNES (.smc/.sfc), N64 (.z64/.n64/.v64), SMS (.sms), CHIP-8 (.ch8/.c8), ColecoVision (.col), SG-1000 (.sg/.sc), PS1 (.exe/.psexe/.cue/.bin/.iso), Game & Watch (.gw/.gnw)".to_string(),
         });
     }
 
     Err(UnsupportedRomError {
-        reason: "Unknown ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), GBA (.gba), Atari 2600 (.a26/.bin), DOS (.com/.exe), SNES (.smc/.sfc), N64 (.z64/.n64/.v64), SMS (.sms), CHIP-8 (.ch8/.c8), ColecoVision (.col), SG-1000 (.sg/.sc), PS1 (.exe/.psexe/.cue/.bin/.iso)"
+        reason: "Unknown ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), GBA (.gba), Atari 2600 (.a26/.bin), DOS (.com/.exe), SNES (.smc/.sfc), N64 (.z64/.n64/.v64), SMS (.sms), CHIP-8 (.ch8/.c8), ColecoVision (.col), SG-1000 (.sg/.sc), PS1 (.exe/.psexe/.cue/.bin/.iso), Game & Watch (.gw/.gnw)"
             .to_string(),
     })
 }

@@ -711,6 +711,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "emu_gameandwatch"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "emu_core",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "emu_gb"
 version = "0.1.0"
 dependencies = [
@@ -736,6 +747,7 @@ dependencies = [
  "emu_chip8",
  "emu_colecovision",
  "emu_core",
+ "emu_gameandwatch",
  "emu_gb",
  "emu_n64",
  "emu_nes",

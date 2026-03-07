@@ -31,6 +31,7 @@
 //!     0x12345678,                      // CRC32 of full ROM file
 //!     Some(4),                          // Override to mapper 4 (MMC3)
 //!     Some(Mirroring::Horizontal),      // Override to horizontal mirroring
+//!     None,                             // No timing override
 //!     Some("TLSROM"),                   // Board type (optional, for documentation)
 //! ),
 //! ```
@@ -42,6 +43,7 @@
 //! - NesCartDB: https://nescartdb.com/
 
 use crate::cartridge::Mirroring;
+use emu_core::apu::TimingMode;
 
 /// ROM database entry containing override information for a specific ROM.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +54,10 @@ pub struct RomDbEntry {
     pub mapper: Option<u16>,
     /// Optional mirroring mode override (if None, use header value)
     pub mirroring: Option<Mirroring>,
+    /// Optional timing mode override (if None, use header value)
+    /// Many European ROMs in iNES 1.0 format don't set the PAL flag in byte 9,
+    /// causing them to be misdetected as NTSC. This field allows correcting that.
+    pub timing: Option<TimingMode>,
     /// Optional board name for documentation purposes
     pub board: Option<&'static str>,
 }
@@ -70,6 +76,7 @@ impl RomDbEntry {
     ///     0x12345678,                      // CRC32 of full ROM file
     ///     Some(4),                          // Override to mapper 4 (MMC3)
     ///     Some(Mirroring::Horizontal),      // Override to horizontal mirroring
+    ///     None,                             // No timing override
     ///     Some("TLSROM"),                   // Board type (optional)
     /// )
     /// ```
@@ -77,12 +84,14 @@ impl RomDbEntry {
         crc32: u32,
         mapper: Option<u16>,
         mirroring: Option<Mirroring>,
+        timing: Option<TimingMode>,
         board: Option<&'static str>,
     ) -> Self {
         Self {
             crc32,
             mapper,
             mirroring,
+            timing,
             board,
         }
     }
@@ -99,6 +108,7 @@ static ROM_DATABASE: &[RomDbEntry] = &[
         0x161D717B,                  // CRC32 of full ROM file
         Some(4),                     // Override to mapper 4 (MMC3)
         Some(Mirroring::Horizontal), // TLROM uses horizontal mirroring
+        None,                        // No timing override
         Some("TLROM"),               // Board type
     ),
     // Dragon Ninja (Japan) - Same game as Bad Dudes, MMC3/TLROM
@@ -106,6 +116,7 @@ static ROM_DATABASE: &[RomDbEntry] = &[
         0x2A7D3ADF,                  // CRC32 of full ROM file
         Some(4),                     // Override to mapper 4 (MMC3)
         Some(Mirroring::Horizontal), // TLROM uses horizontal mirroring
+        None,                        // No timing override
         Some("TLROM"),               // Board type
     ),
     // Dragon Ninja (Japan, Rev A) - Revised version, MMC3/TLROM
@@ -113,6 +124,7 @@ static ROM_DATABASE: &[RomDbEntry] = &[
         0x2AE535CA,                  // CRC32 of full ROM file
         Some(4),                     // Override to mapper 4 (MMC3)
         Some(Mirroring::Horizontal), // TLROM uses horizontal mirroring
+        None,                        // No timing override
         Some("TLROM"),               // Board type
     ),
     // Bad Dudes vs Dragon Ninja (Europe) - MMC3/TLROM
@@ -120,6 +132,7 @@ static ROM_DATABASE: &[RomDbEntry] = &[
         0x8C252AC4,                  // CRC32 of full ROM file
         Some(4),                     // Override to mapper 4 (MMC3)
         Some(Mirroring::Horizontal), // TLROM uses horizontal mirroring
+        Some(TimingMode::Pal),       // European release - PAL timing
         Some("TLROM"),               // Board type
     ),
     // Bee 52 (USA) (Unl) - Header incorrectly specifies horizontal mirroring,
@@ -128,7 +141,20 @@ static ROM_DATABASE: &[RomDbEntry] = &[
         0xE19C2722,                // CRC32 of full ROM file
         None,                      // Use header mapper (71 - Camerica)
         Some(Mirroring::Vertical), // Override to vertical mirroring
+        None,                      // No timing override
         None,                      // No specific board name
+    ),
+    // Aladdin (Europe) - AxROM/AOROM with CHR-RAM
+    // iNES 1.0 header byte 9 does not set PAL flag, causing NTSC misdetection.
+    // Running with NTSC timing (20 VBlank scanlines) doesn't give enough time
+    // for the game's CHR-RAM uploads during VBlank, breaking gameplay graphics.
+    // PAL timing (70 VBlank scanlines) is required for correct operation.
+    RomDbEntry::new(
+        0xDCD55BEC,            // CRC32 of full ROM file
+        None,                  // Use header mapper (7 - AxROM)
+        None, // Use default mirroring (SingleScreenLower via get_initial_mirroring)
+        Some(TimingMode::Pal), // Override to PAL timing
+        Some("AOROM"), // Board type
     ),
 ];
 
@@ -221,23 +247,26 @@ mod tests {
             0x12345678,
             Some(4),
             Some(Mirroring::Horizontal),
+            None,
             Some("TEST"),
         );
 
         assert_eq!(entry.crc32, 0x12345678);
         assert_eq!(entry.mapper, Some(4));
         assert_eq!(entry.mirroring, Some(Mirroring::Horizontal));
+        assert_eq!(entry.timing, None);
         assert_eq!(entry.board, Some("TEST"));
     }
 
     #[test]
     fn test_rom_db_entry_optional_fields() {
         // Test creating an entry with only CRC32 (no overrides)
-        let entry = RomDbEntry::new(0xABCDEF00, None, None, None);
+        let entry = RomDbEntry::new(0xABCDEF00, None, None, None, None);
 
         assert_eq!(entry.crc32, 0xABCDEF00);
         assert_eq!(entry.mapper, None);
         assert_eq!(entry.mirroring, None);
+        assert_eq!(entry.timing, None);
         assert_eq!(entry.board, None);
     }
 }
