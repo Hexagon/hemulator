@@ -100,6 +100,7 @@ enum EmulatorSystem {
     SG1000(Box<emu_sg1000::Sg1000System>),
     PS1(Box<emu_ps1::Ps1System>),
     GameAndWatch(Box<emu_gameandwatch::GameAndWatchSystem>),
+    Atari5200(Box<emu_atari5200::Atari5200System>),
 }
 
 #[allow(dead_code)]
@@ -145,6 +146,9 @@ impl EmulatorSystem {
             EmulatorSystem::GameAndWatch(sys) => sys
                 .step_frame()
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::Atari5200(sys) => sys
+                .step_frame()
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         }
     }
 
@@ -163,6 +167,7 @@ impl EmulatorSystem {
             EmulatorSystem::SG1000(sys) => sys.reset(),
             EmulatorSystem::PS1(sys) => sys.reset(),
             EmulatorSystem::GameAndWatch(sys) => sys.reset(),
+            EmulatorSystem::Atari5200(sys) => sys.reset(),
         }
     }
 
@@ -181,6 +186,7 @@ impl EmulatorSystem {
             EmulatorSystem::SG1000(sys) => sys.debugger(),
             EmulatorSystem::PS1(sys) => sys.debugger(),
             EmulatorSystem::GameAndWatch(sys) => sys.debugger(),
+            EmulatorSystem::Atari5200(sys) => sys.debugger(),
         }
     }
 
@@ -199,6 +205,7 @@ impl EmulatorSystem {
             EmulatorSystem::SG1000(sys) => sys.get_total_cycles(),
             EmulatorSystem::PS1(sys) => sys.get_total_cycles(),
             EmulatorSystem::GameAndWatch(sys) => sys.get_total_cycles(),
+            EmulatorSystem::Atari5200(sys) => sys.get_total_cycles(),
         }
     }
 
@@ -248,6 +255,9 @@ impl EmulatorSystem {
             EmulatorSystem::GameAndWatch(sys) => sys
                 .mount(mount_point_id, data)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::Atari5200(sys) => sys
+                .mount(mount_point_id, data)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         }
     }
 
@@ -267,6 +277,7 @@ impl EmulatorSystem {
             EmulatorSystem::SG1000(sys) => sys.mount_points(),
             EmulatorSystem::PS1(sys) => sys.mount_points(),
             EmulatorSystem::GameAndWatch(sys) => sys.mount_points(),
+            EmulatorSystem::Atari5200(sys) => sys.mount_points(),
         }
     }
 
@@ -312,6 +323,9 @@ impl EmulatorSystem {
             EmulatorSystem::GameAndWatch(sys) => sys
                 .unmount(mount_point_id)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::Atari5200(sys) => sys
+                .unmount(mount_point_id)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         }
     }
 
@@ -331,6 +345,7 @@ impl EmulatorSystem {
             EmulatorSystem::SG1000(sys) => sys.is_mounted(mount_point_id),
             EmulatorSystem::PS1(sys) => sys.is_mounted(mount_point_id),
             EmulatorSystem::GameAndWatch(sys) => sys.is_mounted(mount_point_id),
+            EmulatorSystem::Atari5200(sys) => sys.is_mounted(mount_point_id),
         }
     }
 
@@ -360,6 +375,7 @@ impl EmulatorSystem {
             EmulatorSystem::SG1000(sys) => sys.supports_save_states(),
             EmulatorSystem::PS1(sys) => sys.supports_save_states(),
             EmulatorSystem::GameAndWatch(sys) => sys.supports_save_states(),
+            EmulatorSystem::Atari5200(sys) => sys.supports_save_states(),
         }
     }
 
@@ -378,6 +394,7 @@ impl EmulatorSystem {
             EmulatorSystem::SG1000(sys) => sys.save_state(),
             EmulatorSystem::PS1(sys) => sys.save_state(),
             EmulatorSystem::GameAndWatch(sys) => sys.save_state(),
+            EmulatorSystem::Atari5200(sys) => sys.save_state(),
         }
     }
 
@@ -396,6 +413,7 @@ impl EmulatorSystem {
             EmulatorSystem::SG1000(sys) => sys.load_state(state),
             EmulatorSystem::PS1(sys) => sys.load_state(state),
             EmulatorSystem::GameAndWatch(sys) => sys.load_state(state),
+            EmulatorSystem::Atari5200(sys) => sys.load_state(state),
         }
     }
 
@@ -536,6 +554,7 @@ impl EmulatorSystem {
             EmulatorSystem::GameAndWatch(_) => {
                 // Game & Watch uses 16-bit controller via set_controller_16
             }
+            EmulatorSystem::Atari5200(sys) => sys.set_controller(port, state),
         }
     }
 
@@ -646,6 +665,7 @@ impl EmulatorSystem {
                 None
             }
             EmulatorSystem::GameAndWatch(sys) => Some(sys.cpu.pc as u32),
+            EmulatorSystem::Atari5200(_) => None,
         }
     }
 
@@ -665,6 +685,7 @@ impl EmulatorSystem {
             EmulatorSystem::SG1000(_) => Some(3.58),  // SG-1000 Z80A (3.579545 MHz NTSC)
             EmulatorSystem::PS1(_) => Some(33.87),    // PS1 R3000A (33.8688 MHz)
             EmulatorSystem::GameAndWatch(_) => Some(0.033), // SM510 (32.768 kHz)
+            EmulatorSystem::Atari5200(_) => Some(1.79), // Atari 5200 6502C (1.79 MHz)
         }
     }
 
@@ -691,6 +712,7 @@ impl EmulatorSystem {
             EmulatorSystem::SG1000(_) => emu_nes::RuntimeStats::default(),
             EmulatorSystem::PS1(_) => emu_nes::RuntimeStats::default(),
             EmulatorSystem::GameAndWatch(_) => emu_nes::RuntimeStats::default(),
+            EmulatorSystem::Atari5200(_) => emu_nes::RuntimeStats::default(),
         }
     }
 
@@ -709,6 +731,7 @@ impl EmulatorSystem {
             EmulatorSystem::SG1000(_) => emu_core::apu::TimingMode::Ntsc,
             EmulatorSystem::PS1(_) => emu_core::apu::TimingMode::Ntsc,
             EmulatorSystem::GameAndWatch(_) => emu_core::apu::TimingMode::Ntsc,
+            EmulatorSystem::Atari5200(_) => emu_core::apu::TimingMode::Ntsc,
         }
     }
 
@@ -752,6 +775,7 @@ impl EmulatorSystem {
             EmulatorSystem::SG1000(sys) => sys.get_audio_samples(count),
             EmulatorSystem::PS1(sys) => sys.get_audio_samples(count),
             EmulatorSystem::GameAndWatch(sys) => sys.generate_audio_samples(count),
+            EmulatorSystem::Atari5200(sys) => sys.get_audio_samples(count),
         }
     }
 
@@ -770,6 +794,7 @@ impl EmulatorSystem {
             EmulatorSystem::SG1000(_) => (256, 192),       // TMS9918A resolution
             EmulatorSystem::PS1(_) => (320, 240),          // PS1 standard resolution
             EmulatorSystem::GameAndWatch(_) => (160, 120), // LCD segment grid
+            EmulatorSystem::Atari5200(_) => (320, 192),    // ANTIC standard resolution
         }
     }
 
@@ -788,6 +813,7 @@ impl EmulatorSystem {
             EmulatorSystem::SG1000(_) => "sg1000",
             EmulatorSystem::PS1(_) => "ps1",
             EmulatorSystem::GameAndWatch(_) => "gameandwatch",
+            EmulatorSystem::Atari5200(_) => "atari5200",
         }
     }
 
@@ -807,6 +833,7 @@ impl EmulatorSystem {
             EmulatorSystem::SG1000(_) => SystemType::SG1000,
             EmulatorSystem::PS1(_) => SystemType::PS1,
             EmulatorSystem::GameAndWatch(_) => SystemType::GameAndWatch,
+            EmulatorSystem::Atari5200(_) => SystemType::Atari5200,
         }
     }
 
@@ -873,6 +900,7 @@ impl EmulatorSystem {
             EmulatorSystem::SG1000(_) => "Software".to_string(),
             EmulatorSystem::PS1(_) => "Software".to_string(),
             EmulatorSystem::GameAndWatch(_) => "Software".to_string(),
+            EmulatorSystem::Atari5200(_) => "Software".to_string(),
         }
     }
 
@@ -909,6 +937,7 @@ impl EmulatorSystem {
             EmulatorSystem::SG1000(_) => vec!["Software".to_string()],
             EmulatorSystem::PS1(_) => vec!["Software".to_string()],
             EmulatorSystem::GameAndWatch(_) => vec!["Software".to_string()],
+            EmulatorSystem::Atari5200(_) => vec!["Software".to_string()],
         }
     }
 
@@ -929,6 +958,7 @@ impl EmulatorSystem {
             EmulatorSystem::SG1000(sys) => sys.check_breakpoint(),
             EmulatorSystem::PS1(_) => None,
             EmulatorSystem::GameAndWatch(_) => None,
+            EmulatorSystem::Atari5200(sys) => sys.check_breakpoint(),
         }
     }
 
@@ -948,6 +978,7 @@ impl EmulatorSystem {
             EmulatorSystem::SG1000(sys) => sys.get_breakpoint_manager().get_all(),
             EmulatorSystem::PS1(_) => Vec::new(),
             EmulatorSystem::GameAndWatch(_) => Vec::new(),
+            EmulatorSystem::Atari5200(sys) => sys.get_breakpoint_manager().get_all(),
         }
     }
 
@@ -967,6 +998,7 @@ impl EmulatorSystem {
             EmulatorSystem::SG1000(sys) => Some(sys.get_instruction_tracer()),
             EmulatorSystem::PS1(_) => None,
             EmulatorSystem::GameAndWatch(_) => None,
+            EmulatorSystem::Atari5200(sys) => Some(sys.get_instruction_tracer()),
         }
     }
 
@@ -988,6 +1020,7 @@ impl EmulatorSystem {
             EmulatorSystem::SG1000(sys) => Some(sys.get_instruction_tracer_mut()),
             EmulatorSystem::PS1(_) => None,
             EmulatorSystem::GameAndWatch(_) => None,
+            EmulatorSystem::Atari5200(sys) => Some(sys.get_instruction_tracer_mut()),
         }
     }
 }
@@ -1402,7 +1435,10 @@ fn save_project(
         let system_name = sys.system_name();
         let relevant_mounts: Vec<&str> = match system_name {
             "pc" => vec!["BIOS", "FloppyA", "FloppyB", "HardDrive"],
-            "nes" | "gameboy" | "gba" | "atari2600" | "snes" | "n64" => vec!["Cartridge"],
+            "atari5200" => vec!["BIOS", "Cartridge"],
+            "nes" | "gameboy" | "gba" | "atari2600" | "snes" | "n64" => {
+                vec!["Cartridge"]
+            }
             _ => vec![],
         };
 
@@ -1667,7 +1703,7 @@ impl CliArgs {
                         args.system = Some(system);
                     } else {
                         eprintln!(
-                            "Error: --system requires a value (pc, nes, gb, gba, atari2600, snes, n64)."
+                            "Error: --system requires a value (pc, nes, gb, gba, atari2600, atari5200, snes, n64)."
                         );
                         std::process::exit(1);
                     }
@@ -1926,7 +1962,7 @@ impl CliArgs {
             "  --no-gui                 Run in a plain SDL2 window without the egui overlay (faster startup, minimal UI)"
         );
         eprintln!(
-            "  -S, --system <SYSTEM>    Start clean system (pc, nes, gb, gba, atari2600, snes, n64)"
+            "  -S, --system <SYSTEM>    Start clean system (pc, nes, gb, gba, atari2600, atari5200, snes, n64)"
         );
         eprintln!("  --bios <file>            Load BIOS file (for PS1, ColecoVision, SMS, PC)");
         eprintln!("  --slot1 <file>           Load file into slot 1 (BIOS for PC)");
@@ -2026,6 +2062,7 @@ impl CliArgs {
         );
         eprintln!("  hemu --bios coleco.rom game.col                # Load ColecoVision with BIOS");
         eprintln!("  hemu --bios bios.sms game.sms                  # Load SMS with BIOS");
+        eprintln!("  hemu --bios 5200.rom game.a52                  # Load Atari 5200 with BIOS");
         eprintln!("  hemu --bios custom.bin --slot2 boot.img       # Load PC with custom BIOS");
         eprintln!("  hemu --create-blank-disk floppy.img 1.44m      # Create 1.44MB floppy image");
         eprintln!(
@@ -2037,7 +2074,7 @@ impl CliArgs {
     fn print_version() {
         println!("Hemulator v{}", env!("CARGO_PKG_VERSION"));
         println!("Multi-System Emulator");
-        println!("Supported systems: NES, Game Boy, Atari 2600, PC/DOS, SNES, N64");
+        println!("Supported systems: NES, Game Boy, Atari 2600, Atari 5200, PC/DOS, SNES, N64");
     }
 }
 
@@ -2105,6 +2142,10 @@ Please ensure your system supports hardware-accelerated OpenGL and that the grap
 /// Create an Atari 2600 system
 fn create_atari2600_system(_settings: &Settings) -> emu_atari2600::Atari2600System {
     emu_atari2600::Atari2600System::new()
+}
+
+fn create_atari5200_system(_settings: &Settings) -> emu_atari5200::Atari5200System {
+    emu_atari5200::Atari5200System::new()
 }
 
 /// Helper function to load BIOS from CLI argument or auto-search in ROM directory
@@ -2323,6 +2364,12 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
             EmulatorSystem::GameAndWatch(_) => {
                 // Game & Watch instruction tracing not yet implemented
             }
+            EmulatorSystem::Atari5200(s) => {
+                s.set_instruction_tracing(true);
+                if let Some(limit) = cli_args.trace_limit {
+                    s.get_instruction_tracer_mut().set_max_history(limit);
+                }
+            }
         }
     }
 
@@ -2342,6 +2389,7 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
             EmulatorSystem::SG1000(s) => s.add_breakpoint(addr),
             EmulatorSystem::PS1(_) => {} // PS1 breakpoints not yet implemented
             EmulatorSystem::GameAndWatch(_) => {} // Game & Watch breakpoints not yet implemented
+            EmulatorSystem::Atari5200(s) => s.add_breakpoint(addr),
         }
     }
 
@@ -2361,6 +2409,7 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
             EmulatorSystem::SG1000(s) => s.add_read_breakpoint(addr),
             EmulatorSystem::PS1(_) => {}
             EmulatorSystem::GameAndWatch(_) => {}
+            EmulatorSystem::Atari5200(s) => s.add_read_breakpoint(addr),
         }
     }
 
@@ -2380,6 +2429,7 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
             EmulatorSystem::SG1000(s) => s.add_write_breakpoint(addr),
             EmulatorSystem::PS1(_) => {}
             EmulatorSystem::GameAndWatch(_) => {}
+            EmulatorSystem::Atari5200(s) => s.add_write_breakpoint(addr),
         }
     }
 }
@@ -2926,6 +2976,40 @@ fn main() {
                     }
                 }
             }
+            "atari5200" | "atari52" => {
+                sys = EmulatorSystem::Atari5200(Box::new(create_atari5200_system(&settings)));
+                rom_loaded = true;
+                status_message = "Clean Atari 5200 system started".to_string();
+                println!("Started clean Atari 5200 system");
+
+                if let Some(ref p) = rom_path {
+                    if !p.to_lowercase().ends_with(".hemu") {
+                        match std::fs::read(p) {
+                            Ok(data) => {
+                                rom_hash = Some(GameSaves::rom_hash(&data));
+                                if let EmulatorSystem::Atari5200(atari_sys) = &mut sys {
+                                    if let Err(e) = atari_sys.mount("Cartridge", &data) {
+                                        eprintln!("Failed to load Atari 5200 ROM: {}", e);
+                                        status_message = format!("Error: {}", e);
+                                        rom_hash = None;
+                                    } else {
+                                        rom_loaded = true;
+                                        runtime_state.set_mount("Cartridge".to_string(), p.clone());
+                                        if let Err(e) = settings.save() {
+                                            eprintln!("Warning: Failed to save settings: {}", e);
+                                        }
+                                        status_message = "Atari 5200 ROM loaded".to_string();
+                                        println!("Loaded Atari 5200 ROM: {}", p);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to read file: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
             "pc" => {
                 sys = EmulatorSystem::PC(Box::new(emu_pc::PcSystem::new()));
                 rom_loaded = true; // Mark system as loaded even without ROM
@@ -3055,7 +3139,7 @@ fn main() {
             }
             _ => {
                 eprintln!("Error: Unknown system '{}'", system_name);
-                eprintln!("Valid systems: pc, nes, gb, gba, atari2600, snes, n64, gameandwatch");
+                eprintln!("Valid systems: pc, nes, gb, gba, atari2600, atari5200, snes, n64, gameandwatch");
                 std::process::exit(1);
             }
         }
@@ -3256,6 +3340,47 @@ fn main() {
                             } else {
                                 rom_loaded = true;
                                 sys = EmulatorSystem::Atari2600(Box::new(a2600_sys));
+                                runtime_state.set_mount("Cartridge".to_string(), p.clone());
+                                if let Err(e) = settings.save() {
+                                    eprintln!("Warning: Failed to save settings: {}", e);
+                                }
+                            }
+                        }
+                        Ok(SystemType::Atari5200) => {
+                            rom_hash = Some(GameSaves::rom_hash(&data));
+                            let mut a5200_sys = create_atari5200_system(&settings);
+
+                            // Atari 5200 BIOS is optional - try CLI arg first, then auto-search
+                            let bios_candidates = [
+                                "5200.rom",
+                                "5200.bin",
+                                "ataribas.rom",
+                                "bios.rom",
+                                "bios.bin",
+                            ];
+
+                            let bios_result = load_bios(
+                                cli_args.bios_path.as_ref(),
+                                Some(p),
+                                &bios_candidates,
+                                None, // 5200 BIOS can be 2KB or 4KB
+                            );
+
+                            if let Some((bios_data, bios_path)) = bios_result {
+                                if a5200_sys.mount("BIOS", &bios_data).is_ok() {
+                                    runtime_state.set_mount("BIOS".to_string(), bios_path);
+                                } else {
+                                    eprintln!("Failed to mount Atari 5200 BIOS");
+                                }
+                            }
+
+                            if let Err(e) = a5200_sys.mount("Cartridge", &data) {
+                                eprintln!("Failed to load Atari 5200 ROM: {}", e);
+                                status_message = format!("Error: {}", e);
+                                rom_hash = None;
+                            } else {
+                                rom_loaded = true;
+                                sys = EmulatorSystem::Atari5200(Box::new(a5200_sys));
                                 runtime_state.set_mount("Cartridge".to_string(), p.clone());
                                 if let Err(e) = settings.save() {
                                     eprintln!("Warning: Failed to save settings: {}", e);
@@ -4378,6 +4503,7 @@ fn main() {
                         SystemDebugInfo::new("Game & Watch".to_string())
                     }
                 }
+                EmulatorSystem::Atari5200(_) => SystemDebugInfo::new("Atari 5200".to_string()),
             };
             egui_app.tab_manager.update_debug_info(debug_info);
 
@@ -4433,6 +4559,7 @@ fn main() {
                     let debugger: &dyn Debugger = s.as_ref();
                     Some(create_enhanced_debug_state("Game & Watch", debugger, &sys))
                 }
+                EmulatorSystem::Atari5200(_) => None,
             };
 
             if let Some(enhanced_state) = enhanced_state_opt {
@@ -4455,6 +4582,7 @@ fn main() {
                     EmulatorSystem::SG1000(s) => Some(s.as_ref()),
                     EmulatorSystem::PS1(_) => None,
                     EmulatorSystem::GameAndWatch(s) => Some(s.as_ref()),
+                    EmulatorSystem::Atari5200(_) => None,
                 };
 
                 if let Some(debugger) = debugger {
@@ -4873,6 +5001,19 @@ fn main() {
                                 &runtime_state,
                             );
                         }
+                        "Atari 5200" => {
+                            sys = EmulatorSystem::Atari5200(Box::new(create_atari5200_system(
+                                &settings,
+                            )));
+                            configure_system_ui(
+                                &mut egui_app,
+                                &sys,
+                                "Atari 5200",
+                                &mut rom_loaded,
+                                "Created new Atari 5200 system",
+                                &runtime_state,
+                            );
+                        }
                         "SMS" => {
                             sys = EmulatorSystem::SMS(Box::new(emu_sms::SmsSystem::new()));
                             configure_system_ui(
@@ -5001,15 +5142,16 @@ fn main() {
                         .add_filter(
                             "All ROM Files",
                             &[
-                                "nes", "unf", "gb", "gbc", "gba", "bin", "a26", "smc", "sfc",
-                                "z64", "n64", "v64", "com", "exe", "sms", "ch8", "c8", "col", "sg",
-                                "sc", "gw", "gnw", "mgw",
+                                "nes", "unf", "gb", "gbc", "gba", "bin", "a26", "a52", "smc",
+                                "sfc", "z64", "n64", "v64", "com", "exe", "sms", "ch8", "c8",
+                                "col", "sg", "sc", "gw", "gnw", "mgw",
                             ],
                         )
                         .add_filter("NES ROMs", &["nes", "unf"])
                         .add_filter("Game Boy ROMs", &["gb", "gbc"])
                         .add_filter("GBA ROMs", &["gba"])
                         .add_filter("Atari 2600 ROMs", &["a26", "bin"])
+                        .add_filter("Atari 5200 ROMs", &["a52", "bin"])
                         .add_filter("SNES ROMs", &["smc", "sfc", "bin"])
                         .add_filter("N64 ROMs", &["z64", "n64", "v64", "bin"])
                         .add_filter("SMS ROMs", &["sms", "bin"])
@@ -5206,6 +5348,68 @@ fn main() {
                                                 .set_message("Atari 2600 ROM loaded".to_string());
                                             let _ = sys.resolution();
                                             // Load save states for this ROM
+                                            if let Some(ref hash) = rom_hash {
+                                                _game_saves = GameSaves::load(hash);
+                                            }
+                                        }
+                                    }
+                                    Ok(SystemType::Atari5200) => {
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        let mut a5200_sys = create_atari5200_system(&settings);
+
+                                        // Atari 5200 BIOS - optional auto-search
+                                        let bios_candidates = [
+                                            "5200.rom",
+                                            "5200.bin",
+                                            "ataribas.rom",
+                                            "bios.rom",
+                                            "bios.bin",
+                                        ];
+                                        let bios_result = load_bios(
+                                            None,
+                                            Some(&path_str),
+                                            &bios_candidates,
+                                            None,
+                                        );
+                                        if let Some((bios_data, bios_path)) = bios_result {
+                                            if a5200_sys.mount("BIOS", &bios_data).is_ok() {
+                                                runtime_state
+                                                    .set_mount("BIOS".to_string(), bios_path);
+                                            }
+                                        }
+
+                                        if let Err(e) = a5200_sys.mount("Cartridge", &data) {
+                                            egui_app
+                                                .status_bar
+                                                .set_message(format!("Error: {}", e));
+                                            rom_hash = None;
+                                        } else {
+                                            rom_loaded = true;
+                                            sys = EmulatorSystem::Atari5200(Box::new(a5200_sys));
+                                            egui_app.property_pane.system_name =
+                                                "Atari 5200".to_string();
+                                            egui_app.property_pane.rendering_backend =
+                                                sys.get_current_renderer_name();
+                                            egui_app.property_pane.available_renderers =
+                                                sys.get_available_renderers();
+                                            runtime_state.set_mount(
+                                                "Cartridge".to_string(),
+                                                path_str.clone(),
+                                            );
+                                            settings.add_recent_file(path_str.clone());
+                                            if let Err(e) = settings.save() {
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
+                                            }
+                                            egui_app.update_recent_files(
+                                                settings.get_recent_files().to_vec(),
+                                            );
+                                            egui_app
+                                                .status_bar
+                                                .set_message("Atari 5200 ROM loaded".to_string());
+                                            let _ = sys.resolution();
                                             if let Some(ref hash) = rom_hash {
                                                 _game_saves = GameSaves::load(hash);
                                             }
@@ -5947,6 +6151,68 @@ fn main() {
                                             egui_app
                                                 .status_bar
                                                 .set_message("Atari 2600 ROM loaded".to_string());
+                                            let _ = sys.resolution();
+                                            if let Some(ref hash) = rom_hash {
+                                                _game_saves = GameSaves::load(hash);
+                                            }
+                                        }
+                                    }
+                                    Ok(SystemType::Atari5200) => {
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        let mut a5200_sys = create_atari5200_system(&settings);
+
+                                        // Atari 5200 BIOS - optional auto-search
+                                        let bios_candidates = [
+                                            "5200.rom",
+                                            "5200.bin",
+                                            "ataribas.rom",
+                                            "bios.rom",
+                                            "bios.bin",
+                                        ];
+                                        let bios_result = load_bios(
+                                            None,
+                                            Some(&file_path),
+                                            &bios_candidates,
+                                            None,
+                                        );
+                                        if let Some((bios_data, bios_path)) = bios_result {
+                                            if a5200_sys.mount("BIOS", &bios_data).is_ok() {
+                                                runtime_state
+                                                    .set_mount("BIOS".to_string(), bios_path);
+                                            }
+                                        }
+
+                                        if let Err(e) = a5200_sys.mount("Cartridge", &data) {
+                                            egui_app
+                                                .status_bar
+                                                .set_message(format!("Error: {}", e));
+                                            rom_hash = None;
+                                        } else {
+                                            rom_loaded = true;
+                                            sys = EmulatorSystem::Atari5200(Box::new(a5200_sys));
+                                            egui_app.property_pane.system_name =
+                                                "Atari 5200".to_string();
+                                            egui_app.property_pane.rendering_backend =
+                                                sys.get_current_renderer_name();
+                                            egui_app.property_pane.available_renderers =
+                                                sys.get_available_renderers();
+                                            runtime_state.set_mount(
+                                                "Cartridge".to_string(),
+                                                file_path.clone(),
+                                            );
+                                            settings.add_recent_file(file_path.clone());
+                                            if let Err(e) = settings.save() {
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
+                                            }
+                                            egui_app.update_recent_files(
+                                                settings.get_recent_files().to_vec(),
+                                            );
+                                            egui_app
+                                                .status_bar
+                                                .set_message("Atari 5200 ROM loaded".to_string());
                                             let _ = sys.resolution();
                                             if let Some(ref hash) = rom_hash {
                                                 _game_saves = GameSaves::load(hash);

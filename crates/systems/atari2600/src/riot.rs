@@ -307,28 +307,30 @@ impl Riot {
     }
 
     /// Clock the timer
+    ///
+    /// The RIOT timer counts down from its initial value at the programmed interval.
+    /// When the timer transitions from 0 to FF (underflow), the underflow flag is set
+    /// and the interval switches to 1 cycle per decrement. The timer then continues
+    /// counting down from FF at the 1-cycle rate until re-programmed.
+    ///
+    /// This matches the behavior documented in:
+    /// - Stella emulator (MIT license) TIA/RIOT timing
+    /// - Andrew Towers' Atari 2600 documentation
+    /// - "Atari 2600 Programming" by Paul Slocum
     pub fn clock(&mut self, cycles: u16) {
         for _ in 0..cycles {
             self.timer_cycles += 1;
             if self.timer_cycles >= self.timer_interval {
                 self.timer_cycles = 0;
 
-                // Decrement timer
                 if self.timer == 0 {
-                    // Timer at 0, wrap around
-                    // eprintln!("RIOT: Timer underflow! interval=1");
+                    // Timer was at 0 — this decrement causes the actual underflow.
+                    // Set the flag, wrap to 0xFF, switch to 1-cycle interval.
                     self.timer_underflow.set(true);
-                    self.timer_interval = 1; // After underflow, decrement every cycle
+                    self.timer_interval = 1;
                     self.timer = 0xFF;
                 } else {
                     self.timer = self.timer.wrapping_sub(1);
-                    // Check if we just hit 0
-                    if self.timer == 0 {
-                        // eprintln!("RIOT: Timer hit 0! interval=1");
-                        self.timer_underflow.set(true);
-                        self.timer_interval = 1;
-                        // self.timer = 0xFF; // REMOVED: Don't wrap immediately, stay at 0 for one interval
-                    }
                 }
             }
         }
@@ -405,11 +407,13 @@ mod tests {
         // Clock until 0
         riot.clock(9);
         assert_eq!(riot.read(0x0284), 0); // Should be 0
-        assert_eq!(riot.read(0x0285) & 0x80, 0x80); // Underflow flag set at $285
+                                          // Flag is NOT yet set — it's set on the 0→0xFF transition per hardware
+        assert_eq!(riot.read(0x0285) & 0x80, 0x00);
 
-        // Clock one more time
+        // Clock one more time — NOW the underflow occurs (0→0xFF)
         riot.clock(1);
         assert_eq!(riot.read(0x0284), 0xFF); // Should wrap to 0xFF
+        assert_eq!(riot.read(0x0285) & 0x80, 0x80); // Underflow flag set NOW
     }
 
     #[test]
@@ -422,10 +426,12 @@ mod tests {
         // Initially, underflow flag should be clear
         assert_eq!(riot.read(0x0285) & 0x80, 0x00);
 
-        // Clock until timer expires
+        // Clock until timer reaches 0 — flag not yet set
         riot.clock(2);
+        assert_eq!(riot.read(0x0285) & 0x80, 0x00);
 
-        // Underflow flag should now be set
+        // Clock one more — timer wraps 0→0xFF, flag now set
+        riot.clock(1);
         assert_eq!(riot.read(0x0285) & 0x80, 0x80);
 
         // Reading TIMINT should clear the flag
@@ -437,7 +443,8 @@ mod tests {
 
         // Also test with INSTAT mirror at $287
         riot.write(0x0294, 1);
-        riot.clock(1);
+        // Clock to 0, then one more for underflow
+        riot.clock(2);
         assert_eq!(riot.read(0x0287) & 0x80, 0x80); // Flag set
         assert_eq!(riot.read(0x0287) & 0x80, 0x00); // Flag cleared by read
     }
@@ -668,11 +675,11 @@ mod tests {
         // Writing to any timer register should clear the underflow flag per spec
         let mut riot = Riot::new();
 
-        // Set timer to expire
+        // Set timer to expire: 1 clock to reach 0, 1 more for underflow
         riot.write(0x0294, 1);
-        riot.clock(1);
+        riot.clock(2);
 
-        // Read TIMINT to set the flag
+        // Read TIMINT — flag should be set after 0→0xFF transition
         let status = riot.read(0x0285);
         assert_eq!(status & 0x80, 0x80); // Flag should be set
 

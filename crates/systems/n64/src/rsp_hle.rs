@@ -228,29 +228,46 @@ impl RspHle {
         }
     }
 
+    /// Resolve segmented address using segment base table
+    /// N64 display list commands use segmented addressing where the top byte
+    /// is a segment index (0x00-0x0F) and the remaining 24 bits are an offset.
+    /// The resolved address = segment_bases[seg] + offset.
+    /// Addresses in KSEG0/KSEG1 (>=0x80000000) are passed through directly
+    /// since they are already absolute virtual addresses.
+    fn resolve_segment_addr(&self, addr: u32) -> u32 {
+        // If address is already a kernel virtual address, pass it through
+        if addr >= 0x80000000 {
+            return addr;
+        }
+        let segment = ((addr >> 24) & 0x0F) as usize;
+        let offset = addr & 0x00FFFFFF;
+        self.segment_bases[segment].wrapping_add(offset)
+    }
+
     /// Load a 4x4 matrix from RDRAM
-    /// N64 matrices are stored as 16 signed 16.16 fixed-point values (32 bits each)
+    /// N64 matrices are stored as two 32-byte halves (64 bytes total):
+    ///   Bytes 0-31:  16× 16-bit signed integer parts (big-endian)
+    ///   Bytes 32-63: 16× 16-bit unsigned fractional parts (big-endian)
+    /// Element[i] = (int_part[i] << 16) | frac_part[i], as signed 16.16 fixed-point
     fn load_matrix_from_rdram(&self, rdram: &[u8], addr: u32) -> [f32; 16] {
         let mut matrix = [0.0f32; 16];
         let addr = Self::virt_to_phys(addr);
 
-        // Safety check
+        // Safety check: need 64 bytes
         if addr + 63 >= rdram.len() {
             return Self::identity_matrix();
         }
 
-        // Read 16 32-bit fixed-point values (16.16 format)
-        for (i, elem) in matrix.iter_mut().enumerate() {
-            let offset = addr + i * 4;
-            // Read as signed 32-bit integer
-            let fixed_point = i32::from_be_bytes([
-                rdram[offset],
-                rdram[offset + 1],
-                rdram[offset + 2],
-                rdram[offset + 3],
-            ]);
-            // Convert from 16.16 fixed-point to float
-            *elem = (fixed_point as f32) / 65536.0;
+        for (i, element) in matrix.iter_mut().enumerate() {
+            let int_offset = addr + i * 2;
+            let frac_offset = addr + 32 + i * 2;
+
+            let int_part = i16::from_be_bytes([rdram[int_offset], rdram[int_offset + 1]]);
+            let frac_part = u16::from_be_bytes([rdram[frac_offset], rdram[frac_offset + 1]]);
+
+            // Combine: (int_part << 16) | frac_part as signed 16.16
+            let fixed = ((int_part as i32) << 16) | (frac_part as i32);
+            *element = (fixed as f32) / 65536.0;
         }
 
         matrix
@@ -361,23 +378,26 @@ impl RspHle {
 
     /// Execute graphics microcode task (F3DEX/F3DEX2)
     fn execute_graphics_task(&mut self, dmem: &[u8; 4096], rdram: &mut [u8], rdp: &mut Rdp) -> u32 {
-        // Try to read task structure from DMEM first
-        let mut data_ptr = self.read_u32(dmem, 0x30);
-        let mut data_size = self.read_u32(dmem, 0x34);
-        let mut output_buff = self.read_u32(dmem, 0x28);
-        let mut output_buff_size = self.read_u32(dmem, 0x2C);
+        // OSTask structure is DMA'd to DMEM at offset 0xFC0 (last 64 bytes of DMEM)
+        // OSTask fields relative to task base:
+        //   0x28: output_buff, 0x2C: output_buff_size
+        //   0x30: data_ptr (display list), 0x34: data_size
+        const TASK_BASE: usize = 0xFC0;
+        let mut data_ptr = self.read_u32(dmem, TASK_BASE + 0x30);
+        let mut data_size = self.read_u32(dmem, TASK_BASE + 0x34);
+        let mut output_buff = self.read_u32(dmem, TASK_BASE + 0x28);
+        let mut output_buff_size = self.read_u32(dmem, TASK_BASE + 0x2C);
 
         log(LogCategory::PPU, LogLevel::Info, || {
             format!(
-                "RSP HLE: DMEM task structure: data_ptr=0x{:08X}, data_size=0x{:X}, output_buff=0x{:08X}, output_buff_size=0x{:X}",
-                data_ptr, data_size, output_buff, output_buff_size
+                "RSP HLE: DMEM task structure at 0x{:03X}: data_ptr=0x{:08X}, data_size=0x{:X}, output_buff=0x{:08X}, output_buff_size=0x{:X}",
+                TASK_BASE, data_ptr, data_size, output_buff, output_buff_size
             )
         });
 
         // If DMEM task structure is empty/invalid, try reading from common RDRAM locations
-        // Many test ROMs store task structure at 0x00200000 without DMA to DMEM
+        // Some test ROMs store task structure at 0x00200000 without DMA to DMEM
         if data_ptr == 0 || data_ptr >= 0x00800000 {
-            // Try reading from RDRAM at 0x00200000 (common task structure location)
             const TASK_STRUCT_ADDR: usize = 0x00200000;
             if TASK_STRUCT_ADDR + 0x40 <= rdram.len() {
                 data_ptr = self.read_u32_rdram(rdram, TASK_STRUCT_ADDR + 0x30);
@@ -386,23 +406,12 @@ impl RspHle {
                 output_buff_size = self.read_u32_rdram(rdram, TASK_STRUCT_ADDR + 0x2C);
 
                 log(LogCategory::PPU, LogLevel::Info, || {
-                    format!("RSP HLE: Read from RDRAM 0x{:06X}: data_ptr=0x{:08X}, data_size=0x{:X}, output_buff=0x{:08X}, output_buff_size=0x{:X}", TASK_STRUCT_ADDR, data_ptr, data_size, output_buff, output_buff_size)
+                    format!("RSP HLE: Fallback from RDRAM 0x{:06X}: data_ptr=0x{:08X}, data_size=0x{:X}", TASK_STRUCT_ADDR, data_ptr, data_size)
                 });
 
-                if data_ptr > 0 && data_ptr < 0x00800000 {
-                    log(LogCategory::PPU, LogLevel::Info, || {
-                        "RSP HLE: Valid display list found in RDRAM task structure".to_string()
-                    });
-
-                    // If we found a valid display list but microcode is Unknown,
-                    // assume F3DEX (most common graphics microcode)
-                    if self.microcode == MicrocodeType::Unknown {
-                        log(LogCategory::PPU, LogLevel::Info, || {
-                            "RSP HLE: Detected graphics task with Unknown microcode, assuming F3DEX"
-                                .to_string()
-                        });
-                        self.microcode = MicrocodeType::F3DEX;
-                    }
+                if data_ptr > 0 && data_ptr < 0x00800000 && self.microcode == MicrocodeType::Unknown
+                {
+                    self.microcode = MicrocodeType::F3DEX;
                 }
             }
         }
@@ -456,22 +465,24 @@ impl RspHle {
     ///   0x00 type, 0x02 flags,
     ///   0x04 ucode_boot,  0x08 ucode_boot_size,
     ///   0x0C ucode,       0x10 ucode_size,
-    ///   0x14 ucode_data (= ABI1 command list RDRAM ptr),
-    ///   0x18 ucode_data_size,
-    ///   0x1C dram_stack,  0x20 dram_stack_size,
-    ///   0x24 output_buff (= PCM output RDRAM ptr),
-    ///   0x28 output_buff_size,
+    ///   0x18 ucode_data (= ABI1 command list RDRAM ptr),
+    ///   0x1C ucode_data_size,
+    ///   0x20 dram_stack,  0x24 dram_stack_size,
+    ///   0x28 output_buff (= PCM output RDRAM ptr),
+    ///   0x2C output_buff_size,
     ///   …
     ///
     /// This implements the most common ABI1 commands:
     ///   0x00 SPNOOP, 0x01 ADPCM, 0x02 CLEARBUFF, 0x05 DMEMMOVE,
     ///   0x07 MIXER,  0x08 INTERLEAVE, 0x14 LOADBUFF, 0x15 SAVEBUFF.
     fn execute_audio_task(&mut self, dmem: &mut [u8; 4096], rdram: &mut [u8]) -> u32 {
-        // Read OS_TASK fields from DMEM
-        let ucode_data_ptr = self.read_u32(dmem, 0x14); // ABI1 command list in RDRAM
-        let ucode_data_size = self.read_u32(dmem, 0x18);
-        let output_buff = self.read_u32(dmem, 0x24); // PCM output buffer in RDRAM
-        let output_buff_size = self.read_u32(dmem, 0x28);
+        // OSTask structure is at DMEM offset 0xFC0
+        // OSTask fields: 0x18=ucode_data, 0x1C=ucode_data_size, 0x28=output_buff, 0x2C=output_buff_size
+        const TASK_BASE: usize = 0xFC0;
+        let ucode_data_ptr = self.read_u32(dmem, TASK_BASE + 0x18); // ABI1 command list in RDRAM
+        let ucode_data_size = self.read_u32(dmem, TASK_BASE + 0x1C);
+        let output_buff = self.read_u32(dmem, TASK_BASE + 0x28); // PCM output buffer in RDRAM
+        let output_buff_size = self.read_u32(dmem, TASK_BASE + 0x2C);
 
         log(LogCategory::APU, LogLevel::Debug, || {
             format!(
@@ -746,7 +757,7 @@ impl RspHle {
                 // word0: cmd_id | vtx (vertex index, bits 11-1) | zval (Z value for comparison)
                 // word1: RDRAM address to branch to if condition is met
                 let vertex_index = ((word0 >> 1) & 0x7FF) as usize / 2;
-                let branch_addr = word1;
+                let branch_addr = self.resolve_segment_addr(word1);
 
                 // For now, implement simplified version that always branches
                 // Full implementation would:
@@ -795,7 +806,7 @@ impl RspHle {
                 // word1: vertex data address in RDRAM
                 let vertex_count = ((word0 >> 12) & 0xFF) as usize;
                 let buffer_index = ((word0 >> 1) & 0x7F) as usize;
-                let vertex_addr = word1;
+                let vertex_addr = self.resolve_segment_addr(word1);
 
                 // Load vertices from RDRAM into vertex buffer
                 for i in 0..vertex_count.min(32 - buffer_index) {
@@ -894,7 +905,7 @@ impl RspHle {
                 // word0: cmd_id | param (push/nopush, load/mul, projection/modelview)
                 // word1: RDRAM address of matrix (64 bytes, 4x4 matrix of 16.16 fixed point)
                 let param = word0 & 0xFF;
-                let matrix_addr = word1;
+                let matrix_addr = self.resolve_segment_addr(word1);
 
                 // Parse matrix parameters
                 let push = (param & 0x01) != 0; // G_MTX_PUSH
@@ -1019,7 +1030,7 @@ impl RspHle {
                 // word1: RDRAM address to load from
                 let size = ((word0 >> 16) & 0xFF) as usize;
                 let offset = (word0 & 0xFFFF) as usize;
-                let rdram_addr = word1;
+                let rdram_addr = self.resolve_segment_addr(word1);
 
                 // G_MOVEMEM indices (offset values):
                 // 0x80 = G_MV_VIEWPORT (8 bytes)
@@ -1236,25 +1247,20 @@ impl RspHle {
                 // word0: cmd_id | branch_type (0 = call with return, 1 = branch no return)
                 // word1: RDRAM address of display list to execute
                 let branch_type = (word0 >> 16) & 0xFF;
-                let dl_addr = word1;
+                let dl_addr = self.resolve_segment_addr(word1);
 
                 // branch_type: 0 = G_DL_PUSH (call, will return), 1 = G_DL_NOPUSH (branch, no return)
                 let is_push = branch_type == 0;
 
-                // For now, we implement a simple non-recursive version
-                // A full implementation would use a stack to handle nested display lists
-                // To prevent infinite loops, we only support one level of nesting here
                 if is_push {
-                    // This is a display list call - we should save state and execute the nested DL
-                    // For simplicity, we parse it inline without full recursion support
-                    // Full implementation would push return address to a stack
+                    // Call: execute nested DL, then continue current DL
                     self.parse_f3dex_display_list(rdram, dl_addr, 10000, rdp);
+                    true
                 } else {
-                    // This is a branch - we don't return, but we still parse it inline
-                    // In the real implementation, this would update the current DL pointer
+                    // Branch: execute new DL, terminate current DL (no return)
                     self.parse_f3dex_display_list(rdram, dl_addr, 10000, rdp);
+                    false
                 }
-                true
             }
             // G_ENDDL (0xDF) - End display list
             0xDF => false,

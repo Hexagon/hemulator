@@ -572,20 +572,16 @@ impl Rdp {
             self.execute_rdp_command(cmd_id, cmd_word0, cmd_word1, rdram);
 
             // Increment performance counters
-            // Clock counter: increments for each command processed
-            self.dpc_clock = self.dpc_clock.wrapping_add(10); // ~10 cycles per command
+            self.dpc_clock = self.dpc_clock.wrapping_add(10);
 
-            // Pipe busy counter: increments when pipeline is active (rendering commands)
             if (0x08..=0x0F).contains(&cmd_id) || cmd_id == 0x36 {
-                // Triangle or fill commands keep pipeline busy
                 self.dpc_pipebusy = self.dpc_pipebusy.wrapping_add(1);
             }
 
-            // Track executed commands
             executed_commands = executed_commands.wrapping_add(1);
 
-            // Move to next command (all RDP commands are 8 bytes)
-            addr += 8;
+            // Advance by command size (most are 8 bytes, some are larger)
+            addr += Self::rdp_command_size(cmd_id);
         }
 
         // Buffer busy counter: increments by number of commands actually executed
@@ -896,6 +892,25 @@ impl Rdp {
             }
             // Other formats not yet implemented - return white
             _ => 0xFFFFFFFF,
+        }
+    }
+
+    /// Return the size in bytes of an RDP command by its ID
+    fn rdp_command_size(cmd_id: u32) -> usize {
+        match cmd_id {
+            // Triangle commands have variable sizes based on attributes
+            0x08 => 32,  // Non-shaded triangle
+            0x09 => 48,  // Non-shaded Z-buffered triangle
+            0x0A => 96,  // Textured triangle
+            0x0B => 112, // Textured Z-buffered triangle
+            0x0C => 96,  // Shaded triangle
+            0x0D => 112, // Shaded Z-buffered triangle
+            0x0E => 160, // Shaded textured triangle
+            0x0F => 176, // Shaded textured Z-buffered triangle
+            // Texture rectangle commands are 16 bytes (2 × 64-bit words)
+            0x24 | 0x25 => 16,
+            // All other commands are 8 bytes
+            _ => 8,
         }
     }
 

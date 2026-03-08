@@ -380,6 +380,9 @@ impl System for N64System {
                 // (interrupt line 2). Individual MI interrupt bits are distinguished
                 // by reading MI_INTR_REG, not by separate CPU interrupt lines.
                 self.cpu.cpu.set_interrupt(2);
+            } else {
+                // Clear IP2 when no MI interrupts are pending
+                self.cpu.cpu.clear_interrupt(2);
             }
 
             // Update VI scanline and check for interrupt

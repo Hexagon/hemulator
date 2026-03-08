@@ -1193,10 +1193,12 @@ mod tests {
             // Initially, flag should be clear
             assert_eq!(bus.riot.read(0x0285) & 0x80, 0x00);
 
-            // Clock until timer expires
+            // Clock until timer reaches 0 — flag NOT yet set
             bus.riot.clock(2);
+            assert_eq!(bus.riot.read(0x0285) & 0x80, 0x00);
 
-            // Flag should now be set
+            // Clock one more — 0→0xFF underflow, flag NOW set
+            bus.riot.clock(1);
             assert_eq!(bus.riot.read(0x0285) & 0x80, 0x80);
 
             // Reading TIMINT should clear the flag (this is the critical fix)
@@ -1208,8 +1210,9 @@ mod tests {
             // Set timer again and verify the cycle works
             bus.riot.write(0x0294, 3);
             assert_eq!(bus.riot.read(0x0285) & 0x80, 0x00); // Clear after write
-            bus.riot.clock(3);
-            assert_eq!(bus.riot.read(0x0285) & 0x80, 0x80); // Set after expiry
+                                                            // Clock to 0, then one more for underflow
+            bus.riot.clock(4);
+            assert_eq!(bus.riot.read(0x0285) & 0x80, 0x80); // Set after underflow
             assert_eq!(bus.riot.read(0x0285) & 0x80, 0x00); // Clear after read
         } else {
             panic!("Could not access bus");
