@@ -12,9 +12,11 @@
 //!
 //! # BIOS Memory Map
 //!
-//! The BIOS is mapped to address 0x0000-0x1FFF (8KB) or 0x0000-0x03FF (1KB)
-//! depending on the BIOS size. It can be disabled via bit 3 of the memory
-//! control register (port 0x3E), which maps the cartridge ROM to 0x0000 instead.
+//! When enabled, the BIOS ROM is mapped starting at 0x0000 and covers exactly
+//! as many bytes as the BIOS ROM image (typically 8 KB = 0x0000-0x1FFF for the
+//! Japanese SMS1 BIOS). Addresses beyond the BIOS size fall through to the
+//! cartridge ROM. The BIOS can be disabled via bit 3 of the memory control
+//! register (port 0x3E), which maps the cartridge ROM to 0x0000 instead.
 
 /// Generate a minimal SMS BIOS
 ///
