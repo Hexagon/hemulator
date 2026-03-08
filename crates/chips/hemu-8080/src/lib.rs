@@ -4,3 +4,4 @@
 
 pub mod cpu_8080;
 pub mod cpu_8080_common;
+pub mod disasm_8080;
