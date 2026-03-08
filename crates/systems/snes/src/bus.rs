@@ -183,16 +183,42 @@ pub struct SnesBus {
     /// Pending DMA cycles that halt the CPU
     /// When non-zero, the CPU should not execute and these cycles should be consumed
     pending_dma_cycles: Cell<u32>,
+
+    /// Master clock cycle accumulator for accurate CPU timing.
+    /// Each memory read/write adds the appropriate number of master cycles (6, 8, or 12)
+    /// based on the accessed memory region. Read and reset after each CPU step.
+    master_cycles_accumulated: Cell<u32>,
+
+    /// Count of bus accesses since last take_master_cycles().
+    /// Used to compute IO cycles: io_cycles = cpu_cycles - bus_access_count.
+    bus_access_count: Cell<u32>,
+
+    /// WRAM refresh tracking: master cycle within scanline when refresh occurs
+    /// On real hardware, ~40 master cycles are stolen at H≈538 every scanline
+    wram_refresh_done: Cell<bool>,
 }
 
 impl SnesBus {
-    // Timing constants (approximate CPU cycles, see lib.rs for detailed explanation)
+    // Timing constants in master clock cycles
     // Reference: https://wiki.superfamicom.org/timing
-    // - Actual hardware: 1364 master cycles per scanline, 262 scanlines per frame
-    // - CPU cycles are abstract and depend on operation type (IO vs memory access)
-    // - These constants are tuned for the emulator's CPU cycle tracking
-    const SCANLINE_CYCLES: u32 = 341; // Approximate CPU cycles per scanline
-    const HBLANK_CYCLES: u32 = 40; // Approximate CPU cycles during H-blank (~40-60 depending on HDMA)
+    // - Master Clock: 21.477272 MHz
+    // - Scanline: 1364 master cycles (340 dots × 4 master cycles/dot, with +4 for long dots)
+    // - Frame: 262 scanlines × 1364 = 357,368 master cycles
+    // - H-Blank: ~66 dots = ~268 master cycles (H=274 to H=339)
+    // - WRAM refresh: 40 master cycles stolen at H≈538 each scanline
+    //
+    // Memory access speeds (master cycles per bus access):
+    // - 6 mc: CPU internal ops (IO), FastROM ($80-$FF upper when MEMSEL=1)
+    // - 8 mc: Slow regions (WRAM $0000-$1FFF, PPU $2100-$21FF, I/O $4000-$437F)
+    // - 12 mc: XSlow regions (ROM when MEMSEL=0)
+    const MASTER_CYCLES_PER_SCANLINE: u32 = 1364;
+    #[allow(dead_code)]
+    const MASTER_CYCLES_PER_FRAME: u32 = 1364 * 262; // 357,368
+    #[allow(dead_code)]
+    const HBLANK_START_DOT: u32 = 274;
+    const HBLANK_MASTER_CYCLES: u32 = 268; // ~66 dots × 4 mc
+    const WRAM_REFRESH_HPOS: u32 = 538; // Master cycle within scanline where WRAM refresh occurs
+    const WRAM_REFRESH_CYCLES: u32 = 40; // Master cycles stolen for WRAM refresh
     pub fn new() -> Self {
         log(LogCategory::Bus, LogLevel::Info, || {
             "SNES Bus: Initializing with stub APU (audio disabled)".to_string()
@@ -244,11 +270,118 @@ impl SnesBus {
 
             wram_port_addr: Cell::new(0),
             pending_dma_cycles: Cell::new(0),
+            master_cycles_accumulated: Cell::new(0),
+            bus_access_count: Cell::new(0),
+            wram_refresh_done: Cell::new(false),
         }
     }
 
     pub fn set_last_cpu_pc(&mut self, pc: u32) {
         self.last_cpu_pc = pc;
+    }
+
+    /// Determine the memory access speed in master clock cycles for a given address.
+    ///
+    /// Reference: https://wiki.superfamicom.org/timing
+    /// - 6 mc (3.58 MHz): CPU internal ops, FastROM upper half ($80-$FF:$8000-$FFFF when MEMSEL=1)
+    /// - 8 mc (2.68 MHz): WRAM, PPU, APU, I/O registers, DMA registers
+    /// - 12 mc (1.79 MHz): SlowROM ($00-$3F/$80-$BF:$8000-$FFFF when MEMSEL=0)
+    ///
+    /// Note: Banks $40-$7D and $C0-$FF upper half are always 8 mc (slow) for LoROM,
+    /// or follow MEMSEL for HiROM. We simplify to: fast if MEMSEL=1 and bank >= $80.
+    #[inline]
+    fn access_speed(&self, addr: u32) -> u32 {
+        let bank = (addr >> 16) as u8;
+        let offset = (addr & 0xFFFF) as u16;
+
+        match bank {
+            // Banks $00-$3F: System area
+            0x00..=0x3F => match offset {
+                0x0000..=0x1FFF => 8,  // WRAM mirror - slow
+                0x2000..=0x20FF => 6,  // Unused - fast
+                0x2100..=0x21FF => 8,  // PPU registers - slow
+                0x2200..=0x3FFF => 8,  // Unused/expansion - slow
+                0x4000..=0x41FF => 12, // Joypad/internal - xslow
+                0x4200..=0x5FFF => 8,  // CPU I/O, DMA - slow
+                0x6000..=0x7FFF => 8,  // Expansion RAM - slow
+                0x8000..=0xFFFF => 8,  // SlowROM (banks $00-$3F always slow)
+            },
+            // Banks $40-$7D: Cartridge area (always slow for LoROM)
+            0x40..=0x7D => 8,
+            // Bank $7E-$7F: WRAM (128KB)
+            0x7E..=0x7F => 8,
+            // Banks $80-$BF: Mirror of $00-$3F but ROM area can be fast
+            0x80..=0xBF => match offset {
+                0x0000..=0x1FFF => 8,  // WRAM mirror - slow
+                0x2000..=0x20FF => 6,  // Unused - fast
+                0x2100..=0x21FF => 8,  // PPU registers - slow
+                0x2200..=0x3FFF => 8,  // Unused/expansion - slow
+                0x4000..=0x41FF => 12, // Joypad/internal - xslow
+                0x4200..=0x5FFF => 8,  // CPU I/O, DMA - slow
+                0x6000..=0x7FFF => 8,  // Expansion RAM - slow
+                0x8000..=0xFFFF => {
+                    // FastROM: 6 mc when MEMSEL bit 0 is set, otherwise 8 mc
+                    if self.memsel & 0x01 != 0 {
+                        6
+                    } else {
+                        8
+                    }
+                }
+            },
+            // Banks $C0-$FF: Cartridge ROM (fast if MEMSEL enabled)
+            0xC0..=0xFF => {
+                if self.memsel & 0x01 != 0 {
+                    6
+                } else {
+                    8
+                }
+            }
+        }
+    }
+
+    /// Add master clock cycles for a memory access at the given address.
+    /// Called from read/write to track accurate timing.
+    #[inline]
+    fn accumulate_access_cycles(&self, addr: u32) {
+        let speed = self.access_speed(addr);
+        self.master_cycles_accumulated
+            .set(self.master_cycles_accumulated.get() + speed);
+        self.bus_access_count.set(self.bus_access_count.get() + 1);
+    }
+
+    /// Take the accumulated master cycles and reset the counters.
+    /// `cpu_cycles` is the WDC datasheet cycle count from the CPU step.
+    /// IO cycles (cpu_cycles - bus_accesses) are added at 6 mc each.
+    /// Returns the total master cycle cost of the instruction.
+    #[inline]
+    pub fn take_master_cycles(&self, cpu_cycles: u32) -> u32 {
+        let bus_mc = self.master_cycles_accumulated.get();
+        let bus_accesses = self.bus_access_count.get();
+        self.master_cycles_accumulated.set(0);
+        self.bus_access_count.set(0);
+
+        // IO cycles = total WDC cycles - bus accesses actually performed
+        let io_cycles = cpu_cycles.saturating_sub(bus_accesses);
+        bus_mc + io_cycles * 6
+    }
+
+    /// Reset WRAM refresh tracking for a new scanline
+    #[inline]
+    pub fn reset_wram_refresh(&mut self) {
+        self.wram_refresh_done.set(false);
+    }
+
+    /// Check and apply WRAM refresh cycle steal.
+    /// Returns the number of master cycles stolen (0 or WRAM_REFRESH_CYCLES).
+    /// Should be called with the current master cycle position within the scanline.
+    #[inline]
+    pub fn check_wram_refresh(&self, scanline_master_cycle: u32) -> u32 {
+        if !self.wram_refresh_done.get() && scanline_master_cycle >= Self::WRAM_REFRESH_HPOS {
+            self.wram_refresh_done.set(true);
+            Self::WRAM_REFRESH_CYCLES
+        } else {
+            0
+        }
     }
 
     /// Re-initialize the SPC700 APU (creates a new instance)
@@ -343,44 +476,35 @@ impl SnesBus {
         }
 
         self.auto_joypad_latch = self.controller_state;
-        // Auto-joypad read takes ~4224 master cycles (~704 CPU cycles).
-        self.auto_joypad_busy_cycles = 704;
+        // Auto-joypad read takes ~4224 master cycles
+        self.auto_joypad_busy_cycles = 4224;
     }
 
     /// Update cycle counter within frame (called after each CPU step)
-    pub fn tick_cycles(&mut self, cycles: u32) {
-        self.frame_cycle += cycles;
+    /// `master_cycles` is the number of master clock cycles elapsed
+    pub fn tick_cycles(&mut self, master_cycles: u32) {
+        self.frame_cycle += master_cycles;
 
         if self.auto_joypad_busy_cycles > 0 {
-            self.auto_joypad_busy_cycles = self.auto_joypad_busy_cycles.saturating_sub(cycles);
+            self.auto_joypad_busy_cycles =
+                self.auto_joypad_busy_cycles.saturating_sub(master_cycles);
         }
 
         // Tick cartridge enhancement chip (e.g., SuperFX) with master cycles
         // SuperFX runs at the master clock frequency (21.48 MHz)
-        // Main CPU cycles are abstract units, but we approximate master cycles as CPU cycles * 6
-        // (since most CPU operations take 6 master cycles)
         if let Some(ref mut cart) = self.cartridge {
-            let master_cycles = cycles * 6;
             cart.tick_chip(master_cycles);
         }
 
-        // Convert main CPU cycles to SPC700 cycles using proper clock ratio.
-        //
-        // Our CPU cycle counts come from the WDC 65C816 datasheet (e.g. 2 for LDA #imm).
-        // The SPC700 runs at ~1.024 MHz and the main CPU at ~3.58 MHz (NTSC).
-        // Ratio: 1024 / 3580 ≈ 0.286 SPC cycles per CPU cycle.
-        //
-        // Note: SNES_SCANLINE_CYCLES = 341 processes more CPU instructions per scanline
-        // than real hardware (~170-227 depending on memory speed), but the SPC ratio is
-        // calibrated for correct CPU:SPC instruction-level timing, which is what matters
-        // for port communication protocols (upload handshakes, echo synchronization).
-
-        // Calculate SPC700 cycles with fractional tracking
-        let numerator = cycles as u64 * 1024;
+        // Convert master cycles to SPC700 cycles.
+        // SPC700 runs at 1.024 MHz. Master clock is 21.477272 MHz.
+        // Ratio: 1024000 / 21477272 ≈ 1024 / 21477
+        // We use integer math with fractional accumulator to prevent drift.
+        let numerator = master_cycles as u64 * 1024;
         let accumulator = self.spc700_cycle_accumulator.get();
         let total = numerator + accumulator;
-        let spc700_cycles = total / 3580;
-        let remainder = total % 3580;
+        let spc700_cycles = total / 21477;
+        let remainder = total % 21477;
 
         // Store remainder for next calculation to prevent drift
         self.spc700_cycle_accumulator.set(remainder);
@@ -394,7 +518,7 @@ impl SnesBus {
 
         // Decrement APU response delay for simulating processing time
         if self.apu_response_delay > 0 {
-            self.apu_response_delay = self.apu_response_delay.saturating_sub(cycles);
+            self.apu_response_delay = self.apu_response_delay.saturating_sub(master_cycles);
         }
     }
 
@@ -444,15 +568,16 @@ impl SnesBus {
     /// Called only when frame_cycle changes, avoiding expensive division/modulo in hot path.
     #[inline]
     fn update_blanking_cache(&self) {
-        let current_scanline = self.frame_cycle / Self::SCANLINE_CYCLES;
-        let cycle_in_scanline = self.frame_cycle % Self::SCANLINE_CYCLES;
+        let current_scanline = self.frame_cycle / Self::MASTER_CYCLES_PER_SCANLINE;
+        let cycle_in_scanline = self.frame_cycle % Self::MASTER_CYCLES_PER_SCANLINE;
 
         // VBlank is active during scanlines 225-261 (NTSC has 262 scanlines total)
         self.cached_in_vblank.set(current_scanline >= 225);
 
-        // HBlank is the last ~40 cycles of each scanline
-        self.cached_in_hblank
-            .set(cycle_in_scanline >= (Self::SCANLINE_CYCLES - Self::HBLANK_CYCLES));
+        // HBlank is the last ~268 master cycles of each scanline (~66 dots)
+        self.cached_in_hblank.set(
+            cycle_in_scanline >= (Self::MASTER_CYCLES_PER_SCANLINE - Self::HBLANK_MASTER_CYCLES),
+        );
 
         // Update the cached cycle value
         self.last_cached_cycle.set(self.frame_cycle);
@@ -462,27 +587,26 @@ impl SnesBus {
     ///
     /// Hardware behavior (https://sneslab.net/wiki/H/V_Count_Timer):
     /// - Mode 00 (hv_irq_mode=0): Timer off, never triggers
-    /// - Mode 01 (hv_irq_mode=1): H-IRQ only - triggers every scanline at H = HTIME + ~3.5 cycles
-    /// - Mode 10 (hv_irq_mode=2): V-IRQ only - triggers at V = VTIME, H ≈ 2.5
-    /// - Mode 11 (hv_irq_mode=3): HV-IRQ - triggers at V=VTIME and H=HTIME + ~3.5 cycles
+    /// - Mode 01 (hv_irq_mode=1): H-IRQ only - triggers every scanline at H = HTIME
+    /// - Mode 10 (hv_irq_mode=2): V-IRQ only - triggers at V = VTIME, H ≈ dot 2-4
+    /// - Mode 11 (hv_irq_mode=3): HV-IRQ - triggers at V=VTIME and H=HTIME
     ///
+    /// `h_dot` is the current dot position (0-339) within the scanline.
     /// Returns true if IRQ should be triggered
-    pub fn check_hv_timer_irq(&self, scanline: u32, h_pos: u32) -> bool {
+    pub fn check_hv_timer_irq(&self, scanline: u32, h_dot: u32) -> bool {
         match self.hv_irq_mode {
             0 => false, // Timer off
             1 => {
-                // H-timer only: trigger every scanline when H matches
-                // Approximate HTIME comparison (real hardware has +3.5 cycle offset)
-                h_pos as u16 == self.htime
+                // H-timer only: trigger every scanline when dot matches HTIME
+                h_dot as u16 == self.htime
             }
             2 => {
-                // V-timer only: trigger on specific scanline
-                // Trigger at beginning of scanline (H ≈ 2.5)
-                scanline as u16 == self.vtime && h_pos < 10
+                // V-timer only: trigger on specific scanline at ~dot 2-4
+                scanline as u16 == self.vtime && h_dot < 4
             }
             3 => {
-                // HV-timer: trigger on specific scanline AND H-position
-                scanline as u16 == self.vtime && h_pos as u16 == self.htime
+                // HV-timer: trigger on specific scanline AND dot position
+                scanline as u16 == self.vtime && h_dot as u16 == self.htime
             }
             _ => false,
         }
@@ -862,6 +986,7 @@ impl Default for SnesBus {
 
 impl Memory65c816 for SnesBus {
     fn read(&self, addr: u32) -> u8 {
+        self.accumulate_access_cycles(addr);
         let bank = (addr >> 16) as u8;
         let offset = (addr & 0xFFFF) as u16;
 
@@ -1198,6 +1323,7 @@ impl Memory65c816 for SnesBus {
     }
 
     fn write(&mut self, addr: u32, val: u8) {
+        self.accumulate_access_cycles(addr);
         let bank = (addr >> 16) as u8;
         let offset = (addr & 0xFFFF) as u16;
 
@@ -1782,8 +1908,9 @@ mod tests {
         bus.enable_spc700();
 
         // With real SPC700, we need to wait for it to boot and write $BBAA signature
-        // With proper clock ratio (SPC700 ~28.6% of main CPU), we need more cycles
-        bus.tick_cycles(15000);
+        // tick_cycles now takes master cycles. SPC700 ratio: 1024/21477.
+        // IPL boot needs ~4000 SPC cycles ≈ 90000 master cycles.
+        bus.tick_cycles(100000);
 
         // Verify SPC700 is ready (wrote $BBAA)
         assert_eq!(
@@ -1803,7 +1930,7 @@ mod tests {
         bus.write(0x2141, 0x01); // Non-zero (upload mode)
         bus.write(0x2140, 0xCC); // Start signal
 
-        bus.tick_cycles(500);
+        bus.tick_cycles(5000);
 
         // SPC700 should echo $CC back
         assert_eq!(bus.read(0x2140), 0xCC, "SPC700 should acknowledge with $CC");
@@ -1811,7 +1938,7 @@ mod tests {
         // CRITICAL: Write 0 to port 0 to signal ready for upload
         // The IPL ROM at $FFD6-$FFD8 waits for port 0 to become 0 before proceeding
         bus.write(0x2140, 0x00);
-        bus.tick_cycles(50); // Give SPC700 time to see the 0
+        bus.tick_cycles(500); // Give SPC700 time to see the 0
 
         // Now upload a byte (index 1, data $DE)
         // Note: IPL ROM waits for port 0 = 0 at $FFD6-$FFD8, then proceeds to upload loop
@@ -1819,7 +1946,7 @@ mod tests {
         bus.write(0x2140, 0x01); // Index 1
         bus.write(0x2141, 0xDE); // Data
 
-        bus.tick_cycles(500);
+        bus.tick_cycles(5000);
 
         // SPC700 should echo index 1
         assert_eq!(bus.read(0x2140), 0x01, "SPC700 should echo index 1");
@@ -1834,9 +1961,8 @@ mod tests {
 
         // With real SPC700, we need to run it for enough cycles to complete boot
         // and write the $BBAA ready signature
-        // The IPL ROM clears memory first, then writes ports
-        // With proper clock ratio (SPC700 ~28.6% of main CPU), we need more cycles
-        bus.tick_cycles(15000);
+        // tick_cycles now takes master cycles. IPL boot needs ~90000+ master cycles.
+        bus.tick_cycles(100000);
 
         // APU ports should now have ready values from SPC700 IPL ROM
         // SPC700 IPL sets ports to $BBAA when read as 16-bit little-endian value
