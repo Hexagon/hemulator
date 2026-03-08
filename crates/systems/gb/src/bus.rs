@@ -525,6 +525,13 @@ impl GbBus {
         (self.key1 & 0x81) | 0x7E
     }
 
+    /// Check if CPU is running in CGB double-speed mode.
+    /// In double-speed mode the CPU runs at 8.388 MHz while PPU/APU/serial
+    /// stay at 4.194 MHz, so PPU and audio must receive half the CPU cycles.
+    pub fn is_double_speed(&self) -> bool {
+        self.cgb_mode && (self.key1 & 0x80) != 0
+    }
+
     /// Write to KEY1 register (0xFF4D)
     /// Only bit 0 is writable - it arms the speed switch
     pub fn write_key1(&mut self, val: u8) {
