@@ -854,7 +854,15 @@ impl SmsMemory {
             0xC000..=0xFFFF => {
                 let ram_addr = (addr & 0x1FFF) as usize;
                 self.ram[ram_addr] = val;
-                if (0x1FFC..=0x1FFF).contains(&ram_addr) {
+                // Only the dedicated mapper-register addresses $FFFC-$FFFF trigger
+                // bank updates.  Their RAM mirror at $DFFC-$DFFF shares the same
+                // physical bytes but must NOT update the mapper – the real SMS
+                // hardware mapper decoder only fires on the $FFFC-$FFFF range.
+                // This matters when a real Sega BIOS clears work-RAM ($C000-$DFFF):
+                // without this guard, writes to $DFFE would zero sega_banks[1],
+                // causing the BIOS header check at $7FF0 to read the wrong ROM bank
+                // and fall back to the built-in Snail Maze game.
+                if addr >= 0xFFFC {
                     self.update_sega_banking();
                 }
             }
@@ -937,7 +945,8 @@ impl SmsMemory {
             0xC000..=0xFFFF => {
                 let ram_addr = (addr & 0x1FFF) as usize;
                 self.ram[ram_addr] = val;
-                if (0x1FFC..=0x1FFF).contains(&ram_addr) {
+                // Same rule as Sega mapper: only $FFFC-$FFFF fire the mapper update.
+                if addr >= 0xFFFC {
                     self.update_sega_banking();
                 }
             }
@@ -1168,6 +1177,70 @@ mod tests {
         assert_eq!(mem.read(0x0038), 0xC9);
         // $0400+ should come from bank 3
         assert_eq!(mem.read(0x0400), 0xBB);
+    }
+
+    /// Regression test for the "real BIOS boots Snail Maze instead of cartridge" bug.
+    ///
+    /// The real Sega BIOS initialises/clears work-RAM ($C000-$DFFF) early in its
+    /// boot sequence.  That range includes the physical bytes at $DFFC-$DFFF which
+    /// are the RAM mirrors of the Sega mapper registers at $FFFC-$FFFF.  On real
+    /// hardware the mapper decoder only fires on writes to $FFFC-$FFFF; the
+    /// primary-RAM writes at $DFFC-$DFFF update the RAM byte but do NOT change the
+    /// active bank registers.  Without this fix both address ranges would reset the
+    /// banks to 0 so the header check at $7FF0 mapped to ROM offset $3FF0 (bank 0)
+    /// instead of $7FF0 (bank 1) and "TMR SEGA" was never found.
+    #[test]
+    fn test_sega_primary_ram_write_does_not_update_mapper() {
+        // 128 KB ROM (8 × 16 KB banks).  Place "TMR SEGA" at offset $7FF0 as a
+        // real SMS cartridge would (header in bank 1 at the canonical location).
+        let mut rom = vec![0u8; 0x20000];
+        let header = b"TMR SEGA";
+        rom[0x7FF0..0x7FF8].copy_from_slice(header);
+        // Put a different sentinel at the location the mapper would read if
+        // sega_banks[1] were incorrectly reset to 0 (bank 0, offset $3FF0).
+        rom[0x3FF0] = 0xDE; // NOT 'T', so if we see this the test must fail.
+
+        let mut mem = make_mem(rom);
+        mem.set_mapper_type(MapperType::Sega);
+
+        // Simulate BIOS clearing primary work-RAM $C000-$DFFF to 0x00.
+        // This includes $DFFE which is the primary-RAM byte backing the slot-1
+        // bank register.  It must NOT reset sega_banks[1] from 1 to 0.
+        for addr in 0xC000u16..=0xDFFF {
+            mem.write(addr, 0x00);
+        }
+
+        // After the RAM clear, bank 1 must still be mapped to slot 1 ($4000-$7FFF).
+        // Reading $7FF0 must return the first byte of "TMR SEGA", not $DE.
+        assert_eq!(
+            mem.read(0x7FF0),
+            b'T',
+            "sega_banks[1] was incorrectly reset by a write to the primary-RAM \
+             mirror of the mapper register ($DFFE); header check would fail"
+        );
+    }
+
+    /// Companion test: writes to the dedicated mapper-register range $FFFC-$FFFF
+    /// MUST still update the banks (normal game banker behaviour).
+    #[test]
+    fn test_sega_mapper_register_range_still_updates_banks() {
+        let mut rom = vec![0u8; 0x20000]; // 128 KB
+        for i in 0..8usize {
+            rom[i * 0x4000] = i as u8;
+        }
+        let mut mem = make_mem(rom);
+        mem.set_mapper_type(MapperType::Sega);
+
+        // Default: slot 1 → bank 1
+        assert_eq!(mem.read(0x4000), 1);
+
+        // Write to the real mapper register at $FFFE → should remap slot 1.
+        mem.write(0xFFFE, 3);
+        assert_eq!(
+            mem.read(0x4000),
+            3,
+            "write to $FFFE must update sega_banks[1]"
+        );
     }
 
     #[test]
