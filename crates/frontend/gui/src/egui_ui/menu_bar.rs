@@ -153,6 +153,16 @@ impl MenuBar {
                     }
 
                     if ui
+                        .button("Atari 5200")
+                        .on_hover_text("Atari 5200 SuperSystem")
+                        .clicked()
+                    {
+                        self.pending_action =
+                            Some(MenuAction::NewProjectSystem("Atari 5200".to_string()));
+                        ui.close();
+                    }
+
+                    if ui
                         .button("SMS")
                         .on_hover_text("Sega Master System")
                         .clicked()

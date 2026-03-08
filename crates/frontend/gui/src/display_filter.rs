@@ -140,8 +140,8 @@ fn pack_rgb(r: u8, g: u8, b: u8) -> u32 {
     0xFF000000 | ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
 }
 
-/// Apply CRT edge vignette effect - fades edges to near black with slight rounding
-/// This simulates the rounded corners and edge darkening of CRT displays
+/// Apply CRT edge vignette effect - very subtle edge darkening
+/// Simulates the slight rounded corners of CRT displays without altering colors
 #[inline]
 fn apply_crt_vignette(buffer: &mut [u32], width: usize, height: usize) {
     let center_x = width as f32 / 2.0;
@@ -155,26 +155,19 @@ fn apply_crt_vignette(buffer: &mut [u32], width: usize, height: usize) {
                 let color = buffer[idx];
                 let (r, g, b) = unpack_rgb(color);
 
-                // Calculate distance from center
                 let dx = x as f32 - center_x;
                 let dy = y as f32 - center_y;
                 let dist = (dx * dx + dy * dy).sqrt();
-
-                // Normalize distance (0.0 at center, 1.0 at corners)
                 let normalized_dist = dist / max_dist;
 
-                // Apply smooth vignette with quadratic falloff for rounded edges
-                // At 90% of distance, start aggressive darkening to near black at edges
-                let vignette = if normalized_dist > 0.9 {
-                    // Aggressive fade at very edges - goes to near black
-                    let edge_factor = (normalized_dist - 0.9) / 0.1; // 0.0 to 1.0 in outer 10%
-                    1.0 - edge_factor * 0.95 // Fade to 5% brightness at edges
+                // Very gentle vignette - only darken the extreme corners slightly
+                let vignette = if normalized_dist > 0.95 {
+                    let edge_factor = (normalized_dist - 0.95) / 0.05;
+                    1.0 - edge_factor * 0.3 // Max 30% darkening at extreme corners
                 } else {
-                    // Gentle vignette in main area
-                    1.0 - (normalized_dist * normalized_dist * 0.2) // 20% darkening at 90% radius
+                    1.0 - (normalized_dist * normalized_dist * 0.05) // 5% darkening at 95% radius
                 };
 
-                // Apply vignette to all channels
                 let r = (r as f32 * vignette) as u8;
                 let g = (g as f32 * vignette) as u8;
                 let b = (b as f32 * vignette) as u8;
@@ -199,10 +192,10 @@ fn blend_colors(color1: u32, color2: u32, ratio: f32) -> u32 {
     pack_rgb(r, g, b)
 }
 
-/// Sony Trinitron - Color CRT with aperture grille, RGB phosphor triads, bloom
-/// Known for vertical RGB stripes instead of shadow mask dots
+/// Sony Trinitron - Color CRT with aperture grille
+/// Subtle scanline effect that preserves original colors
 fn apply_sony_trinitron(buffer: &mut [u32], width: usize, height: usize) {
-    // First pass: Apply subtle horizontal scanlines (Trinitron had very fine scanlines)
+    // Very subtle horizontal scanlines - barely perceptible darkening on odd lines
     for y in 0..height {
         if y % 2 == 1 {
             for x in 0..width {
@@ -213,84 +206,17 @@ fn apply_sony_trinitron(buffer: &mut [u32], width: usize, height: usize) {
                     let g = ((color >> 8) & 0xFF) as u8;
                     let b = (color & 0xFF) as u8;
 
-                    // Very subtle scanlines (95% brightness)
-                    let r = ((r as u16 * 243) >> 8) as u8;
-                    let g = ((g as u16 * 243) >> 8) as u8;
-                    let b = ((b as u16 * 243) >> 8) as u8;
+                    // 97% brightness - barely visible scanlines
+                    let r = ((r as u16 * 248) >> 8) as u8;
+                    let g = ((g as u16 * 248) >> 8) as u8;
+                    let b = ((b as u16 * 248) >> 8) as u8;
                     buffer[idx] = pack_rgb(r, g, b);
                 }
             }
         }
     }
 
-    // Second pass: Subtle bloom on bright pixels
-    let mut bloom_buffer = vec![0u32; buffer.len()];
-    for y in 1..height - 1 {
-        for x in 1..width - 1 {
-            let idx = y * width + x;
-            if idx < buffer.len() {
-                let color = buffer[idx];
-                let r = ((color >> 16) & 0xFF) as u8;
-                let g = ((color >> 8) & 0xFF) as u8;
-                let b = (color & 0xFF) as u8;
-
-                // Calculate brightness
-                let brightness = (r as u16 + g as u16 + b as u16) / 3;
-
-                // Add bloom to bright pixels (threshold at 180)
-                if brightness > 180 {
-                    let bloom_amount = ((brightness - 180) * 2).min(255) as u8;
-
-                    // Add bloom to neighbors
-                    for dy in -1..=1 {
-                        for dx in -1..=1 {
-                            if dx == 0 && dy == 0 {
-                                continue;
-                            }
-                            let nx = (x as i32 + dx) as usize;
-                            let ny = (y as i32 + dy) as usize;
-                            let nidx = ny * width + nx;
-                            if nidx < bloom_buffer.len() {
-                                let current_bloom = bloom_buffer[nidx];
-                                let br = ((current_bloom >> 16) & 0xFF) as u8;
-                                let bg = ((current_bloom >> 8) & 0xFF) as u8;
-                                let bb = (current_bloom & 0xFF) as u8;
-
-                                let scale = bloom_amount / 8; // Subtle bloom
-                                bloom_buffer[nidx] = pack_rgb(
-                                    br.saturating_add(scale),
-                                    bg.saturating_add(scale),
-                                    bb.saturating_add(scale),
-                                );
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Apply bloom
-    for idx in 0..buffer.len() {
-        let base = buffer[idx];
-        let bloom = bloom_buffer[idx];
-
-        let r = ((base >> 16) & 0xFF) as u8;
-        let g = ((base >> 8) & 0xFF) as u8;
-        let b = (base & 0xFF) as u8;
-
-        let br = ((bloom >> 16) & 0xFF) as u8;
-        let bg = ((bloom >> 8) & 0xFF) as u8;
-        let bb = (bloom & 0xFF) as u8;
-
-        buffer[idx] = pack_rgb(
-            r.saturating_add(br),
-            g.saturating_add(bg),
-            b.saturating_add(bb),
-        );
-    }
-
-    // Apply CRT edge vignette for authentic rounded screen effect
+    // Apply gentle CRT edge vignette
     apply_crt_vignette(buffer, width, height);
 }
 
@@ -376,41 +302,10 @@ fn apply_ibm5151(buffer: &mut [u32], width: usize, height: usize) {
     apply_crt_vignette(buffer, width, height);
 }
 
-/// Commodore 1702 - Color CRT monitor with shadow mask and moderate scanlines
-/// Popular for C64/Amiga gaming
+/// Commodore 1702 - Color CRT monitor with moderate scanlines
+/// Preserves original colors with subtle CRT texture
 fn apply_commodore1702(buffer: &mut [u32], width: usize, height: usize) {
-    // Apply horizontal color bleeding (phosphor glow)
-    for y in 0..height {
-        let row_start = y * width;
-        let row_end = (row_start + width).min(buffer.len());
-
-        if row_end <= row_start {
-            continue;
-        }
-
-        // Process right to left
-        for x in (1..width).rev() {
-            let idx = row_start + x;
-            if idx >= row_end {
-                continue;
-            }
-
-            let current = buffer[idx];
-            let left = buffer[idx - 1];
-
-            let (r_curr, g_curr, b_curr) = unpack_rgb(current);
-            let (r_left, g_left, b_left) = unpack_rgb(left);
-
-            // Subtle blend (10% from left)
-            let r = ((r_curr as u16 * 230 + r_left as u16 * 26) >> 8) as u8;
-            let g = ((g_curr as u16 * 230 + g_left as u16 * 26) >> 8) as u8;
-            let b = ((b_curr as u16 * 230 + b_left as u16 * 26) >> 8) as u8;
-
-            buffer[idx] = pack_rgb(r, g, b);
-        }
-    }
-
-    // Apply moderate scanlines
+    // Apply moderate scanlines - slightly more visible than Trinitron
     for y in 0..height {
         if y % 2 == 1 {
             for x in 0..width {
@@ -419,17 +314,17 @@ fn apply_commodore1702(buffer: &mut [u32], width: usize, height: usize) {
                     let color = buffer[idx];
                     let (r, g, b) = unpack_rgb(color);
 
-                    // Subtle scanlines (85% brightness)
-                    let r = ((r as u16 * 217) >> 8) as u8;
-                    let g = ((g as u16 * 217) >> 8) as u8;
-                    let b = ((b as u16 * 217) >> 8) as u8;
+                    // 94% brightness - visible but not color-altering scanlines
+                    let r = ((r as u16 * 240) >> 8) as u8;
+                    let g = ((g as u16 * 240) >> 8) as u8;
+                    let b = ((b as u16 * 240) >> 8) as u8;
                     buffer[idx] = pack_rgb(r, g, b);
                 }
             }
         }
     }
 
-    // Apply CRT edge vignette for authentic rounded screen effect
+    // Apply gentle CRT edge vignette
     apply_crt_vignette(buffer, width, height);
 }
 
