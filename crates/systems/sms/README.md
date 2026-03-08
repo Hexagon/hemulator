@@ -192,7 +192,7 @@ For 440 Hz (A4): register = 3579545 / (32 × 440) ≈ 254
 
 | Address Range | Description |
 |--------------|-------------|
-| 0x0000-BIOS_END | BIOS ROM (when enabled via bit 3 of port 0x3E; size depends on BIOS image, typically 8KB) |
+| 0x0000-(bios_size-1) | BIOS ROM (enabled when port 0x3E bit 3 = 0; size depends on BIOS image, typically 8KB) |
 | 0x0000-0x3FFF | ROM Bank 0 (16KB, when BIOS disabled or address beyond BIOS range) |
 | 0x4000-0x7FFF | ROM Bank 1 (16KB) |
 | 0x8000-0xBFFF | ROM Bank 2 (16KB) |
