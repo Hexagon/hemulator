@@ -1908,6 +1908,61 @@ impl<M: MemoryZ80> CpuZ80<M> {
                 }
             }
 
+            // IN F,(C) - undocumented: read from port C, affect flags, discard result
+            0x70 => {
+                let val = self.memory.io_read(self.c);
+                self.set_sz_flags(val);
+                self.set_flag(FLAG_N, false);
+                self.set_flag(FLAG_H, false);
+                12
+            }
+
+            // OUT (C),0 - undocumented: write 0 to port C
+            0x71 => {
+                self.memory.io_write(self.c, 0);
+                12
+            }
+
+            // NEG mirrors (0x4C, 0x54, 0x5C, 0x64, 0x6C, 0x74, 0x7C)
+            0x4C | 0x54 | 0x5C | 0x64 | 0x6C | 0x74 | 0x7C => {
+                let a = self.a;
+                self.a = 0;
+                self.sub_a(a, false);
+                8
+            }
+
+            // RETN mirrors (0x55, 0x65, 0x75)
+            0x55 | 0x65 | 0x75 => {
+                self.pc = self.pop_u16();
+                self.iff1 = self.iff2;
+                14
+            }
+
+            // RETI mirrors (0x5D, 0x6D, 0x7D)
+            0x5D | 0x6D | 0x7D => {
+                self.pc = self.pop_u16();
+                self.iff1 = self.iff2;
+                14
+            }
+
+            // IM 0 mirrors (0x4E, 0x66, 0x6E)
+            0x4E | 0x66 | 0x6E => {
+                self.im = 0;
+                8
+            }
+
+            // IM 1 mirror (0x76)
+            0x76 => {
+                self.im = 1;
+                8
+            }
+
+            // IM 2 mirror (0x7E)
+            0x7E => {
+                self.im = 2;
+                8
+            }
+
             _ => 8,
         }
     }
@@ -2116,6 +2171,203 @@ impl<M: MemoryZ80> CpuZ80<M> {
                 let cb_opcode = self.read_pc();
                 self.execute_ddcb(offset, cb_opcode)
             }
+            // Undocumented: INC/DEC/LD IXH (high byte of IX)
+            0x24 => {
+                let ixh = self.inc((self.ix >> 8) as u8);
+                self.ix = (self.ix & 0x00FF) | ((ixh as u16) << 8);
+                8
+            }
+            0x25 => {
+                let ixh = self.dec((self.ix >> 8) as u8);
+                self.ix = (self.ix & 0x00FF) | ((ixh as u16) << 8);
+                8
+            }
+            0x26 => {
+                let val = self.read_pc();
+                self.ix = (self.ix & 0x00FF) | ((val as u16) << 8);
+                11
+            }
+            // Undocumented: INC/DEC/LD IXL (low byte of IX)
+            0x2C => {
+                let ixl = self.inc((self.ix & 0xFF) as u8);
+                self.ix = (self.ix & 0xFF00) | (ixl as u16);
+                8
+            }
+            0x2D => {
+                let ixl = self.dec((self.ix & 0xFF) as u8);
+                self.ix = (self.ix & 0xFF00) | (ixl as u16);
+                8
+            }
+            0x2E => {
+                let val = self.read_pc();
+                self.ix = (self.ix & 0xFF00) | (val as u16);
+                11
+            }
+            // Undocumented: LD r,IXH / LD r,IXL (where r != H, L)
+            0x44 => {
+                self.b = (self.ix >> 8) as u8;
+                8
+            }
+            0x45 => {
+                self.b = (self.ix & 0xFF) as u8;
+                8
+            }
+            0x4C => {
+                self.c = (self.ix >> 8) as u8;
+                8
+            }
+            0x4D => {
+                self.c = (self.ix & 0xFF) as u8;
+                8
+            }
+            0x54 => {
+                self.d = (self.ix >> 8) as u8;
+                8
+            }
+            0x55 => {
+                self.d = (self.ix & 0xFF) as u8;
+                8
+            }
+            0x5C => {
+                self.e = (self.ix >> 8) as u8;
+                8
+            }
+            0x5D => {
+                self.e = (self.ix & 0xFF) as u8;
+                8
+            }
+            0x7C => {
+                self.a = (self.ix >> 8) as u8;
+                8
+            }
+            0x7D => {
+                self.a = (self.ix & 0xFF) as u8;
+                8
+            }
+            // Undocumented: LD IXH,r / LD IXL,r
+            0x60 => {
+                self.ix = (self.ix & 0x00FF) | ((self.b as u16) << 8);
+                8
+            }
+            0x61 => {
+                self.ix = (self.ix & 0x00FF) | ((self.c as u16) << 8);
+                8
+            }
+            0x62 => {
+                self.ix = (self.ix & 0x00FF) | ((self.d as u16) << 8);
+                8
+            }
+            0x63 => {
+                self.ix = (self.ix & 0x00FF) | ((self.e as u16) << 8);
+                8
+            }
+            0x64 => {
+                /* LD IXH,IXH - no-op */
+                8
+            }
+            0x65 => {
+                let ixl = (self.ix & 0xFF) as u8;
+                self.ix = (self.ix & 0x00FF) | ((ixl as u16) << 8);
+                8
+            }
+            0x67 => {
+                self.ix = (self.ix & 0x00FF) | ((self.a as u16) << 8);
+                8
+            }
+            0x68 => {
+                self.ix = (self.ix & 0xFF00) | (self.b as u16);
+                8
+            }
+            0x69 => {
+                self.ix = (self.ix & 0xFF00) | (self.c as u16);
+                8
+            }
+            0x6A => {
+                self.ix = (self.ix & 0xFF00) | (self.d as u16);
+                8
+            }
+            0x6B => {
+                self.ix = (self.ix & 0xFF00) | (self.e as u16);
+                8
+            }
+            0x6C => {
+                let ixh = (self.ix >> 8) as u8;
+                self.ix = (self.ix & 0xFF00) | (ixh as u16);
+                8
+            }
+            0x6D => {
+                /* LD IXL,IXL - no-op */
+                8
+            }
+            0x6F => {
+                self.ix = (self.ix & 0xFF00) | (self.a as u16);
+                8
+            }
+            // Undocumented: ADD/ADC/SUB/SBC/AND/XOR/OR/CP A,IXH/IXL
+            0x84 => {
+                self.add_a((self.ix >> 8) as u8, false);
+                8
+            }
+            0x85 => {
+                self.add_a((self.ix & 0xFF) as u8, false);
+                8
+            }
+            0x8C => {
+                self.add_a((self.ix >> 8) as u8, true);
+                8
+            }
+            0x8D => {
+                self.add_a((self.ix & 0xFF) as u8, true);
+                8
+            }
+            0x94 => {
+                self.sub_a((self.ix >> 8) as u8, false);
+                8
+            }
+            0x95 => {
+                self.sub_a((self.ix & 0xFF) as u8, false);
+                8
+            }
+            0x9C => {
+                self.sub_a((self.ix >> 8) as u8, true);
+                8
+            }
+            0x9D => {
+                self.sub_a((self.ix & 0xFF) as u8, true);
+                8
+            }
+            0xA4 => {
+                self.and_a((self.ix >> 8) as u8);
+                8
+            }
+            0xA5 => {
+                self.and_a((self.ix & 0xFF) as u8);
+                8
+            }
+            0xAC => {
+                self.xor_a((self.ix >> 8) as u8);
+                8
+            }
+            0xAD => {
+                self.xor_a((self.ix & 0xFF) as u8);
+                8
+            }
+            0xB4 => {
+                self.or_a((self.ix >> 8) as u8);
+                8
+            }
+            0xB5 => {
+                self.or_a((self.ix & 0xFF) as u8);
+                8
+            }
+            0xBC => {
+                self.cp_a((self.ix >> 8) as u8);
+                8
+            }
+            0xBD => {
+                self.cp_a((self.ix & 0xFF) as u8);
+                8
+            }
             // Any other DD opcode: execute as base instruction (DD prefix ignored)
             _ => {
                 // The real Z80 treats unrecognized DD-prefixed opcodes as base opcodes.
@@ -2293,6 +2545,203 @@ impl<M: MemoryZ80> CpuZ80<M> {
                 let offset = self.read_pc() as i8;
                 let cb_opcode = self.read_pc();
                 self.execute_fdcb(offset, cb_opcode)
+            }
+            // Undocumented: INC/DEC/LD IYH (high byte of IY)
+            0x24 => {
+                let iyh = self.inc((self.iy >> 8) as u8);
+                self.iy = (self.iy & 0x00FF) | ((iyh as u16) << 8);
+                8
+            }
+            0x25 => {
+                let iyh = self.dec((self.iy >> 8) as u8);
+                self.iy = (self.iy & 0x00FF) | ((iyh as u16) << 8);
+                8
+            }
+            0x26 => {
+                let val = self.read_pc();
+                self.iy = (self.iy & 0x00FF) | ((val as u16) << 8);
+                11
+            }
+            // Undocumented: INC/DEC/LD IYL (low byte of IY)
+            0x2C => {
+                let iyl = self.inc((self.iy & 0xFF) as u8);
+                self.iy = (self.iy & 0xFF00) | (iyl as u16);
+                8
+            }
+            0x2D => {
+                let iyl = self.dec((self.iy & 0xFF) as u8);
+                self.iy = (self.iy & 0xFF00) | (iyl as u16);
+                8
+            }
+            0x2E => {
+                let val = self.read_pc();
+                self.iy = (self.iy & 0xFF00) | (val as u16);
+                11
+            }
+            // Undocumented: LD r,IYH / LD r,IYL
+            0x44 => {
+                self.b = (self.iy >> 8) as u8;
+                8
+            }
+            0x45 => {
+                self.b = (self.iy & 0xFF) as u8;
+                8
+            }
+            0x4C => {
+                self.c = (self.iy >> 8) as u8;
+                8
+            }
+            0x4D => {
+                self.c = (self.iy & 0xFF) as u8;
+                8
+            }
+            0x54 => {
+                self.d = (self.iy >> 8) as u8;
+                8
+            }
+            0x55 => {
+                self.d = (self.iy & 0xFF) as u8;
+                8
+            }
+            0x5C => {
+                self.e = (self.iy >> 8) as u8;
+                8
+            }
+            0x5D => {
+                self.e = (self.iy & 0xFF) as u8;
+                8
+            }
+            0x7C => {
+                self.a = (self.iy >> 8) as u8;
+                8
+            }
+            0x7D => {
+                self.a = (self.iy & 0xFF) as u8;
+                8
+            }
+            // Undocumented: LD IYH,r / LD IYL,r
+            0x60 => {
+                self.iy = (self.iy & 0x00FF) | ((self.b as u16) << 8);
+                8
+            }
+            0x61 => {
+                self.iy = (self.iy & 0x00FF) | ((self.c as u16) << 8);
+                8
+            }
+            0x62 => {
+                self.iy = (self.iy & 0x00FF) | ((self.d as u16) << 8);
+                8
+            }
+            0x63 => {
+                self.iy = (self.iy & 0x00FF) | ((self.e as u16) << 8);
+                8
+            }
+            0x64 => {
+                /* LD IYH,IYH - no-op */
+                8
+            }
+            0x65 => {
+                let iyl = (self.iy & 0xFF) as u8;
+                self.iy = (self.iy & 0x00FF) | ((iyl as u16) << 8);
+                8
+            }
+            0x67 => {
+                self.iy = (self.iy & 0x00FF) | ((self.a as u16) << 8);
+                8
+            }
+            0x68 => {
+                self.iy = (self.iy & 0xFF00) | (self.b as u16);
+                8
+            }
+            0x69 => {
+                self.iy = (self.iy & 0xFF00) | (self.c as u16);
+                8
+            }
+            0x6A => {
+                self.iy = (self.iy & 0xFF00) | (self.d as u16);
+                8
+            }
+            0x6B => {
+                self.iy = (self.iy & 0xFF00) | (self.e as u16);
+                8
+            }
+            0x6C => {
+                let iyh = (self.iy >> 8) as u8;
+                self.iy = (self.iy & 0xFF00) | (iyh as u16);
+                8
+            }
+            0x6D => {
+                /* LD IYL,IYL - no-op */
+                8
+            }
+            0x6F => {
+                self.iy = (self.iy & 0xFF00) | (self.a as u16);
+                8
+            }
+            // Undocumented: ADD/ADC/SUB/SBC/AND/XOR/OR/CP A,IYH/IYL
+            0x84 => {
+                self.add_a((self.iy >> 8) as u8, false);
+                8
+            }
+            0x85 => {
+                self.add_a((self.iy & 0xFF) as u8, false);
+                8
+            }
+            0x8C => {
+                self.add_a((self.iy >> 8) as u8, true);
+                8
+            }
+            0x8D => {
+                self.add_a((self.iy & 0xFF) as u8, true);
+                8
+            }
+            0x94 => {
+                self.sub_a((self.iy >> 8) as u8, false);
+                8
+            }
+            0x95 => {
+                self.sub_a((self.iy & 0xFF) as u8, false);
+                8
+            }
+            0x9C => {
+                self.sub_a((self.iy >> 8) as u8, true);
+                8
+            }
+            0x9D => {
+                self.sub_a((self.iy & 0xFF) as u8, true);
+                8
+            }
+            0xA4 => {
+                self.and_a((self.iy >> 8) as u8);
+                8
+            }
+            0xA5 => {
+                self.and_a((self.iy & 0xFF) as u8);
+                8
+            }
+            0xAC => {
+                self.xor_a((self.iy >> 8) as u8);
+                8
+            }
+            0xAD => {
+                self.xor_a((self.iy & 0xFF) as u8);
+                8
+            }
+            0xB4 => {
+                self.or_a((self.iy >> 8) as u8);
+                8
+            }
+            0xB5 => {
+                self.or_a((self.iy & 0xFF) as u8);
+                8
+            }
+            0xBC => {
+                self.cp_a((self.iy >> 8) as u8);
+                8
+            }
+            0xBD => {
+                self.cp_a((self.iy & 0xFF) as u8);
+                8
             }
             // Any other FD opcode: execute as base instruction (FD prefix ignored)
             _ => {
@@ -2642,5 +3091,184 @@ mod tests {
 
         assert!(!cpu.iff1); // Interrupts should be disabled
         assert!(!cpu.iff2);
+    }
+
+    // ── IX half-register undocumented instructions ────────────────────────────
+
+    #[test]
+    fn test_ix_half_registers_load() {
+        // LD IXH, n (DD 26 nn) and LD IXL, n (DD 2E nn)
+        let program = [
+            0xDD, 0x26, 0x12, // LD IXH,$12
+            0xDD, 0x2E, 0x34, // LD IXL,$34
+        ];
+        let memory = TestMemory::with_program(&program);
+        let mut cpu = CpuZ80::new(memory);
+        cpu.step();
+        assert_eq!((cpu.ix >> 8) as u8, 0x12);
+        cpu.step();
+        assert_eq!((cpu.ix & 0xFF) as u8, 0x34);
+        assert_eq!(cpu.ix, 0x1234);
+    }
+
+    #[test]
+    fn test_ix_half_register_ld_b_ixh() {
+        // LD B, IXH (DD 44)
+        let program = [0xDD, 0x44];
+        let memory = TestMemory::with_program(&program);
+        let mut cpu = CpuZ80::new(memory);
+        cpu.ix = 0xABCD;
+        cpu.step();
+        assert_eq!(cpu.b, 0xAB);
+    }
+
+    #[test]
+    fn test_ix_half_register_ld_ixh_a() {
+        // LD IXH, A (DD 67)
+        let program = [0xDD, 0x67];
+        let memory = TestMemory::with_program(&program);
+        let mut cpu = CpuZ80::new(memory);
+        cpu.a = 0x42;
+        cpu.ix = 0x0000;
+        cpu.step();
+        assert_eq!((cpu.ix >> 8) as u8, 0x42);
+    }
+
+    #[test]
+    fn test_ix_half_register_add_a_ixh() {
+        // ADD A, IXH (DD 84)
+        let program = [0xDD, 0x84];
+        let memory = TestMemory::with_program(&program);
+        let mut cpu = CpuZ80::new(memory);
+        cpu.a = 0x10;
+        cpu.ix = 0x0500; // IXH = 0x05
+        cpu.step();
+        assert_eq!(cpu.a, 0x15);
+    }
+
+    // ── IY half-register undocumented instructions ────────────────────────────
+
+    #[test]
+    fn test_iy_half_registers() {
+        // LD IYH, n (FD 26) and LD A, IYL (FD 7D)
+        let program = [
+            0xFD, 0x26, 0x56, // LD IYH,$56
+            0xFD, 0x2E, 0x78, // LD IYL,$78
+            0xFD, 0x7D, // LD A,IYL
+        ];
+        let memory = TestMemory::with_program(&program);
+        let mut cpu = CpuZ80::new(memory);
+        cpu.step();
+        assert_eq!((cpu.iy >> 8) as u8, 0x56);
+        cpu.step();
+        assert_eq!((cpu.iy & 0xFF) as u8, 0x78);
+        cpu.step();
+        assert_eq!(cpu.a, 0x78);
+    }
+
+    // ── ED undocumented instructions ──────────────────────────────────────────
+
+    #[test]
+    fn test_ed_in_f_c_undocumented() {
+        // IN F,(C) (ED 70) – reads from port C, sets flags, discards result.
+        struct IoMem([u8; 0x10000]);
+        impl MemoryZ80 for IoMem {
+            fn read(&self, a: u16) -> u8 {
+                self.0[a as usize]
+            }
+            fn write(&mut self, a: u16, v: u8) {
+                self.0[a as usize] = v;
+            }
+            fn io_read(&mut self, _port: u8) -> u8 {
+                0x42
+            }
+        }
+        let mut mem = IoMem([0; 0x10000]);
+        mem.0[0] = 0xED;
+        mem.0[1] = 0x70;
+        let mut cpu = CpuZ80::new(mem);
+        cpu.c = 0x00;
+        cpu.step();
+        // A should be unchanged (result discarded), but Z flag should be clear
+        // (0x42 is non-zero → Z=0).
+        assert_eq!(cpu.a, 0x00);
+        assert!(!cpu.get_flag(FLAG_Z));
+    }
+
+    #[test]
+    fn test_ed_out_c_0_undocumented() {
+        // OUT (C),0 (ED 71) – writes 0 to port; ensure it executes without panic.
+        let program = [0xED, 0x71];
+        let memory = TestMemory::with_program(&program);
+        let mut cpu = CpuZ80::new(memory);
+        cpu.c = 0x7E;
+        let cycles = cpu.step();
+        assert_eq!(cycles, 12);
+    }
+
+    #[test]
+    fn test_ed_neg_mirrors() {
+        // NEG mirrors (0x4C, 0x54, … 0x7C) should all negate A.
+        for &op in &[0x4Cu8, 0x54, 0x5C, 0x64, 0x6C, 0x74, 0x7C] {
+            let mut mem = TestMemory::new();
+            mem.ram[0] = 0xED;
+            mem.ram[1] = op;
+            let mut cpu = CpuZ80::new(mem);
+            cpu.a = 5;
+            cpu.step();
+            assert_eq!(cpu.a, 0xFBu8, "NEG mirror 0xED {:02X} failed", op);
+        }
+    }
+
+    #[test]
+    fn test_ed_im_mirrors() {
+        // IM 0 mirrors (0x4E, 0x66, 0x6E)
+        for &op in &[0x4Eu8, 0x66, 0x6E] {
+            let mut mem = TestMemory::new();
+            mem.ram[0] = 0xED;
+            mem.ram[1] = op;
+            let mut cpu = CpuZ80::new(mem);
+            cpu.im = 2;
+            cpu.step();
+            assert_eq!(cpu.im, 0, "IM 0 mirror 0xED {:02X} failed", op);
+        }
+        // IM 1 mirror (0x76)
+        {
+            let program = [0xED, 0x76];
+            let mem = TestMemory::with_program(&program);
+            let mut cpu = CpuZ80::new(mem);
+            cpu.im = 0;
+            cpu.step();
+            assert_eq!(cpu.im, 1);
+        }
+        // IM 2 mirror (0x7E)
+        {
+            let program = [0xED, 0x7E];
+            let mem = TestMemory::with_program(&program);
+            let mut cpu = CpuZ80::new(mem);
+            cpu.im = 0;
+            cpu.step();
+            assert_eq!(cpu.im, 2);
+        }
+    }
+
+    #[test]
+    fn test_ed_retn_mirrors() {
+        // RETN mirrors (0x55, 0x65, 0x75) should return from NMI and restore IFF1.
+        for &op in &[0x55u8, 0x65, 0x75] {
+            let mut mem = TestMemory::new();
+            mem.ram[0] = 0xED;
+            mem.ram[1] = op;
+            // push return address 0x1234 on stack
+            mem.ram[0xFFFE] = 0x34;
+            mem.ram[0xFFFF] = 0x12;
+            let mut cpu = CpuZ80::new(mem);
+            cpu.sp = 0xFFFE;
+            cpu.iff1 = false;
+            cpu.iff2 = true; // IFF2 saved state
+            cpu.step();
+            assert_eq!(cpu.pc, 0x1234, "RETN mirror 0xED {:02X} failed", op);
+            assert!(cpu.iff1, "IFF1 not restored for RETN mirror {:02X}", op);
+        }
     }
 }
