@@ -5,7 +5,7 @@
 //!
 //! For detailed CPU reference documentation, see: `docs/references/cpu_lr35902.md`
 
-use crate::cpu_8080_common;
+use hemu_8080::cpu_8080_common;
 
 /// Memory interface trait for the LR35902 CPU
 pub trait MemoryLr35902 {
@@ -1282,16 +1282,6 @@ impl<M: MemoryLr35902> CpuLr35902<M> {
         } else {
             8
         }
-    }
-}
-
-impl<M: MemoryLr35902> crate::Cpu for CpuLr35902<M> {
-    fn reset(&mut self) {
-        self.reset();
-    }
-
-    fn step(&mut self) -> u32 {
-        self.step()
     }
 }
 

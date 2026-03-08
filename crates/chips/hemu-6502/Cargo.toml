@@ -1,0 +1,12 @@
+[package]
+name = "hemu-6502"
+version = "0.1.0"
+edition = "2021"
+description = "Reusable MOS 6502 CPU emulation core — used in NES, Atari 2600, Apple II, and more"
+license = "MIT"
+keywords = ["emulator", "6502", "cpu", "nes", "retro"]
+categories = ["emulators", "hardware-support"]
+readme = "README.md"
+
+[dependencies]
+log = "0.4"

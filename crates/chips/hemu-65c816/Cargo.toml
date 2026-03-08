@@ -1,0 +1,12 @@
+[package]
+name = "hemu-65c816"
+version = "0.1.0"
+edition = "2021"
+description = "Reusable WDC 65C816 CPU emulation core — used in the SNES and Apple IIGS"
+license = "MIT"
+keywords = ["emulator", "65c816", "snes", "cpu", "retro"]
+categories = ["emulators", "hardware-support"]
+readme = "README.md"
+
+[dependencies]
+log = "0.4"

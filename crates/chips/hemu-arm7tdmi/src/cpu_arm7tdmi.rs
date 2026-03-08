@@ -47,8 +47,6 @@
 //! - ARM Architecture Reference Manual (ARM DDI 0100E)
 //! - GBATEK (https://problemkaputt.de/gbatek.htm)
 
-use crate::logging::{log, LogCategory, LogLevel};
-
 // =============================================================================
 // Data structures
 // =============================================================================
@@ -651,12 +649,14 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
     /// Returns true if the SWI was handled here and no exception is needed.
     fn handle_bios_swi(&mut self, imm: u32) -> bool {
         // Log all SWI calls for debugging
-        log(LogCategory::Stubs, LogLevel::Debug, || {
-            format!(
-                "SWI 0x{:02X} called at PC=${:08X} R0={:08X} R1={:08X} R2={:08X}",
-                imm, self.gpr[15], self.gpr[0], self.gpr[1], self.gpr[2]
-            )
-        });
+        log::debug!(
+            "SWI 0x{:02X} called at PC=${:08X} R0={:08X} R1={:08X} R2={:08X}",
+            imm,
+            self.gpr[15],
+            self.gpr[0],
+            self.gpr[1],
+            self.gpr[2]
+        );
         match imm {
             0x06 => {
                 // Div (signed) - R0 / R1
@@ -936,12 +936,11 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
                 true
             }
             _ => {
-                log(LogCategory::Stubs, LogLevel::Warn, || {
-                    format!(
-                        "Unhandled BIOS SWI 0x{:02X} at PC={:08X}",
-                        imm, self.gpr[15]
-                    )
-                });
+                log::warn!(
+                    "Unhandled BIOS SWI 0x{:02X} at PC={:08X}",
+                    imm,
+                    self.gpr[15]
+                );
                 false
             }
         }
@@ -1334,12 +1333,11 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
         let data_width = compression_type & 0x0F;
 
         if data_width != 4 && data_width != 8 {
-            log(LogCategory::Stubs, LogLevel::Warn, || {
-                format!(
-                    "HuffUnComp: Invalid data width {} at src={:08X}",
-                    data_width, src
-                )
-            });
+            log::warn!(
+                "HuffUnComp: Invalid data width {} at src={:08X}",
+                data_width,
+                src
+            );
             return;
         }
 
@@ -1457,12 +1455,11 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
         // enter_exception computes: LR = PC.wrapping_sub(lr_offset)
         // We need LR = PC + 4, so lr_offset = -4 (wrapping)
         let isr_addr = self.memory.read_word(0x03FF_FFFC);
-        log(LogCategory::Interrupts, LogLevel::Debug, || {
-            format!(
-                "ARM7: IRQ handler: PC={:08X} ISR=[03FFFFFC]={:08X}",
-                self.gpr[15], isr_addr
-            )
-        });
+        log::debug!(
+            "ARM7: IRQ handler: PC={:08X} ISR=[03FFFFFC]={:08X}",
+            self.gpr[15],
+            isr_addr
+        );
         self.enter_exception(VECTOR_IRQ, ProcessorMode::Irq, (-4i32) as u32);
     }
 
@@ -1480,9 +1477,7 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
         // FIQ uses same return address convention as IRQ
         // LR_fiq = next_instruction_addr + 4
         let lr_offset = (-4i32) as u32;
-        log(LogCategory::Interrupts, LogLevel::Debug, || {
-            format!("ARM7: FIQ handler: PC={:08X}", self.gpr[15])
-        });
+        log::debug!("ARM7: FIQ handler: PC={:08X}", self.gpr[15]);
         self.enter_exception(VECTOR_FIQ, ProcessorMode::Fiq, lr_offset);
     }
 
@@ -1492,9 +1487,7 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
         // Prefetch Abort: LR_abt = aborted_instruction_addr + 4
         // gpr[15] already = instruction_addr + 4, so lr_offset = 0
         // Return with SUBS PC, LR, #4 to retry the aborted instruction
-        log(LogCategory::CPU, LogLevel::Debug, || {
-            format!("ARM7: Prefetch Abort at PC={:08X}", self.gpr[15])
-        });
+        log::debug!("ARM7: Prefetch Abort at PC={:08X}", self.gpr[15]);
         self.enter_exception(VECTOR_PREFETCH_ABORT, ProcessorMode::Abort, 0);
     }
 
@@ -1505,9 +1498,7 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
         // gpr[15] = instruction_addr + 4, need LR = instruction_addr + 8
         // So lr_offset = -4 (wrapping subtract adds 4)
         // Return with SUBS PC, LR, #8 to retry the faulting instruction
-        log(LogCategory::CPU, LogLevel::Debug, || {
-            format!("ARM7: Data Abort at PC={:08X}", self.gpr[15])
-        });
+        log::debug!("ARM7: Data Abort at PC={:08X}", self.gpr[15]);
         self.enter_exception(VECTOR_DATA_ABORT, ProcessorMode::Abort, (-4i32) as u32);
     }
 
@@ -1515,9 +1506,7 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
     fn check_interrupts(&mut self) -> bool {
         // Check IRQ: must be enabled (I flag clear) and pending from hardware
         if self.cpsr & FLAG_I == 0 && self.memory.irq_pending() {
-            log(LogCategory::Interrupts, LogLevel::Debug, || {
-                "ARM7: IRQ taken".to_string()
-            });
+            log::debug!("ARM7: IRQ taken");
             self.handle_irq();
             return true;
         }
@@ -1755,9 +1744,7 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
         let pc = self.gpr[15];
         let instr = self.memory.read_word(pc & !3); // Force word-aligned
 
-        log(LogCategory::CPU, LogLevel::Trace, || {
-            format!("ARM: PC={:08X} instr={:08X}", pc, instr)
-        });
+        log::trace!("ARM: PC={:08X} instr={:08X}", pc, instr);
 
         // Advance PC past this instruction (pipeline)
         self.gpr[15] = pc.wrapping_add(4);
@@ -1858,9 +1845,7 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
 
             _ => {
                 // Undefined instruction
-                log(LogCategory::CPU, LogLevel::Warn, || {
-                    format!("ARM: Undefined instruction {:08X} at PC={:08X}", instr, pc)
-                });
+                log::warn!("ARM: Undefined instruction {:08X} at PC={:08X}", instr, pc);
                 self.handle_undefined();
                 self.cycles += 1;
             }
@@ -2275,9 +2260,7 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
                     self.memory.read_halfword(addr & !1) as i16 as i32 as u32
                 }
                 _ => {
-                    log(LogCategory::CPU, LogLevel::Warn, || {
-                        format!("ARM: Invalid halfword transfer op={}", op)
-                    });
+                    log::warn!("ARM: Invalid halfword transfer op={}", op);
                     0
                 }
             };
@@ -2506,9 +2489,7 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
         let pc = self.gpr[15];
         let instr = self.memory.read_halfword(pc & !1) as u32;
 
-        log(LogCategory::CPU, LogLevel::Trace, || {
-            format!("THUMB: PC={:08X} instr={:04X}", pc, instr)
-        });
+        log::trace!("THUMB: PC={:08X} instr={:04X}", pc, instr);
 
         // Advance PC
         self.gpr[15] = pc.wrapping_add(2);
@@ -2569,12 +2550,11 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
                     // Format 14: Push/Pop registers
                     self.thumb_push_pop(instr);
                 } else {
-                    log(LogCategory::CPU, LogLevel::Warn, || {
-                        format!(
-                            "THUMB: Undefined instruction {:04X} at PC={:08X}",
-                            instr, pc
-                        )
-                    });
+                    log::warn!(
+                        "THUMB: Undefined instruction {:04X} at PC={:08X}",
+                        instr,
+                        pc
+                    );
                     self.handle_undefined();
                     self.cycles += 1;
                 }
@@ -2594,12 +2574,11 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
                     // Format 16: Conditional branch
                     self.thumb_conditional_branch(instr);
                 } else {
-                    log(LogCategory::CPU, LogLevel::Warn, || {
-                        format!(
-                            "THUMB: Undefined instruction {:04X} at PC={:08X}",
-                            instr, pc
-                        )
-                    });
+                    log::warn!(
+                        "THUMB: Undefined instruction {:04X} at PC={:08X}",
+                        instr,
+                        pc
+                    );
                     self.handle_undefined();
                     self.cycles += 1;
                 }

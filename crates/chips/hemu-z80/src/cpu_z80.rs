@@ -5,7 +5,7 @@
 //!
 //! For detailed CPU reference documentation, see: `docs/references/cpu_z80.md`
 
-use crate::cpu_8080_common;
+use hemu_8080::cpu_8080_common;
 
 // Z80 Flag bits
 const FLAG_S: u8 = 0b10000000; // Sign
@@ -2846,16 +2846,6 @@ impl<M: MemoryZ80> CpuZ80<M> {
         self.set_flag(FLAG_H, ((a & 0x0FFF) + (b & 0x0FFF)) > 0x0FFF);
         self.set_flag(FLAG_C, (a as u32 + b as u32) > 0xFFFF);
         result
-    }
-}
-
-impl<M: MemoryZ80> crate::Cpu for CpuZ80<M> {
-    fn reset(&mut self) {
-        self.reset();
-    }
-
-    fn step(&mut self) -> u32 {
-        self.step()
     }
 }
 

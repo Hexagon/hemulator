@@ -2,6 +2,13 @@
 resolver = "2"
 members = [
   "crates/core",
+  "crates/chips/hemu-8080",
+  "crates/chips/hemu-z80",
+  "crates/chips/hemu-lr35902",
+  "crates/chips/hemu-6502",
+  "crates/chips/hemu-65c816",
+  "crates/chips/hemu-8086",
+  "crates/chips/hemu-arm7tdmi",
   "crates/systems/nes",
   "crates/systems/gb",
   "crates/systems/gba",

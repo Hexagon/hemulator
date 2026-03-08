@@ -1020,13 +1020,3 @@ impl<M: Memory8080> Cpu8080<M> {
         }
     }
 }
-
-impl<M: Memory8080> crate::Cpu for Cpu8080<M> {
-    fn reset(&mut self) {
-        self.reset();
-    }
-
-    fn step(&mut self) -> u32 {
-        self.step()
-    }
-}

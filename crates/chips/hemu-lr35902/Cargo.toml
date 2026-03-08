@@ -1,0 +1,12 @@
+[package]
+name = "hemu-lr35902"
+version = "0.1.0"
+edition = "2021"
+description = "Reusable Sharp LR35902 (Game Boy CPU) emulation core"
+license = "MIT"
+keywords = ["emulator", "lr35902", "gameboy", "cpu", "retro"]
+categories = ["emulators", "hardware-support"]
+readme = "README.md"
+
+[dependencies]
+hemu-8080 = { path = "../hemu-8080" }

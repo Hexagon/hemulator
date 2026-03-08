@@ -1,0 +1,11 @@
+[package]
+name = "hemu-8080"
+version = "0.1.0"
+edition = "2021"
+description = "Reusable Intel 8080 CPU emulation core — the ancestor of Z80 and Game Boy LR35902"
+license = "MIT"
+keywords = ["emulator", "8080", "cpu", "retro", "no_std"]
+categories = ["emulators", "hardware-support"]
+readme = "README.md"
+
+[dependencies]

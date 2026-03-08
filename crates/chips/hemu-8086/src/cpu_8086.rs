@@ -10,7 +10,6 @@
 #![allow(clippy::unnecessary_cast)] // Many casts are intentional for clarity
 
 use crate::cpu_8086_protected::ProtectedModeState;
-use crate::logging::{log, LogCategory, LogLevel};
 
 /// CPU model/variant selection
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
@@ -1885,23 +1884,19 @@ impl<M: Memory8086> Cpu8086<M> {
                     0xA6 => {
                         // Apply segment override to source (DS:SI), destination is always ES:DI
                         let src_seg = self.get_segment_with_override(self.ds);
-                        log(LogCategory::CPU, LogLevel::Trace, || {
-                            format!(
-                                "[REPE CMPSB] Starting: CX={:04X} DS:SI={:04X}:{:04X} ES:DI={:04X}:{:04X}",
-                                self.cx, src_seg, self.si, self.es, self.di
-                            )
-                        });
+                        log::trace!(
+                            "[REPE CMPSB] Starting: CX={:04X} DS:SI={:04X}:{:04X} ES:DI={:04X}:{:04X}",
+                            self.cx, src_seg, self.si, self.es, self.di
+                        );
 
                         while (self.cx & 0xFFFF) != 0 {
                             let src = self.read(src_seg, self.si as u16);
                             let dst = self.read(self.es, self.di as u16);
 
-                            log(LogCategory::CPU, LogLevel::Trace, || {
-                                format!(
-                                    "[REPE CMPSB] Comparing: SRC:{:04X}:{:04X}=0x{:02X} vs ES:{:04X}:{:04X}=0x{:02X} (CX={:04X})",
-                                    src_seg, self.si, src, self.es, self.di, dst, self.cx
-                                )
-                            });
+                            log::trace!(
+                                "[REPE CMPSB] Comparing: SRC:{:04X}:{:04X}=0x{:02X} vs ES:{:04X}:{:04X}=0x{:02X} (CX={:04X})",
+                                src_seg, self.si, src, self.es, self.di, dst, self.cx
+                            );
 
                             let result = src.wrapping_sub(dst);
                             let borrow = (src as u16) < (dst as u16);
@@ -1921,20 +1916,16 @@ impl<M: Memory8086> Cpu8086<M> {
                             total_cycles += 22;
                             // REPE: Exit if ZF=0
                             if !self.get_flag(FLAG_ZF) {
-                                log(LogCategory::CPU, LogLevel::Trace, || {
-                                    "[REPE CMPSB] Mismatch! Exiting early. ZF=0".to_string()
-                                });
+                                log::trace!("[REPE CMPSB] Mismatch! Exiting early. ZF=0");
                                 break;
                             }
                         }
 
-                        log(LogCategory::CPU, LogLevel::Trace, || {
-                            format!(
-                                "[REPE CMPSB] Finished: CX={:04X} ZF={}",
-                                self.cx,
-                                if self.get_flag(FLAG_ZF) { 1 } else { 0 }
-                            )
-                        });
+                        log::trace!(
+                            "[REPE CMPSB] Finished: CX={:04X} ZF={}",
+                            self.cx,
+                            if self.get_flag(FLAG_ZF) { 1 } else { 0 }
+                        );
 
                         self.cycles += total_cycles as u64;
                         total_cycles
@@ -2345,14 +2336,12 @@ impl<M: Memory8086> Cpu8086<M> {
                     }
                 } else {
                     // Undefined operation - treat as NOP
-                    log(LogCategory::Stubs, LogLevel::Info, || {
-                        format!(
-                            "Undefined 0x8F operation with op={} at CS:IP={:04X}:{:04X}",
-                            op,
-                            self.cs,
-                            self.ip.wrapping_sub(2u32)
-                        )
-                    });
+                    log::info!(
+                        "Undefined 0x8F operation with op={} at CS:IP={:04X}:{:04X}",
+                        op,
+                        self.cs,
+                        self.ip.wrapping_sub(2u32)
+                    );
                     self.cycles += 1;
                     1
                 }
@@ -4319,9 +4308,7 @@ impl<M: Memory8086> Cpu8086<M> {
 
                         // Only valid with reg field = 1
                         if reg != 1 {
-                            log(LogCategory::Stubs, LogLevel::Error, || {
-                                format!("Invalid CMPXCHG8B reg field: {}", reg)
-                            });
+                            log::error!("Invalid CMPXCHG8B reg field: {}", reg);
                             self.cycles += 2;
                             return 2;
                         }
@@ -4945,14 +4932,12 @@ impl<M: Memory8086> Cpu8086<M> {
                         }
                     }
                     _ => {
-                        log(LogCategory::Stubs, LogLevel::Warn, || {
-                            format!(
-                                "Two-byte opcode 0x0F 0x{:02X} not implemented at CS:IP={:04X}:{:04X}",
-                                next_opcode,
-                                self.cs,
-                                self.ip.wrapping_sub(2u32)
-                            )
-                        });
+                        log::warn!(
+                            "Two-byte opcode 0x0F 0x{:02X} not implemented at CS:IP={:04X}:{:04X}",
+                            next_opcode,
+                            self.cs,
+                            self.ip.wrapping_sub(2u32)
+                        );
                         self.cycles += 2;
                         2
                     }
@@ -6825,14 +6810,12 @@ impl<M: Memory8086> Cpu8086<M> {
                         }
                     }
                     _ => {
-                        log(LogCategory::Stubs, LogLevel::Warn, || {
-                            format!(
-                                "Unimplemented 0xF6 subopcode: {} at CS:IP={:04X}:{:04X}",
-                                reg,
-                                self.cs,
-                                self.ip.wrapping_sub(2u32)
-                            )
-                        });
+                        log::warn!(
+                            "Unimplemented 0xF6 subopcode: {} at CS:IP={:04X}:{:04X}",
+                            reg,
+                            self.cs,
+                            self.ip.wrapping_sub(2u32)
+                        );
                         self.cycles += 1;
                         1
                     }
@@ -6987,14 +6970,12 @@ impl<M: Memory8086> Cpu8086<M> {
                         }
                     }
                     _ => {
-                        log(LogCategory::Stubs, LogLevel::Warn, || {
-                            format!(
-                                "Unimplemented 0xF7 subopcode: {} at CS:IP={:04X}:{:04X}",
-                                reg,
-                                self.cs,
-                                self.ip.wrapping_sub(2u32)
-                            )
-                        });
+                        log::warn!(
+                            "Unimplemented 0xF7 subopcode: {} at CS:IP={:04X}:{:04X}",
+                            reg,
+                            self.cs,
+                            self.ip.wrapping_sub(2u32)
+                        );
                         self.cycles += 1;
                         1
                     }
@@ -7065,14 +7046,12 @@ impl<M: Memory8086> Cpu8086<M> {
                     }
                     // Consume immediate byte
                     let _ = self.fetch_u8();
-                    log(LogCategory::Stubs, LogLevel::Warn, || {
-                        format!(
-                            "Undefined 0xC6 operation with op={} at CS:IP={:04X}:{:04X}",
-                            op,
-                            self.cs,
-                            self.ip.wrapping_sub(2u32)
-                        )
-                    });
+                    log::warn!(
+                        "Undefined 0xC6 operation with op={} at CS:IP={:04X}:{:04X}",
+                        op,
+                        self.cs,
+                        self.ip.wrapping_sub(2u32)
+                    );
                     self.cycles += 1;
                     1
                 }
@@ -7142,14 +7121,10 @@ impl<M: Memory8086> Cpu8086<M> {
                         let _ = self.fetch_u16();
                     }
                     // Note: This is likely invalid code; treat as NOP to continue execution
-                    log(LogCategory::Stubs, LogLevel::Warn, || {
-                        format!(
-                            "Undefined 0xC7 operation with op={} at CS:IP={:04X}:{:04X} - treating as NOP",
-                            op,
-                            self.cs,
-                            self.ip.wrapping_sub(2u32)
-                        )
-                    });
+                    log::warn!(
+                        "Undefined 0xC7 operation with op={} at CS:IP={:04X}:{:04X} - treating as NOP",
+                        op, self.cs, self.ip.wrapping_sub(2u32)
+                    );
                     self.cycles += 1;
                     1
                 }
@@ -7233,29 +7208,38 @@ impl<M: Memory8086> Cpu8086<M> {
                     return 10;
                 }
                 // Debug: check what bytes we're about to read
-                log(LogCategory::CPU, LogLevel::Trace, || {
+                {
                     let ip_before = self.ip;
                     let byte1 = self.read(self.cs, (ip_before) as u16);
                     let byte2 = self.read(self.cs, (ip_before.wrapping_add(1)) as u16);
                     let byte3 = self.read(self.cs, (ip_before.wrapping_add(2u32)) as u16);
                     let phys_start = ((self.cs as u32) << 4) + (ip_before as u32);
-                    format!(
+                    log::trace!(
                         "[ENTER DEBUG] CS:IP={:04X}:{:04X}, physical=0x{:05X}\n\
                          [ENTER DEBUG] Next 3 bytes in memory: {:02X} {:02X} {:02X}\n\
                          [ENTER DEBUG] Will read as: size=0x{:02X}{:02X}, nesting=0x{:02X}",
-                        self.cs, ip_before, phys_start, byte1, byte2, byte3, byte2, byte1, byte3
-                    )
-                });
+                        self.cs,
+                        ip_before,
+                        phys_start,
+                        byte1,
+                        byte2,
+                        byte3,
+                        byte2,
+                        byte1,
+                        byte3
+                    );
+                }
 
                 let size = self.fetch_u16();
                 let _nesting = self.fetch_u8();
 
-                log(LogCategory::CPU, LogLevel::Trace, || {
-                    format!(
-                        "[ENTER] BP before={:04X}, SP before={:04X}, size={:04X}, nesting={:02X}",
-                        self.bp, self.sp, size, _nesting
-                    )
-                });
+                log::trace!(
+                    "[ENTER] BP before={:04X}, SP before={:04X}, size={:04X}, nesting={:02X}",
+                    self.bp,
+                    self.sp,
+                    size,
+                    _nesting
+                );
 
                 // Simplified implementation
                 self.push(self.bp as u16);
@@ -7263,9 +7247,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 self.bp = frame_temp;
                 self.sp = self.sp.wrapping_sub(size as u32);
 
-                log(LogCategory::CPU, LogLevel::Trace, || {
-                    format!("[ENTER] BP after={:04X}, SP after={:04X}", self.bp, self.sp)
-                });
+                log::trace!("[ENTER] BP after={:04X}, SP after={:04X}", self.bp, self.sp);
 
                 self.cycles += 15;
                 15
@@ -7693,14 +7675,12 @@ impl<M: Memory8086> Cpu8086<M> {
                         self.set_flag(FLAG_AF, af);
                     }
                     _ => {
-                        log(LogCategory::Stubs, LogLevel::Warn, || {
-                            format!(
-                                "Undefined 0xFE operation with op={} at CS:IP={:04X}:{:04X}",
-                                op,
-                                self.cs,
-                                self.ip.wrapping_sub(2u32)
-                            )
-                        });
+                        log::warn!(
+                            "Undefined 0xFE operation with op={} at CS:IP={:04X}:{:04X}",
+                            op,
+                            self.cs,
+                            self.ip.wrapping_sub(2u32)
+                        );
                         // For undefined operations, we'll just NOP and continue
                         // This prevents the system from crashing completely
                     }
@@ -7818,14 +7798,10 @@ impl<M: Memory8086> Cpu8086<M> {
                             let _ = self.calc_effective_address(modbits, rm);
                         }
                         // Note: This is likely invalid code; treat as NOP to continue execution
-                        log(LogCategory::Stubs, LogLevel::Warn, || {
-                            format!(
-                                "Undefined 0xFF operation with op={} at CS:IP={:04X}:{:04X} - treating as NOP",
-                                op,
-                                self.cs,
-                                self.ip.wrapping_sub(2u32)
-                            )
-                        });
+                        log::warn!(
+                            "Undefined 0xFF operation with op={} at CS:IP={:04X}:{:04X} - treating as NOP",
+                            op, self.cs, self.ip.wrapping_sub(2u32)
+                        );
                         self.cycles += 1;
                         1
                     }
@@ -8637,15 +8613,13 @@ impl<M: Memory8086> Cpu8086<M> {
                     ret_cs = self.pop();
                 }
 
-                log(LogCategory::CPU, LogLevel::Trace, || {
-                    format!(
-                        "[RETF] SP before={:04X}, pop_bytes={:04X}, ret_ip={:04X}, ret_cs={:04X}",
-                        self.sp.wrapping_add(4u32),
-                        pop_bytes,
-                        ret_ip,
-                        ret_cs
-                    )
-                });
+                log::trace!(
+                    "[RETF] SP before={:04X}, pop_bytes={:04X}, ret_ip={:04X}, ret_cs={:04X}",
+                    self.sp.wrapping_add(4u32),
+                    pop_bytes,
+                    ret_ip,
+                    ret_cs
+                );
 
                 self.ip = ret_ip as u32;
                 self.cs = ret_cs;
@@ -8729,14 +8703,12 @@ impl<M: Memory8086> Cpu8086<M> {
                 // Unknown/unimplemented opcode
                 // Note: This pattern is technically unreachable as all 256 opcodes are covered,
                 // but we keep it for safety and to handle potential future refactoring
-                log(LogCategory::Stubs, LogLevel::Warn, || {
-                    format!(
-                        "Unknown 8086 opcode: 0x{:02X} at CS:IP={:04X}:{:04X}",
-                        opcode,
-                        self.cs,
-                        self.ip.wrapping_sub(1)
-                    )
-                });
+                log::warn!(
+                    "Unknown 8086 opcode: 0x{:02X} at CS:IP={:04X}:{:04X}",
+                    opcode,
+                    self.cs,
+                    self.ip.wrapping_sub(1)
+                );
                 self.cycles += 1;
                 1
             }

@@ -2,18 +2,20 @@
 
 pub mod apu;
 pub mod breakpoints;
-pub mod cpu_6502;
-pub mod cpu_65c816;
-pub mod cpu_8080;
-pub mod cpu_8080_common;
-pub mod cpu_8086;
-pub mod cpu_8086_protected;
-pub mod cpu_arm7tdmi;
-pub mod cpu_lr35902;
+// CPU implementations are in standalone chip crates; re-exported here for backward compatibility.
+// Prefer importing from the chip crate directly (e.g. `hemu_6502::cpu_6502`) in new code.
+pub use hemu_6502::cpu_6502;
+pub use hemu_65c816::cpu_65c816;
+pub use hemu_8080::cpu_8080;
+pub use hemu_8080::cpu_8080_common;
+pub use hemu_8086::cpu_8086;
+pub use hemu_8086::cpu_8086_protected;
+pub use hemu_arm7tdmi::cpu_arm7tdmi;
+pub use hemu_lr35902::cpu_lr35902;
+pub use hemu_z80::cpu_z80;
 pub mod cpu_mips_r3000a;
 pub mod cpu_mips_r4300i;
 pub mod cpu_spc700;
-pub mod cpu_z80;
 pub mod debug;
 pub mod disasm_6502;
 pub mod disasm_65c816;

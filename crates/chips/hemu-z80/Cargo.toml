@@ -1,0 +1,12 @@
+[package]
+name = "hemu-z80"
+version = "0.1.0"
+edition = "2021"
+description = "Reusable Zilog Z80 CPU emulation core — used in SMS, ColecoVision, SG-1000, and more"
+license = "MIT"
+keywords = ["emulator", "z80", "cpu", "retro", "zilog"]
+categories = ["emulators", "hardware-support"]
+readme = "README.md"
+
+[dependencies]
+hemu-8080 = { path = "../hemu-8080" }

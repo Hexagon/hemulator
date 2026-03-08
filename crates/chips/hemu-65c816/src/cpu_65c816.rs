@@ -11,8 +11,6 @@
 //!
 //! For detailed CPU reference documentation, see: `docs/references/cpu_65c816.md`
 
-use crate::logging::{log, LogCategory, LogLevel};
-
 /// Memory interface trait for the 65C816 CPU
 ///
 /// Systems using the 65C816 must implement this trait to provide memory access.
@@ -149,16 +147,12 @@ impl<M: Memory65c816> Cpu65c816<M> {
 
         // WAI instruction is released by any interrupt
         if self.waiting_for_interrupt {
-            log(LogCategory::Interrupts, LogLevel::Info, || {
-                "65C816: NMI triggered, releasing WAI".to_string()
-            });
+            log::info!("65C816: NMI triggered, releasing WAI");
         }
         self.waiting_for_interrupt = false;
         self.in_nmi = true;
 
-        log(LogCategory::Interrupts, LogLevel::Debug, || {
-            format!("65C816: NMI triggered at ${:02X}:{:04X}", self.pbr, self.pc)
-        });
+        log::debug!("65C816: NMI triggered at ${:02X}:{:04X}", self.pbr, self.pc);
 
         // Save current state
         if self.emulation {
@@ -180,9 +174,7 @@ impl<M: Memory65c816> Cpu65c816<M> {
 
             // Load NMI vector from $FFEA-$FFEB
             let nmi_vector = self.read_word(0xFFEA);
-            log(LogCategory::Interrupts, LogLevel::Debug, || {
-                format!("65C816: NMI vector read from $FFEA = ${:04X}", nmi_vector)
-            });
+            log::debug!("65C816: NMI vector read from $FFEA = ${:04X}", nmi_vector);
             self.pc = nmi_vector;
             self.pbr = 0;
             self.cycles += 8;
@@ -250,12 +242,12 @@ impl<M: Memory65c816> Cpu65c816<M> {
         let opcode = self.fetch_byte();
 
         // Log opcode execution at trace level for debugging stuck games
-        log(LogCategory::CPU, LogLevel::Trace, || {
-            format!(
-                "65C816: Executing opcode 0x{:02X} at ${:02X}:{:04X}",
-                opcode, pbr_before_fetch, pc_before_fetch
-            )
-        });
+        log::trace!(
+            "65C816: Executing opcode 0x{:02X} at ${:02X}:{:04X}",
+            opcode,
+            pbr_before_fetch,
+            pc_before_fetch
+        );
 
         match opcode {
             // BRK - Force Break
@@ -4340,25 +4332,22 @@ impl<M: Memory65c816> Cpu65c816<M> {
                 // Halt CPU until an interrupt (IRQ or NMI) occurs
                 // PC has already advanced past WAI, so when interrupt occurs, execution continues at next instruction
                 self.waiting_for_interrupt = true;
-                log(LogCategory::CPU, LogLevel::Info, || {
-                    format!(
-                        "65C816: Entering WAI at ${:02X}:{:04X}",
-                        self.pbr,
-                        self.pc.wrapping_sub(1)
-                    )
-                });
+                log::info!(
+                    "65C816: Entering WAI at ${:02X}:{:04X}",
+                    self.pbr,
+                    self.pc.wrapping_sub(1)
+                );
                 self.cycles += 3;
             }
             0xDB => {
                 // STP - Stop Processor
                 // CPU is halted until reset
                 self.stopped = true;
-                log(LogCategory::CPU, LogLevel::Info, || {
-                    format!(
-                        "65C816: STP instruction - CPU stopped at ${:02X}:{:04X}",
-                        self.pbr, self.pc
-                    )
-                });
+                log::info!(
+                    "65C816: STP instruction - CPU stopped at ${:02X}:{:04X}",
+                    self.pbr,
+                    self.pc
+                );
                 self.cycles += 3;
             }
         }
