@@ -359,7 +359,10 @@ impl Gpu {
         if self.check_mask_bit {
             stat |= 1 << 12;
         }
-        // Bit 13: Interlace field (not implemented)
+        // Bit 13: Interlace field
+        if self.odd_field {
+            stat |= 1 << 13;
+        }
         // Bit 14: Reverse flag (not standard, always 0)
         // Bit 15: Texture disable
         if self.texture_disable {
@@ -872,9 +875,12 @@ impl Gpu {
                 let b1 = w1 as f32 * inv_area;
                 let b2 = w2 as f32 * inv_area;
 
-                let r = (c0.0 as f32 * b0 + c1.0 as f32 * b1 + c2.0 as f32 * b2) as u8;
-                let g = (c0.1 as f32 * b0 + c1.1 as f32 * b1 + c2.1 as f32 * b2) as u8;
-                let b = (c0.2 as f32 * b0 + c1.2 as f32 * b1 + c2.2 as f32 * b2) as u8;
+                let r = (c0.0 as f32 * b0 + c1.0 as f32 * b1 + c2.0 as f32 * b2).clamp(0.0, 255.0)
+                    as u8;
+                let g = (c0.1 as f32 * b0 + c1.1 as f32 * b1 + c2.1 as f32 * b2).clamp(0.0, 255.0)
+                    as u8;
+                let b = (c0.2 as f32 * b0 + c1.2 as f32 * b1 + c2.2 as f32 * b2).clamp(0.0, 255.0)
+                    as u8;
 
                 self.set_pixel(x, y, r, g, b);
             }
@@ -1262,8 +1268,10 @@ impl Gpu {
                 let b2 = w2 as f32 * inv_area;
 
                 // Interpolate texture coordinates
-                let u = (uv0.0 as f32 * b0 + uv1.0 as f32 * b1 + uv2.0 as f32 * b2) as u8;
-                let v = (uv0.1 as f32 * b0 + uv1.1 as f32 * b1 + uv2.1 as f32 * b2) as u8;
+                let u = (uv0.0 as f32 * b0 + uv1.0 as f32 * b1 + uv2.0 as f32 * b2)
+                    .clamp(0.0, 255.0) as u8;
+                let v = (uv0.1 as f32 * b0 + uv1.1 as f32 * b1 + uv2.1 as f32 * b2)
+                    .clamp(0.0, 255.0) as u8;
                 let (u, v) = self.apply_tex_window(u, v);
 
                 let (tr, tg, tb, transparent, stp) =
@@ -1339,8 +1347,10 @@ impl Gpu {
                 let b2 = w2 as f32 * inv_area;
 
                 // Interpolate texture coordinates
-                let u = (uv0.0 as f32 * b0 + uv1.0 as f32 * b1 + uv2.0 as f32 * b2) as u8;
-                let v = (uv0.1 as f32 * b0 + uv1.1 as f32 * b1 + uv2.1 as f32 * b2) as u8;
+                let u = (uv0.0 as f32 * b0 + uv1.0 as f32 * b1 + uv2.0 as f32 * b2)
+                    .clamp(0.0, 255.0) as u8;
+                let v = (uv0.1 as f32 * b0 + uv1.1 as f32 * b1 + uv2.1 as f32 * b2)
+                    .clamp(0.0, 255.0) as u8;
                 let (u, v) = self.apply_tex_window(u, v);
 
                 let (tr, tg, tb, transparent, stp) =
@@ -1353,9 +1363,12 @@ impl Gpu {
                     (tr, tg, tb)
                 } else {
                     // Interpolate Gouraud color
-                    let gr = (c0.0 as f32 * b0 + c1.0 as f32 * b1 + c2.0 as f32 * b2) as u8;
-                    let gg = (c0.1 as f32 * b0 + c1.1 as f32 * b1 + c2.1 as f32 * b2) as u8;
-                    let gb = (c0.2 as f32 * b0 + c1.2 as f32 * b1 + c2.2 as f32 * b2) as u8;
+                    let gr = (c0.0 as f32 * b0 + c1.0 as f32 * b1 + c2.0 as f32 * b2)
+                        .clamp(0.0, 255.0) as u8;
+                    let gg = (c0.1 as f32 * b0 + c1.1 as f32 * b1 + c2.1 as f32 * b2)
+                        .clamp(0.0, 255.0) as u8;
+                    let gb = (c0.2 as f32 * b0 + c1.2 as f32 * b1 + c2.2 as f32 * b2)
+                        .clamp(0.0, 255.0) as u8;
                     Self::modulate_color((tr, tg, tb), (gr, gg, gb))
                 };
 
@@ -1391,11 +1404,11 @@ impl Gpu {
     fn gp0_shaded_line(&mut self) {
         // Two-vertex shaded line: [c0+cmd, v0, c1, v1]
         if self.gp0_buffer.len() >= 4 {
-            let (r, g, b) = Self::decode_color(self.gp0_buffer[0]);
+            let c0 = Self::decode_color(self.gp0_buffer[0]);
             let v0 = self.decode_vertex(self.gp0_buffer[1]);
+            let c1 = Self::decode_color(self.gp0_buffer[2]);
             let v1 = self.decode_vertex(self.gp0_buffer[3]);
-            // Use the start color for the whole line (simplified; full Gouraud for lines is rare)
-            self.draw_line(v0, v1, r, g, b);
+            self.draw_shaded_line(v0, c0, v1, c1);
         }
     }
 
@@ -1403,15 +1416,26 @@ impl Gpu {
         // Draw the first segment (cmd+c0, v0, c1, v1)
         // Subsequent color/vertex pairs are handled in Gp0Mode::Polyline via gp0_write
         if self.gp0_buffer.len() >= 4 {
-            let (r, g, b) = Self::decode_color(self.gp0_buffer[0]);
+            let c0 = Self::decode_color(self.gp0_buffer[0]);
             let v0 = self.decode_vertex(self.gp0_buffer[1]);
+            let c1 = Self::decode_color(self.gp0_buffer[2]);
             let v1 = self.decode_vertex(self.gp0_buffer[3]);
-            self.draw_line(v0, v1, r, g, b);
+            self.draw_shaded_line(v0, c0, v1, c1);
         }
     }
 
     fn draw_line(&mut self, v0: (i32, i32), v1: (i32, i32), r: u8, g: u8, b: u8) {
-        // Bresenham's line algorithm
+        self.draw_shaded_line(v0, (r, g, b), v1, (r, g, b));
+    }
+
+    fn draw_shaded_line(
+        &mut self,
+        v0: (i32, i32),
+        c0: (u8, u8, u8),
+        v1: (i32, i32),
+        c1: (u8, u8, u8),
+    ) {
+        // Bresenham's line algorithm with Gouraud color interpolation
         let (mut x0, mut y0) = v0;
         let (x1, y1) = v1;
         let dx = (x1 - x0).abs();
@@ -1420,7 +1444,20 @@ impl Gpu {
         let sy = if y0 < y1 { 1 } else { -1 };
         let mut err = dx + dy;
 
+        let total_steps = dx.max((y1 - y0).abs());
+        let mut step = 0;
+
         loop {
+            // Interpolate color along the line
+            let t = if total_steps > 0 {
+                step as f32 / total_steps as f32
+            } else {
+                0.0
+            };
+            let r = (c0.0 as f32 + (c1.0 as f32 - c0.0 as f32) * t).clamp(0.0, 255.0) as u8;
+            let g = (c0.1 as f32 + (c1.1 as f32 - c0.1 as f32) * t).clamp(0.0, 255.0) as u8;
+            let b = (c0.2 as f32 + (c1.2 as f32 - c0.2 as f32) * t).clamp(0.0, 255.0) as u8;
+
             self.set_pixel(x0, y0, r, g, b);
             if x0 == x1 && y0 == y1 {
                 break;
@@ -1434,6 +1471,7 @@ impl Gpu {
                 err += dx;
                 y0 += sy;
             }
+            step += 1;
         }
     }
 

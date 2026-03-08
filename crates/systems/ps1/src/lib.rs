@@ -226,30 +226,72 @@ struct Timer {
     counter: u16,
     target: u16,
     mode: u16,
+    /// IRQ flags: bit 0 = target reached, bit 1 = overflow reached
+    /// Set by hardware, cleared by reading mode register.
+    /// Uses Cell for interior mutability (read_mode clears flags via &self).
+    irq_flags: Cell<u8>,
+    /// Whether this timer's IRQ has already fired (one-shot mode)
+    irq_fired: bool,
 }
 
 impl Timer {
     fn step(&mut self, ticks: u32) -> bool {
         let mut irq = false;
         for _ in 0..ticks {
+            let prev = self.counter;
             self.counter = self.counter.wrapping_add(1);
+
+            // Target reached
             if self.counter == self.target {
-                // Target reached
+                self.irq_flags.set(self.irq_flags.get() | 1); // bit 10 in mode readback
+                if self.mode & (1 << 3) != 0 {
+                    irq = true;
+                }
                 if self.mode & (1 << 4) != 0 {
                     // Reset on target
                     self.counter = 0;
                 }
-                if self.mode & (1 << 3) != 0 {
-                    // IRQ on target
+            }
+
+            // Overflow: counter wraps from 0xFFFF to 0x0000
+            if prev == 0xFFFF && self.counter == 0 {
+                self.irq_flags.set(self.irq_flags.get() | 2); // bit 11 in mode readback
+                if self.mode & (1 << 5) != 0 {
                     irq = true;
                 }
             }
-            if self.counter == 0xFFFF && self.mode & (1 << 5) != 0 {
-                // IRQ on overflow
-                irq = true;
+        }
+
+        // Handle one-shot vs repeat (bit 7 = repeat)
+        if irq {
+            let repeat = self.mode & (1 << 7) != 0;
+            if !repeat && self.irq_fired {
+                irq = false; // One-shot: only fire once
+            } else {
+                self.irq_fired = true;
             }
         }
+
         irq
+    }
+
+    /// Read mode register: returns mode with IRQ flags in bits 10-11,
+    /// then clears those flags (hardware behavior per PSX-SPX docs).
+    fn read_mode(&self) -> u16 {
+        let flags = self.irq_flags.get();
+        let val = self.mode
+            | (if flags & 1 != 0 { 1 << 10 } else { 0 })
+            | (if flags & 2 != 0 { 1 << 11 } else { 0 });
+        self.irq_flags.set(0); // Cleared on read
+        val
+    }
+
+    /// Write mode register: resets counter to 0 and clears IRQ flags.
+    fn write_mode(&mut self, val: u16) {
+        self.mode = val;
+        self.counter = 0; // Writing mode resets counter
+        self.irq_flags.set(0);
+        self.irq_fired = false;
     }
 }
 
@@ -874,13 +916,13 @@ impl Ps1Bus {
 
             // Timer registers
             0x1F80_1100 => self.timers[0].counter,
-            0x1F80_1104 => self.timers[0].mode,
+            0x1F80_1104 => self.timers[0].read_mode(),
             0x1F80_1108 => self.timers[0].target,
             0x1F80_1110 => self.timers[1].counter,
-            0x1F80_1114 => self.timers[1].mode,
+            0x1F80_1114 => self.timers[1].read_mode(),
             0x1F80_1118 => self.timers[1].target,
             0x1F80_1120 => self.timers[2].counter,
-            0x1F80_1124 => self.timers[2].mode,
+            0x1F80_1124 => self.timers[2].read_mode(),
             0x1F80_1128 => self.timers[2].target,
 
             // Joypad
@@ -929,13 +971,13 @@ impl Ps1Bus {
 
             // Timer registers
             0x1F80_1100 => self.timers[0].counter as u32,
-            0x1F80_1104 => self.timers[0].mode as u32,
+            0x1F80_1104 => self.timers[0].read_mode() as u32,
             0x1F80_1108 => self.timers[0].target as u32,
             0x1F80_1110 => self.timers[1].counter as u32,
-            0x1F80_1114 => self.timers[1].mode as u32,
+            0x1F80_1114 => self.timers[1].read_mode() as u32,
             0x1F80_1118 => self.timers[1].target as u32,
             0x1F80_1120 => self.timers[2].counter as u32,
-            0x1F80_1124 => self.timers[2].mode as u32,
+            0x1F80_1124 => self.timers[2].read_mode() as u32,
             0x1F80_1128 => self.timers[2].target as u32,
 
             // Joypad
@@ -1078,13 +1120,13 @@ impl Ps1Bus {
 
             // Timer registers
             0x1F80_1100 => self.timers[0].counter = val,
-            0x1F80_1104 => self.timers[0].mode = val,
+            0x1F80_1104 => self.timers[0].write_mode(val),
             0x1F80_1108 => self.timers[0].target = val,
             0x1F80_1110 => self.timers[1].counter = val,
-            0x1F80_1114 => self.timers[1].mode = val,
+            0x1F80_1114 => self.timers[1].write_mode(val),
             0x1F80_1118 => self.timers[1].target = val,
             0x1F80_1120 => self.timers[2].counter = val,
-            0x1F80_1124 => self.timers[2].mode = val,
+            0x1F80_1124 => self.timers[2].write_mode(val),
             0x1F80_1128 => self.timers[2].target = val,
 
             // Joypad
@@ -1136,13 +1178,13 @@ impl Ps1Bus {
 
             // Timer registers (word access)
             0x1F80_1100 => self.timers[0].counter = val as u16,
-            0x1F80_1104 => self.timers[0].mode = val as u16,
+            0x1F80_1104 => self.timers[0].write_mode(val as u16),
             0x1F80_1108 => self.timers[0].target = val as u16,
             0x1F80_1110 => self.timers[1].counter = val as u16,
-            0x1F80_1114 => self.timers[1].mode = val as u16,
+            0x1F80_1114 => self.timers[1].write_mode(val as u16),
             0x1F80_1118 => self.timers[1].target = val as u16,
             0x1F80_1120 => self.timers[2].counter = val as u16,
-            0x1F80_1124 => self.timers[2].mode = val as u16,
+            0x1F80_1124 => self.timers[2].write_mode(val as u16),
             0x1F80_1128 => self.timers[2].target = val as u16,
 
             // Joypad
@@ -1360,16 +1402,16 @@ impl MemoryR3000A for Ps1Bus {
     fn read_halfword(&self, addr: u32) -> u16 {
         match addr {
             0x0000_0000..=0x007F_FFFF => {
-                let a = (addr & 0x1F_FFFF) as usize;
+                let a = (addr & 0x1F_FFFE) as usize;
                 self.ram[a] as u16 | (self.ram[a + 1] as u16) << 8
             }
             0x1F80_0000..=0x1F80_03FF => {
-                let a = (addr & 0x3FF) as usize;
+                let a = (addr & 0x3FE) as usize;
                 self.scratchpad[a] as u16 | (self.scratchpad[a + 1] as u16) << 8
             }
             0x1F80_1000..=0x1F80_2FFF => self.io_read_halfword(addr),
             0x1FC0_0000..=0x1FC7_FFFF => {
-                let a = (addr & 0x7_FFFF) as usize;
+                let a = (addr & 0x7_FFFE) as usize;
                 self.bios[a] as u16 | (self.bios[a + 1] as u16) << 8
             }
             0x1F00_0000..=0x1F7F_FFFF => 0xFFFF,
@@ -1380,14 +1422,14 @@ impl MemoryR3000A for Ps1Bus {
     fn read_word(&self, addr: u32) -> u32 {
         match addr {
             0x0000_0000..=0x007F_FFFF => {
-                let a = (addr & 0x1F_FFFF) as usize;
+                let a = (addr & 0x1F_FFFC) as usize;
                 self.ram[a] as u32
                     | (self.ram[a + 1] as u32) << 8
                     | (self.ram[a + 2] as u32) << 16
                     | (self.ram[a + 3] as u32) << 24
             }
             0x1F80_0000..=0x1F80_03FF => {
-                let a = (addr & 0x3FF) as usize;
+                let a = (addr & 0x3FC) as usize;
                 self.scratchpad[a] as u32
                     | (self.scratchpad[a + 1] as u32) << 8
                     | (self.scratchpad[a + 2] as u32) << 16
@@ -1395,7 +1437,7 @@ impl MemoryR3000A for Ps1Bus {
             }
             0x1F80_1000..=0x1F80_2FFF => self.io_read_word(addr),
             0x1FC0_0000..=0x1FC7_FFFF => {
-                let a = (addr & 0x7_FFFF) as usize;
+                let a = (addr & 0x7_FFFC) as usize;
                 self.bios[a] as u32
                     | (self.bios[a + 1] as u32) << 8
                     | (self.bios[a + 2] as u32) << 16
@@ -1419,12 +1461,12 @@ impl MemoryR3000A for Ps1Bus {
     fn write_halfword(&mut self, addr: u32, val: u16) {
         match addr {
             0x0000_0000..=0x007F_FFFF => {
-                let a = (addr & 0x1F_FFFF) as usize;
+                let a = (addr & 0x1F_FFFE) as usize;
                 self.ram[a] = val as u8;
                 self.ram[a + 1] = (val >> 8) as u8;
             }
             0x1F80_0000..=0x1F80_03FF => {
-                let a = (addr & 0x3FF) as usize;
+                let a = (addr & 0x3FE) as usize;
                 self.scratchpad[a] = val as u8;
                 self.scratchpad[a + 1] = (val >> 8) as u8;
             }
@@ -1436,14 +1478,14 @@ impl MemoryR3000A for Ps1Bus {
     fn write_word(&mut self, addr: u32, val: u32) {
         match addr {
             0x0000_0000..=0x007F_FFFF => {
-                let a = (addr & 0x1F_FFFF) as usize;
+                let a = (addr & 0x1F_FFFC) as usize;
                 self.ram[a] = val as u8;
                 self.ram[a + 1] = (val >> 8) as u8;
                 self.ram[a + 2] = (val >> 16) as u8;
                 self.ram[a + 3] = (val >> 24) as u8;
             }
             0x1F80_0000..=0x1F80_03FF => {
-                let a = (addr & 0x3FF) as usize;
+                let a = (addr & 0x3FC) as usize;
                 self.scratchpad[a] = val as u8;
                 self.scratchpad[a + 1] = (val >> 8) as u8;
                 self.scratchpad[a + 2] = (val >> 16) as u8;
