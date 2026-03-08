@@ -682,11 +682,7 @@ mod tests {
     fn test_disassemble_ld() {
         let memory = [0x3E, 0x42];
         let instr = disassemble_z80(&memory, 0x0000).unwrap();
-        assert!(
-            instr.mnemonic.contains("LD A") && instr.mnemonic.contains("$42"),
-            "unexpected mnemonic: {}",
-            instr.mnemonic
-        );
+        assert_eq!(instr.mnemonic, "LD A,$42");
         assert_eq!(instr.len(), 2);
     }
 
@@ -694,11 +690,7 @@ mod tests {
     fn test_disassemble_jp() {
         let memory = [0xC3, 0x00, 0x10];
         let instr = disassemble_z80(&memory, 0x0000).unwrap();
-        assert!(
-            instr.mnemonic.contains("JP") && instr.mnemonic.contains("$1000"),
-            "unexpected mnemonic: {}",
-            instr.mnemonic
-        );
+        assert_eq!(instr.mnemonic, "JP $1000");
         assert_eq!(instr.len(), 3);
     }
 
