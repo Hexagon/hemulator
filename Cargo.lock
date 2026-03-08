@@ -1173,6 +1173,7 @@ dependencies = [
 name = "hemu-arm7tdmi"
 version = "0.1.0"
 dependencies = [
+ "hemu-types",
  "log",
 ]
 

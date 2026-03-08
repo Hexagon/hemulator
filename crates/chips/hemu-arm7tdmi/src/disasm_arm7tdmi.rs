@@ -2,6 +2,8 @@
 //!
 //! Provides disassembly for both ARM (32-bit) and Thumb (16-bit) instruction sets.
 
+use hemu_types::DisassembledInstruction;
+
 /// Condition code suffix strings
 const COND_NAMES: [&str; 16] = [
     "EQ", "NE", "CS", "CC", "MI", "PL", "VS", "VC", "HI", "LS", "GE", "LT", "GT", "LE", "", "NV",
@@ -682,6 +684,18 @@ fn format_reg_list(reg_list: u32) -> String {
     }
 
     parts.join(", ")
+}
+
+/// Disassemble a single ARM (32-bit) instruction, returning a [`DisassembledInstruction`].
+pub fn disassemble_arm_instr(instr: u32, pc: u32) -> DisassembledInstruction {
+    let mnemonic = disassemble_arm(instr, pc);
+    DisassembledInstruction::new(pc, instr.to_le_bytes().to_vec(), mnemonic)
+}
+
+/// Disassemble a single Thumb (16-bit) instruction, returning a [`DisassembledInstruction`].
+pub fn disassemble_thumb_instr(instr: u16, pc: u32) -> DisassembledInstruction {
+    let mnemonic = disassemble_thumb(instr, pc);
+    DisassembledInstruction::new(pc, instr.to_le_bytes().to_vec(), mnemonic)
 }
 
 #[cfg(test)]

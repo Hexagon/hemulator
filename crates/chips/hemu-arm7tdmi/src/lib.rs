@@ -4,3 +4,5 @@
 
 pub mod cpu_arm7tdmi;
 pub mod disasm_arm7tdmi;
+
+pub use hemu_types::DisassembledInstruction;
