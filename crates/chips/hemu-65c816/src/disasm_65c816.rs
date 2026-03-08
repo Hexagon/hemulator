@@ -4,7 +4,7 @@
 //! The 65C816 is a 16-bit extension of the 6502 with additional addressing modes
 //! and instructions.
 
-use crate::debug::DisassembledInstruction;
+use hemu_types::DisassembledInstruction;
 
 /// Disassemble a single 65C816 instruction from memory (legacy version assuming 8-bit mode)
 ///

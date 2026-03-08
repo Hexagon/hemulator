@@ -1,0 +1,12 @@
+[package]
+name = "hemu-spc700"
+version = "0.1.0"
+edition = "2021"
+description = "Reusable Sony SPC700 CPU emulation core — used in the SNES APU"
+license = "MIT"
+keywords = ["emulator", "spc700", "snes", "apu", "cpu"]
+categories = ["emulators", "hardware-support"]
+readme = "README.md"
+
+[dependencies]
+log = "0.4"

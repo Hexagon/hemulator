@@ -1,10 +1,10 @@
 [package]
-name = "hemu-65c816"
+name = "hemu-mips-r4300i"
 version = "0.1.0"
 edition = "2021"
-description = "Reusable WDC 65C816 CPU emulation core — used in the SNES and Apple IIGS"
+description = "Reusable MIPS R4300i CPU emulation core — used in the Nintendo 64"
 license = "MIT"
-keywords = ["emulator", "65c816", "snes", "cpu", "retro"]
+keywords = ["emulator", "mips", "r4300i", "n64", "cpu"]
 categories = ["emulators", "hardware-support"]
 readme = "README.md"
 

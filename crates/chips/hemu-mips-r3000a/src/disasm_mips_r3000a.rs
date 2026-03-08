@@ -3,7 +3,7 @@
 //! Full disassembly for the MIPS R3000A CPU used in PlayStation 1.
 //! All MIPS I instructions are supported, plus COP0 and GTE (COP2) basics.
 
-use crate::debug::DisassembledInstruction;
+use hemu_types::DisassembledInstruction;
 
 /// Standard MIPS register names
 const REG_NAMES: [&str; 32] = [

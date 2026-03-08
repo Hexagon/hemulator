@@ -68,8 +68,6 @@
 //! - **64-bit shifts**: Shift amount masked to 6 bits (0-63)
 //! - Safe against overflow/underflow
 
-use crate::logging::{log, LogCategory, LogLevel};
-
 /// TLB entry data structure for CP0 TLB instructions
 /// This is a simplified representation that matches CP0 register format
 #[derive(Debug, Clone, Copy, Default)]
@@ -796,12 +794,11 @@ impl<M: MemoryMips> CpuMips<M> {
 
         // Validate 4-byte alignment
         if addr & 3 != 0 {
-            log(LogCategory::CPU, LogLevel::Warn, || {
-                format!(
-                    "LW: Unaligned word access at 0x{:08X} (PC=0x{:016X})",
-                    addr, self.pc
-                )
-            });
+            log::warn!(
+                "LW: Unaligned word access at 0x{:08X} (PC=0x{:016X})",
+                addr,
+                self.pc
+            );
         }
 
         let val = self.memory.read_word(addr);
@@ -821,12 +818,11 @@ impl<M: MemoryMips> CpuMips<M> {
 
         // Validate 4-byte alignment
         if addr & 3 != 0 {
-            log(LogCategory::CPU, LogLevel::Warn, || {
-                format!(
-                    "SW: Unaligned word access at 0x{:08X} (PC=0x{:016X})",
-                    addr, self.pc
-                )
-            });
+            log::warn!(
+                "SW: Unaligned word access at 0x{:08X} (PC=0x{:016X})",
+                addr,
+                self.pc
+            );
         }
 
         self.memory.write_word(addr, self.gpr[rt] as u32);
@@ -1201,12 +1197,11 @@ impl<M: MemoryMips> CpuMips<M> {
 
         // Validate 2-byte alignment
         if addr & 1 != 0 {
-            log(LogCategory::CPU, LogLevel::Warn, || {
-                format!(
-                    "LH: Unaligned halfword access at 0x{:08X} (PC=0x{:016X})",
-                    addr, self.pc
-                )
-            });
+            log::warn!(
+                "LH: Unaligned halfword access at 0x{:08X} (PC=0x{:016X})",
+                addr,
+                self.pc
+            );
         }
 
         let val = self.memory.read_halfword(addr);
@@ -1224,12 +1219,11 @@ impl<M: MemoryMips> CpuMips<M> {
 
         // Validate 2-byte alignment
         if addr & 1 != 0 {
-            log(LogCategory::CPU, LogLevel::Warn, || {
-                format!(
-                    "LHU: Unaligned halfword access at 0x{:08X} (PC=0x{:016X})",
-                    addr, self.pc
-                )
-            });
+            log::warn!(
+                "LHU: Unaligned halfword access at 0x{:08X} (PC=0x{:016X})",
+                addr,
+                self.pc
+            );
         }
 
         let val = self.memory.read_halfword(addr);
@@ -1247,12 +1241,11 @@ impl<M: MemoryMips> CpuMips<M> {
 
         // Validate 4-byte alignment
         if addr & 3 != 0 {
-            log(LogCategory::CPU, LogLevel::Warn, || {
-                format!(
-                    "LWU: Unaligned word access at 0x{:08X} (PC=0x{:016X})",
-                    addr, self.pc
-                )
-            });
+            log::warn!(
+                "LWU: Unaligned word access at 0x{:08X} (PC=0x{:016X})",
+                addr,
+                self.pc
+            );
         }
 
         let val = self.memory.read_word(addr);
@@ -1270,12 +1263,11 @@ impl<M: MemoryMips> CpuMips<M> {
 
         // Validate 8-byte alignment
         if addr & 7 != 0 {
-            log(LogCategory::CPU, LogLevel::Warn, || {
-                format!(
-                    "LD: Unaligned doubleword access at 0x{:08X} (PC=0x{:016X})",
-                    addr, self.pc
-                )
-            });
+            log::warn!(
+                "LD: Unaligned doubleword access at 0x{:08X} (PC=0x{:016X})",
+                addr,
+                self.pc
+            );
         }
 
         let val = self.memory.read_doubleword(addr);
@@ -1380,12 +1372,11 @@ impl<M: MemoryMips> CpuMips<M> {
 
         // Validate 2-byte alignment
         if addr & 1 != 0 {
-            log(LogCategory::CPU, LogLevel::Warn, || {
-                format!(
-                    "SH: Unaligned halfword access at 0x{:08X} (PC=0x{:016X})",
-                    addr, self.pc
-                )
-            });
+            log::warn!(
+                "SH: Unaligned halfword access at 0x{:08X} (PC=0x{:016X})",
+                addr,
+                self.pc
+            );
         }
 
         self.memory.write_halfword(addr, self.gpr[rt] as u16);
@@ -1402,12 +1393,11 @@ impl<M: MemoryMips> CpuMips<M> {
 
         // Validate 8-byte alignment
         if addr & 7 != 0 {
-            log(LogCategory::CPU, LogLevel::Warn, || {
-                format!(
-                    "SD: Unaligned doubleword access at 0x{:08X} (PC=0x{:016X})",
-                    addr, self.pc
-                )
-            });
+            log::warn!(
+                "SD: Unaligned doubleword access at 0x{:08X} (PC=0x{:016X})",
+                addr,
+                self.pc
+            );
         }
 
         self.memory.write_doubleword(addr, self.gpr[rt]);

@@ -3,7 +3,7 @@
 //! Provides basic disassembly for the MIPS R4300i CPU used in N64.
 //! This is a simplified implementation that shows instruction bytes.
 
-use crate::debug::DisassembledInstruction;
+use hemu_types::DisassembledInstruction;
 
 /// Disassemble a single MIPS instruction from memory
 ///

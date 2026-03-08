@@ -31,6 +31,7 @@ Hemulator is built on a modular architecture that separates reusable emulation c
 - **Consistency**: Unified interfaces and patterns across all emulated systems
 - **Testability**: Independent testing of core components and system implementations
 - **Extensibility**: Easy addition of new systems by composing existing components
+- **Future Separability**: Chip crates are structured to be publishable to crates.io independently
 
 ## High-Level Architecture
 
@@ -56,64 +57,140 @@ Hemulator is built on a modular architecture that separates reusable emulation c
 └────────────────────┬───────────────────────────────────────────┘
                      │ Uses
 ┌────────────────────┴───────────────────────────────────────────┐
-│                      Core Components                           │
+│                      Core (emu_core)                           │
 │  ┌──────────────────────────────────────────────────────────┐  │
-│  │  • CPU Implementations (6502, Z80, LR35902, 65C816,      │  │
-│  │    MIPS R4300i, 8086, 8080)                              │  │
+│  │  • Traits: System, Cpu, Renderer, AudioChip, Debugger    │  │
 │  │  • Audio Components (APU channels, envelopes, mixers)    │  │
 │  │  • Graphics Utilities (ZBuffer, ColorOps, palettes)      │  │
-│  │  • Common Traits (System, Cpu, Renderer, AudioChip)      │  │
 │  │  • Data Structures (Frame, AudioSample)                  │  │
+│  │  • Re-exports all chip crate modules                     │  │
 │  └──────────────────────────────────────────────────────────┘  │
+└────────────────────┬───────────────────────────────────────────┘
+                     │ Depends on
+┌────────────────────┴───────────────────────────────────────────┐
+│                   Chip Crates (crates/chips/)                  │
+│  ┌──────────┬──────────┬──────────┬──────────┬────────────┐    │
+│  │hemu-6502 │hemu-z80  │hemu-8086 │hemu-arm7 │hemu-mips-* │    │
+│  │hemu-8080 │hemu-lr35 │hemu-65c8 │hemu-spc7 │hemu-types  │    │
+│  └──────────┴──────────┴──────────┴──────────┴────────────┘    │
 └────────────────────────────────────────────────────────────────┘
 ```
 
 ## Core Module (`crates/core/`)
 
 The core module provides reusable components that multiple systems can share.
+CPU implementations **live in chip crates** (`crates/chips/hemu-*`) and are
+re-exported from `emu_core` for backward compatibility. See the
+[Chip Crates](#chip-crates-crateschips) section for the full list and design rationale.
 
 ### CPU Implementations
 
-Hemulator implements several CPU architectures as generic components:
-
-- **`cpu_6502`**: MOS 6502 (NES, Atari 2600, Apple II, Commodore 64)
-  - Complete instruction set with all addressing modes
-  - Hardware interrupt support (NMI, IRQ)
-  - Generic `Memory6502` trait for system-specific memory implementations
-  
-- **`cpu_65c816`**: WDC 65C816 (SNES, Apple IIGS)
-  - 16-bit extension of 6502
-  - 256/256 opcodes implemented (100% complete)
-  - 8/16-bit mode switching, 24-bit address space
-  
-- **`cpu_lr35902`**: Sharp LR35902 (Game Boy, Game Boy Color)
-  - Z80-like CPU with Game Boy-specific modifications
-  - 8-bit and 16-bit register operations
-  
-- **`cpu_z80`**: Zilog Z80 (Sega Master System, Game Gear, ZX Spectrum)
-  - Shadow registers and index registers
-  - Multiple interrupt modes
-  
-- **`cpu_mips_r4300i`**: MIPS R4300i (Nintendo 64)
-  - 64-bit MIPS III RISC processor
-  - Complete instruction set including FPU operations
-  
-- **`cpu_8086`**: Intel 8086 (IBM PC, PC XT)
-  - Segment-based memory addressing
-  - Complete instruction set with ModR/M addressing
-  - Range-based interrupt priority system (hardware, BIOS, OS handlers)
-  
-- **`cpu_8080`**: Intel 8080 (Space Invaders, CP/M systems)
-  - Foundation for Z80
-  - I/O port support
-
-Each CPU implementation follows the same pattern:
+All CPU implementations follow the same pattern:
 1. Generic memory trait (e.g., `Memory6502`, `MemoryMips`)
 2. CPU struct with registers and state
 3. Instruction execution with cycle-accurate timing
-4. Comprehensive unit tests
+4. Disassembler module (co-located in the same chip crate)
+5. Comprehensive unit tests
 
-For implementation details, see `crates/core/src/cpu_*.rs`
+CPUs are accessed via `emu_core` re-exports or directly from the chip crate:
+
+```rust
+// Via emu_core (backward-compatible path)
+use emu_core::cpu_6502::{Cpu6502, Memory6502};
+use emu_core::disasm_6502::disassemble;
+
+// Directly from chip crate (preferred in new code)
+use hemu_6502::cpu_6502::{Cpu6502, Memory6502};
+use hemu_6502::disasm_6502::disassemble;
+```
+
+Current CPU chips (all in `crates/chips/`):
+
+| Chip Crate | CPU | Used in |
+|-----------|-----|---------|
+| `hemu-6502` | MOS 6502 | NES, Atari 2600/5200 |
+| `hemu-65c816` | WDC 65C816 | SNES |
+| `hemu-8080` | Intel 8080 + shared helpers | ColecoVision, SG-1000 |
+| `hemu-z80` | Zilog Z80 | SMS, ColecoVision, SG-1000 |
+| `hemu-lr35902` | Sharp LR35902 | Game Boy, Game Boy Color |
+| `hemu-8086` | Intel 8086/80186/80286/80386 | PC/XT |
+| `hemu-arm7tdmi` | ARM7TDMI | Game Boy Advance |
+| `hemu-mips-r3000a` | MIPS R3000A | PlayStation 1 |
+| `hemu-mips-r4300i` | MIPS R4300i | Nintendo 64 |
+| `hemu-spc700` | Sony SPC700 | SNES APU |
+
+## Chip Crates (`crates/chips/`)
+
+### Philosophy and Design Rules
+
+Every CPU/chip in this repository **must be implemented as a standalone chip crate** (`crates/chips/hemu-<chip>`). This is a hard architectural rule:
+
+1. **Zero `emu_core` dependency** — chip crates must not depend on `emu_core`. They depend only on `hemu-types` (for `DisassembledInstruction`) and `log` (standard Rust logging facade). This keeps them independently publishable.
+
+2. **Standard `log` crate** — use `log::warn!(...)`, `log::trace!(...)` etc. Never use the internal `emu_core::logging` system. The `log` facade is the correct pattern for library crates.
+
+3. **One crate per chip** — each physical chip gets its own crate. Do not bundle multiple unrelated chips.
+
+4. **Disassembler co-location** — the disassembler (`disasm_<chip>.rs`) lives in the same chip crate as the CPU implementation. This ensures the disassembler is always available to consumers without pulling in `emu_core`.
+
+5. **`emu_core` re-exports** — `emu_core` re-exports all chip modules at their legacy paths (`emu_core::cpu_6502`, `emu_core::disasm_z80`, etc.) for backward compatibility. System crates do not need to change their imports.
+
+### Crate Inventory
+
+| Crate | Contents | External Deps |
+|-------|----------|---------------|
+| `hemu-types` | `DisassembledInstruction` shared type | *(none)* |
+| `hemu-8080` | Intel 8080 CPU + `cpu_8080_common` helpers | *(none)* |
+| `hemu-z80` | Zilog Z80 CPU + disassembler | `hemu-8080`, `hemu-types` |
+| `hemu-lr35902` | Sharp LR35902 (Game Boy) CPU + disassembler | `hemu-8080`, `hemu-types` |
+| `hemu-6502` | MOS 6502 CPU + disassembler | `hemu-types`, `log` |
+| `hemu-65c816` | WDC 65C816 CPU + disassembler | `hemu-types`, `log` |
+| `hemu-8086` | Intel 8086/80386 CPU + protected mode + disassembler | `hemu-types`, `log`, `serde` |
+| `hemu-arm7tdmi` | ARM7TDMI CPU + disassembler | `log` |
+| `hemu-mips-r3000a` | MIPS R3000A CPU + disassembler | `hemu-types` |
+| `hemu-mips-r4300i` | MIPS R4300i CPU + disassembler | `hemu-types`, `log` |
+| `hemu-spc700` | Sony SPC700 CPU | `log` |
+
+### Preparing for Separate Repositories
+
+Each chip crate is already structured to be extracted into its own repository:
+- Has a complete `Cargo.toml` with publish-ready metadata (name, description, license, keywords)
+- Has a `README.md` with usage examples and hardware references
+- Has no dependency on the rest of the monorepo (only `hemu-types` which would be published first)
+- Uses standard crates.io dependencies (`log`, `serde`) — no hemulator-internal APIs
+
+To extract a chip to its own repo:
+1. Copy `crates/chips/hemu-<chip>/` to a new repository
+2. If the crate depends on `hemu-types`, publish `hemu-types` to crates.io first
+3. Update the `path = "../hemu-types"` dependency to a version dependency: `hemu-types = "0.1"`
+4. Remove the workspace member from the monorepo's `Cargo.toml`
+5. Update `emu_core/Cargo.toml` to use the crates.io version
+
+### Adding a New Chip
+
+When implementing a new CPU or chip that might be reusable:
+
+```
+crates/chips/
+└── hemu-<chipname>/
+    ├── Cargo.toml          # name = "hemu-<chipname>", no emu_core dep
+    ├── README.md           # usage, features, hardware references
+    └── src/
+        ├── lib.rs          # pub mod cpu_<chipname>; pub mod disasm_<chipname>;
+        ├── cpu_<chipname>.rs    # CPU state machine (no crate::logging!)
+        └── disasm_<chipname>.rs # disassembler (use hemu_types::DisassembledInstruction)
+```
+
+Then in `emu_core/src/lib.rs`, add:
+```rust
+pub use hemu_<chipname>::cpu_<chipname>;
+pub use hemu_<chipname>::disasm_<chipname>;
+```
+
+And in `emu_core/Cargo.toml`:
+```toml
+hemu-<chipname> = { path = "../chips/hemu-<chipname>" }
+```
 
 ### Audio Components (`crates/core/src/apu/`)
 
@@ -353,7 +430,7 @@ Each system follows a consistent architecture:
 
 ```
 SystemStruct
-  ├── CPU (from emu_core)
+  ├── CPU (from a hemu-* chip crate, accessed via emu_core re-export)
   │   └── SystemBus (implements Memory trait)
   │       ├── RAM/ROM
   │       ├── Video Hardware (PPU, TIA, RDP, VideoAdapter)
@@ -578,11 +655,12 @@ For user-facing controls and features, see the [User Manual](https://hemulator.5
 ## Design Principles
 
 1. **Modularity**: Reusable components over monolithic implementations
-2. **Accuracy**: Cycle-accurate where feasible, frame-based where practical
-3. **Testability**: Comprehensive test coverage for all components
-4. **Documentation**: Clear documentation for architecture and implementation
-5. **Code Reuse**: Share components across systems when possible
-6. **Separation of Concerns**: Clean boundaries between state and rendering
+2. **Chip Crates First**: Every CPU/chip implementation goes in a `hemu-*` chip crate — see [Chip Crates](#chip-crates-crateschips)
+3. **Accuracy**: Cycle-accurate where feasible, frame-based where practical
+4. **Testability**: Comprehensive test coverage for all components
+5. **Documentation**: Clear documentation for architecture and implementation
+6. **Code Reuse**: Share components across systems when possible
+7. **Separation of Concerns**: Clean boundaries between state and rendering
 
 ## Future Architecture Improvements
 

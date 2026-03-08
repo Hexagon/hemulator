@@ -4,3 +4,4 @@
 
 pub mod cpu_8086;
 pub mod cpu_8086_protected;
+pub mod disasm_8086;

@@ -3,7 +3,7 @@
 //! Provides instruction disassembly for the Sharp LR35902 CPU used in Game Boy.
 //! This is a Z80-like CPU with some instructions removed and modified.
 
-use crate::debug::DisassembledInstruction;
+use hemu_types::DisassembledInstruction;
 
 /// Disassemble a single LR35902 instruction from memory
 pub fn disassemble_lr35902(memory: &[u8], address: u32) -> Option<DisassembledInstruction> {

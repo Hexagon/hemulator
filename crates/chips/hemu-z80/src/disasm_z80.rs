@@ -5,7 +5,7 @@
 //! and ED prefix tables, the DDCB/FDCB compound prefix, and common
 //! undocumented instructions (IXH/IXL/IYH/IYL register access).
 
-use crate::debug::DisassembledInstruction;
+use hemu_types::DisassembledInstruction;
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 

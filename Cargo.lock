@@ -730,6 +730,10 @@ dependencies = [
  "hemu-8086",
  "hemu-arm7tdmi",
  "hemu-lr35902",
+ "hemu-mips-r3000a",
+ "hemu-mips-r4300i",
+ "hemu-spc700",
+ "hemu-types",
  "hemu-z80",
  "log",
  "serde",
@@ -1140,6 +1144,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 name = "hemu-6502"
 version = "0.1.0"
 dependencies = [
+ "hemu-types",
  "log",
 ]
 
@@ -1147,6 +1152,7 @@ dependencies = [
 name = "hemu-65c816"
 version = "0.1.0"
 dependencies = [
+ "hemu-types",
  "log",
 ]
 
@@ -1158,6 +1164,7 @@ version = "0.1.0"
 name = "hemu-8086"
 version = "0.1.0"
 dependencies = [
+ "hemu-types",
  "log",
  "serde",
 ]
@@ -1174,13 +1181,41 @@ name = "hemu-lr35902"
 version = "0.1.0"
 dependencies = [
  "hemu-8080",
+ "hemu-types",
 ]
+
+[[package]]
+name = "hemu-mips-r3000a"
+version = "0.1.0"
+dependencies = [
+ "hemu-types",
+]
+
+[[package]]
+name = "hemu-mips-r4300i"
+version = "0.1.0"
+dependencies = [
+ "hemu-types",
+ "log",
+]
+
+[[package]]
+name = "hemu-spc700"
+version = "0.1.0"
+dependencies = [
+ "log",
+]
+
+[[package]]
+name = "hemu-types"
+version = "0.1.0"
 
 [[package]]
 name = "hemu-z80"
 version = "0.1.0"
 dependencies = [
  "hemu-8080",
+ "hemu-types",
 ]
 
 [[package]]

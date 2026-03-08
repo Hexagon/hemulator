@@ -60,8 +60,8 @@
 use std::cell::Cell;
 
 use crate::apu::{AudioChip, Dsp, TimingMode};
-use crate::cpu_spc700::{CpuSpc700, MemorySpc700};
 use crate::logging::{log, LogCategory, LogLevel};
+use hemu_spc700::cpu_spc700::{CpuSpc700, MemorySpc700};
 
 /// SPC700 I/O register addresses
 const TEST_REG: u16 = 0x00F0; // Test register

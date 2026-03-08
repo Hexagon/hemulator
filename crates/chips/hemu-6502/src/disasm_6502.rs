@@ -2,7 +2,7 @@
 //!
 //! Provides instruction disassembly for the MOS 6502 CPU used in NES, Atari 2600, and other systems.
 
-use crate::debug::DisassembledInstruction;
+use hemu_types::DisassembledInstruction;
 
 /// Addressing mode for 6502 instructions
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -3,7 +3,7 @@
 //! Provides basic disassembly for the Intel 8086 CPU family used in PC.
 //! This is a simplified implementation that shows instruction bytes.
 
-use crate::debug::DisassembledInstruction;
+use hemu_types::DisassembledInstruction;
 
 /// Disassemble a single 8086 instruction from memory
 ///

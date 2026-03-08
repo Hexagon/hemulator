@@ -18,8 +18,6 @@
 //! - https://snes.nesdev.org/wiki/S-SMP
 //! - https://snes.nesdev.org/wiki/SPC-700_instruction_set
 
-use crate::logging::{log, LogCategory, LogLevel};
-
 /// Memory interface trait for the SPC700 CPU
 ///
 /// The SPC700 has a 64KB address space containing:
@@ -106,12 +104,14 @@ impl<M: MemorySpc700> CpuSpc700<M> {
 
         // Log every 1000th instruction at Debug level to avoid spam
         if self.cycles.is_multiple_of(1000) {
-            log(LogCategory::APU, LogLevel::Debug, || {
-                format!(
-                    "SPC700: PC=${:04X} opcode=${:02X} A=${:02X} X=${:02X} Y=${:02X}",
-                    pc_before, opcode, self.a, self.x, self.y
-                )
-            });
+            log::debug!(
+                "SPC700: PC=${:04X} opcode=${:02X} A=${:02X} X=${:02X} Y=${:02X}",
+                pc_before,
+                opcode,
+                self.a,
+                self.x,
+                self.y
+            );
         }
 
         let cycles = self.execute_opcode(opcode);
@@ -486,17 +486,13 @@ impl<M: MemorySpc700> CpuSpc700<M> {
             // SLEEP - halt CPU until interrupt
             0xEF => {
                 // For now, just NOP
-                log(LogCategory::Bus, LogLevel::Debug, || {
-                    "SPC700: SLEEP instruction executed".to_string()
-                });
+                log::debug!("SPC700: SLEEP instruction executed");
                 3
             }
 
             // STOP - halt CPU and oscillator
             0xFF => {
-                log(LogCategory::Bus, LogLevel::Debug, || {
-                    "SPC700: STOP instruction executed".to_string()
-                });
+                log::debug!("SPC700: STOP instruction executed");
                 3
             }
 

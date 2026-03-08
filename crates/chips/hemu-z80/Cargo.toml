@@ -10,3 +10,4 @@ readme = "README.md"
 
 [dependencies]
 hemu-8080 = { path = "../hemu-8080" }
+hemu-types = { path = "../hemu-types" }
