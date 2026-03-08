@@ -192,8 +192,8 @@ For 440 Hz (A4): register = 3579545 / (32 × 440) ≈ 254
 
 | Address Range | Description |
 |--------------|-------------|
-| 0x0000-0x03FF | BIOS ROM (1KB, when enabled via bit 3 of port 0x3E) |
-| 0x0000-0x3FFF | ROM Bank 0 (16KB, when BIOS disabled) |
+| 0x0000-BIOS_END | BIOS ROM (when enabled via bit 3 of port 0x3E; size depends on BIOS image, typically 8KB) |
+| 0x0000-0x3FFF | ROM Bank 0 (16KB, when BIOS disabled or address beyond BIOS range) |
 | 0x4000-0x7FFF | ROM Bank 1 (16KB) |
 | 0x8000-0xBFFF | ROM Bank 2 (16KB) |
 | 0xC000-0xDFFF | RAM (8KB) |
@@ -207,7 +207,7 @@ The SMS has optional BIOS ROM support:
 
 **Memory Control Register (Port 0x3E):**
 - Bit 3: BIOS enable/disable
-  - 0 = BIOS enabled (BIOS ROM mapped at 0x0000-0x03FF)
+  - 0 = BIOS enabled (BIOS ROM mapped at 0x0000 up to the BIOS ROM size; typically 8KB = 0x0000-0x1FFF)
   - 1 = BIOS disabled (Cartridge ROM mapped from 0x0000)
 
 **Default Behavior:**

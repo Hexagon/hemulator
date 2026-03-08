@@ -994,9 +994,13 @@ impl SmsMemory {
 
 impl MemoryZ80 for SmsMemory {
     fn read(&self, addr: u16) -> u8 {
-        // BIOS overlay always takes priority for first 1 KB.
-        if addr <= 0x03FF && self.is_bios_enabled() {
-            return self.bios.get(addr as usize).copied().unwrap_or(0xFF);
+        // When BIOS is enabled, it overlays the cartridge ROM for all addresses
+        // within the BIOS ROM's range (0x0000 to BIOS_SIZE-1).  Real SMS BIOS
+        // ROMs are typically 8 KB, so limiting the overlay to the first 1 KB
+        // would cause reads beyond 0x03FF to fall through to the cartridge ROM
+        // and corrupt BIOS execution.
+        if self.is_bios_enabled() && (addr as usize) < self.bios.len() {
+            return self.bios[addr as usize];
         }
 
         match self.mapper_type {
@@ -1368,5 +1372,62 @@ mod tests {
         let c2 = crc32(data);
         assert_eq!(c1, c2);
         assert_ne!(c1, 0);
+    }
+
+    #[test]
+    fn test_bios_overlay_full_size() {
+        // The BIOS overlay must cover the full BIOS ROM size, not just the first
+        // 1 KB.  Real SMS BIOS ROMs are 8 KB; code beyond 0x03FF must come from
+        // the BIOS rather than the cartridge ROM.
+        let mut rom = vec![0u8; 0x8000];
+        // Mark every byte of the ROM with a known sentinel so we can detect
+        // accidental fall-through reads.
+        rom.fill(0xCC);
+
+        let mut mem = make_mem(rom);
+
+        // Create an 8 KB BIOS image with distinct bytes at various offsets.
+        let mut bios = vec![0xBBu8; 0x2000]; // 8 KB
+        bios[0x0000] = 0x01; // first byte
+        bios[0x03FF] = 0x02; // last byte of first 1 KB
+        bios[0x0400] = 0x03; // first byte of second 1 KB (was broken before the fix)
+        bios[0x1FFF] = 0x04; // last byte of the 8 KB BIOS
+
+        mem.load_bios(bios);
+        assert!(mem.is_bios_enabled());
+
+        // All addresses within the 8 KB BIOS range must return BIOS data.
+        assert_eq!(mem.read(0x0000), 0x01);
+        assert_eq!(mem.read(0x03FF), 0x02);
+        assert_eq!(mem.read(0x0400), 0x03); // this returned cartridge ROM before the fix
+        assert_eq!(mem.read(0x1FFF), 0x04); // this returned cartridge ROM before the fix
+
+        // Addresses above the BIOS range (0x2000+) must fall through to ROM/RAM.
+        // The cartridge ROM was filled with 0xCC so we expect that value back.
+        assert_eq!(mem.read(0x2000), 0xCC);
+    }
+
+    #[test]
+    fn test_bios_overlay_disabled_after_disable() {
+        // After the BIOS disables itself (port 0x3E bit 3 set to 1), the
+        // cartridge ROM must be visible at 0x0000.
+        let mut rom = vec![0u8; 0x8000];
+        rom[0x0400] = 0xDD; // cartridge data at 0x0400
+
+        let mut mem = make_mem(rom);
+
+        let mut bios = vec![0xBBu8; 0x2000];
+        bios[0x0400] = 0xAA; // BIOS data at 0x0400
+        mem.load_bios(bios);
+
+        // BIOS is enabled; 0x0400 should return BIOS data.
+        assert_eq!(mem.read(0x0400), 0xAA);
+
+        // Disable BIOS via port 0x3E (bit 3 = 1).
+        mem.io_write(0x3E, 0x08);
+        assert!(!mem.is_bios_enabled());
+
+        // Now 0x0400 must return cartridge data.
+        assert_eq!(mem.read(0x0400), 0xDD);
     }
 }
