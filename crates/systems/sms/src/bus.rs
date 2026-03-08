@@ -994,11 +994,11 @@ impl SmsMemory {
 
 impl MemoryZ80 for SmsMemory {
     fn read(&self, addr: u16) -> u8 {
-        // When BIOS is enabled, it overlays the cartridge ROM for all addresses
-        // within the BIOS ROM's range (0x0000 to BIOS_SIZE-1).  Real SMS BIOS
-        // ROMs are typically 8 KB, so limiting the overlay to the first 1 KB
-        // would cause reads beyond 0x03FF to fall through to the cartridge ROM
-        // and corrupt BIOS execution.
+        // When the BIOS is enabled, it overlays the cartridge ROM for all
+        // addresses within the BIOS ROM's range (0x0000..bios.len()-1). Real
+        // SMS BIOS ROMs are typically 8 KB or larger, so the overlay must not
+        // be artificially limited to 1 KB, or reads beyond 0x03FF would fall
+        // through to the cartridge ROM and corrupt BIOS execution.
         if self.is_bios_enabled() && (addr as usize) < self.bios.len() {
             return self.bios[addr as usize];
         }
