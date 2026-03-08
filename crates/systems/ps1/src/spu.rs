@@ -453,6 +453,9 @@ impl Spu {
                     self.ram[addr + 1] = (val >> 8) as u8;
                 }
                 self.transfer_pos += 2;
+                if self.transfer_pos >= self.ram.len() as u32 {
+                    self.transfer_pos = 0;
+                }
             }
             0x1AA => self.control = val,
             0x1B0 => self.cd_vol_left = val as i16,
