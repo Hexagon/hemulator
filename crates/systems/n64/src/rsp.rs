@@ -185,10 +185,12 @@ impl Rsp {
             SP_DMA_FULL => self.sp_dma_full,
             SP_DMA_BUSY => self.sp_dma_busy,
             SP_SEMAPHORE => {
-                // Reading semaphore returns the current value and then clears it (read-and-clear)
-                // Returns 1 if it was set (locked), 0 if it was clear (unlocked)
-                // Use replace() to implement this read-and-clear behavior
-                self.sp_semaphore.replace(0)
+                // Read returns current value, then sets to 1 (locked)
+                // First read after write/reset: returns 0 (acquired)
+                // Subsequent reads: returns 1 (busy, not acquired)
+                let val = self.sp_semaphore.get();
+                self.sp_semaphore.set(1);
+                val
             }
             _ => 0,
         }
@@ -329,8 +331,8 @@ impl Rsp {
                 }
             }
             SP_SEMAPHORE => {
-                // Writing any value to semaphore sets it
-                self.sp_semaphore.set(1);
+                // Writing any value to semaphore releases it (sets to 0)
+                self.sp_semaphore.set(0);
             }
             _ => {}
         }
@@ -580,26 +582,23 @@ mod tests {
         let mut rsp = Rsp::new();
         let mut rdram = vec![0u8; 1024];
 
-        // Initially semaphore should be 0 (unlocked)
+        // Initially semaphore is 0; first read acquires it (returns 0, sets to 1)
         assert_eq!(rsp.read_register(SP_SEMAPHORE), 0);
 
-        // Write to semaphore sets it to 1 (locked)
-        rsp.write_register(SP_SEMAPHORE, 1, &mut rdram);
-
-        // First read should return 1 and clear it
+        // Second read returns 1 (already locked) and stays locked
         assert_eq!(rsp.read_register(SP_SEMAPHORE), 1);
 
-        // Second read should return 0 (already cleared)
-        assert_eq!(rsp.read_register(SP_SEMAPHORE), 0);
-
-        // Write again to set it
-        rsp.write_register(SP_SEMAPHORE, 0xFFFF, &mut rdram); // Any value sets to 1
-
-        // Read should return 1 and clear
+        // Third read still returns 1 (locked)
         assert_eq!(rsp.read_register(SP_SEMAPHORE), 1);
 
-        // Verify it's cleared
+        // Write releases (sets to 0)
+        rsp.write_register(SP_SEMAPHORE, 0, &mut rdram);
+
+        // Read after release: returns 0 (acquired), sets to 1
         assert_eq!(rsp.read_register(SP_SEMAPHORE), 0);
+
+        // Now locked again
+        assert_eq!(rsp.read_register(SP_SEMAPHORE), 1);
     }
 
     #[test]

@@ -468,7 +468,11 @@ impl System for GbSystem {
             if self.cpu.memory.oam_dma_active() {
                 // CPU is halted during OAM DMA. Advance time in 4-cycle chunks.
                 let dma_cpu_cycles: u32 = 4;
-                let dma_ppu_cycles = if double_speed { dma_cpu_cycles / 2 } else { dma_cpu_cycles };
+                let dma_ppu_cycles = if double_speed {
+                    dma_cpu_cycles / 2
+                } else {
+                    dma_cpu_cycles
+                };
                 ppu_cycles += dma_ppu_cycles;
                 self.total_cycles += dma_cpu_cycles as u64;
 
@@ -510,7 +514,11 @@ impl System for GbSystem {
 
             let pc_before = self.cpu.pc;
             let cpu_cycles = self.cpu.step();
-            let step_ppu_cycles = if double_speed { cpu_cycles / 2 } else { cpu_cycles };
+            let step_ppu_cycles = if double_speed {
+                cpu_cycles / 2
+            } else {
+                cpu_cycles
+            };
             ppu_cycles += step_ppu_cycles;
             self.total_cycles += cpu_cycles as u64;
 

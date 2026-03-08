@@ -223,43 +223,7 @@ fn apply_sony_trinitron(buffer: &mut [u32], width: usize, height: usize) {
         }
     }
 
-    // Second pass: RGB phosphor stripe effect (vertical aperture grille)
-    // Trinitron's distinctive feature: vertical RGB stripes
-    for y in 0..height {
-        for x in 0..width {
-            let idx = y * width + x;
-            if idx < buffer.len() {
-                let color = buffer[idx];
-                let r = ((color >> 16) & 0xFF) as u8;
-                let g = ((color >> 8) & 0xFF) as u8;
-                let b = (color & 0xFF) as u8;
-
-                // Simulate RGB stripe pattern (every 3 pixels)
-                let stripe = x % 3;
-                let (r, g, b) = match stripe {
-                    0 => (
-                        r,
-                        ((g as u16 * 230) >> 8) as u8,
-                        ((b as u16 * 230) >> 8) as u8,
-                    ), // Red stripe
-                    1 => (
-                        ((r as u16 * 230) >> 8) as u8,
-                        g,
-                        ((b as u16 * 230) >> 8) as u8,
-                    ), // Green stripe
-                    _ => (
-                        ((r as u16 * 230) >> 8) as u8,
-                        ((g as u16 * 230) >> 8) as u8,
-                        b,
-                    ), // Blue stripe
-                };
-
-                buffer[idx] = pack_rgb(r, g, b);
-            }
-        }
-    }
-
-    // Third pass: Subtle bloom on bright pixels
+    // Second pass: Subtle bloom on bright pixels
     let mut bloom_buffer = vec![0u32; buffer.len()];
     for y in 1..height - 1 {
         for x in 1..width - 1 {
@@ -461,43 +425,6 @@ fn apply_commodore1702(buffer: &mut [u32], width: usize, height: usize) {
                     let b = ((b as u16 * 217) >> 8) as u8;
                     buffer[idx] = pack_rgb(r, g, b);
                 }
-            }
-        }
-    }
-
-    // Shadow mask pattern (subtle RGB dots in triangular pattern)
-    for y in 0..height {
-        for x in 0..width {
-            let idx = y * width + x;
-            if idx < buffer.len() {
-                let color = buffer[idx];
-                let (r, g, b) = unpack_rgb(color);
-
-                // Create dot pattern based on position
-                let dot_x = x % 3;
-                let dot_y = y % 3;
-
-                // Triangular shadow mask pattern
-                let (r, g, b) = match (dot_x, dot_y) {
-                    (0, 0) => (
-                        r,
-                        ((g as u16 * 240) >> 8) as u8,
-                        ((b as u16 * 240) >> 8) as u8,
-                    ), // Red dot
-                    (1, 1) => (
-                        ((r as u16 * 240) >> 8) as u8,
-                        g,
-                        ((b as u16 * 240) >> 8) as u8,
-                    ), // Green dot
-                    (2, 2) => (
-                        ((r as u16 * 240) >> 8) as u8,
-                        ((g as u16 * 240) >> 8) as u8,
-                        b,
-                    ), // Blue dot
-                    _ => (r, g, b), // No dot
-                };
-
-                buffer[idx] = pack_rgb(r, g, b);
             }
         }
     }

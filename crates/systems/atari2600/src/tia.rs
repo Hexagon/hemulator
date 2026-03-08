@@ -139,6 +139,7 @@ struct ScanlineState {
     pf2: u8,
     playfield_reflect: bool,
     playfield_priority: bool,
+    playfield_score_mode: bool,
     colubk: u8,
     colupf: u8,
     colup0: u8,
@@ -165,7 +166,8 @@ struct ScanlineState {
     missile1_x: u8,
     enabl: bool,
     ball_x: u8,
-    ball_size: u8, // Ball size (1, 2, 4, or 8 pixels)
+    ball_size: u8,        // Ball size (1, 2, 4, or 8 pixels)
+    hmove_blanking: bool, // Whether HMOVE blanking extends HBLANK by 8 pixels
     // Mid-scanline graphics changes for racing-the-beam effects
     grp0_changes: [GrpChange; MAX_GRP_CHANGES],
     grp0_change_count: u8,
@@ -246,6 +248,11 @@ pub struct Tia {
     hmm0: i8,
     hmm1: i8,
     hmbl: i8,
+
+    // HMOVE blanking: when HMOVE is triggered during HBLANK, the visible area
+    // HBLANK is extended by 8 color clocks (from 68 to 76). This produces the
+    // "HMOVE comb" artifact — an 8-pixel black bar on the left edge.
+    hmove_blanking: bool,
 
     // Input ports (fire buttons and paddles)
     // INPT4/INPT5: Joystick fire buttons (bit 7: 0=pressed, 1=not pressed)
@@ -367,6 +374,30 @@ impl Tia {
         x.clamp(0, 159) as u8
     }
 
+    /// Compute the visible X position when a RESPx/RESMx/RESBL strobe occurs.
+    ///
+    /// On real TIA hardware, the position counter resets ~5 color clocks after
+    /// the CPU write reaches the TIA. The resulting position depends on where
+    /// in the scanline the strobe occurs:
+    ///
+    /// - During HBLANK (color clock < 68): The object appears near the left edge.
+    ///   Stella uses a lookup; the effective position is approximately 3 for
+    ///   early HBLANK and increases toward the end of HBLANK.
+    /// - During visible area: position = (color_clock - 68 + 5) % 160
+    ///
+    /// Reference: Stella emulator (MIT), Andrew Towers' TIA hardware notes
+    fn compute_reset_position(&self) -> u8 {
+        // The TIA object counter starts 5 color clocks after the RESP strobe.
+        // The visible area begins at color clock 68, so visible position = cc - 68.
+        // Adding the 5-clock pipeline delay and wrapping within the 160-pixel
+        // visible width gives a single unified formula for both HBLANK and
+        // visible strobes. During HBLANK (cc < 68), the arithmetic naturally
+        // wraps around — e.g. strobing at cc=0 places the object at pixel 97,
+        // which is correct per hardware measurements.
+        let cc = self.pixel as i16;
+        ((cc - 68 + 5 + 160) % 160) as u8
+    }
+
     /// Apply horizontal motion to a position
     /// Note: TIA horizontal motion is inverted from what you'd expect:
     /// - Positive values (+1 to +7) move LEFT (decrease x position)
@@ -445,6 +476,7 @@ impl Tia {
             hmm0: 0,
             hmm1: 0,
             hmbl: 0,
+            hmove_blanking: false,
             inpt4: 0x80, // Not pressed (bit 7 = 1)
             inpt5: 0x80, // Not pressed (bit 7 = 1)
             inpt0: 0x80, // Paddle not charged (bit 7 = 1)
@@ -616,11 +648,29 @@ impl Tia {
     /// Latch current TIA state for a scanline (for later rendering)
     fn latch_scanline_state(&mut self, scanline: u16) {
         // Apply RESMP: lock missiles to player positions if enabled
+        // Apply RESMP: lock missiles to player center when enabled.
+        // The missile is positioned at the center of the player, which depends on
+        // the player's NUSIZ width mode:
+        //   Normal (1x):  center = player_x + 4  (8-pixel player / 2)
+        //   Double (2x):  center = player_x + 8  (16-pixel player / 2)
+        //   Quad   (4x):  center = player_x + 16 (32-pixel player / 2)
         if self.resmp0 {
-            self.missile0_x = self.player0_x.saturating_add(4); // Center of 8-pixel player
+            let nusiz_mode = self.nusiz0 & 0x07;
+            let center: u16 = match nusiz_mode {
+                0x05 => 8,  // Double width
+                0x07 => 16, // Quad width
+                _ => 4,     // Normal width
+            };
+            self.missile0_x = ((self.player0_x as u16 + center) % 160) as u8;
         }
         if self.resmp1 {
-            self.missile1_x = self.player1_x.saturating_add(4); // Center of 8-pixel player
+            let nusiz_mode = self.nusiz1 & 0x07;
+            let center: u16 = match nusiz_mode {
+                0x05 => 8,  // Double width
+                0x07 => 16, // Quad width
+                _ => 4,     // Normal width
+            };
+            self.missile1_x = ((self.player1_x as u16 + center) % 160) as u8;
         }
 
         let idx = (scanline as usize).min(261);
@@ -631,6 +681,7 @@ impl Tia {
             pf2: self.pf2,
             playfield_reflect: self.playfield_reflect,
             playfield_priority: self.playfield_priority,
+            playfield_score_mode: self.playfield_score_mode,
             colubk: self.colubk,
             colupf: self.colupf,
             colup0: self.colup0,
@@ -666,6 +717,7 @@ impl Tia {
             },
             ball_x: self.ball_x,
             ball_size: self.ball_size,
+            hmove_blanking: self.hmove_blanking,
             // Copy mid-scanline graphics changes
             grp0_changes: self.current_grp0_changes,
             grp0_change_count: self.current_grp0_change_count,
@@ -686,6 +738,8 @@ impl Tia {
         self.current_pf0_change_count = 0;
         self.current_pf1_change_count = 0;
         self.current_pf2_change_count = 0;
+        // HMOVE blanking resets each scanline
+        self.hmove_blanking = false;
     }
 
     /// Reset TIA to power-on state
@@ -871,35 +925,32 @@ impl Tia {
             }
 
             // Player position resets (RESP0, RESP1, RESM0, RESM1, RESBL)
-            // The TIA has a hardware delay of approximately 4-5 color clocks
-            // between the strobe and when the position counter actually resets.
-            // This effectively adds 4-5 pixels to the x position.
+            //
+            // On real TIA hardware, the position counter resets ~5 color clocks after the
+            // strobe write. The resulting visible position depends on where in the scanline
+            // the strobe occurs:
+            //   - During HBLANK (pixel < 68): Position wraps, with a minimum of 3
+            //   - During visible area (pixel >= 68): position = (pixel - 68 + 5) % 160
+            //
+            // Reference: Stella emulator (MIT), Andrew Towers' TIA hardware notes
             0x10 => {
-                let x = self.current_visible_x();
-                // Add 4 pixel delay for positioning (accounts for TIA hardware delay)
-                self.player0_x = (x.saturating_add(4)).min(159);
+                self.player0_x = self.compute_reset_position();
             }
             0x11 => {
-                let x = self.current_visible_x();
-                self.player1_x = (x.saturating_add(4)).min(159);
+                self.player1_x = self.compute_reset_position();
             }
             0x12 => {
                 if !self.resmp0 {
-                    // Only set position if not locked to player
-                    let x = self.current_visible_x();
-                    self.missile0_x = (x.saturating_add(4)).min(159);
+                    self.missile0_x = self.compute_reset_position();
                 }
             }
             0x13 => {
                 if !self.resmp1 {
-                    // Only set position if not locked to player
-                    let x = self.current_visible_x();
-                    self.missile1_x = (x.saturating_add(4)).min(159);
+                    self.missile1_x = self.compute_reset_position();
                 }
             }
             0x14 => {
-                let x = self.current_visible_x();
-                self.ball_x = (x.saturating_add(4)).min(159);
+                self.ball_x = self.compute_reset_position();
             }
 
             // Audio
@@ -1021,12 +1072,20 @@ impl Tia {
             0x29 => self.resmp1 = (val & 0x02) != 0, // RESMP1
 
             // Apply horizontal motion (HMOVE)
-            // Hardware note: On real TIA, HMOVE takes 6 color clocks to complete
-            // and creates visible "HMOVE comb" artifacts if triggered outside HBLANK.
-            // This implementation applies motion instantly without visible artifacts,
-            // which is a reasonable trade-off for gameplay vs. cycle-accurate timing.
-            // Games that properly use HMOVE during HBLANK will work correctly.
+            // Reference: Stella emulator (MIT), Andrew Towers' TIA hardware notes
+            //
+            // On real TIA, HMOVE applies motion over 8 extra clock cycles.
+            // If triggered during HBLANK (pixel < 68), it extends HBLANK by 8
+            // color clocks, producing the "HMOVE comb" artifact — 8 black pixels
+            // on the left edge. Games that use HMOVE properly trigger it at the
+            // start of HBLANK (via STA HMOVE right after WSYNC), so the extra
+            // blanking is invisible. Games that trigger HMOVE outside HBLANK
+            // will see the comb artifact, which we now emulate.
             0x2A => {
+                // Set HMOVE blanking flag if triggered during HBLANK
+                if self.pixel < 68 {
+                    self.hmove_blanking = true;
+                }
                 self.player0_x = self.apply_motion(self.player0_x, self.hmp0);
                 self.player1_x = self.apply_motion(self.player1_x, self.hmp1);
                 self.missile0_x = self.apply_motion(self.missile0_x, self.hmm0);
@@ -1087,21 +1146,25 @@ impl Tia {
 
     /// Clock the TIA for one CPU cycle (3 color clocks)
     pub fn clock(&mut self) {
-        // Update paddle capacitor charging (every color clock)
-        self.update_paddle_charging();
-
-        // Cycle-accurate: Process each color clock individually
+        // Process each color clock individually
         // This ensures mid-scanline register changes affect pixels correctly
         for _ in 0..3 {
+            // Update paddle capacitor charging (must be per color clock for accurate timing)
+            self.update_paddle_charging();
             self.clock_color_clock();
         }
     }
 
     /// Clock one color clock (used in cycle-accurate mode)
+    ///
+    /// TIA color clocks are numbered 0-227 (228 total per scanline).
+    /// Clocks 0-67: HBLANK (not visible)
+    /// Clocks 68-227: Visible area (160 pixels)
     fn clock_color_clock(&mut self) {
         self.pixel += 1;
 
         if self.pixel >= 228 {
+            // End of scanline — latch state and move to next
             self.pixel = 0;
             let old_scanline = self.scanline;
 
@@ -1129,11 +1192,16 @@ impl Tia {
     }
 
     /// Calculate CPU cycles remaining until end of scanline (for WSYNC)
+    ///
+    /// WSYNC halts the CPU until the TIA reaches the end of the current scanline
+    /// (color clock 228). The CPU resumes on the first cycle of the next scanline.
+    ///
+    /// We round up to the next whole CPU cycle (3 color clocks each) because
+    /// the CPU can only halt in whole-cycle increments.
     pub fn cpu_cycles_until_scanline_end(&self) -> u32 {
-        let pixel = self.pixel.min(227) as u32;
-        let remaining_color_clocks = 228u32.saturating_sub(pixel);
-        let extra = remaining_color_clocks.div_ceil(3);
-        extra.max(1)
+        let remaining_color_clocks = 228u32.saturating_sub(self.pixel as u32);
+        // Round up: the CPU resumes aligned to a 3-clock boundary
+        remaining_color_clocks.div_ceil(3).max(1)
     }
 
     /// Check if in VBLANK
@@ -1704,6 +1772,13 @@ impl Tia {
             return 0xFF000000; // Black
         }
 
+        // HMOVE blanking: when HMOVE was triggered during HBLANK, the first 8
+        // visible pixels are blanked (the "HMOVE comb" artifact). This is a
+        // well-documented TIA hardware behavior.
+        if state.hmove_blanking && x < 8 {
+            return 0xFF000000; // Black
+        }
+
         // Priority order (when playfield priority is off):
         // 1. Player 0, Missile 0
         // 2. Player 1, Missile 1
@@ -1747,10 +1822,21 @@ impl Tia {
 
         // Check playfield
         if Self::is_playfield_pixel(state, x) {
-            return palette_to_rgb(state.colupf, video_mode);
+            // Score mode: left half uses player 0 color, right half uses player 1 color
+            let pf_color = if state.playfield_score_mode {
+                if x < 80 {
+                    state.colup0
+                } else {
+                    state.colup1
+                }
+            } else {
+                state.colupf
+            };
+            return palette_to_rgb(pf_color, video_mode);
         }
 
-        // Check Ball (if playfield priority)
+        // Check Ball — same priority tier as playfield when PF priority is on,
+        // so it must be checked right after playfield (before players).
         if state.playfield_priority && Self::is_ball_pixel(state, x) {
             return palette_to_rgb(state.colupf, video_mode);
         }
@@ -2065,10 +2151,15 @@ impl Tia {
     }
 
     /// Generate audio samples for a given count
-    /// TIA runs at 31.4 kHz (color clock / 114), but we output at 44.1 kHz
+    ///
+    /// TIA audio clocks at the CPU clock / 114 (one tick per 228 color clocks / 2).
+    /// NTSC: 3,579,545 / 114 ≈ 31,400 Hz
+    /// We resample from TIA audio rate to the output sample rate (44.1 kHz).
     pub fn generate_audio_samples(&mut self, sample_count: usize) -> Vec<i16> {
         const SAMPLE_HZ: f64 = 44_100.0;
-        const TIA_AUDIO_HZ: f64 = 31_400.0; // Approximate TIA audio clock rate
+        // TIA audio clock = color clock frequency / 114
+        // NTSC: 3,579,545 / 114 = 31,400.39 Hz
+        const TIA_AUDIO_HZ: f64 = 3_579_545.0 / 114.0;
         const TIA_CLOCKS_PER_SAMPLE: f64 = TIA_AUDIO_HZ / SAMPLE_HZ;
         // 15 represents the midpoint when both channels are at max (15+15)/2 = 15
         const AUDIO_OFFSET: i32 = 15360; // 15 * 1024
@@ -2399,51 +2490,55 @@ mod tests {
     fn test_tia_ball_size() {
         let mut tia = Tia::new();
 
-        tia.write(0x14, 0x00); // RESBL - position ball (hardware adds 4-pixel delay)
+        // Position ball during visible area: pixel=68+10 → pos = (78-68+5)%160 = 15
+        tia.pixel = 68 + 10;
+        tia.write(0x14, 0x00); // RESBL
         tia.write(0x1F, 0x02); // ENABL - enable ball
+        assert_eq!(tia.ball_x, 15);
 
         // Test 1-pixel ball (CTRLPF bits 4-5 = 00)
         tia.write(0x0A, 0x00);
         tia.latch_scanline_state(0);
         let state = tia.scanline_states[0];
         assert_eq!(state.ball_size, 1);
-        // Ball is at position 4 due to hardware delay
-        assert!(Tia::is_ball_pixel(&state, 4));
-        assert!(!Tia::is_ball_pixel(&state, 5));
+        assert!(Tia::is_ball_pixel(&state, 15));
+        assert!(!Tia::is_ball_pixel(&state, 16));
 
         // Test 2-pixel ball (CTRLPF bits 4-5 = 01)
         tia.write(0x0A, 0x10);
         tia.latch_scanline_state(0);
         let state = tia.scanline_states[0];
         assert_eq!(state.ball_size, 2);
-        assert!(Tia::is_ball_pixel(&state, 4));
-        assert!(Tia::is_ball_pixel(&state, 5));
-        assert!(!Tia::is_ball_pixel(&state, 6));
+        assert!(Tia::is_ball_pixel(&state, 15));
+        assert!(Tia::is_ball_pixel(&state, 16));
+        assert!(!Tia::is_ball_pixel(&state, 17));
 
         // Test 4-pixel ball (CTRLPF bits 4-5 = 10)
         tia.write(0x0A, 0x20);
         tia.latch_scanline_state(0);
         let state = tia.scanline_states[0];
         assert_eq!(state.ball_size, 4);
-        assert!(Tia::is_ball_pixel(&state, 4));
-        assert!(Tia::is_ball_pixel(&state, 7));
-        assert!(!Tia::is_ball_pixel(&state, 8));
+        assert!(Tia::is_ball_pixel(&state, 15));
+        assert!(Tia::is_ball_pixel(&state, 18));
+        assert!(!Tia::is_ball_pixel(&state, 19));
 
         // Test 8-pixel ball (CTRLPF bits 4-5 = 11)
         tia.write(0x0A, 0x30);
         tia.latch_scanline_state(0);
         let state = tia.scanline_states[0];
         assert_eq!(state.ball_size, 8);
-        assert!(Tia::is_ball_pixel(&state, 4));
-        assert!(Tia::is_ball_pixel(&state, 11));
-        assert!(!Tia::is_ball_pixel(&state, 12));
+        assert!(Tia::is_ball_pixel(&state, 15));
+        assert!(Tia::is_ball_pixel(&state, 22));
+        assert!(!Tia::is_ball_pixel(&state, 23));
     }
 
     #[test]
     fn test_vdelbl_delayed_ball_graphics() {
         let mut tia = Tia::new();
 
-        tia.write(0x14, 0x00); // RESBL - position ball at x=0
+        // Position ball during visible area for predictable position
+        tia.pixel = 68 + 10;
+        tia.write(0x14, 0x00); // RESBL - position ball
         tia.write(0x08, 0x0E); // COLUPF - set color
 
         // Enable delayed ball graphics
@@ -2483,38 +2578,39 @@ mod tests {
     fn test_resmp_missile_to_player() {
         let mut tia = Tia::new();
 
-        // Position player 0 at x=50 (pixel is in color clocks, not screen pixels)
-        tia.pixel = 68 + 50; // HBLANK + 50 color clocks
-        tia.write(0x10, 0x00); // RESP0
+        // Position player 0 at visible pixel 55
+        // compute_reset_position: (pixel - 68 + 5) % 160
+        tia.pixel = 68 + 50; // color clock 118
+        tia.write(0x10, 0x00); // RESP0 → position = (118-68+5)%160 = 55
+        assert_eq!(tia.player0_x, 55);
 
         // Enable missile 0
         tia.write(0x1D, 0x02); // ENAM0
 
-        // Position missile 0 at x=10 initially (without RESMP)
-        tia.pixel = 68 + 10;
-        // Hardware adds 4-pixel delay to positioning
-        tia.write(0x12, 0x00); // RESM0
-        assert_eq!(tia.missile0_x, 14); // 10 + 4
+        // Position missile 0 (without RESMP)
+        tia.pixel = 68 + 10; // color clock 78
+        tia.write(0x12, 0x00); // RESM0 → position = (78-68+5)%160 = 15
+        assert_eq!(tia.missile0_x, 15);
 
-        // Enable RESMP0 - lock missile to player
+        // Enable RESMP0 - lock missile to player center
         tia.write(0x28, 0x02); // RESMP0
         tia.latch_scanline_state(0);
 
         // Missile should now be at player position + 4 (center of 8-pixel player)
-        // Player is at 50 + 4 = 54, missile at 54 + 4 = 58
-        assert_eq!(tia.missile0_x, 58);
+        // Player is at 55, missile at 55 + 4 = 59
+        assert_eq!(tia.missile0_x, 59);
 
         // Try to move missile - should be ignored when RESMP is on
         tia.pixel = 68 + 100;
         tia.write(0x12, 0x00); // RESM0 - should be ignored
         tia.latch_scanline_state(1);
-        assert_eq!(tia.missile0_x, 58); // Still locked to player + 4
+        assert_eq!(tia.missile0_x, 59); // Still locked to player + 4
 
         // Disable RESMP0
         tia.write(0x28, 0x00); // RESMP0 = 0
-        tia.pixel = 68 + 20;
-        tia.write(0x12, 0x00); // RESM0 - should work now
-        assert_eq!(tia.missile0_x, 24); // Free to move again (20 + 4)
+        tia.pixel = 68 + 20; // color clock 88
+        tia.write(0x12, 0x00); // RESM0 → position = (88-68+5)%160 = 25
+        assert_eq!(tia.missile0_x, 25); // Free to move again
     }
 
     #[test]
