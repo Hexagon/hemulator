@@ -9,4 +9,5 @@ categories = ["emulators", "hardware-support"]
 readme = "README.md"
 
 [dependencies]
+hemu-types = { path = "../hemu-types" }
 log = "0.4"

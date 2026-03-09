@@ -1159,6 +1159,9 @@ dependencies = [
 [[package]]
 name = "hemu-8080"
 version = "0.1.0"
+dependencies = [
+ "hemu-types",
+]
 
 [[package]]
 name = "hemu-8086"
