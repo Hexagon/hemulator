@@ -4,10 +4,26 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+# Chip crates — broken out from emu_core for independent reuse / future separate repos
+hemu-types    = { path = "../chips/hemu-types" }
+hemu-8080     = { path = "../chips/hemu-8080" }
+hemu-z80      = { path = "../chips/hemu-z80" }
+hemu-lr35902  = { path = "../chips/hemu-lr35902" }
+hemu-6502     = { path = "../chips/hemu-6502" }
+hemu-65c816   = { path = "../chips/hemu-65c816" }
+hemu-8086     = { path = "../chips/hemu-8086" }
+hemu-arm7tdmi = { path = "../chips/hemu-arm7tdmi" }
+hemu-mips-common = { path = "../chips/hemu-mips-common" }
+hemu-mips-r3000a = { path = "../chips/hemu-mips-r3000a" }
+hemu-mips-r4300i = { path = "../chips/hemu-mips-r4300i" }
+hemu-spc700   = { path = "../chips/hemu-spc700" }
+hemu-sn76489  = { path = "../chips/hemu-sn76489" }
+
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "1.0"
 chrono = "0.4"
+log = "0.4"
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }

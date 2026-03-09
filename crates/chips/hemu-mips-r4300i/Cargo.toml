@@ -1,0 +1,14 @@
+[package]
+name = "hemu-mips-r4300i"
+version = "0.1.0"
+edition = "2021"
+description = "Reusable MIPS R4300i CPU emulation core — used in the Nintendo 64"
+license = "MIT"
+keywords = ["emulator", "mips", "r4300i", "n64", "cpu"]
+categories = ["emulators", "hardware-support"]
+readme = "README.md"
+
+[dependencies]
+hemu-mips-common = { path = "../hemu-mips-common" }
+hemu-types = { path = "../hemu-types" }
+log = "0.4"

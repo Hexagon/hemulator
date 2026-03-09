@@ -1,0 +1,11 @@
+[package]
+name = "hemu-types"
+version = "0.1.0"
+edition = "2021"
+description = "Shared types used across hemu-* chip crates — DisassembledInstruction, etc."
+license = "MIT"
+keywords = ["emulator", "disassembler", "cpu", "types"]
+categories = ["emulators", "hardware-support"]
+readme = "README.md"
+
+[dependencies]

@@ -724,6 +724,20 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "criterion",
+ "hemu-6502",
+ "hemu-65c816",
+ "hemu-8080",
+ "hemu-8086",
+ "hemu-arm7tdmi",
+ "hemu-lr35902",
+ "hemu-mips-common",
+ "hemu-mips-r3000a",
+ "hemu-mips-r4300i",
+ "hemu-sn76489",
+ "hemu-spc700",
+ "hemu-types",
+ "hemu-z80",
+ "log",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -1127,6 +1141,106 @@ name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
+
+[[package]]
+name = "hemu-6502"
+version = "0.1.0"
+dependencies = [
+ "hemu-types",
+ "log",
+]
+
+[[package]]
+name = "hemu-65c816"
+version = "0.1.0"
+dependencies = [
+ "hemu-types",
+ "log",
+]
+
+[[package]]
+name = "hemu-8080"
+version = "0.1.0"
+dependencies = [
+ "hemu-types",
+]
+
+[[package]]
+name = "hemu-8086"
+version = "0.1.0"
+dependencies = [
+ "hemu-types",
+ "log",
+ "serde",
+]
+
+[[package]]
+name = "hemu-arm7tdmi"
+version = "0.1.0"
+dependencies = [
+ "hemu-types",
+ "log",
+]
+
+[[package]]
+name = "hemu-lr35902"
+version = "0.1.0"
+dependencies = [
+ "hemu-8080",
+ "hemu-types",
+]
+
+[[package]]
+name = "hemu-mips-common"
+version = "0.1.0"
+dependencies = [
+ "hemu-types",
+]
+
+[[package]]
+name = "hemu-mips-r3000a"
+version = "0.1.0"
+dependencies = [
+ "hemu-mips-common",
+ "hemu-types",
+]
+
+[[package]]
+name = "hemu-mips-r4300i"
+version = "0.1.0"
+dependencies = [
+ "hemu-mips-common",
+ "hemu-types",
+ "log",
+]
+
+[[package]]
+name = "hemu-sn76489"
+version = "0.1.0"
+dependencies = [
+ "hemu-types",
+ "serde_json",
+]
+
+[[package]]
+name = "hemu-spc700"
+version = "0.1.0"
+dependencies = [
+ "hemu-types",
+ "log",
+]
+
+[[package]]
+name = "hemu-types"
+version = "0.1.0"
+
+[[package]]
+name = "hemu-z80"
+version = "0.1.0"
+dependencies = [
+ "hemu-8080",
+ "hemu-types",
+]
 
 [[package]]
 name = "hemu_gba"

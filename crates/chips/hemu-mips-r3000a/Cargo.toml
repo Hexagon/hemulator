@@ -1,0 +1,13 @@
+[package]
+name = "hemu-mips-r3000a"
+version = "0.1.0"
+edition = "2021"
+description = "Reusable MIPS R3000A CPU emulation core — used in the PlayStation 1"
+license = "MIT"
+keywords = ["emulator", "mips", "r3000a", "ps1", "cpu"]
+categories = ["emulators", "hardware-support"]
+readme = "README.md"
+
+[dependencies]
+hemu-mips-common = { path = "../hemu-mips-common" }
+hemu-types = { path = "../hemu-types" }

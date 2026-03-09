@@ -1,0 +1,13 @@
+[package]
+name = "hemu-arm7tdmi"
+version = "0.1.0"
+edition = "2021"
+description = "Reusable ARM7TDMI CPU emulation core — used in the Game Boy Advance"
+license = "MIT"
+keywords = ["emulator", "arm7tdmi", "arm", "gba", "cpu"]
+categories = ["emulators", "hardware-support"]
+readme = "README.md"
+
+[dependencies]
+log = "0.4"
+hemu-types = { path = "../hemu-types" }

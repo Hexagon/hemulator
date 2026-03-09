@@ -1,0 +1,13 @@
+[package]
+name = "hemu-sn76489"
+version = "0.1.0"
+edition = "2021"
+description = "Reusable Texas Instruments SN76489 PSG emulation core — used in SMS, ColecoVision, SG-1000"
+license = "MIT"
+keywords = ["emulator", "sn76489", "psg", "audio", "retro"]
+categories = ["emulators", "hardware-support"]
+readme = "README.md"
+
+[dependencies]
+hemu-types = { path = "../hemu-types" }
+serde_json = "1.0"

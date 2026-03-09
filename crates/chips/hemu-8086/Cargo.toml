@@ -1,0 +1,14 @@
+[package]
+name = "hemu-8086"
+version = "0.1.0"
+edition = "2021"
+description = "Reusable Intel 8086/80186/80286/80386 CPU emulation core — used in IBM PC/XT and compatibles"
+license = "MIT"
+keywords = ["emulator", "8086", "x86", "cpu", "ibm-pc"]
+categories = ["emulators", "hardware-support"]
+readme = "README.md"
+
+[dependencies]
+log = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+hemu-types = { path = "../hemu-types" }

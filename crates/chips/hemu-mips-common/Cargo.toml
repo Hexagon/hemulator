@@ -1,0 +1,12 @@
+[package]
+name = "hemu-mips-common"
+version = "0.1.0"
+edition = "2021"
+description = "Shared MIPS CPU helpers — register names, instruction field extraction, and base MIPS I disassembler used by R3000A and R4300i chip crates"
+license = "MIT"
+keywords = ["emulator", "mips", "cpu", "disassembler", "retro"]
+categories = ["emulators", "hardware-support"]
+readme = "README.md"
+
+[dependencies]
+hemu-types = { path = "../hemu-types" }
