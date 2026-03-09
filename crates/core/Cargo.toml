@@ -13,6 +13,7 @@ hemu-6502     = { path = "../chips/hemu-6502" }
 hemu-65c816   = { path = "../chips/hemu-65c816" }
 hemu-8086     = { path = "../chips/hemu-8086" }
 hemu-arm7tdmi = { path = "../chips/hemu-arm7tdmi" }
+hemu-mips-common = { path = "../chips/hemu-mips-common" }
 hemu-mips-r3000a = { path = "../chips/hemu-mips-r3000a" }
 hemu-mips-r4300i = { path = "../chips/hemu-mips-r4300i" }
 hemu-spc700   = { path = "../chips/hemu-spc700" }

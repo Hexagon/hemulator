@@ -730,6 +730,7 @@ dependencies = [
  "hemu-8086",
  "hemu-arm7tdmi",
  "hemu-lr35902",
+ "hemu-mips-common",
  "hemu-mips-r3000a",
  "hemu-mips-r4300i",
  "hemu-sn76489",
@@ -1190,9 +1191,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hemu-mips-common"
+version = "0.1.0"
+dependencies = [
+ "hemu-types",
+]
+
+[[package]]
 name = "hemu-mips-r3000a"
 version = "0.1.0"
 dependencies = [
+ "hemu-mips-common",
  "hemu-types",
 ]
 
@@ -1200,6 +1209,7 @@ dependencies = [
 name = "hemu-mips-r4300i"
 version = "0.1.0"
 dependencies = [
+ "hemu-mips-common",
  "hemu-types",
  "log",
 ]

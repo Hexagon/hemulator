@@ -9,5 +9,6 @@ categories = ["emulators", "hardware-support"]
 readme = "README.md"
 
 [dependencies]
+hemu-mips-common = { path = "../hemu-mips-common" }
 hemu-types = { path = "../hemu-types" }
 log = "0.4"

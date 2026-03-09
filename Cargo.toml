@@ -10,6 +10,7 @@ members = [
   "crates/chips/hemu-65c816",
   "crates/chips/hemu-8086",
   "crates/chips/hemu-arm7tdmi",
+  "crates/chips/hemu-mips-common",
   "crates/chips/hemu-mips-r3000a",
   "crates/chips/hemu-mips-r4300i",
   "crates/chips/hemu-spc700",

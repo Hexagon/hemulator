@@ -115,6 +115,7 @@ Current CPU chips (all in `crates/chips/`):
 | `hemu-lr35902` | Sharp LR35902 | Game Boy, Game Boy Color |
 | `hemu-8086` | Intel 8086/80186/80286/80386 | PC/XT |
 | `hemu-arm7tdmi` | ARM7TDMI | Game Boy Advance |
+| `hemu-mips-common` | Shared MIPS register names, field extraction, base MIPS I disassembler | *(base for R3000A/R4300i)* |
 | `hemu-mips-r3000a` | MIPS R3000A | PlayStation 1 |
 | `hemu-mips-r4300i` | MIPS R4300i | Nintendo 64 |
 | `hemu-spc700` | Sony SPC700 | SNES APU |
@@ -135,13 +136,15 @@ Current audio/PSG chips (all in `crates/chips/`):
 
 2. **Standard `log` crate** — use `log::warn!(...)`, `log::trace!(...)` etc. Never use the internal `emu_core::logging` system. The `log` facade is the correct pattern for library crates.
 
-3. **One crate per chip** — each physical chip gets its own crate. Do not bundle multiple unrelated chips.
+3. **One crate per chip, group families** — each physical chip gets its own crate. When multiple chips share a common instruction set (e.g. 8080→Z80→LR35902, MIPS I→R3000A/R4300i), extract shared helpers into a `hemu-<family>-common` or `hemu-<base>` crate. Variant crates depend on the common crate, reuse its code, and extend with variant-specific features.
 
 4. **Disassembler co-location** — for CPU chips, the disassembler (`disasm_<chip>.rs`) lives in the same chip crate. For audio chips that have no instruction set, no disassembler is needed.
 
 5. **`emu_core` re-exports** — `emu_core` re-exports all chip modules at their legacy paths (`emu_core::cpu_6502`, `emu_core::disasm_z80`, `emu_core::apu::sn76489`, etc.) for backward compatibility. System crates do not need to change their imports.
 
-6. **Unit tests in the chip crate** — every chip crate must contain unit tests for its core functionality. Tests for the CPU state machine, disassembler, and audio output belong in the chip crate, not in system crates.
+6. **Unit tests in the chip crate** — every chip crate must contain unit tests for its core functionality. Tests for the CPU state machine, disassembler, and audio output belong in the chip crate, not in system crates. Common/shared code is tested in the common crate; variant-specific features are tested only in the variant crate. Avoid duplicating the same test in both places.
+
+7. **Generic, reusable interfaces** — chip crates must expose generic memory/bus traits (not tied to any specific system's address map). A CPU crate accepts a trait like `MemoryR3000A { fn read_word(&self, addr: u32) -> u32; … }` — any system can implement this trait. Audio chips implement the `AudioChip` trait from `hemu-types`.
 
 ### Crate Inventory
 
@@ -155,10 +158,40 @@ Current audio/PSG chips (all in `crates/chips/`):
 | `hemu-65c816` | WDC 65C816 CPU + disassembler | `hemu-types`, `log` |
 | `hemu-8086` | Intel 8086/80386 CPU + protected mode + disassembler | `hemu-types`, `log`, `serde` |
 | `hemu-arm7tdmi` | ARM7TDMI CPU + disassembler | `hemu-types`, `log` |
-| `hemu-mips-r3000a` | MIPS R3000A CPU + disassembler | `hemu-types` |
-| `hemu-mips-r4300i` | MIPS R4300i CPU + disassembler | `hemu-types`, `log` |
+| `hemu-mips-common` | Shared MIPS helpers: register names, field extraction, base MIPS I disassembler | `hemu-types` |
+| `hemu-mips-r3000a` | MIPS R3000A CPU + disassembler (extends common + GTE) | `hemu-mips-common`, `hemu-types` |
+| `hemu-mips-r4300i` | MIPS R4300i CPU + disassembler (extends common + FPU + 64-bit) | `hemu-mips-common`, `hemu-types`, `log` |
 | `hemu-spc700` | Sony SPC700 CPU + disassembler | `hemu-types`, `log` |
 | `hemu-sn76489` | TI SN76489 PSG audio chip | `hemu-types` |
+
+### Chip Family Grouping
+
+When multiple chips share a common instruction set or register model, they
+form a **chip family**.  The shared code lives in a `-common` or base crate;
+variant-specific features live in the variant crate.
+
+| Family | Base Crate | Shared Code | Variant Crates |
+|--------|-----------|-------------|----------------|
+| 8080   | `hemu-8080` | Registers, flag helpers, opcode infrastructure | `hemu-z80`, `hemu-lr35902` |
+| MIPS   | `hemu-mips-common` | Register names, instruction field extraction, base MIPS I disassembler | `hemu-mips-r3000a`, `hemu-mips-r4300i` |
+
+**Rules for family grouping:**
+
+1. The base/common crate owns **shared helpers and types** — register name tables, instruction field extraction, and the base-level disassembler.
+2. Variant crates depend on the base crate and **extend** it — adding chip-specific opcodes (e.g. GTE for R3000A, FPU + 64-bit for R4300i).
+3. **Tests follow the code**: base-level instruction tests in the base crate, variant-specific tests in the variant crate. No duplication.
+4. Disassemblers use a "try base → fall through to variant" pattern:
+
+```rust
+pub fn disassemble_variant(memory: &[u8], address: u32) -> Option<DisassembledInstruction> {
+    // Try the common decoder first
+    if let Some(instr) = base_crate::disassemble(memory, address) {
+        return Some(instr);
+    }
+    // Handle variant-specific opcodes
+    decode_variant_specific(memory, address)
+}
+```
 
 ### Chip Crate Pattern (Required for All Chips)
 
