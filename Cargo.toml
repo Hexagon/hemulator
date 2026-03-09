@@ -13,6 +13,7 @@ members = [
   "crates/chips/hemu-mips-r3000a",
   "crates/chips/hemu-mips-r4300i",
   "crates/chips/hemu-spc700",
+  "crates/chips/hemu-sn76489",
   "crates/systems/nes",
   "crates/systems/gb",
   "crates/systems/gba",

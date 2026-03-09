@@ -732,6 +732,7 @@ dependencies = [
  "hemu-lr35902",
  "hemu-mips-r3000a",
  "hemu-mips-r4300i",
+ "hemu-sn76489",
  "hemu-spc700",
  "hemu-types",
  "hemu-z80",
@@ -1204,9 +1205,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "hemu-sn76489"
+version = "0.1.0"
+dependencies = [
+ "hemu-types",
+ "serde_json",
+]
+
+[[package]]
 name = "hemu-spc700"
 version = "0.1.0"
 dependencies = [
+ "hemu-types",
  "log",
 ]
 
