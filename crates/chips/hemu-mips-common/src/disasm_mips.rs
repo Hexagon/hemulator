@@ -59,8 +59,8 @@ pub fn decode_mips_i(f: &Fields, address: u32) -> Option<String> {
     let r = REG_NAMES;
 
     match f.opcode {
-        // SPECIAL (R-type)
-        0x00 => Some(decode_special(f)),
+        // SPECIAL (R-type) — returns None for MIPS III 64-bit functs
+        0x00 => decode_special(f),
 
         // REGIMM
         0x01 => decode_regimm(f, address),
@@ -147,52 +147,56 @@ pub fn decode_mips_i(f: &Fields, address: u32) -> Option<String> {
 }
 
 /// Decode SPECIAL (opcode 0x00) R-type instructions.
-fn decode_special(f: &Fields) -> String {
+///
+/// Returns `None` for MIPS III 64-bit funct codes (DSLL, DSRL, DMULT, DADD,
+/// etc.) so variant crates can provide their own decode.
+fn decode_special(f: &Fields) -> Option<String> {
     let r = REG_NAMES;
     match f.funct {
-        0x00 if f.word == 0 => "NOP".to_string(),
-        0x00 => format!("SLL {}, {}, {}", r[f.rd], r[f.rt], f.sa),
-        0x02 => format!("SRL {}, {}, {}", r[f.rd], r[f.rt], f.sa),
-        0x03 => format!("SRA {}, {}, {}", r[f.rd], r[f.rt], f.sa),
-        0x04 => format!("SLLV {}, {}, {}", r[f.rd], r[f.rt], r[f.rs]),
-        0x06 => format!("SRLV {}, {}, {}", r[f.rd], r[f.rt], r[f.rs]),
-        0x07 => format!("SRAV {}, {}, {}", r[f.rd], r[f.rt], r[f.rs]),
-        0x08 => format!("JR {}", r[f.rs]),
+        0x00 if f.word == 0 => Some("NOP".to_string()),
+        0x00 => Some(format!("SLL {}, {}, {}", r[f.rd], r[f.rt], f.sa)),
+        0x02 => Some(format!("SRL {}, {}, {}", r[f.rd], r[f.rt], f.sa)),
+        0x03 => Some(format!("SRA {}, {}, {}", r[f.rd], r[f.rt], f.sa)),
+        0x04 => Some(format!("SLLV {}, {}, {}", r[f.rd], r[f.rt], r[f.rs])),
+        0x06 => Some(format!("SRLV {}, {}, {}", r[f.rd], r[f.rt], r[f.rs])),
+        0x07 => Some(format!("SRAV {}, {}, {}", r[f.rd], r[f.rt], r[f.rs])),
+        0x08 => Some(format!("JR {}", r[f.rs])),
         0x09 => {
             if f.rd == 31 {
-                format!("JALR {}", r[f.rs])
+                Some(format!("JALR {}", r[f.rs]))
             } else {
-                format!("JALR {}, {}", r[f.rd], r[f.rs])
+                Some(format!("JALR {}, {}", r[f.rd], r[f.rs]))
             }
         }
-        0x0C => "SYSCALL".to_string(),
-        0x0D => "BREAK".to_string(),
-        0x0F => "SYNC".to_string(),
-        0x10 => format!("MFHI {}", r[f.rd]),
-        0x11 => format!("MTHI {}", r[f.rs]),
-        0x12 => format!("MFLO {}", r[f.rd]),
-        0x13 => format!("MTLO {}", r[f.rs]),
-        0x18 => format!("MULT {}, {}", r[f.rs], r[f.rt]),
-        0x19 => format!("MULTU {}, {}", r[f.rs], r[f.rt]),
-        0x1A => format!("DIV {}, {}", r[f.rs], r[f.rt]),
-        0x1B => format!("DIVU {}, {}", r[f.rs], r[f.rt]),
-        0x20 => format!("ADD {}, {}, {}", r[f.rd], r[f.rs], r[f.rt]),
+        0x0C => Some("SYSCALL".to_string()),
+        0x0D => Some("BREAK".to_string()),
+        0x0F => Some("SYNC".to_string()),
+        0x10 => Some(format!("MFHI {}", r[f.rd])),
+        0x11 => Some(format!("MTHI {}", r[f.rs])),
+        0x12 => Some(format!("MFLO {}", r[f.rd])),
+        0x13 => Some(format!("MTLO {}", r[f.rs])),
+        0x18 => Some(format!("MULT {}, {}", r[f.rs], r[f.rt])),
+        0x19 => Some(format!("MULTU {}, {}", r[f.rs], r[f.rt])),
+        0x1A => Some(format!("DIV {}, {}", r[f.rs], r[f.rt])),
+        0x1B => Some(format!("DIVU {}, {}", r[f.rs], r[f.rt])),
+        0x20 => Some(format!("ADD {}, {}, {}", r[f.rd], r[f.rs], r[f.rt])),
         0x21 => {
             if f.rt == 0 {
-                format!("MOVE {}, {}", r[f.rd], r[f.rs])
+                Some(format!("MOVE {}, {}", r[f.rd], r[f.rs]))
             } else {
-                format!("ADDU {}, {}, {}", r[f.rd], r[f.rs], r[f.rt])
+                Some(format!("ADDU {}, {}, {}", r[f.rd], r[f.rs], r[f.rt]))
             }
         }
-        0x22 => format!("SUB {}, {}, {}", r[f.rd], r[f.rs], r[f.rt]),
-        0x23 => format!("SUBU {}, {}, {}", r[f.rd], r[f.rs], r[f.rt]),
-        0x24 => format!("AND {}, {}, {}", r[f.rd], r[f.rs], r[f.rt]),
-        0x25 => format!("OR {}, {}, {}", r[f.rd], r[f.rs], r[f.rt]),
-        0x26 => format!("XOR {}, {}, {}", r[f.rd], r[f.rs], r[f.rt]),
-        0x27 => format!("NOR {}, {}, {}", r[f.rd], r[f.rs], r[f.rt]),
-        0x2A => format!("SLT {}, {}, {}", r[f.rd], r[f.rs], r[f.rt]),
-        0x2B => format!("SLTU {}, {}, {}", r[f.rd], r[f.rs], r[f.rt]),
-        _ => format!("SPECIAL ${:02X}", f.funct),
+        0x22 => Some(format!("SUB {}, {}, {}", r[f.rd], r[f.rs], r[f.rt])),
+        0x23 => Some(format!("SUBU {}, {}, {}", r[f.rd], r[f.rs], r[f.rt])),
+        0x24 => Some(format!("AND {}, {}, {}", r[f.rd], r[f.rs], r[f.rt])),
+        0x25 => Some(format!("OR {}, {}, {}", r[f.rd], r[f.rs], r[f.rt])),
+        0x26 => Some(format!("XOR {}, {}, {}", r[f.rd], r[f.rs], r[f.rt])),
+        0x27 => Some(format!("NOR {}, {}, {}", r[f.rd], r[f.rs], r[f.rt])),
+        0x2A => Some(format!("SLT {}, {}, {}", r[f.rd], r[f.rs], r[f.rt])),
+        0x2B => Some(format!("SLTU {}, {}, {}", r[f.rd], r[f.rs], r[f.rt])),
+        // MIPS III 64-bit funct codes — let variant handle
+        _ => None,
     }
 }
 
@@ -405,5 +409,23 @@ mod tests {
         let word = (1u32 << 26) | (8 << 21) | (2 << 16) | 0x0004;
         let mem = word.to_le_bytes();
         assert!(disassemble_mips_i(&mem, 0x80000000, Endian::Little).is_none());
+    }
+
+    #[test]
+    fn test_special_mips_iii_returns_none() {
+        // DSLL (funct=0x38) is MIPS III — base decoder returns None
+        let word = (0u32 << 26) | (8 << 16) | (10 << 11) | (4 << 6) | 0x38;
+        let mem = word.to_le_bytes();
+        assert!(disassemble_mips_i(&mem, 0x80000000, Endian::Little).is_none());
+
+        // DMULT (funct=0x1C) is MIPS III — base decoder returns None
+        let word2 = (8u32 << 21) | (9 << 16) | 0x1C;
+        let mem2 = word2.to_le_bytes();
+        assert!(disassemble_mips_i(&mem2, 0x80000000, Endian::Little).is_none());
+
+        // DADDU (funct=0x2D) is MIPS III — base decoder returns None
+        let word3 = (8u32 << 21) | (9 << 16) | (10 << 11) | 0x2D;
+        let mem3 = word3.to_le_bytes();
+        assert!(disassemble_mips_i(&mem3, 0x80000000, Endian::Little).is_none());
     }
 }

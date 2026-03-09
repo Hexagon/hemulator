@@ -37,6 +37,9 @@ fn decode_mips_iii(f: &Fields, address: u32) -> String {
     let r = REG_NAMES;
 
     match f.opcode {
+        // SPECIAL fallthrough — MIPS III 64-bit R-type instructions not handled by base
+        0x00 => decode_special_mips_iii(f),
+
         // REGIMM fallthrough — MIPS II/III likely branches not handled by base
         0x01 => {
             let tgt = f.branch_target(address);
@@ -204,6 +207,45 @@ fn decode_cop1_fmt(f: &Fields, fmt: &str, fd: usize, fs: usize, ft: usize) -> St
             format!("C.{}.{} {}, {}", cond_name, fmt, fp[fs], fp[ft])
         }
         _ => format!("COP1.{} ${:02X}", fmt, f.funct),
+    }
+}
+
+/// Decode MIPS III 64-bit SPECIAL (opcode 0x00) R-type instructions.
+///
+/// Handles doubleword shifts, multiplies, divides, and add/subtract operations
+/// that are not present in MIPS I.
+fn decode_special_mips_iii(f: &Fields) -> String {
+    let r = REG_NAMES;
+    match f.funct {
+        // Doubleword shift variable
+        0x14 => format!("DSLLV {}, {}, {}", r[f.rd], r[f.rt], r[f.rs]),
+        0x16 => format!("DSRLV {}, {}, {}", r[f.rd], r[f.rt], r[f.rs]),
+        0x17 => format!("DSRAV {}, {}, {}", r[f.rd], r[f.rt], r[f.rs]),
+        // Doubleword multiply/divide
+        0x1C => format!("DMULT {}, {}", r[f.rs], r[f.rt]),
+        0x1D => format!("DMULTU {}, {}", r[f.rs], r[f.rt]),
+        0x1E => format!("DDIV {}, {}", r[f.rs], r[f.rt]),
+        0x1F => format!("DDIVU {}, {}", r[f.rs], r[f.rt]),
+        // Doubleword add/subtract
+        0x2C => format!("DADD {}, {}, {}", r[f.rd], r[f.rs], r[f.rt]),
+        0x2D => format!("DADDU {}, {}, {}", r[f.rd], r[f.rs], r[f.rt]),
+        0x2E => format!("DSUB {}, {}, {}", r[f.rd], r[f.rs], r[f.rt]),
+        0x2F => format!("DSUBU {}, {}, {}", r[f.rd], r[f.rs], r[f.rt]),
+        // Doubleword shift immediate
+        0x38 => format!("DSLL {}, {}, {}", r[f.rd], r[f.rt], f.sa),
+        0x3A => format!("DSRL {}, {}, {}", r[f.rd], r[f.rt], f.sa),
+        0x3B => format!("DSRA {}, {}, {}", r[f.rd], r[f.rt], f.sa),
+        0x3C => format!("DSLL32 {}, {}, {}", r[f.rd], r[f.rt], f.sa),
+        0x3E => format!("DSRL32 {}, {}, {}", r[f.rd], r[f.rt], f.sa),
+        0x3F => format!("DSRA32 {}, {}, {}", r[f.rd], r[f.rt], f.sa),
+        // Trap instructions (MIPS II)
+        0x30 => format!("TGE {}, {}", r[f.rs], r[f.rt]),
+        0x31 => format!("TGEU {}, {}", r[f.rs], r[f.rt]),
+        0x32 => format!("TLT {}, {}", r[f.rs], r[f.rt]),
+        0x33 => format!("TLTU {}, {}", r[f.rs], r[f.rt]),
+        0x34 => format!("TEQ {}, {}", r[f.rs], r[f.rt]),
+        0x36 => format!("TNE {}, {}", r[f.rs], r[f.rt]),
+        _ => format!("SPECIAL ${:02X}", f.funct),
     }
 }
 
@@ -402,5 +444,116 @@ mod tests {
     #[test]
     fn test_sync() {
         assert_eq!(dis(0x0000000F), "SYNC");
+    }
+
+    // --- MIPS III 64-bit SPECIAL R-type ---
+
+    #[test]
+    fn test_dsll() {
+        // DSLL $t2, $t0, 4 => opcode=0, rt=8, rd=10, sa=4, funct=0x38
+        let word = (0u32 << 26) | (0 << 21) | (8 << 16) | (10 << 11) | (4 << 6) | 0x38;
+        assert_eq!(dis(word), "DSLL t2, t0, 4");
+    }
+
+    #[test]
+    fn test_dsrl() {
+        let word = (8 << 16) | (10 << 11) | (4 << 6) | 0x3Au32;
+        assert_eq!(dis(word), "DSRL t2, t0, 4");
+    }
+
+    #[test]
+    fn test_dsra() {
+        let word = (8 << 16) | (10 << 11) | (4 << 6) | 0x3Bu32;
+        assert_eq!(dis(word), "DSRA t2, t0, 4");
+    }
+
+    #[test]
+    fn test_dsll32() {
+        let word = (8 << 16) | (10 << 11) | (0 << 6) | 0x3Cu32;
+        assert_eq!(dis(word), "DSLL32 t2, t0, 0");
+    }
+
+    #[test]
+    fn test_dsrl32() {
+        let word = (8 << 16) | (10 << 11) | (0 << 6) | 0x3Eu32;
+        assert_eq!(dis(word), "DSRL32 t2, t0, 0");
+    }
+
+    #[test]
+    fn test_dsra32() {
+        let word = (8 << 16) | (10 << 11) | (0 << 6) | 0x3Fu32;
+        assert_eq!(dis(word), "DSRA32 t2, t0, 0");
+    }
+
+    #[test]
+    fn test_dmult() {
+        let word = (8u32 << 21) | (9 << 16) | 0x1C;
+        assert_eq!(dis(word), "DMULT t0, t1");
+    }
+
+    #[test]
+    fn test_dmultu() {
+        let word = (8u32 << 21) | (9 << 16) | 0x1D;
+        assert_eq!(dis(word), "DMULTU t0, t1");
+    }
+
+    #[test]
+    fn test_ddiv() {
+        let word = (8u32 << 21) | (9 << 16) | 0x1E;
+        assert_eq!(dis(word), "DDIV t0, t1");
+    }
+
+    #[test]
+    fn test_ddivu() {
+        let word = (8u32 << 21) | (9 << 16) | 0x1F;
+        assert_eq!(dis(word), "DDIVU t0, t1");
+    }
+
+    #[test]
+    fn test_dadd() {
+        let word = (8u32 << 21) | (9 << 16) | (10 << 11) | 0x2C;
+        assert_eq!(dis(word), "DADD t2, t0, t1");
+    }
+
+    #[test]
+    fn test_daddu() {
+        let word = (8u32 << 21) | (9 << 16) | (10 << 11) | 0x2D;
+        assert_eq!(dis(word), "DADDU t2, t0, t1");
+    }
+
+    #[test]
+    fn test_dsub() {
+        let word = (8u32 << 21) | (9 << 16) | (10 << 11) | 0x2E;
+        assert_eq!(dis(word), "DSUB t2, t0, t1");
+    }
+
+    #[test]
+    fn test_dsubu() {
+        let word = (8u32 << 21) | (9 << 16) | (10 << 11) | 0x2F;
+        assert_eq!(dis(word), "DSUBU t2, t0, t1");
+    }
+
+    #[test]
+    fn test_dsllv() {
+        let word = (8u32 << 21) | (9 << 16) | (10 << 11) | 0x14;
+        assert_eq!(dis(word), "DSLLV t2, t1, t0");
+    }
+
+    #[test]
+    fn test_dsrlv() {
+        let word = (8u32 << 21) | (9 << 16) | (10 << 11) | 0x16;
+        assert_eq!(dis(word), "DSRLV t2, t1, t0");
+    }
+
+    #[test]
+    fn test_dsrav() {
+        let word = (8u32 << 21) | (9 << 16) | (10 << 11) | 0x17;
+        assert_eq!(dis(word), "DSRAV t2, t1, t0");
+    }
+
+    #[test]
+    fn test_teq() {
+        let word = (8u32 << 21) | (9 << 16) | 0x34;
+        assert_eq!(dis(word), "TEQ t0, t1");
     }
 }
