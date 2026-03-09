@@ -83,16 +83,16 @@ CPU implementations **live in chip crates** (`crates/chips/hemu-*`) and are
 re-exported from `emu_core` for backward compatibility. See the
 [Chip Crates](#chip-crates-crateschips) section for the full list and design rationale.
 
-### CPU Implementations
+### CPU and Chip Implementations
 
-All CPU implementations follow the same pattern:
-1. Generic memory trait (e.g., `Memory6502`, `MemoryMips`)
-2. CPU struct with registers and state
-3. Instruction execution with cycle-accurate timing
-4. Disassembler module (co-located in the same chip crate)
+All chip implementations (CPUs and audio chips) follow the same pattern:
+1. Generic memory/bus trait (e.g., `Memory6502`, `MemoryMips`) or `AudioChip` trait
+2. Chip struct with registers and state
+3. Instruction execution or signal processing logic
+4. Disassembler module co-located in the same chip crate (where applicable)
 5. Comprehensive unit tests
 
-CPUs are accessed via `emu_core` re-exports or directly from the chip crate:
+Chips are accessed via `emu_core` re-exports or directly from the chip crate:
 
 ```rust
 // Via emu_core (backward-compatible path)
@@ -110,7 +110,7 @@ Current CPU chips (all in `crates/chips/`):
 |-----------|-----|---------|
 | `hemu-6502` | MOS 6502 | NES, Atari 2600/5200 |
 | `hemu-65c816` | WDC 65C816 | SNES |
-| `hemu-8080` | Intel 8080 + shared helpers | ColecoVision, SG-1000 |
+| `hemu-8080` | Intel 8080 + shared helpers | ColecoVision, SG-1000 (base for Z80/LR35902) |
 | `hemu-z80` | Zilog Z80 | SMS, ColecoVision, SG-1000 |
 | `hemu-lr35902` | Sharp LR35902 | Game Boy, Game Boy Color |
 | `hemu-8086` | Intel 8086/80186/80286/80386 | PC/XT |
@@ -119,37 +119,72 @@ Current CPU chips (all in `crates/chips/`):
 | `hemu-mips-r4300i` | MIPS R4300i | Nintendo 64 |
 | `hemu-spc700` | Sony SPC700 | SNES APU |
 
+Current audio/PSG chips (all in `crates/chips/`):
+
+| Chip Crate | Chip | Used in |
+|-----------|------|---------|
+| `hemu-sn76489` | TI SN76489 PSG | SMS, Game Gear, ColecoVision, SG-1000 |
+
 ## Chip Crates (`crates/chips/`)
 
 ### Philosophy and Design Rules
 
-Every CPU/chip in this repository **must be implemented as a standalone chip crate** (`crates/chips/hemu-<chip>`). This is a hard architectural rule:
+**Every reusable chip in this repository must be implemented as a standalone chip crate** (`crates/chips/hemu-<chip>`). This rule applies to *all* chips — CPU cores, PSG/sound chips, and any other standalone hardware component. This is a hard architectural requirement:
 
-1. **Zero `emu_core` dependency** — chip crates must not depend on `emu_core`. They depend only on `hemu-types` (for `DisassembledInstruction`) and `log` (standard Rust logging facade). This keeps them independently publishable.
+1. **Zero `emu_core` dependency** — chip crates must not depend on `emu_core`. They depend only on `hemu-types` (for `DisassembledInstruction`, `AudioChip`, `TimingMode`) and `log`. This keeps them independently publishable to crates.io.
 
 2. **Standard `log` crate** — use `log::warn!(...)`, `log::trace!(...)` etc. Never use the internal `emu_core::logging` system. The `log` facade is the correct pattern for library crates.
 
 3. **One crate per chip** — each physical chip gets its own crate. Do not bundle multiple unrelated chips.
 
-4. **Disassembler co-location** — the disassembler (`disasm_<chip>.rs`) lives in the same chip crate as the CPU implementation. This ensures the disassembler is always available to consumers without pulling in `emu_core`.
+4. **Disassembler co-location** — for CPU chips, the disassembler (`disasm_<chip>.rs`) lives in the same chip crate. For audio chips that have no instruction set, no disassembler is needed.
 
-5. **`emu_core` re-exports** — `emu_core` re-exports all chip modules at their legacy paths (`emu_core::cpu_6502`, `emu_core::disasm_z80`, etc.) for backward compatibility. System crates do not need to change their imports.
+5. **`emu_core` re-exports** — `emu_core` re-exports all chip modules at their legacy paths (`emu_core::cpu_6502`, `emu_core::disasm_z80`, `emu_core::apu::sn76489`, etc.) for backward compatibility. System crates do not need to change their imports.
+
+6. **Unit tests in the chip crate** — every chip crate must contain unit tests for its core functionality. Tests for the CPU state machine, disassembler, and audio output belong in the chip crate, not in system crates.
 
 ### Crate Inventory
 
 | Crate | Contents | External Deps |
 |-------|----------|---------------|
-| `hemu-types` | `DisassembledInstruction` shared type | *(none)* |
-| `hemu-8080` | Intel 8080 CPU + `cpu_8080_common` helpers | *(none)* |
+| `hemu-types` | `DisassembledInstruction`, `AudioChip` trait, `TimingMode` | *(none)* |
+| `hemu-8080` | Intel 8080 CPU + `cpu_8080_common` helpers + disassembler | `hemu-types` |
 | `hemu-z80` | Zilog Z80 CPU + disassembler | `hemu-8080`, `hemu-types` |
 | `hemu-lr35902` | Sharp LR35902 (Game Boy) CPU + disassembler | `hemu-8080`, `hemu-types` |
 | `hemu-6502` | MOS 6502 CPU + disassembler | `hemu-types`, `log` |
 | `hemu-65c816` | WDC 65C816 CPU + disassembler | `hemu-types`, `log` |
 | `hemu-8086` | Intel 8086/80386 CPU + protected mode + disassembler | `hemu-types`, `log`, `serde` |
-| `hemu-arm7tdmi` | ARM7TDMI CPU + disassembler | `log` |
+| `hemu-arm7tdmi` | ARM7TDMI CPU + disassembler | `hemu-types`, `log` |
 | `hemu-mips-r3000a` | MIPS R3000A CPU + disassembler | `hemu-types` |
 | `hemu-mips-r4300i` | MIPS R4300i CPU + disassembler | `hemu-types`, `log` |
-| `hemu-spc700` | Sony SPC700 CPU | `log` |
+| `hemu-spc700` | Sony SPC700 CPU + disassembler | `hemu-types`, `log` |
+| `hemu-sn76489` | TI SN76489 PSG audio chip | `hemu-types` |
+
+### Chip Crate Pattern (Required for All Chips)
+
+Every chip crate must follow this structure:
+
+```
+crates/chips/hemu-<chipname>/
+├── Cargo.toml          # name = "hemu-<chipname>"; no emu_core dep; publish-ready metadata
+├── README.md           # usage example, chip features, hardware references
+└── src/
+    ├── lib.rs              # pub mod declarations + re-exports
+    ├── cpu_<chipname>.rs   # (CPU chips) state machine, memory trait, registers
+    ├── disasm_<chipname>.rs # (CPU chips) disassembler returning DisassembledInstruction
+    └── <chipname>.rs       # (audio chips) register interface, clock(), AudioChip impl
+```
+
+**Required elements per chip type:**
+
+| Element | CPU chip | Audio chip |
+|---------|----------|------------|
+| Memory/bus trait | ✓ | — |
+| `AudioChip` impl | — | ✓ |
+| Disassembler returning `DisassembledInstruction` | ✓ | — |
+| `log::*` for diagnostics | ✓ | if needed |
+| `hemu-types` dependency | ✓ | ✓ |
+| Unit tests (≥10 recommended) | ✓ | ✓ |
 
 ### Preparing for Separate Repositories
 
@@ -168,28 +203,43 @@ To extract a chip to its own repo:
 
 ### Adding a New Chip
 
-When implementing a new CPU or chip that might be reusable:
+When implementing a new CPU or chip that might be reusable across systems, or that represents a real standalone hardware component:
 
+**CPU chip:**
 ```
-crates/chips/
-└── hemu-<chipname>/
-    ├── Cargo.toml          # name = "hemu-<chipname>", no emu_core dep
-    ├── README.md           # usage, features, hardware references
-    └── src/
-        ├── lib.rs          # pub mod cpu_<chipname>; pub mod disasm_<chipname>;
-        ├── cpu_<chipname>.rs    # CPU state machine (no crate::logging!)
-        └── disasm_<chipname>.rs # disassembler (use hemu_types::DisassembledInstruction)
+crates/chips/hemu-<name>/
+├── Cargo.toml          # hemu-types, log as deps; no emu_core
+├── README.md
+└── src/
+    ├── lib.rs              # pub mod cpu_<name>; pub mod disasm_<name>;
+    ├── cpu_<name>.rs       # Memory trait + CPU struct + step() + tests
+    └── disasm_<name>.rs    # disassemble(memory, addr) -> Option<DisassembledInstruction>
 ```
 
-Then in `emu_core/src/lib.rs`, add:
+**Audio/PSG chip:**
+```
+crates/chips/hemu-<name>/
+├── Cargo.toml          # hemu-types as dep (for AudioChip + TimingMode); no emu_core
+├── README.md
+└── src/
+    ├── lib.rs              # pub mod <name>; pub use hemu_types::{AudioChip, TimingMode};
+    └── <name>.rs           # chip struct + write_register() + clock() + AudioChip impl + tests
+```
+
+Then in `emu_core/src/lib.rs`:
 ```rust
-pub use hemu_<chipname>::cpu_<chipname>;
-pub use hemu_<chipname>::disasm_<chipname>;
+pub use hemu_<name>::cpu_<name>;
+pub use hemu_<name>::disasm_<name>;       // CPU chips only
+```
+
+Or for audio chips, in `emu_core/src/apu/<name>.rs`:
+```rust
+pub use hemu_<name>::<name>::*;
 ```
 
 And in `emu_core/Cargo.toml`:
 ```toml
-hemu-<chipname> = { path = "../chips/hemu-<chipname>" }
+hemu-<name> = { path = "../chips/hemu-<name>" }
 ```
 
 ### Audio Components (`crates/core/src/apu/`)
@@ -655,9 +705,9 @@ For user-facing controls and features, see the [User Manual](https://hemulator.5
 ## Design Principles
 
 1. **Modularity**: Reusable components over monolithic implementations
-2. **Chip Crates First**: Every CPU/chip implementation goes in a `hemu-*` chip crate — see [Chip Crates](#chip-crates-crateschips)
+2. **Chip Crates First**: Every CPU/chip implementation goes in a `hemu-*` chip crate — see [Chip Crates](#chip-crates-crateschips). This applies to ALL chips: CPU cores, PSG/audio chips, and any self-contained hardware component used across multiple systems.
 3. **Accuracy**: Cycle-accurate where feasible, frame-based where practical
-4. **Testability**: Comprehensive test coverage for all components
+4. **Testability**: Comprehensive test coverage for all components; chip crates must include their own unit tests
 5. **Documentation**: Clear documentation for architecture and implementation
 6. **Code Reuse**: Share components across systems when possible
 7. **Separation of Concerns**: Clean boundaries between state and rendering
