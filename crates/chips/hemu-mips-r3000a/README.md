@@ -10,7 +10,7 @@ Reusable **MIPS R3000A** CPU emulation core — the 32-bit MIPS I processor used
 - Branch delay slots
 - Precise exception handling (SYSCALL, BREAK, address errors, overflow)
 - Generic memory interface via `MemoryR3000A` trait
-- MIPS I disassembler via `disasm_mips_r3000a` module
+- MIPS I disassembler via `disasm_mips_r3000a` module (extends `hemu-mips-common` base decoder + COP2/GTE overlay)
 
 ## Usage
 

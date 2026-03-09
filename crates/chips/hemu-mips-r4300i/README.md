@@ -12,7 +12,7 @@ Reusable **MIPS R4300i** CPU emulation core — the 64-bit MIPS III processor us
 - Branch delay slots
 - 32-bit and 64-bit operation modes
 - Generic memory + TLB interface via `MemoryMips` trait
-- Minimal MIPS disassembler via `disasm_mips_r4300i` module
+- Full MIPS III disassembler via `disasm_mips_r4300i` module (extends `hemu-mips-common` base + 64-bit/FPU/cache overlay)
 - Optional `log` crate integration for unaligned access warnings
 
 ## Usage

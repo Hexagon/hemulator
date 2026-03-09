@@ -37,6 +37,29 @@ fn decode_mips_iii(f: &Fields, address: u32) -> String {
     let r = REG_NAMES;
 
     match f.opcode {
+        // REGIMM fallthrough — MIPS II/III likely branches not handled by base
+        0x01 => {
+            let tgt = f.branch_target(address);
+            match f.rt {
+                0x02 => format!("BLTZL {}, ${:08X}", r[f.rs], tgt),
+                0x03 => format!("BGEZL {}, ${:08X}", r[f.rs], tgt),
+                0x12 => format!("BLTZALL {}, ${:08X}", r[f.rs], tgt),
+                0x13 => format!("BGEZALL {}, ${:08X}", r[f.rs], tgt),
+                _ => format!("REGIMM rt={} {}, ${:08X}", f.rt, r[f.rs], tgt),
+            }
+        }
+
+        // COP0 fallthrough — DMFC0, DMTC0, ERET not handled by base
+        0x10 => match f.rs {
+            0x01 => format!("DMFC0 {}, ${}", r[f.rt], f.rd),
+            0x05 => format!("DMTC0 {}, ${}", r[f.rt], f.rd),
+            0x10..=0x1F => match f.funct {
+                0x18 => "ERET".to_string(),
+                _ => format!("COP0 ${:08X}", f.word),
+            },
+            _ => format!("COP0 ${:08X}", f.word),
+        },
+
         // Likely branches (MIPS II/III)
         0x14 => format!(
             "BEQL {}, {}, ${:08X}",
@@ -76,7 +99,7 @@ fn decode_mips_iii(f: &Fields, address: u32) -> String {
         0x3F => format!("SD {}, {}({})", r[f.rt], f.simm, r[f.rs]),
 
         // COP1 (FPU)
-        0x11 => decode_cop1(f),
+        0x11 => decode_cop1(f, address),
 
         // COP1 loads/stores
         0x31 => format!("LWC1 {}, {}({})", FPR_NAMES[f.rt], f.simm, r[f.rs]),
@@ -89,7 +112,7 @@ fn decode_mips_iii(f: &Fields, address: u32) -> String {
 }
 
 /// Decode COP1 (FPU) instructions.
-fn decode_cop1(f: &Fields) -> String {
+fn decode_cop1(f: &Fields, address: u32) -> String {
     let r = REG_NAMES;
     let fp = FPR_NAMES;
     let fd = (f.word >> 6) & 0x1F;
@@ -105,7 +128,7 @@ fn decode_cop1(f: &Fields) -> String {
         0x06 => format!("CTC1 {}, ${}", r[ft], fs),
         // BC1F / BC1T
         0x08 => {
-            let tgt = f.branch_target(f.word & !0xFFFF | (f.imm16 as u32));
+            let tgt = f.branch_target(address);
             match ft {
                 0x00 => format!("BC1F ${:08X}", tgt),
                 0x01 => format!("BC1T ${:08X}", tgt),
@@ -340,5 +363,44 @@ mod tests {
         let instr = disassemble_mips(&mem, 0x80000000).unwrap();
         assert_eq!(instr.len(), 4);
         assert_eq!(instr.address, 0x80000000);
+    }
+
+    // --- MIPS II/III-specific (not in base) ---
+
+    #[test]
+    fn test_eret() {
+        let word = (0x10u32 << 26) | (0x10 << 21) | 0x18;
+        assert_eq!(dis(word), "ERET");
+    }
+
+    #[test]
+    fn test_dmfc0() {
+        let word = (0x10u32 << 26) | (0x01 << 21) | (8 << 16) | (12 << 11);
+        assert_eq!(dis(word), "DMFC0 t0, $12");
+    }
+
+    #[test]
+    fn test_dmtc0() {
+        let word = (0x10u32 << 26) | (0x05 << 21) | (8 << 16) | (12 << 11);
+        assert_eq!(dis(word), "DMTC0 t0, $12");
+    }
+
+    #[test]
+    fn test_bltzl() {
+        let word = (1u32 << 26) | (8 << 21) | (2 << 16) | 0x0004;
+        let m = dis(word);
+        assert!(m.starts_with("BLTZL t0"), "got: {m}");
+    }
+
+    #[test]
+    fn test_bgezl() {
+        let word = (1u32 << 26) | (8 << 21) | (3 << 16) | 0x0004;
+        let m = dis(word);
+        assert!(m.starts_with("BGEZL t0"), "got: {m}");
+    }
+
+    #[test]
+    fn test_sync() {
+        assert_eq!(dis(0x0000000F), "SYNC");
     }
 }

@@ -63,7 +63,7 @@ pub fn decode_mips_i(f: &Fields, address: u32) -> Option<String> {
         0x00 => Some(decode_special(f)),
 
         // REGIMM
-        0x01 => Some(decode_regimm(f, address)),
+        0x01 => decode_regimm(f, address),
 
         // J / JAL
         0x02 => Some(format!("J ${:08X}", f.jump_target(address))),
@@ -112,7 +112,7 @@ pub fn decode_mips_i(f: &Fields, address: u32) -> Option<String> {
         0x0F => Some(format!("LUI {}, 0x{:04X}", r[f.rt], f.imm16)),
 
         // COP0 (common subset)
-        0x10 => Some(decode_cop0(f)),
+        0x10 => decode_cop0(f),
 
         // COP1, COP2, COP3 — variant-specific, let caller handle
         0x11..=0x13 => None,
@@ -197,41 +197,40 @@ fn decode_special(f: &Fields) -> String {
 }
 
 /// Decode REGIMM (opcode 0x01) branch instructions.
-fn decode_regimm(f: &Fields, address: u32) -> String {
+///
+/// Returns `None` for MIPS II/III likely branches — variant crates handle those.
+fn decode_regimm(f: &Fields, address: u32) -> Option<String> {
     let r = REG_NAMES;
     let tgt = f.branch_target(address);
     match f.rt {
-        0x00 => format!("BLTZ {}, ${:08X}", r[f.rs], tgt),
-        0x01 => format!("BGEZ {}, ${:08X}", r[f.rs], tgt),
-        0x10 => format!("BLTZAL {}, ${:08X}", r[f.rs], tgt),
-        0x11 => format!("BGEZAL {}, ${:08X}", r[f.rs], tgt),
-        // MIPS III likely branches (handled here since encoding is standard)
-        0x02 => format!("BLTZL {}, ${:08X}", r[f.rs], tgt),
-        0x03 => format!("BGEZL {}, ${:08X}", r[f.rs], tgt),
-        0x12 => format!("BLTZALL {}, ${:08X}", r[f.rs], tgt),
-        0x13 => format!("BGEZALL {}, ${:08X}", r[f.rs], tgt),
-        _ => format!("REGIMM rt={} {}, ${:08X}", f.rt, r[f.rs], tgt),
+        0x00 => Some(format!("BLTZ {}, ${:08X}", r[f.rs], tgt)),
+        0x01 => Some(format!("BGEZ {}, ${:08X}", r[f.rs], tgt)),
+        0x10 => Some(format!("BLTZAL {}, ${:08X}", r[f.rs], tgt)),
+        0x11 => Some(format!("BGEZAL {}, ${:08X}", r[f.rs], tgt)),
+        // MIPS II/III likely branches — variant-specific
+        _ => None,
     }
 }
 
-/// Decode COP0 instructions (common subset).
-fn decode_cop0(f: &Fields) -> String {
+/// Decode COP0 instructions (MIPS I common subset).
+///
+/// Returns `None` for MIPS II/III instructions (DMFC0, DMTC0, ERET) — variant crates handle those.
+fn decode_cop0(f: &Fields) -> Option<String> {
     let r = REG_NAMES;
     match f.rs {
-        0x00 => format!("MFC0 {}, ${}", r[f.rt], f.rd),
-        0x01 => format!("DMFC0 {}, ${}", r[f.rt], f.rd),
-        0x04 => format!("MTC0 {}, ${}", r[f.rt], f.rd),
-        0x05 => format!("DMTC0 {}, ${}", r[f.rt], f.rd),
+        0x00 => Some(format!("MFC0 {}, ${}", r[f.rt], f.rd)),
+        0x04 => Some(format!("MTC0 {}, ${}", r[f.rt], f.rd)),
         0x10..=0x1F => match f.funct {
-            0x01 => "TLBR".to_string(),
-            0x02 => "TLBWI".to_string(),
-            0x06 => "TLBWR".to_string(),
-            0x08 => "TLBP".to_string(),
-            0x10 => "RFE".to_string(),
-            0x18 => "ERET".to_string(),
-            _ => format!("COP0 ${:08X}", f.word),
+            0x01 => Some("TLBR".to_string()),
+            0x02 => Some("TLBWI".to_string()),
+            0x06 => Some("TLBWR".to_string()),
+            0x08 => Some("TLBP".to_string()),
+            0x10 => Some("RFE".to_string()),
+            // DMFC0, DMTC0, ERET are MIPS II/III — let variant handle
+            _ => None,
         },
-        _ => format!("COP0 ${:08X}", f.word),
+        // DMFC0 (0x01), DMTC0 (0x05) are MIPS III — let variant handle
+        _ => None,
     }
 }
 
@@ -385,8 +384,26 @@ mod tests {
     }
 
     #[test]
-    fn test_eret() {
+    fn test_eret_returns_none() {
+        // ERET is MIPS II — base decoder returns None for variant-specific handling
         let word = (0x10u32 << 26) | (0x10 << 21) | 0x18;
-        assert_eq!(dis_le(word, 0x80000000), "ERET");
+        let mem = word.to_le_bytes();
+        assert!(disassemble_mips_i(&mem, 0x80000000, Endian::Little).is_none());
+    }
+
+    #[test]
+    fn test_dmfc0_returns_none() {
+        // DMFC0 is MIPS III — base decoder returns None
+        let word = (0x10u32 << 26) | (0x01 << 21) | (8 << 16) | (12 << 11);
+        let mem = word.to_le_bytes();
+        assert!(disassemble_mips_i(&mem, 0x80000000, Endian::Little).is_none());
+    }
+
+    #[test]
+    fn test_regimm_likely_returns_none() {
+        // BLTZL is MIPS II — base decoder returns None for variant handling
+        let word = (1u32 << 26) | (8 << 21) | (2 << 16) | 0x0004;
+        let mem = word.to_le_bytes();
+        assert!(disassemble_mips_i(&mem, 0x80000000, Endian::Little).is_none());
     }
 }
