@@ -348,6 +348,15 @@ impl System for SnesSystem {
             self.cpu.bus_mut().ppu_mut().set_hblank(false);
             self.cpu.bus_mut().reset_wram_refresh();
 
+            // Snapshot per-scanline PPU state for HDMA-driven effects
+            // This captures COLDATA etc. BEFORE this scanline's CPU/HDMA runs,
+            // matching hardware where the scanline renders with the state set
+            // by the previous scanline's HDMA.
+            self.cpu
+                .bus_mut()
+                .ppu_mut()
+                .snapshot_scanline_state(scanline as usize);
+
             // Log CPU state on first scanline of first few frames for debugging
             if scanline == 0 && self.current_cycles < 10000 {
                 log(LogCategory::CPU, LogLevel::Debug, || {

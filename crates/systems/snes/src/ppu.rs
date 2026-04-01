@@ -504,6 +504,13 @@ pub struct Ppu {
     /// Latched V counter value (from $2137 read)
     /// Uses Cell for interior mutability as reading $213D updates the toggle
     v_counter_latched: Cell<u16>,
+
+    /// Per-scanline fixed color snapshots for HDMA-driven effects
+    /// HDMA can write different COLDATA values each scanline (e.g., SMW sky gradient).
+    /// Since we render the full frame at once, we capture the fixed color state at
+    /// the start of each visible scanline so apply_color_math() can use per-scanline values.
+    /// Format: [scanline][0=R, 1=G, 2=B], 5-bit values (0-31)
+    scanline_fixed_colors: [[u8; 3]; 224],
 }
 
 impl Ppu {
@@ -589,6 +596,7 @@ impl Ppu {
             hv_latch_toggle: Cell::new(false),
             h_counter_latched: Cell::new(0),
             v_counter_latched: Cell::new(0),
+            scanline_fixed_colors: [[0u8; 3]; 224],
         }
     }
 
@@ -1567,6 +1575,17 @@ impl Ppu {
         });
 
         frame
+    }
+
+    /// Snapshot the current fixed color state for the given scanline.
+    /// Called at the start of each visible scanline so that HDMA-driven
+    /// per-scanline color effects (e.g., sky gradients) are captured for
+    /// the deferred full-frame render pass.
+    pub fn snapshot_scanline_state(&mut self, scanline: usize) {
+        if scanline < 224 {
+            self.scanline_fixed_colors[scanline] =
+                [self.fixed_color_r, self.fixed_color_g, self.fixed_color_b];
+        }
     }
 
     /// Update H/V counters based on elapsed cycles
@@ -4181,17 +4200,6 @@ impl Ppu {
     /// - <https://wiki.superfamicom.org/rendering-the-screen#color-math>
     /// - <https://wiki.superfamicom.org/transparency>
     fn apply_color_math(&self, frame: &mut Frame, layer_buffer: &[u8], sub_frame: &Frame) {
-        // Get fixed color for blending (from $2132 COLDATA register)
-        // Convert 5-bit components to 8-bit using proper bit replication
-        // (r << 3) | (r >> 2) maps 0-31 to 0-255 with correct rounding
-        let r5 = self.fixed_color_r as u32;
-        let g5 = self.fixed_color_g as u32;
-        let b5 = self.fixed_color_b as u32;
-        let fixed_r = (r5 << 3) | (r5 >> 2);
-        let fixed_g = (g5 << 3) | (g5 >> 2);
-        let fixed_b = (b5 << 3) | (b5 >> 2);
-        let fixed_color = 0xFF000000 | (fixed_r << 16) | (fixed_g << 8) | fixed_b;
-
         // Get color math control flags
         let subtract_mode = (self.cgadsub & 0x80) != 0; // Bit 7: 0=add, 1=subtract
         let half_math = (self.cgadsub & 0x40) != 0; // Bit 6: half the result
@@ -4206,59 +4214,67 @@ impl Ppu {
         // 11 = Disable everywhere
         let clip_mode = (self.cgwsel >> 4) & 0x03;
 
-        // Apply color math to each pixel
+        // Apply color math to each pixel, using per-scanline fixed color values
+        // to support HDMA-driven effects like sky gradients
         let width = frame.width as usize;
-        let mut x = 0usize;
-        for (i, &layer) in layer_buffer.iter().enumerate() {
-            // Ensure layer value is within the valid range before using it as a bit index
-            if layer > LAYER_BACKDROP {
-                continue;
+        let height = frame.height as usize;
+        let mut prev_scanline = usize::MAX;
+        let mut fixed_color = 0u32;
+
+        for scanline in 0..height {
+            // Get per-scanline fixed color from snapshot
+            if scanline != prev_scanline {
+                let [r5, g5, b5] = if scanline < 224 {
+                    self.scanline_fixed_colors[scanline]
+                } else {
+                    [self.fixed_color_r, self.fixed_color_g, self.fixed_color_b]
+                };
+                let (r5, g5, b5) = (r5 as u32, g5 as u32, b5 as u32);
+                let fr = (r5 << 3) | (r5 >> 2);
+                let fg = (g5 << 3) | (g5 >> 2);
+                let fb = (b5 << 3) | (b5 >> 2);
+                fixed_color = 0xFF000000 | (fr << 16) | (fg << 8) | fb;
+                prev_scanline = scanline;
             }
-            // Check if color math is enabled for this layer (CGADSUB bits 0-5)
-            let layer_bit = 1u8 << layer;
 
-            // Only apply color math when enabled for this layer and allowed by window clipping
-            if (self.cgadsub & layer_bit) != 0
-                && self.is_color_math_enabled_at_position(x, clip_mode)
-            {
-                // Get the main screen pixel color
-                let main_pixel = frame.pixels[i];
+            for x in 0..width {
+                let i = scanline * width + x;
+                let layer = layer_buffer[i];
 
-                // Choose blend source: sub-screen or fixed color
-                // IMPORTANT: When blending backdrop pixels, always use backdrop color as the
-                // sub-screen source, not whatever was rendered on the sub-screen. This matches
-                // real SNES hardware behavior where backdrop blends with backdrop.
-                let blend_color = if use_subscreen {
-                    if layer == LAYER_BACKDROP {
-                        // For backdrop pixels, blend with sub-screen backdrop (CGRAM[0])
-                        self.get_color(0)
+                // Ensure layer value is within the valid range
+                if layer > LAYER_BACKDROP {
+                    continue;
+                }
+                // Check if color math is enabled for this layer (CGADSUB bits 0-5)
+                let layer_bit = 1u8 << layer;
+
+                if (self.cgadsub & layer_bit) != 0
+                    && self.is_color_math_enabled_at_position(x, clip_mode)
+                {
+                    let main_pixel = frame.pixels[i];
+
+                    let blend_color = if use_subscreen {
+                        if layer == LAYER_BACKDROP {
+                            self.get_color(0)
+                        } else {
+                            sub_frame.pixels[i]
+                        }
                     } else {
-                        // For layer pixels, blend with corresponding sub-screen pixel
-                        sub_frame.pixels[i]
-                    }
-                } else {
-                    fixed_color
-                };
+                        fixed_color
+                    };
 
-                // Apply color math: add or subtract
-                let result = if subtract_mode {
-                    self.subtract_colors(main_pixel, blend_color)
-                } else {
-                    self.add_colors(main_pixel, blend_color)
-                };
+                    let result = if subtract_mode {
+                        self.subtract_colors(main_pixel, blend_color)
+                    } else {
+                        self.add_colors(main_pixel, blend_color)
+                    };
 
-                // Apply half-color if enabled
-                frame.pixels[i] = if half_math {
-                    self.halve_color(result)
-                } else {
-                    result
-                };
-            }
-
-            // Advance x position, wrapping at the end of the scanline
-            x += 1;
-            if x == width {
-                x = 0;
+                    frame.pixels[i] = if half_math {
+                        self.halve_color(result)
+                    } else {
+                        result
+                    };
+                }
             }
         }
     }
