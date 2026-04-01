@@ -951,9 +951,17 @@ impl MemoryMips for N64Bus {
                 let offset = phys_addr & 0x1F;
                 self.rsp.write_register(offset, val, &mut self.rdram);
 
-                // If SP_STATUS was written (offset 0x10), check if RSP was un-halted
-                // and execute pending task
+                // Handle SP_STATUS write side effects
                 if offset == 0x10 {
+                    // Bit 3: Clear SP interrupt in MI
+                    if val & 0x0008 != 0 {
+                        self.mi.clear_interrupt(super::mi::MI_INTR_SP);
+                    }
+                    // Bit 4: Set SP interrupt in MI
+                    if val & 0x0010 != 0 {
+                        self.mi.set_interrupt(super::mi::MI_INTR_SP);
+                    }
+                    // Check if RSP was un-halted and execute pending task
                     self.process_rsp_task();
                 }
             }
@@ -976,6 +984,11 @@ impl MemoryMips for N64Bus {
             0x0440_0000..=0x0440_0037 => {
                 let offset = phys_addr & 0x3F;
                 self.vi.write_register(offset, val);
+
+                // Writing to VI_CURRENT (0x10) acknowledges VI interrupt
+                if offset == 0x10 {
+                    self.mi.clear_interrupt(super::mi::MI_INTR_VI);
+                }
             }
             // AI registers (0x04500000 - 0x04500017)
             0x0450_0000..=0x0450_0017 => {

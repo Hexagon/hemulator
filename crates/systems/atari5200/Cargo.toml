@@ -1,5 +1,5 @@
 [package]
-name = "emu_gameandwatch"
+name = "emu_atari5200"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,7 +8,3 @@ emu_core = { path = "../../core" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "1.0"
-base64 = "0.22"
-lz4_flex = "0.13"
-miniz_oxide = "0.8"
-bzip2 = "0.6"

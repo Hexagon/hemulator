@@ -177,12 +177,15 @@ pub struct SnesSystem {
 // - WRAM Refresh: CPU paused for 40 master cycles (~6-7 CPU cycles) at ~536 master cycles into each scanline
 //
 // Current Implementation:
-// We track "CPU cycles" returned by the 65C816 core (WDC 65C816 datasheet counts).
-// These are abstract bus cycle counts — the effective CPU rate is higher than the real
-// ~3.58 MHz because we don't apply SNES-specific memory speed penalties.
-// The SPC700 ratio in bus.rs is calibrated for correct CPU:SPC instruction-level timing.
-const SNES_FRAME_CYCLES: u32 = 89342; // Approximate CPU cycles per frame (~60 Hz)
-const SNES_SCANLINE_CYCLES: u32 = 341; // Approximate CPU cycles per scanline
+// We track master cycles (21.477 MHz master clock).
+// Each memory access accumulates real master cycles based on the accessed region:
+//   FastROM/IO: 6 mc, SlowROM/WRAM/PPU: 8 mc, XSlow: 12 mc.
+// After each CPU step, bus.take_master_cycles() returns the actual master cycle cost.
+// Internal (IO) cycles that don't touch the bus are accounted for as 6 mc each.
+// WRAM refresh steals 40 mc per scanline at H≈538.
+const SNES_MASTER_CYCLES_PER_SCANLINE: u32 = 1364;
+const SNES_MASTER_CYCLES_PER_FRAME: u32 = 1364 * 262; // 357,368
+const SNES_HBLANK_MASTER_CYCLES: u32 = 268; // ~66 dots × 4 mc
 
 impl SnesSystem {
     /// Create a new SNES system
@@ -193,7 +196,7 @@ impl SnesSystem {
         bus.enable_spc700();
         Self {
             cpu: SnesCpu::new(bus),
-            frame_cycles: SNES_FRAME_CYCLES,
+            frame_cycles: SNES_MASTER_CYCLES_PER_FRAME,
             current_cycles: 0,
             total_cycles: 0,
             renderer: Box::new(SoftwareSnesPpuRenderer::new()),
@@ -335,12 +338,24 @@ impl System for SnesSystem {
         // Reference: VBlank starts at scanline $E1 (225) or $F0 (240) depending on $2133 bit 2
         // We use 225 as the standard configuration (224 visible + 1 post-render scanline)
         const VBLANK_START_SCANLINE: u32 = 225;
+        const HBLANK_START_MC: u32 = SNES_MASTER_CYCLES_PER_SCANLINE - SNES_HBLANK_MASTER_CYCLES;
 
         for scanline in 0..VBLANK_START_SCANLINE {
-            let scanline_target = (scanline + 1) * SNES_SCANLINE_CYCLES;
+            let scanline_start = scanline * SNES_MASTER_CYCLES_PER_SCANLINE;
+            let scanline_target = scanline_start + SNES_MASTER_CYCLES_PER_SCANLINE;
 
             // Active display starts at the beginning of each scanline
             self.cpu.bus_mut().ppu_mut().set_hblank(false);
+            self.cpu.bus_mut().reset_wram_refresh();
+
+            // Snapshot per-scanline PPU state for HDMA-driven effects
+            // This captures COLDATA etc. BEFORE this scanline's CPU/HDMA runs,
+            // matching hardware where the scanline renders with the state set
+            // by the previous scanline's HDMA.
+            self.cpu
+                .bus_mut()
+                .ppu_mut()
+                .snapshot_scanline_state(scanline as usize);
 
             // Log CPU state on first scanline of first few frames for debugging
             if scanline == 0 && self.current_cycles < 10000 {
@@ -354,48 +369,47 @@ impl System for SnesSystem {
             }
 
             // Execute CPU until end of active display portion of scanline
-            // Only render on visible scanlines (0-223, total 224 scanlines)
-            while self.current_cycles < scanline_target.saturating_sub(40) {
+            while self.current_cycles < scanline_start + HBLANK_START_MC {
                 // Check if DMA is halting the CPU
                 if self.cpu.bus().has_pending_dma() {
-                    // Consume DMA cycles instead of executing CPU instructions.
-                    // Batch consumption up to the remaining cycles in the active display
-                    // portion of this scanline to avoid per-cycle tight loops.
-                    let display_limit = scanline_target.saturating_sub(40);
-                    let remaining_display_cycles =
-                        display_limit.saturating_sub(self.current_cycles);
-                    if remaining_display_cycles == 0 {
+                    let display_limit = scanline_start + HBLANK_START_MC;
+                    let remaining = display_limit.saturating_sub(self.current_cycles);
+                    if remaining == 0 {
                         break;
                     }
-                    let dma_cycles = self.cpu.bus().consume_dma_cycles(remaining_display_cycles);
-                    if dma_cycles == 0 {
-                        // Defensive: avoid an infinite loop if DMA reports pending
-                        // but does not actually consume any cycles.
+                    let dma_mc = self.cpu.bus().consume_dma_cycles(remaining);
+                    if dma_mc == 0 {
                         break;
                     }
-                    self.current_cycles += dma_cycles;
-                    self.total_cycles += dma_cycles as u64;
-                    self.cpu.bus_mut().tick_cycles(dma_cycles);
+                    self.current_cycles += dma_mc;
+                    self.total_cycles += dma_mc as u64;
+                    self.cpu.bus_mut().tick_cycles(dma_mc);
 
-                    // During DMA halt, also advance PPU H/V counters and evaluate H/V timer IRQs
-                    let scanline_cycles = self.current_cycles % SNES_SCANLINE_CYCLES;
-                    // Convert CPU cycles to approximate dot position (340 dots per scanline)
-                    // Clamp to valid range 0-339
-                    let dot = ((scanline_cycles * 340) / SNES_SCANLINE_CYCLES).min(339);
+                    // WRAM refresh during DMA
+                    let scanline_mc = self.current_cycles - scanline_start;
+                    let wram_steal = self.cpu.bus().check_wram_refresh(scanline_mc);
+                    if wram_steal > 0 {
+                        self.current_cycles += wram_steal;
+                        self.total_cycles += wram_steal as u64;
+                        self.cpu.bus_mut().tick_cycles(wram_steal);
+                    }
+
+                    // Update PPU H/V counters
+                    let scanline_mc = self.current_cycles - scanline_start;
+                    let dot = ((scanline_mc * 340) / SNES_MASTER_CYCLES_PER_SCANLINE).min(339);
                     self.cpu
                         .bus_mut()
                         .ppu_mut()
                         .update_counters(scanline as u16, dot as u16);
 
                     // Check for H/V timer IRQ
-                    if self.cpu.bus().check_hv_timer_irq(scanline, scanline_cycles) {
-                        // Set IRQ flag and trigger CPU IRQ
+                    if self.cpu.bus().check_hv_timer_irq(scanline, dot) {
                         self.cpu.bus().trigger_hv_irq();
                         log(LogCategory::Interrupts, LogLevel::Debug, || {
                             format!(
-                                "SNES: H/V Timer IRQ triggered at scanline {} H-pos {} (mode {})",
+                                "SNES: H/V Timer IRQ at scanline {} dot {} (mode {})",
                                 scanline,
-                                scanline_cycles,
+                                dot,
                                 self.cpu.bus().get_hv_irq_mode()
                             )
                         });
@@ -406,39 +420,45 @@ impl System for SnesSystem {
 
                 let pc_before = ((self.cpu.cpu.pbr as u32) << 16) | (self.cpu.cpu.pc as u32);
                 self.cpu.bus_mut().set_last_cpu_pc(pc_before);
-                let cycles = self.cpu.step();
-                self.current_cycles += cycles;
-                self.total_cycles += cycles as u64;
-                self.cpu.bus_mut().tick_cycles(cycles);
+                let cpu_cycles = self.cpu.step();
+                let master_cycles = self.cpu.bus().take_master_cycles(cpu_cycles);
+                self.current_cycles += master_cycles;
+                self.total_cycles += master_cycles as u64;
+                self.cpu.bus_mut().tick_cycles(master_cycles);
 
-                // Update PPU H/V counters based on current position
-                // Calculate approximate dot position within the scanline
-                let scanline_cycles = self.current_cycles % SNES_SCANLINE_CYCLES;
-                // Convert CPU cycles to approximate dot position (340 dots per scanline)
-                // Clamp to valid range 0-339
-                let dot = ((scanline_cycles * 340) / SNES_SCANLINE_CYCLES).min(339);
+                // WRAM refresh: 40 mc stolen at H≈538 once per scanline
+                let scanline_mc = self.current_cycles - scanline_start;
+                let wram_steal = self.cpu.bus().check_wram_refresh(scanline_mc);
+                if wram_steal > 0 {
+                    self.current_cycles += wram_steal;
+                    self.total_cycles += wram_steal as u64;
+                    self.cpu.bus_mut().tick_cycles(wram_steal);
+                }
+
+                // Update PPU H/V counters
+                let scanline_mc = self.current_cycles - scanline_start;
+                let dot = ((scanline_mc * 340) / SNES_MASTER_CYCLES_PER_SCANLINE).min(339);
                 self.cpu
                     .bus_mut()
                     .ppu_mut()
                     .update_counters(scanline as u16, dot as u16);
 
-                // Check for H/V timer IRQ
-                if self.cpu.bus().check_hv_timer_irq(scanline, scanline_cycles) {
-                    // Set IRQ flag and trigger CPU IRQ
+                // Check for H/V timer IRQ (compare using dot position)
+                if self.cpu.bus().check_hv_timer_irq(scanline, dot) {
                     self.cpu.bus().trigger_hv_irq();
                     log(LogCategory::Interrupts, LogLevel::Debug, || {
                         format!(
-                            "SNES: H/V Timer IRQ triggered at scanline {} H-pos {} (mode {})",
+                            "SNES: H/V Timer IRQ at scanline {} dot {} (mode {})",
                             scanline,
-                            scanline_cycles,
+                            dot,
                             self.cpu.bus().get_hv_irq_mode()
                         )
                     });
                     self.cpu.cpu.trigger_irq();
                 }
 
-                // Record instruction if tracing is enabled
-                if self.instruction_tracer.is_enabled() {
+                // Record instruction if tracing is enabled (skip WAI idle cycles)
+                if self.instruction_tracer.is_enabled() && !self.cpu.cpu.waiting_for_interrupt {
                     if let Some(instr) = self.disassemble_instruction(pc_before) {
                         let cpu_state = self.get_cpu_state();
                         self.instruction_tracer.trace(instr, cpu_state);
@@ -446,52 +466,42 @@ impl System for SnesSystem {
                 }
             }
 
-            // Enter HBlank for the remainder of the scanline.
-            // Many games (including SMW) rely on VRAM/CGRAM writes being possible during HBlank.
+            // Enter HBlank for the remainder of the scanline
             self.cpu.bus_mut().ppu_mut().set_hblank(true);
 
-            // Execute HDMA during H-blank (approximately 40 cycles)
+            // Execute HDMA during H-blank
             let _hdma_cycles = self.cpu.bus_mut().do_hdma();
 
-            // Complete the scanline
+            // Complete the scanline (HBlank portion)
             while self.current_cycles < scanline_target {
                 // Check if DMA is halting the CPU
                 if self.cpu.bus().has_pending_dma() {
-                    // Consume DMA cycles in larger chunks to avoid tight loops.
-                    // Batch consumption up to the remaining cycles in this scanline.
-                    let remaining_scanline_cycles =
-                        scanline_target.saturating_sub(self.current_cycles);
-                    if remaining_scanline_cycles == 0 {
+                    let remaining = scanline_target.saturating_sub(self.current_cycles);
+                    if remaining == 0 {
                         break;
                     }
-                    let dma_cycles = self.cpu.bus().consume_dma_cycles(remaining_scanline_cycles);
-                    if dma_cycles == 0 {
-                        // Defensive: avoid an infinite loop
+                    let dma_mc = self.cpu.bus().consume_dma_cycles(remaining);
+                    if dma_mc == 0 {
                         break;
                     }
-                    self.current_cycles += dma_cycles;
-                    self.total_cycles += dma_cycles as u64;
-                    self.cpu.bus_mut().tick_cycles(dma_cycles);
+                    self.current_cycles += dma_mc;
+                    self.total_cycles += dma_mc as u64;
+                    self.cpu.bus_mut().tick_cycles(dma_mc);
 
-                    // Keep PPU H/V counters and H/V timer IRQ evaluation in sync during DMA halt
-                    let scanline_cycles = self.current_cycles % SNES_SCANLINE_CYCLES;
-                    // Convert CPU cycles to approximate dot position (340 dots per scanline)
-                    // Clamp to valid range 0-339
-                    let dot = ((scanline_cycles * 340) / SNES_SCANLINE_CYCLES).min(339);
+                    let scanline_mc = self.current_cycles - scanline_start;
+                    let dot = ((scanline_mc * 340) / SNES_MASTER_CYCLES_PER_SCANLINE).min(339);
                     self.cpu
                         .bus_mut()
                         .ppu_mut()
                         .update_counters(scanline as u16, dot as u16);
 
-                    // Check for H/V timer IRQ during DMA halt in HBlank too
-                    if self.cpu.bus().check_hv_timer_irq(scanline, scanline_cycles) {
-                        // Set IRQ flag and trigger CPU IRQ
+                    if self.cpu.bus().check_hv_timer_irq(scanline, dot) {
                         self.cpu.bus().trigger_hv_irq();
                         log(LogCategory::Interrupts, LogLevel::Debug, || {
                             format!(
-                                "SNES: H/V Timer IRQ triggered at scanline {} H-pos {} (mode {}) [HBlank/DMA]",
+                                "SNES: H/V Timer IRQ at scanline {} dot {} (mode {}) [HBlank/DMA]",
                                 scanline,
-                                scanline_cycles,
+                                dot,
                                 self.cpu.bus().get_hv_irq_mode()
                             )
                         });
@@ -502,38 +512,34 @@ impl System for SnesSystem {
 
                 let pc_before = ((self.cpu.cpu.pbr as u32) << 16) | (self.cpu.cpu.pc as u32);
                 self.cpu.bus_mut().set_last_cpu_pc(pc_before);
-                let cycles = self.cpu.step();
-                self.current_cycles += cycles;
-                self.total_cycles += cycles as u64;
-                self.cpu.bus_mut().tick_cycles(cycles);
+                let cpu_cycles = self.cpu.step();
+                let master_cycles = self.cpu.bus().take_master_cycles(cpu_cycles);
+                self.current_cycles += master_cycles;
+                self.total_cycles += master_cycles as u64;
+                self.cpu.bus_mut().tick_cycles(master_cycles);
 
-                // Update PPU H/V counters in HBlank too
-                let scanline_cycles = self.current_cycles % SNES_SCANLINE_CYCLES;
-                // Convert CPU cycles to approximate dot position (340 dots per scanline)
-                // Clamp to valid range 0-339
-                let dot = ((scanline_cycles * 340) / SNES_SCANLINE_CYCLES).min(339);
+                let scanline_mc = self.current_cycles - scanline_start;
+                let dot = ((scanline_mc * 340) / SNES_MASTER_CYCLES_PER_SCANLINE).min(339);
                 self.cpu
                     .bus_mut()
                     .ppu_mut()
                     .update_counters(scanline as u16, dot as u16);
 
-                // Check for H/V timer IRQ during HBlank too
-                if self.cpu.bus().check_hv_timer_irq(scanline, scanline_cycles) {
-                    // Set IRQ flag and trigger CPU IRQ
+                if self.cpu.bus().check_hv_timer_irq(scanline, dot) {
                     self.cpu.bus().trigger_hv_irq();
                     log(LogCategory::Interrupts, LogLevel::Debug, || {
                         format!(
-                            "SNES: H/V Timer IRQ triggered at scanline {} H-pos {} (mode {}) [HBlank]",
+                            "SNES: H/V Timer IRQ at scanline {} dot {} (mode {}) [HBlank]",
                             scanline,
-                            scanline_cycles,
+                            dot,
                             self.cpu.bus().get_hv_irq_mode()
                         )
                     });
                     self.cpu.cpu.trigger_irq();
                 }
 
-                // Record instruction if tracing is enabled
-                if self.instruction_tracer.is_enabled() {
+                // Record instruction if tracing is enabled (skip WAI idle cycles)
+                if self.instruction_tracer.is_enabled() && !self.cpu.cpu.waiting_for_interrupt {
                     if let Some(instr) = self.disassemble_instruction(pc_before) {
                         let cpu_state = self.get_cpu_state();
                         self.instruction_tracer.trace(instr, cpu_state);
@@ -543,18 +549,14 @@ impl System for SnesSystem {
         }
 
         // Render frame at end of visible scanlines (scanlines 0-223)
-        // Reference: PPU outputs pixels for scanlines 1-224 (or 1-239 with overscan)
-        // In 0-based indexing, that's scanlines 0-223 for standard 224-line mode
         self.renderer.render_frame(self.cpu.bus_mut().ppu_mut());
 
         // Enter VBlank at start of scanline 225 ($E1)
-        // Reference: "V-Blank begins on scanline $E1 or $F0, at H=0"
-        // NMI triggers at H=0.5 (approximately half a dot into the scanline)
         self.cpu.bus_mut().ppu_mut().set_vblank(true);
         self.cpu.bus_mut().start_auto_joypad_read();
         log(LogCategory::PPU, LogLevel::Debug, || {
             format!(
-                "SNES: VBlank started (cycle {}), NMI enabled: {}",
+                "SNES: VBlank started (mc {}), NMI enabled: {}",
                 self.current_cycles,
                 self.cpu.bus_mut().ppu_mut().nmi_enable
             )
@@ -574,17 +576,19 @@ impl System for SnesSystem {
             });
         }
 
-        // Execute remaining VBlank cycles
+        // Execute remaining VBlank scanlines (225-261)
         while self.current_cycles < self.frame_cycles {
             // Check if DMA is halting the CPU
             if self.cpu.bus().has_pending_dma() {
-                // Consume DMA cycles instead of executing CPU instructions
-                let dma_cycles = self.cpu.bus().consume_dma_cycles(1);
-                self.current_cycles += dma_cycles;
-                self.total_cycles += dma_cycles as u64;
-                self.cpu.bus_mut().tick_cycles(dma_cycles);
+                let remaining = self.frame_cycles.saturating_sub(self.current_cycles);
+                let dma_mc = self.cpu.bus().consume_dma_cycles(remaining.min(64));
+                if dma_mc == 0 {
+                    break;
+                }
+                self.current_cycles += dma_mc;
+                self.total_cycles += dma_mc as u64;
+                self.cpu.bus_mut().tick_cycles(dma_mc);
 
-                // Check for NMI that may have become pending during DMA
                 if self.cpu.bus_mut().ppu_mut().take_nmi_pending() {
                     log(LogCategory::Interrupts, LogLevel::Debug, || {
                         "SNES: NMI triggered during DMA".to_string()
@@ -596,13 +600,14 @@ impl System for SnesSystem {
 
             let pc_before = ((self.cpu.cpu.pbr as u32) << 16) | (self.cpu.cpu.pc as u32);
             self.cpu.bus_mut().set_last_cpu_pc(pc_before);
-            let cycles = self.cpu.step();
-            self.current_cycles += cycles;
-            self.total_cycles += cycles as u64;
-            self.cpu.bus_mut().tick_cycles(cycles);
+            let cpu_cycles = self.cpu.step();
+            let master_cycles = self.cpu.bus().take_master_cycles(cpu_cycles);
+            self.current_cycles += master_cycles;
+            self.total_cycles += master_cycles as u64;
+            self.cpu.bus_mut().tick_cycles(master_cycles);
 
-            // Record instruction if tracing is enabled
-            if self.instruction_tracer.is_enabled() {
+            // Record instruction if tracing is enabled (skip WAI idle cycles)
+            if self.instruction_tracer.is_enabled() && !self.cpu.cpu.waiting_for_interrupt {
                 if let Some(instr) = self.disassemble_instruction(pc_before) {
                     let cpu_state = self.get_cpu_state();
                     self.instruction_tracer.trace(instr, cpu_state);
@@ -619,7 +624,6 @@ impl System for SnesSystem {
         }
 
         // Clear VBlank and NMI flag at start of new frame (V=0 H=0)
-        // Reference: "The internal timer sets its NMI output high at H=0 V=0"
         self.cpu.bus_mut().ppu_mut().set_vblank(false);
         log(LogCategory::PPU, LogLevel::Trace, || {
             "SNES: Frame end, VBlank cleared".to_string()

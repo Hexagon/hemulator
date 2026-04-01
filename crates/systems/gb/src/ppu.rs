@@ -430,7 +430,9 @@ impl Ppu {
             self.prev_mode = 0;
             self.stat &= !0x03;
             self.stat_interrupt_line = false;
-            self.scanline_states_captured = false;
+            // Don't clear scanline_states_captured — if visible scanlines were
+            // already captured this frame, render_frame() should still use them.
+            // Games commonly disable LCD during VBlank for VRAM operations.
             self.window_line_counter = 0;
         } else if !was_enabled && now_enabled {
             // LCD turned on: restart timing from LY=0
@@ -566,8 +568,19 @@ impl Ppu {
     pub fn render_frame(&self) -> Frame {
         let mut frame = Frame::new(160, 144);
 
-        if (self.lcdc & LCDC_ENABLE) == 0 {
-            // LCD is off - return blank screen
+        // Determine whether the LCD was active for this frame.
+        // When scanline states were captured (normal operation via step()),
+        // use that flag — it survives brief LCD disables during VBlank,
+        // preventing the blinking that occurs when games toggle LCD off
+        // for VRAM operations.  When render_frame() is called without
+        // step() (e.g. unit tests), fall back to the current LCDC register.
+        let lcd_active = if self.scanline_states_captured {
+            true
+        } else {
+            (self.lcdc & LCDC_ENABLE) != 0
+        };
+
+        if !lcd_active {
             return frame;
         }
 
@@ -1137,7 +1150,8 @@ impl Ppu {
             self.prev_mode = 0;
             self.stat &= !0x03; // Mode 0 always when LCD off
             self.stat_interrupt_line = false;
-            self.scanline_states_captured = false;
+            // Don't clear scanline_states_captured — preserved for render_frame()
+            // so games that briefly disable LCD during VBlank still render.
             self.window_line_counter = 0;
 
             // Track cycle counter for HDMA timing even with LCD off

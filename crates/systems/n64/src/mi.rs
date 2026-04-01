@@ -121,16 +121,21 @@ impl MipsInterface {
                 self.intr &= !value;
             }
             MI_INTR_MASK => {
-                // MI_INTR_MASK has special write behavior for setting/clearing bits:
-                // Bits 0-5: clear corresponding mask bit
-                // Bits 8-13: set corresponding mask bit
-
-                // Clear mask bits (bits 0-5)
-                self.intr_mask &= !(value & 0x3F);
-
-                // Set mask bits (bits 8-13 correspond to mask bits 0-5)
-                let set_bits = (value >> 8) & 0x3F;
-                self.intr_mask |= set_bits;
+                // MI_INTR_MASK uses alternating clear/set bit pairs:
+                // Bit 0: Clear SP mask,  Bit 1: Set SP mask
+                // Bit 2: Clear SI mask,  Bit 3: Set SI mask
+                // Bit 4: Clear AI mask,  Bit 5: Set AI mask
+                // Bit 6: Clear VI mask,  Bit 7: Set VI mask
+                // Bit 8: Clear PI mask,  Bit 9: Set PI mask
+                // Bit 10: Clear DP mask, Bit 11: Set DP mask
+                for i in 0..6u32 {
+                    if value & (1 << (i * 2)) != 0 {
+                        self.intr_mask &= !(1 << i); // Clear mask bit
+                    }
+                    if value & (1 << (i * 2 + 1)) != 0 {
+                        self.intr_mask |= 1 << i; // Set mask bit
+                    }
+                }
             }
             _ => {}
         }
@@ -187,7 +192,7 @@ mod tests {
     fn test_mi_reset() {
         let mut mi = MipsInterface::new();
         mi.set_interrupt(MI_INTR_VI);
-        mi.write_register(MI_INTR_MASK, 0x0800); // Enable VI interrupt
+        mi.write_register(MI_INTR_MASK, 0x0080); // Enable VI interrupt (bit 7 = set VI mask)
 
         mi.reset();
 
@@ -233,16 +238,16 @@ mod tests {
     fn test_mi_intr_mask_write() {
         let mut mi = MipsInterface::new();
 
-        // Set VI interrupt mask (bit 8 in write corresponds to mask bit 3)
-        mi.write_register(MI_INTR_MASK, 0x0800);
+        // Set VI interrupt mask (bit 7 in write = set VI mask, which is mask bit 3)
+        mi.write_register(MI_INTR_MASK, 0x0080);
         assert_eq!(mi.read_register(MI_INTR_MASK), 0x08);
 
-        // Set SP interrupt mask (bit 8 in write corresponds to mask bit 0)
-        mi.write_register(MI_INTR_MASK, 0x0100);
+        // Set SP interrupt mask (bit 1 in write = set SP mask, which is mask bit 0)
+        mi.write_register(MI_INTR_MASK, 0x0002);
         assert_eq!(mi.read_register(MI_INTR_MASK), 0x09); // Both VI and SP
 
-        // Clear VI interrupt mask (bit 3)
-        mi.write_register(MI_INTR_MASK, 0x08);
+        // Clear VI interrupt mask (bit 6 in write = clear VI mask)
+        mi.write_register(MI_INTR_MASK, 0x0040);
         assert_eq!(mi.read_register(MI_INTR_MASK), 0x01); // Only SP
     }
 
@@ -257,8 +262,8 @@ mod tests {
         mi.set_interrupt(MI_INTR_VI);
         assert!(!mi.has_pending_interrupt());
 
-        // Enable mask
-        mi.write_register(MI_INTR_MASK, 0x0800);
+        // Enable VI mask (bit 7 = set VI mask)
+        mi.write_register(MI_INTR_MASK, 0x0080);
         assert!(mi.has_pending_interrupt());
 
         // Clear interrupt
@@ -273,8 +278,8 @@ mod tests {
         // Set multiple interrupts
         mi.set_interrupt(MI_INTR_VI | MI_INTR_SP | MI_INTR_AI);
 
-        // Enable only VI and SP masks
-        mi.write_register(MI_INTR_MASK, 0x0900); // Bits 8 and 11
+        // Enable VI and SP masks (bit 1 = set SP, bit 7 = set VI)
+        mi.write_register(MI_INTR_MASK, 0x0082);
 
         // Should only get VI and SP as pending (masked)
         let pending = mi.get_pending_interrupts();

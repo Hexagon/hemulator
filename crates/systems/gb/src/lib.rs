@@ -452,56 +452,60 @@ impl System for GbSystem {
             return Err(GbError::NoCartridge);
         }
 
-        // Game Boy runs at ~4.194304 MHz
-        // Frame rate is ~59.73 Hz
-        // Cycles per frame: 4194304 / 59.73 ≈ 70224 cycles
-        const CYCLES_PER_FRAME: u32 = 70224;
+        // A frame is always 70224 PPU cycles (154 scanlines × 456 dots).
+        // In CGB double-speed mode the CPU runs at 2× but PPU stays at 1×,
+        // so we track PPU cycles for the frame boundary and convert CPU
+        // cycles to PPU cycles on each iteration.
+        const PPU_CYCLES_PER_FRAME: u32 = 70224;
 
-        let mut cycles = 0;
-        while cycles < CYCLES_PER_FRAME {
+        let mut ppu_cycles = 0u32;
+        while ppu_cycles < PPU_CYCLES_PER_FRAME {
             // Execute any pending GDMA before CPU step
             self.cpu.memory.execute_pending_gdma();
 
+            let double_speed = self.cpu.memory.is_double_speed();
+
             if self.cpu.memory.oam_dma_active() {
                 // CPU is halted during OAM DMA. Advance time in 4-cycle chunks.
-                let dma_cycles = 4;
-                cycles += dma_cycles;
-                self.total_cycles += dma_cycles as u64;
+                let dma_cpu_cycles: u32 = 4;
+                let dma_ppu_cycles = if double_speed {
+                    dma_cpu_cycles / 2
+                } else {
+                    dma_cpu_cycles
+                };
+                ppu_cycles += dma_ppu_cycles;
+                self.total_cycles += dma_cpu_cycles as u64;
 
-                // Accumulate cycles for audio generation
-                self.audio_cycles_accumulated += dma_cycles;
+                // Accumulate cycles for audio generation (APU runs at PPU rate)
+                self.audio_cycles_accumulated += dma_ppu_cycles;
 
-                // Step timer and handle timer interrupt
-                if self.cpu.memory.timer.step(dma_cycles) {
+                // Step timer and handle timer interrupt (timer runs at CPU rate)
+                if self.cpu.memory.timer.step(dma_cpu_cycles) {
                     // Timer overflow - request timer interrupt (bit 2)
                     self.cpu.memory.request_interrupt(0x04);
                 }
 
-                // Step OAM DMA transfer
-                self.cpu.memory.step_oam_dma(dma_cycles);
+                // Step OAM DMA transfer (DMA runs at CPU rate)
+                self.cpu.memory.step_oam_dma(dma_cpu_cycles);
 
-                // Step PPU and handle VBlank, STAT interrupts, and HDMA
+                // Step PPU (PPU runs at 4.194 MHz regardless of speed mode)
                 let (vblank_started, stat_interrupt, hblank_entered) =
-                    self.cpu.memory.ppu.step(dma_cycles);
+                    self.cpu.memory.ppu.step(dma_ppu_cycles);
 
                 if vblank_started {
-                    // V-Blank started - request VBlank interrupt (bit 0)
                     self.cpu.memory.request_interrupt(0x01);
                 }
 
                 if stat_interrupt {
-                    // STAT interrupt - request STAT interrupt (bit 1)
                     self.cpu.memory.request_interrupt(0x02);
                 }
 
-                // Perform HDMA transfer during HBlank if active
                 if hblank_entered {
                     self.cpu.memory.step_hdma();
                 }
 
-                // Step serial transfer and handle serial interrupt
-                if self.cpu.memory.step_serial(dma_cycles) {
-                    // Serial transfer complete - request serial interrupt (bit 3)
+                // Step serial transfer (serial runs at PPU rate)
+                if self.cpu.memory.step_serial(dma_ppu_cycles) {
                     self.cpu.memory.request_interrupt(0x08);
                 }
 
@@ -510,7 +514,12 @@ impl System for GbSystem {
 
             let pc_before = self.cpu.pc;
             let cpu_cycles = self.cpu.step();
-            cycles += cpu_cycles;
+            let step_ppu_cycles = if double_speed {
+                cpu_cycles / 2
+            } else {
+                cpu_cycles
+            };
+            ppu_cycles += step_ppu_cycles;
             self.total_cycles += cpu_cycles as u64;
 
             if !self.pc_0038_logged && self.cpu.pc == 0x0038 {
@@ -550,29 +559,27 @@ impl System for GbSystem {
                 }
             }
 
-            // Accumulate cycles for audio generation
-            self.audio_cycles_accumulated += cpu_cycles;
+            // Accumulate cycles for audio generation (APU runs at PPU rate)
+            self.audio_cycles_accumulated += step_ppu_cycles;
 
-            // Step timer and handle timer interrupt
+            // Step timer and handle timer interrupt (timer runs at CPU rate)
             if self.cpu.memory.timer.step(cpu_cycles) {
                 // Timer overflow - request timer interrupt (bit 2)
                 self.cpu.memory.request_interrupt(0x04);
             }
 
-            // Step OAM DMA transfer
+            // Step OAM DMA transfer (DMA runs at CPU rate)
             self.cpu.memory.step_oam_dma(cpu_cycles);
 
-            // Step PPU and handle VBlank, STAT interrupts, and HDMA
+            // Step PPU (PPU runs at 4.194 MHz regardless of speed mode)
             let (vblank_started, stat_interrupt, hblank_entered) =
-                self.cpu.memory.ppu.step(cpu_cycles);
+                self.cpu.memory.ppu.step(step_ppu_cycles);
 
             if vblank_started {
-                // V-Blank started - request VBlank interrupt (bit 0)
                 self.cpu.memory.request_interrupt(0x01);
             }
 
             if stat_interrupt {
-                // STAT interrupt - request STAT interrupt (bit 1)
                 self.cpu.memory.request_interrupt(0x02);
             }
 
@@ -581,9 +588,8 @@ impl System for GbSystem {
                 self.cpu.memory.step_hdma();
             }
 
-            // Step serial transfer and handle serial interrupt
-            if self.cpu.memory.step_serial(cpu_cycles) {
-                // Serial transfer complete - request serial interrupt (bit 3)
+            // Step serial transfer (serial runs at PPU rate)
+            if self.cpu.memory.step_serial(step_ppu_cycles) {
                 self.cpu.memory.request_interrupt(0x08);
             }
         }
