@@ -48,6 +48,22 @@ pub use video_adapter_cga_graphics::{CgaGraphicsAdapter, CgaMode}; // Export CGA
 pub use video_adapter_ega_software::{EgaMode, SoftwareEgaAdapter}; // Export EGA software adapter and modes
 pub use video_adapter_vga_software::{SoftwareVgaAdapter, VgaMode}; // Export VGA software adapter and modes
 
+/// Standard floppy disk image sizes in bytes.
+///
+/// Covers the four PC-compatible floppy densities:
+/// - 360 KB  (5.25", double-density)
+/// - 720 KB  (3.5", double-density)
+/// - 1.2 MB  (5.25", high-density)
+/// - 1.44 MB (3.5", high-density) – most common
+///
+/// Note: 2.88 MB (extended density) is intentionally omitted because the PC
+/// system's floppy mount validation does not support that format (the 2.88 MB
+/// ED drive was very rare in practice and is not emulated by the BIOS).
+///
+/// This constant is the single authoritative list: both `PcSystem::mount()`
+/// and the GUI's ROM-detection logic use it so they can never drift apart.
+pub const FLOPPY_IMAGE_SIZES: &[usize] = &[368_640, 737_280, 1_228_800, 1_474_560];
+
 #[derive(Debug, Error)]
 pub enum PcError {
     #[error("No executable loaded")]
@@ -1058,8 +1074,7 @@ impl System for PcSystem {
             }
             "FloppyA" => {
                 // Validate floppy size (common formats: 360K, 720K, 1.2M, 1.44M)
-                let valid_sizes = [368640, 737280, 1228800, 1474560];
-                if !valid_sizes.contains(&data.len()) {
+                if !FLOPPY_IMAGE_SIZES.contains(&data.len()) {
                     eprintln!(
                         "Warning: Floppy A image size {} is not a standard format",
                         data.len()
@@ -1069,8 +1084,7 @@ impl System for PcSystem {
                 Ok(())
             }
             "FloppyB" => {
-                let valid_sizes = [368640, 737280, 1228800, 1474560];
-                if !valid_sizes.contains(&data.len()) {
+                if !FLOPPY_IMAGE_SIZES.contains(&data.len()) {
                     eprintln!(
                         "Warning: Floppy B image size {} is not a standard format",
                         data.len()
@@ -2988,5 +3002,124 @@ mod boot_output_tests {
         // Restore settings
         config.set_level(LogCategory::CPU, old_level);
         config.set_rate_limit(old_rate_limit);
+    }
+
+    #[test]
+    fn test_custom_bios_loading() {
+        // Verify that a custom BIOS (any size up to 256 KB) is end-aligned so
+        // the reset vector lands at physical address 0xFFFF0.
+
+        let mut sys = PcSystem::new();
+
+        // Build a minimal 64 KB BIOS with a distinctive byte at the entry point
+        // (F000:FFF0 = offset 0xFFF0 in a 64 KB image).
+        let mut bios64 = vec![0xCFu8; 0x10000]; // all IRET
+        bios64[0xFFF0] = 0xEB; // JMP SHORT at entry point
+        bios64[0xFFF1] = 0xFE; // JMP $-2 (tight loop)
+
+        sys.mount("BIOS", &bios64).expect("64 KB BIOS mount failed");
+
+        // Entry point is CS=0xFFFF, IP=0x0000 which translates to physical 0xFFFF0
+        assert_eq!(
+            sys.cpu.bus().read(0xFFFF0),
+            0xEB,
+            "64 KB BIOS entry byte should be at 0xFFFF0"
+        );
+
+        // Test with a 128 KB BIOS: the reset vector is at offset 0x1FFF0
+        let mut bios128 = vec![0xCFu8; 0x20000]; // 128 KB
+        bios128[0x1FFF0] = 0xEB; // entry point byte
+
+        sys.mount("BIOS", &bios128)
+            .expect("128 KB BIOS mount failed");
+
+        assert_eq!(
+            sys.cpu.bus().read(0xFFFF0),
+            0xEB,
+            "128 KB BIOS entry byte should be at 0xFFFF0 after end-alignment"
+        );
+    }
+
+    #[test]
+    fn test_int13h_no_call_limit() {
+        // Verify that INT 13h succeeds even after >1000 invocations (old limit was 1000).
+        // This test exercises the actual CPU INT 13h dispatch path (handle_int13h)
+        // rather than the bus disk_read helper, so it would catch a regression in
+        // the call-count check that used to live in handle_int13h.
+
+        let mut sys = PcSystem::new();
+
+        // Mount a 1.44 MB floppy with a valid first sector
+        let mut floppy = vec![0u8; 1474560];
+        floppy[510] = 0x55;
+        floppy[511] = 0xAA;
+        assert!(sys.mount("FloppyA", &floppy).is_ok());
+
+        // Build a tiny program that resets the disk (INT 13h AH=00h) and then
+        // loops back on itself so we can call sys.cpu.step() repeatedly.
+        //
+        // Layout at 0x7C00:
+        //   0x00: MOV AH, 0x00
+        //   0x02: MOV DL, 0x00 (drive A)
+        //   0x04: INT 13h
+        //   0x06: JMP 0x7C00   (short loop back to start)
+        let program: &[u8] = &[
+            0xB4, 0x00, // MOV AH, 0x00
+            0xB2, 0x00, // MOV DL, 0x00
+            0xCD, 0x13, // INT 13h
+            0xEB, 0xF8, // JMP SHORT -8 (back to MOV AH)
+        ];
+        for (i, &b) in program.iter().enumerate() {
+            sys.cpu.bus_mut().write(0x7C00 + i as u32, b);
+        }
+
+        // Point the CPU at the program
+        let mut regs = sys.cpu.get_registers();
+        regs.cs = 0x0000;
+        regs.ip = 0x7C00;
+        regs.sp = 0xFFFE;
+        sys.cpu.set_registers(&regs);
+
+        const FLAG_CF: u32 = 0x0001;
+
+        // Execute >1000 INT 13h calls and verify that the carry flag (error
+        // indicator) is never set.
+        // Each loop iteration is: MOV AH (1), MOV DL (1), INT 13h (many steps
+        // inside the handler), JMP (1). Step until CS:IP returns to 0000:7C00
+        // (the start of the loop), with an upper bound on steps per iteration
+        // to avoid hanging if something goes wrong.
+        for iteration in 0..1050 {
+            let mut steps = 0;
+            loop {
+                sys.cpu.step();
+                steps += 1;
+
+                let regs = sys.cpu.get_registers();
+
+                // One full loop iteration completes when we jump back to 0000:7C00.
+                if regs.cs == 0x0000 && regs.ip == 0x7C00 {
+                    assert_eq!(
+                        (regs.ax >> 8) & 0xFF,
+                        0x00,
+                        "INT 13h AH should be 0 (success) after iteration {}",
+                        iteration
+                    );
+                    assert_eq!(
+                        regs.flags & FLAG_CF,
+                        0,
+                        "Carry flag should be clear (no error) after iteration {}",
+                        iteration
+                    );
+                    break;
+                }
+
+                // Safety bound: we don't expect a single loop iteration to
+                // require anywhere near this many steps.
+                assert!(
+                    steps < 200,
+                    "Exceeded expected maximum steps per loop iteration"
+                );
+            }
+        }
     }
 }

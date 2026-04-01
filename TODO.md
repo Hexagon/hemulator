@@ -18,13 +18,10 @@ not available in CI or in headless `cargo test` runs.  They can be run manually 
 ## N64
 
 ### Critical
-- [x] **FlashRAM command protocol** (`Macronix MX29L1100`): Implemented the full Macronix MX29L1100 state machine — erase (chip + sector), write, status, and read modes. Games using FlashRAM (Pokémon Stadium, etc.) now save correctly. — `crates/systems/n64/src/bus.rs`
 - [ ] **Save type detection for unlisted games**: Only common retail titles are in the save-type database. Unknown games silently receive `SaveType::None`. Consider implementing a checksum-based database fallback (e.g. using the ipl3 CRC or the CIC seed) so that unlisted games still get a sensible default. — `crates/systems/n64/src/cartridge.rs`
 
 ### High
 - [ ] **RDP Blend/Combine pipeline**: `SET_OTHER_MODES` values are stored in both the RDP (`rdp.rs`) and RSP HLE (`rsp_hle.rs`) but are never consumed by the rendering pipeline. Applying cycle type, texture filtering, and alpha-blending modes would significantly improve visual accuracy. — `crates/systems/n64/src/rdp.rs`, `crates/systems/n64/src/rdp_renderer_opengl.rs`
-- [x] **RSP Audio microcode (ABI1)**: Implemented a basic ABI1 command interpreter (SPNOOP, ADPCM stub, CLEARBUFF, RESAMPLE stub, DMEMMOVE, MIXER, INTERLEAVE, LOADBUFF, SAVEBUFF). Games that use ABI1 now produce audio output via the INTERLEAVE→RDRAM path. ADPCM decode and RESAMPLE remain approximations. — `crates/systems/n64/src/rsp_hle.rs`
-- [x] **Controller Pak (memory card)**: Implemented PIF commands 0x02 (read pak) and 0x03 (write pak) with CRC-8 generation, 32 KB per-slot storage, and proper save/load API. Rewrote PIF channel walker to correctly parse variable-length channels instead of fixed offsets. Games requiring a Controller Pak (e.g. Wave Race 64) now save correctly. — `crates/systems/n64/src/pif.rs`
 
 ### Medium
 - [ ] **RSP ADPCM decode**: The ADPCM command (0x01) currently writes silence. A proper VADPCM decoder would significantly improve audio quality for games that use ADPCM-compressed audio. — `crates/systems/n64/src/rsp_hle.rs`
@@ -81,6 +78,17 @@ not available in CI or in headless `cargo test` runs.  They can be run manually 
 ### Low
 - [ ] **Joypad/Controller input** — Controller polling via SIO is stubbed; digital pad button state not connected to the emulator input system. — `crates/systems/ps1/src/lib.rs`
 - [ ] **Memory Card** — Memory card SIO protocol not implemented. — `crates/systems/ps1/src/lib.rs`
+
+## NES
+
+### Medium
+- [ ] **Sprite 0 hit timing**: Fix trigger to fire at `hit_x + 1` (not `hit_x + 2`), and restrict the detection window to dots 1–256 (not 2–257). Per hardware, dot 1 = pixel x=0, so the hit fires at dot = x + 1. The current one-dot offset causes incorrect sprite 0 hit timing for games that use it to split the screen (e.g. Bee 52 HUD). Reference: Mesen2 `NesPpu.cpp GetPixelColor()`, NESdev wiki PPU sprite evaluation — `crates/systems/nes/src/ppu.rs`
+- [ ] **Odd-frame cycle skip NTSC-only gate**: The skip at pre-render scanline dot 339 must only apply when `TimingMode::Ntsc`. The PAL PPU (2C07) never performs this skip; every PAL frame is exactly 312 × 341 dots. Without the guard, PAL games lose one dot per frame, causing cumulative CPU/PPU drift. Reference: NESdev wiki PPU frame timing, NESdev wiki PAL video — `crates/systems/nes/src/ppu.rs`
+- [ ] **OAMDATA ($2004) reads during active rendering**: During visible scanlines (0–239) with rendering enabled, $2004 should return `$FF` on dots 0–64 (secondary OAM clear phase) and dots 257–340 (sprite tile fetch), and the primary OAM Y-byte of the sprite currently being evaluated (`oam[sprite_index * 4]`, where `sprite_index = (dot - 65) / 2`) on dots 65–256. Currently always returns `OAM[OAMADDR]` regardless of rendering state. Games like Bee 52 read $2004 to synchronise with the PPU and time HUD scroll splits; wrong values cause timing loops to fail. Reference: NESdev wiki PPU sprite evaluation, Mesen2 `NesPpu.cpp ReadRam()` — `crates/systems/nes/src/ppu.rs`
+- [ ] **Mid-scanline PPUMASK re-enable re-render**: When PPUMASK transitions from rendering-disabled to rendering-enabled during a visible scanline (0–239), that scanline has already been drawn as backdrop at dot 0 and must be re-rendered with the current scroll and mask values. Needed for HUD scroll splits in Bee 52 and other Codemasters games that disable rendering to change scroll, then re-enable mid-scanline. Proposed approach from PR #632: add a `rerender_scanline: Cell<Option<u16>>` field set in `write_register(1)` when the transition is detected, then re-render in the main loop after each CPU step. Reference: PR #632 investigation, NESdev wiki mid-frame updates — `crates/systems/nes/src/ppu.rs`, `crates/systems/nes/src/lib.rs`
+
+### Low
+- [ ] **ROM DB lookup test — use dynamic entry**: `test_lookup_rom_found` in `rom_db.rs` hardcodes Bee 52's CRC32 (`0xE19C2722`). Replacing the lookup with `ROM_DATABASE[0]` (and asserting all fields match) makes the test database-agnostic and prevents breakage if the Bee 52 entry is ever removed or reordered. — `crates/systems/nes/src/rom_db.rs`
 
 ## SNES
 
