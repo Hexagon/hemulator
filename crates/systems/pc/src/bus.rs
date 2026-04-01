@@ -471,11 +471,31 @@ impl PcBus {
     }
 
     /// Load BIOS ROM
+    ///
+    /// For non-empty input, any BIOS size up to 256 KB is accepted. If the input
+    /// is larger than 256 KB, only the last 256 KB are used. The data is placed
+    /// at the highest possible ROM offset so that the image is end-aligned in
+    /// the ROM area, ensuring its last 16 bytes map to physical addresses
+    /// 0xFFFF0..=0xFFFFF (where the CPU fetches the reset entry at 0xFFFF0).
+    ///
+    /// ROM bytes in the prefix region (below the loaded image) are filled with
+    /// `0xFF` so that a previously-loaded larger image cannot leave stale bytes.
+    ///
+    /// If an empty slice is provided, this function leaves the existing ROM
+    /// contents unchanged. At the system level, `PcSystem::mount("BIOS", …)`
+    /// currently rejects empty BIOS images.
     pub fn load_bios(&mut self, data: &[u8]) {
-        // BIOS is typically loaded at 0xF0000-0xFFFFF (last 64KB of ROM area)
-        let bios_offset = 0x30000; // Offset within rom array (0x40000 - 0x10000)
-        let len = data.len().min(0x10000);
-        self.rom[bios_offset..bios_offset + len].copy_from_slice(&data[..len]);
+        let rom_size = self.rom.len(); // 256KB = 0x40000
+        let len = data.len().min(rom_size);
+        // End-align: last byte of BIOS image maps to physical 0xFFFFF
+        let dst_offset = rom_size - len;
+        // Fill the prefix with 0xFF (unprogrammed ROM state) so a previously-loaded
+        // larger BIOS cannot leave stale bytes in the region that the new image does
+        // not cover.
+        self.rom[..dst_offset].fill(0xFF);
+        // Take the last `len` bytes of the supplied data (handles oversized images)
+        let src_start = data.len() - len;
+        self.rom[dst_offset..dst_offset + len].copy_from_slice(&data[src_start..]);
     }
 
     /// Get a reference to the executable data
@@ -1410,12 +1430,28 @@ mod tests {
     fn test_bios_loading() {
         let mut bus = PcBus::new();
 
+        // A 5-byte BIOS stub: end-aligned, last byte at 0xFFFFF
         let bios = vec![0xEA, 0x5B, 0xE0, 0x00, 0xF0]; // Simple BIOS stub
         bus.load_bios(&bios);
 
-        // BIOS should be at 0xF0000+
-        assert_eq!(bus.read(0xF0000), 0xEA);
-        assert_eq!(bus.read(0xF0001), 0x5B);
+        // BIOS is end-aligned: last byte lands at 0xFFFFF
+        let start = 0x100000 - bios.len();
+        assert_eq!(bus.read(start as u32), 0xEA);
+        assert_eq!(bus.read((start + 1) as u32), 0x5B);
+    }
+
+    #[test]
+    fn test_bios_loading_64kb() {
+        let mut bus = PcBus::new();
+
+        // A 64KB BIOS: should occupy F0000-FFFFF (same as before)
+        let mut bios = vec![0u8; 0x10000];
+        bios[0] = 0xAB; // first byte at F0000
+        bios[0xFFF0] = 0xEA; // entry point at FFFF0
+        bus.load_bios(&bios);
+
+        assert_eq!(bus.read(0xF0000), 0xAB);
+        assert_eq!(bus.read(0xFFFF0), 0xEA);
     }
 
     #[test]
