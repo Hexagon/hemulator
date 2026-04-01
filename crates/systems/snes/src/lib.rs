@@ -448,8 +448,8 @@ impl System for SnesSystem {
                     self.cpu.cpu.trigger_irq();
                 }
 
-                // Record instruction if tracing is enabled
-                if self.instruction_tracer.is_enabled() {
+                // Record instruction if tracing is enabled (skip WAI idle cycles)
+                if self.instruction_tracer.is_enabled() && !self.cpu.cpu.waiting_for_interrupt {
                     if let Some(instr) = self.disassemble_instruction(pc_before) {
                         let cpu_state = self.get_cpu_state();
                         self.instruction_tracer.trace(instr, cpu_state);
@@ -529,8 +529,8 @@ impl System for SnesSystem {
                     self.cpu.cpu.trigger_irq();
                 }
 
-                // Record instruction if tracing is enabled
-                if self.instruction_tracer.is_enabled() {
+                // Record instruction if tracing is enabled (skip WAI idle cycles)
+                if self.instruction_tracer.is_enabled() && !self.cpu.cpu.waiting_for_interrupt {
                     if let Some(instr) = self.disassemble_instruction(pc_before) {
                         let cpu_state = self.get_cpu_state();
                         self.instruction_tracer.trace(instr, cpu_state);
@@ -597,8 +597,8 @@ impl System for SnesSystem {
             self.total_cycles += master_cycles as u64;
             self.cpu.bus_mut().tick_cycles(master_cycles);
 
-            // Record instruction if tracing is enabled
-            if self.instruction_tracer.is_enabled() {
+            // Record instruction if tracing is enabled (skip WAI idle cycles)
+            if self.instruction_tracer.is_enabled() && !self.cpu.cpu.waiting_for_interrupt {
                 if let Some(instr) = self.disassemble_instruction(pc_before) {
                     let cpu_state = self.get_cpu_state();
                     self.instruction_tracer.trace(instr, cpu_state);
