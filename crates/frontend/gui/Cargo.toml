@@ -47,7 +47,7 @@ egui = "0.33"
 egui_glow = "0.33"
 egui_extras = { version = "0.33", features = ["image"] }
 egui_sdl2_gl = "0.33"
-egui_dock = "0.19"
+egui_dock = "0.18"
 
 [build-dependencies]
 # Windows resource embedding
