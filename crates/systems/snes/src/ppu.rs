@@ -59,6 +59,41 @@ const LAYER_BG4: u8 = 3;
 const LAYER_OBJ: u8 = 4;
 const LAYER_BACKDROP: u8 = 5;
 
+/// Per-scanline PPU state snapshot for HDMA-driven effects.
+/// Captured at the start of each visible scanline before CPU/HDMA processing.
+#[derive(Clone, Copy)]
+struct ScanlineState {
+    fixed_color_r: u8,
+    fixed_color_g: u8,
+    fixed_color_b: u8,
+    cgwsel: u8,
+    cgadsub: u8,
+    screen_display: u8,
+    #[allow(dead_code)]
+    tm: u8,
+    #[allow(dead_code)]
+    ts: u8,
+    bg_hofs: [u16; 4],
+    bg_vofs: [u16; 4],
+}
+
+impl Default for ScanlineState {
+    fn default() -> Self {
+        Self {
+            fixed_color_r: 0,
+            fixed_color_g: 0,
+            fixed_color_b: 0,
+            cgwsel: 0,
+            cgadsub: 0,
+            screen_display: 0x80, // Start with screen blanked
+            tm: 0,
+            ts: 0,
+            bg_hofs: [0; 4],
+            bg_vofs: [0; 4],
+        }
+    }
+}
+
 /// Parameters for rendering a single tile
 struct TileRenderParams {
     tile_x: usize,
@@ -505,12 +540,11 @@ pub struct Ppu {
     /// Uses Cell for interior mutability as reading $213D updates the toggle
     v_counter_latched: Cell<u16>,
 
-    /// Per-scanline fixed color snapshots for HDMA-driven effects
-    /// HDMA can write different COLDATA values each scanline (e.g., SMW sky gradient).
-    /// Since we render the full frame at once, we capture the fixed color state at
-    /// the start of each visible scanline so apply_color_math() can use per-scanline values.
-    /// Format: [scanline][0=R, 1=G, 2=B], 5-bit values (0-31)
-    scanline_fixed_colors: [[u8; 3]; 224],
+    /// Per-scanline PPU state snapshots for HDMA-driven effects.
+    /// HDMA can write different register values each scanline (e.g., SMW sky gradient,
+    /// status bar layer enables, brightness fades). Since we render the full frame
+    /// at once, we capture critical register state at the start of each visible scanline.
+    scanline_state: [ScanlineState; 224],
 }
 
 impl Ppu {
@@ -596,7 +630,7 @@ impl Ppu {
             hv_latch_toggle: Cell::new(false),
             h_counter_latched: Cell::new(0),
             v_counter_latched: Cell::new(0),
-            scanline_fixed_colors: [[0u8; 3]; 224],
+            scanline_state: [ScanlineState::default(); 224],
         }
     }
 
@@ -1501,57 +1535,55 @@ impl Ppu {
         }
 
         // ============================================================================
-        // COLOR WINDOW CLIPPING (BEFORE COLOR MATH)
+        // COLOR WINDOW CLIPPING (BEFORE COLOR MATH) - per scanline
         // ============================================================================
         // CGWSEL bits 6-7 control color clipping to black based on window regions
-        // This must happen BEFORE color math is applied
-        // 00 = Never clip colors
-        // 01 = Clip colors outside window
-        // 10 = Clip colors inside window
-        // 11 = Always clip colors
-        let color_clip_mode = (self.cgwsel >> 6) & 0x03;
-        if color_clip_mode != 0 {
-            self.apply_color_clipping(&mut frame, color_clip_mode);
+        for scanline in 0..224usize {
+            let color_clip_mode = (self.scanline_state[scanline].cgwsel >> 6) & 0x03;
+            if color_clip_mode != 0 {
+                let start = scanline * 256;
+                for x in 0..256 {
+                    let should_clip = match color_clip_mode {
+                        1 => !self.is_inside_color_window(x),
+                        2 => self.is_inside_color_window(x),
+                        3 => true,
+                        _ => false,
+                    };
+                    if should_clip {
+                        frame.pixels[start + x] = 0xFF000000;
+                    }
+                }
+            }
         }
 
         // ============================================================================
         // COLOR MATH POST-PROCESSING
         // ============================================================================
-        // Apply color math effects based on CGWSEL ($2130) and CGADSUB ($2131) registers
-        // Now that we have per-pixel layer tracking, we can implement this correctly!
-
-        // Check if color math is globally disabled via CGWSEL bits 4-5
-        // 00 = Always enable, 01 = Inside window, 10 = Outside window, 11 = Never
-        let color_math_never = (self.cgwsel >> 4) & 0x03 == 3;
-
-        if !color_math_never && self.cgadsub != 0 {
-            self.apply_color_math(&mut frame, &layer_buffer, &sub_frame);
-        }
+        // Apply color math effects using per-scanline CGWSEL/CGADSUB snapshots
+        // to support HDMA-driven effects (sky gradients, status bar separation)
+        self.apply_color_math(&mut frame, &layer_buffer, &sub_frame, &sub_layer_buffer);
         // ============================================================================
 
-        // Apply brightness (bits 0-3 of $2100) ONLY when force blank is OFF
-        // This preserves the behavior where we render during force blank for boot sequences
-        // Force blank is bit 7 of screen_display register
-        let force_blank = (self.screen_display & 0x80) != 0;
-        let brightness = (self.screen_display & 0x0F) as u32;
+        // Apply per-scanline brightness (bits 0-3 of screen_display $2100)
+        for scanline in 0..224usize {
+            let sd = self.scanline_state[scanline].screen_display;
+            let force_blank = (sd & 0x80) != 0;
+            let brightness = (sd & 0x0F) as u32;
 
-        // Only apply brightness scaling when screen is not force blanked
-        if !force_blank && brightness != 15 {
-            // Fast path for brightness 0: just clear all RGB channels to black
-            if brightness == 0 {
-                for pixel in frame.pixels.iter_mut() {
-                    *pixel = 0xFF000000; // Keep alpha, clear RGB
-                }
-            } else {
-                // Apply brightness scaling to all pixels
-                // Formula: color_out = (color_in * brightness) / 15
-                // We scale each RGB channel independently
-                for pixel in frame.pixels.iter_mut() {
-                    let a = (*pixel >> 24) & 0xFF;
-                    let r = ((*pixel >> 16) & 0xFF) * brightness / 15;
-                    let g = ((*pixel >> 8) & 0xFF) * brightness / 15;
-                    let b = (*pixel & 0xFF) * brightness / 15;
-                    *pixel = (a << 24) | (r << 16) | (g << 8) | b;
+            if !force_blank && brightness != 15 {
+                let start = scanline * 256;
+                if brightness == 0 {
+                    for pixel in &mut frame.pixels[start..start + 256] {
+                        *pixel = 0xFF000000;
+                    }
+                } else {
+                    for pixel in &mut frame.pixels[start..start + 256] {
+                        let a = (*pixel >> 24) & 0xFF;
+                        let r = ((*pixel >> 16) & 0xFF) * brightness / 15;
+                        let g = ((*pixel >> 8) & 0xFF) * brightness / 15;
+                        let b = (*pixel & 0xFF) * brightness / 15;
+                        *pixel = (a << 24) | (r << 16) | (g << 8) | b;
+                    }
                 }
             }
         }
@@ -1564,7 +1596,7 @@ impl Ppu {
                 "SNES PPU: Frame rendered - {} non-backdrop pixels, backdrop=0x{:08X}, brightness={}, TM=0x{:02X}, BGMODE=0x{:02X}, OBSEL=0x{:02X}, VRAM_any={}, CGRAM_any={}, OAM_any={}",
                 non_backdrop_pixels,
                 backdrop_color,
-                brightness,
+                self.screen_display & 0x0F,
                 self.tm,
                 self.bgmode,
                 self.obsel,
@@ -1577,14 +1609,24 @@ impl Ppu {
         frame
     }
 
-    /// Snapshot the current fixed color state for the given scanline.
+    /// Snapshot the current PPU state for the given scanline.
     /// Called at the start of each visible scanline so that HDMA-driven
-    /// per-scanline color effects (e.g., sky gradients) are captured for
-    /// the deferred full-frame render pass.
+    /// per-scanline effects (color gradients, layer enables, brightness)
+    /// are captured for the deferred full-frame render pass.
     pub fn snapshot_scanline_state(&mut self, scanline: usize) {
         if scanline < 224 {
-            self.scanline_fixed_colors[scanline] =
-                [self.fixed_color_r, self.fixed_color_g, self.fixed_color_b];
+            self.scanline_state[scanline] = ScanlineState {
+                fixed_color_r: self.fixed_color_r,
+                fixed_color_g: self.fixed_color_g,
+                fixed_color_b: self.fixed_color_b,
+                cgwsel: self.cgwsel,
+                cgadsub: self.cgadsub,
+                screen_display: self.screen_display,
+                tm: self.tm,
+                ts: self.ts,
+                bg_hofs: [self.bg1_hofs, self.bg2_hofs, self.bg3_hofs, self.bg4_hofs],
+                bg_vofs: [self.bg1_vofs, self.bg2_vofs, self.bg3_vofs, self.bg4_vofs],
+            };
         }
     }
 
@@ -2691,22 +2733,11 @@ impl Ppu {
         let (tilemap_width, tilemap_height) = self.get_tilemap_size(bg_index);
 
         // Get character size for this layer (8 or 16)
-        // This must be done before calculating pixel dimensions
         let char_size = self.get_bg_char_size(bg_index);
 
         // Calculate tilemap pixel dimensions based on character size
-        // For 16x16 tiles, each tilemap entry covers 16 pixels, not 8
         let tilemap_pixel_width = tilemap_width * char_size;
         let tilemap_pixel_height = tilemap_height * char_size;
-
-        // Get scroll offsets for this layer
-        let (hofs, vofs) = match bg_index {
-            0 => (self.bg1_hofs, self.bg1_vofs),
-            1 => (self.bg2_hofs, self.bg2_vofs),
-            2 => (self.bg3_hofs, self.bg3_vofs),
-            3 => (self.bg4_hofs, self.bg4_vofs),
-            _ => (0, 0),
-        };
 
         // Determine layer ID for tracking
         let layer_id = match bg_index {
@@ -2727,9 +2758,14 @@ impl Ppu {
 
         // Render all visible tiles
         for screen_y in 0..224 {
+            // Use per-scanline scroll offsets from HDMA snapshot
+            let (hofs, vofs) = (
+                self.scanline_state[screen_y].bg_hofs[bg_index],
+                self.scanline_state[screen_y].bg_vofs[bg_index],
+            );
+
             for screen_x in 0..256 {
                 // Apply mosaic effect to screen coordinates if enabled
-                // Mosaic groups pixels into NxN blocks using the color from the block's top-left pixel
                 let (render_x, render_y) = if mosaic_enabled {
                     self.apply_mosaic(screen_x, screen_y)
                 } else {
@@ -2857,22 +2893,11 @@ impl Ppu {
         let (tilemap_width, tilemap_height) = self.get_tilemap_size(bg_index);
 
         // Get character size for this layer (8 or 16)
-        // This must be done before calculating pixel dimensions
         let char_size = self.get_bg_char_size(bg_index);
 
         // Calculate tilemap pixel dimensions based on character size
-        // For 16x16 tiles, each tilemap entry covers 16 pixels, not 8
         let tilemap_pixel_width = tilemap_width * char_size;
         let tilemap_pixel_height = tilemap_height * char_size;
-
-        // Get scroll offsets for this layer
-        let (hofs, vofs) = match bg_index {
-            0 => (self.bg1_hofs, self.bg1_vofs),
-            1 => (self.bg2_hofs, self.bg2_vofs),
-            2 => (self.bg3_hofs, self.bg3_vofs),
-            3 => (self.bg4_hofs, self.bg4_vofs),
-            _ => (0, 0),
-        };
 
         // Determine layer ID for tracking
         let layer_id = bg_index as u8;
@@ -2887,6 +2912,12 @@ impl Ppu {
 
         // Render all visible tiles
         for screen_y in 0..224 {
+            // Use per-scanline scroll offsets from HDMA snapshot
+            let (hofs, vofs) = (
+                self.scanline_state[screen_y].bg_hofs[bg_index],
+                self.scanline_state[screen_y].bg_vofs[bg_index],
+            );
+
             for screen_x in 0..256 {
                 // Apply mosaic effect to screen coordinates if enabled
                 let (render_x, render_y) = if mosaic_enabled {
@@ -3021,22 +3052,11 @@ impl Ppu {
         let (tilemap_width, tilemap_height) = self.get_tilemap_size(bg_index);
 
         // Get character size for this layer (8 or 16)
-        // This must be done before calculating pixel dimensions
         let char_size = self.get_bg_char_size(bg_index);
 
         // Calculate tilemap pixel dimensions based on character size
-        // For 16x16 tiles, each tilemap entry covers 16 pixels, not 8
         let tilemap_pixel_width = tilemap_width * char_size;
         let tilemap_pixel_height = tilemap_height * char_size;
-
-        // Get scroll offsets for this layer
-        let (hofs, vofs) = match bg_index {
-            0 => (self.bg1_hofs, self.bg1_vofs),
-            1 => (self.bg2_hofs, self.bg2_vofs),
-            2 => (self.bg3_hofs, self.bg3_vofs),
-            3 => (self.bg4_hofs, self.bg4_vofs),
-            _ => (0, 0),
-        };
 
         // Check if mosaic is enabled for this layer
         let mosaic_enabled = self.is_mosaic_enabled(bg_index);
@@ -3048,6 +3068,12 @@ impl Ppu {
 
         // Render all visible tiles
         for screen_y in 0..224 {
+            // Use per-scanline scroll offsets from HDMA snapshot
+            let (hofs, vofs) = (
+                self.scanline_state[screen_y].bg_hofs[bg_index],
+                self.scanline_state[screen_y].bg_vofs[bg_index],
+            );
+
             for screen_x in 0..256 {
                 // Apply mosaic effect to screen coordinates if enabled
                 let (render_x, render_y) = if mosaic_enabled {
@@ -4156,37 +4182,19 @@ impl Ppu {
         0xFF000000 | (r << 16) | (g << 8) | b
     }
 
-    /// Apply color window clipping (CGWSEL bits 6-7)
-    /// This clips pixel colors to black BEFORE color math is applied
-    ///
-    /// Color clip modes:
-    /// - 00 = Never clip colors
-    /// - 01 = Clip colors outside window
-    /// - 10 = Clip colors inside window
-    /// - 11 = Always clip colors
-    ///
-    /// Reference: <https://wiki.superfamicom.org/rendering-the-screen#color-math>
+    /// Apply color window clipping to a frame (test helper)
+    #[cfg(test)]
     fn apply_color_clipping(&self, frame: &mut Frame, clip_mode: u8) {
         let width = frame.width as usize;
-        let black = 0xFF000000u32; // Black color (opaque)
-
+        let black = 0xFF000000u32;
         for (i, pixel) in frame.pixels.iter_mut().enumerate() {
             let x = i % width;
-
             let should_clip = match clip_mode {
-                0 => false, // Never clip
-                1 => {
-                    // Clip outside window
-                    !self.is_inside_color_window(x)
-                }
-                2 => {
-                    // Clip inside window
-                    self.is_inside_color_window(x)
-                }
-                3 => true, // Always clip
+                1 => !self.is_inside_color_window(x),
+                2 => self.is_inside_color_window(x),
+                3 => true,
                 _ => false,
             };
-
             if should_clip {
                 *pixel = black;
             }
@@ -4199,63 +4207,84 @@ impl Ppu {
     /// References:
     /// - <https://wiki.superfamicom.org/rendering-the-screen#color-math>
     /// - <https://wiki.superfamicom.org/transparency>
-    fn apply_color_math(&self, frame: &mut Frame, layer_buffer: &[u8], sub_frame: &Frame) {
-        // Get color math control flags
-        let subtract_mode = (self.cgadsub & 0x80) != 0; // Bit 7: 0=add, 1=subtract
-        let half_math = (self.cgadsub & 0x40) != 0; // Bit 6: half the result
-
-        // CGWSEL bit 1: 0=use fixed color, 1=use sub-screen
-        let use_subscreen = (self.cgwsel & 0x02) != 0;
-
-        // CGWSEL bits 4-5: Color math enable control based on window regions
-        // 00 = Enable everywhere
-        // 01 = Enable inside window
-        // 10 = Enable outside window
-        // 11 = Disable everywhere
-        let clip_mode = (self.cgwsel >> 4) & 0x03;
-
-        // Apply color math to each pixel, using per-scanline fixed color values
-        // to support HDMA-driven effects like sky gradients
+    fn apply_color_math(
+        &self,
+        frame: &mut Frame,
+        layer_buffer: &[u8],
+        sub_frame: &Frame,
+        sub_layer_buffer: &[u8],
+    ) {
+        // Apply color math per-scanline using snapshotted CGADSUB, CGWSEL,
+        // and fixed color values to support HDMA-driven effects.
         let width = frame.width as usize;
         let height = frame.height as usize;
-        let mut prev_scanline = usize::MAX;
-        let mut fixed_color = 0u32;
 
         for scanline in 0..height {
-            // Get per-scanline fixed color from snapshot
-            if scanline != prev_scanline {
-                let [r5, g5, b5] = if scanline < 224 {
-                    self.scanline_fixed_colors[scanline]
-                } else {
-                    [self.fixed_color_r, self.fixed_color_g, self.fixed_color_b]
-                };
-                let (r5, g5, b5) = (r5 as u32, g5 as u32, b5 as u32);
-                let fr = (r5 << 3) | (r5 >> 2);
-                let fg = (g5 << 3) | (g5 >> 2);
-                let fb = (b5 << 3) | (b5 >> 2);
-                fixed_color = 0xFF000000 | (fr << 16) | (fg << 8) | fb;
-                prev_scanline = scanline;
+            // Get per-scanline state from snapshot
+            let state = if scanline < 224 {
+                self.scanline_state[scanline]
+            } else {
+                ScanlineState {
+                    fixed_color_r: self.fixed_color_r,
+                    fixed_color_g: self.fixed_color_g,
+                    fixed_color_b: self.fixed_color_b,
+                    cgwsel: self.cgwsel,
+                    cgadsub: self.cgadsub,
+                    screen_display: self.screen_display,
+                    tm: self.tm,
+                    ts: self.ts,
+                    bg_hofs: [self.bg1_hofs, self.bg2_hofs, self.bg3_hofs, self.bg4_hofs],
+                    bg_vofs: [self.bg1_vofs, self.bg2_vofs, self.bg3_vofs, self.bg4_vofs],
+                }
+            };
+
+            let cgadsub = state.cgadsub;
+            let cgwsel = state.cgwsel;
+
+            // Skip this scanline if color math is completely disabled
+            let color_math_never = (cgwsel >> 4) & 0x03 == 3;
+            if color_math_never || cgadsub == 0 {
+                continue;
             }
+
+            let subtract_mode = (cgadsub & 0x80) != 0;
+            let half_math = (cgadsub & 0x40) != 0;
+            let use_subscreen = (cgwsel & 0x02) != 0;
+            let clip_mode = (cgwsel >> 4) & 0x03;
+
+            // Build fixed color for this scanline (always needed: used directly
+            // when subscreen is disabled, or as fallback when the subscreen
+            // pixel is backdrop/transparent)
+            let (r5, g5, b5) = (
+                state.fixed_color_r as u32,
+                state.fixed_color_g as u32,
+                state.fixed_color_b as u32,
+            );
+            let fr = (r5 << 3) | (r5 >> 2);
+            let fg = (g5 << 3) | (g5 >> 2);
+            let fb = (b5 << 3) | (b5 >> 2);
+            let fixed_color = 0xFF000000 | (fr << 16) | (fg << 8) | fb;
 
             for x in 0..width {
                 let i = scanline * width + x;
                 let layer = layer_buffer[i];
 
-                // Ensure layer value is within the valid range
                 if layer > LAYER_BACKDROP {
                     continue;
                 }
-                // Check if color math is enabled for this layer (CGADSUB bits 0-5)
+
                 let layer_bit = 1u8 << layer;
 
-                if (self.cgadsub & layer_bit) != 0
+                if (cgadsub & layer_bit) != 0
                     && self.is_color_math_enabled_at_position(x, clip_mode)
                 {
                     let main_pixel = frame.pixels[i];
 
                     let blend_color = if use_subscreen {
-                        if layer == LAYER_BACKDROP {
-                            self.get_color(0)
+                        // Hardware behavior: when subscreen pixel is
+                        // backdrop (transparent), use fixed color instead
+                        if sub_layer_buffer[i] == LAYER_BACKDROP {
+                            fixed_color
                         } else {
                             sub_frame.pixels[i]
                         }
@@ -4703,6 +4732,11 @@ mod tests {
         // Now enable screen with full brightness (force blank off)
         ppu.write_register(0x2100, 0x0F); // Brightness 15, not blanked
 
+        // Snapshot scanline state for all visible scanlines (mimics system frame loop)
+        for sl in 0..224 {
+            ppu.snapshot_scanline_state(sl);
+        }
+
         // Render with no scrolling
         let frame1 = ppu.render_frame();
         let pixel_0_0 = frame1.pixels[0]; // Top-left pixel of tile 0
@@ -4710,6 +4744,11 @@ mod tests {
         // Apply horizontal scroll of 8 pixels (one tile)
         ppu.write_register(0x210D, 0x08);
         ppu.write_register(0x210D, 0x00);
+
+        // Re-snapshot after scroll change
+        for sl in 0..224 {
+            ppu.snapshot_scanline_state(sl);
+        }
 
         let frame2 = ppu.render_frame();
         let pixel_0_0_scrolled = frame2.pixels[0]; // Should now show tile 1
