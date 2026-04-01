@@ -348,6 +348,15 @@ impl System for SnesSystem {
             self.cpu.bus_mut().ppu_mut().set_hblank(false);
             self.cpu.bus_mut().reset_wram_refresh();
 
+            // Snapshot per-scanline PPU state for HDMA-driven effects
+            // This captures COLDATA etc. BEFORE this scanline's CPU/HDMA runs,
+            // matching hardware where the scanline renders with the state set
+            // by the previous scanline's HDMA.
+            self.cpu
+                .bus_mut()
+                .ppu_mut()
+                .snapshot_scanline_state(scanline as usize);
+
             // Log CPU state on first scanline of first few frames for debugging
             if scanline == 0 && self.current_cycles < 10000 {
                 log(LogCategory::CPU, LogLevel::Debug, || {
@@ -448,8 +457,8 @@ impl System for SnesSystem {
                     self.cpu.cpu.trigger_irq();
                 }
 
-                // Record instruction if tracing is enabled
-                if self.instruction_tracer.is_enabled() {
+                // Record instruction if tracing is enabled (skip WAI idle cycles)
+                if self.instruction_tracer.is_enabled() && !self.cpu.cpu.waiting_for_interrupt {
                     if let Some(instr) = self.disassemble_instruction(pc_before) {
                         let cpu_state = self.get_cpu_state();
                         self.instruction_tracer.trace(instr, cpu_state);
@@ -529,8 +538,8 @@ impl System for SnesSystem {
                     self.cpu.cpu.trigger_irq();
                 }
 
-                // Record instruction if tracing is enabled
-                if self.instruction_tracer.is_enabled() {
+                // Record instruction if tracing is enabled (skip WAI idle cycles)
+                if self.instruction_tracer.is_enabled() && !self.cpu.cpu.waiting_for_interrupt {
                     if let Some(instr) = self.disassemble_instruction(pc_before) {
                         let cpu_state = self.get_cpu_state();
                         self.instruction_tracer.trace(instr, cpu_state);
@@ -597,8 +606,8 @@ impl System for SnesSystem {
             self.total_cycles += master_cycles as u64;
             self.cpu.bus_mut().tick_cycles(master_cycles);
 
-            // Record instruction if tracing is enabled
-            if self.instruction_tracer.is_enabled() {
+            // Record instruction if tracing is enabled (skip WAI idle cycles)
+            if self.instruction_tracer.is_enabled() && !self.cpu.cpu.waiting_for_interrupt {
                 if let Some(instr) = self.disassemble_instruction(pc_before) {
                     let cpu_state = self.get_cpu_state();
                     self.instruction_tracer.trace(instr, cpu_state);

@@ -794,10 +794,12 @@ impl SnesBus {
                     }
 
                     // Update A-bus address based on increment mode
+                    // DMA only modifies the low 16 bits; bank byte stays fixed
+                    let bank = a_addr & 0xFF0000;
                     match increment_mode {
-                        0 => a_addr += 1,     // Increment
-                        1 => {}               // Fixed
-                        2 | 3 => a_addr -= 1, // Decrement
+                        0 => a_addr = bank | ((a_addr.wrapping_add(1)) & 0xFFFF), // Increment within bank
+                        1 => {}                                                   // Fixed
+                        2 | 3 => a_addr = bank | ((a_addr.wrapping_sub(1)) & 0xFFFF), // Decrement within bank
                         _ => {}
                     }
 
@@ -887,7 +889,10 @@ impl SnesBus {
             if self.hdma_state[ch].line_counter == 0 {
                 // Read line count byte from table
                 let line_byte = self.read(self.hdma_state[ch].table_addr);
-                self.hdma_state[ch].table_addr += 1;
+                // HDMA table address wraps within bank (only low 16 bits change)
+                let bank = self.hdma_state[ch].table_addr & 0xFF0000;
+                self.hdma_state[ch].table_addr =
+                    bank | ((self.hdma_state[ch].table_addr + 1) & 0xFFFF);
 
                 // Check for termination (line count = 0)
                 if line_byte == 0 {
@@ -907,8 +912,10 @@ impl SnesBus {
                 if indirect {
                     // Read 2-byte indirect address
                     let addr_low = self.read(self.hdma_state[ch].table_addr) as u32;
-                    let addr_high = self.read(self.hdma_state[ch].table_addr + 1) as u32;
-                    self.hdma_state[ch].table_addr += 2;
+                    let addr_high =
+                        self.read(bank | ((self.hdma_state[ch].table_addr + 1) & 0xFFFF)) as u32;
+                    self.hdma_state[ch].table_addr =
+                        bank | ((self.hdma_state[ch].table_addr + 2) & 0xFFFF);
 
                     // Store indirect address for data fetch
                     self.dma_channels[ch].a_addr =
@@ -938,7 +945,8 @@ impl SnesBus {
                     self.hdma_state[ch].table_addr
                 };
 
-                // Transfer the bytes
+                // Transfer the bytes (source address wraps within bank)
+                let source_bank = source_addr & 0xFF0000;
                 for i in 0..bytes_to_transfer {
                     let b_reg = match transfer_mode {
                         0 => 0x2100 | (dma.b_addr as u16),
@@ -949,19 +957,22 @@ impl SnesBus {
                         _ => 0x2100 | (dma.b_addr as u16),
                     };
 
-                    let val = self.read(source_addr + i);
+                    let effective_addr = source_bank | ((source_addr + i) & 0xFFFF);
+                    let val = self.read(effective_addr);
                     self.write(b_reg as u32, val);
                     cycles += 8; // 8 cycles per byte
                 }
 
-                // Advance source address after transfer
+                // Advance source address after transfer (wraps within bank)
                 if indirect {
-                    self.dma_channels[ch].a_addr += bytes_to_transfer;
+                    let a_bank = self.dma_channels[ch].a_addr & 0xFF0000;
+                    self.dma_channels[ch].a_addr =
+                        a_bank | ((self.dma_channels[ch].a_addr + bytes_to_transfer) & 0xFFFF);
                 } else {
                     // In direct mode: ALWAYS advance table_addr past the data bytes.
-                    // For repeat mode: advances to next set of data bytes for next scanline.
-                    // For non-repeat mode: advances past the data so next entry read is correct.
-                    self.hdma_state[ch].table_addr += bytes_to_transfer;
+                    let t_bank = self.hdma_state[ch].table_addr & 0xFF0000;
+                    self.hdma_state[ch].table_addr =
+                        t_bank | ((self.hdma_state[ch].table_addr + bytes_to_transfer) & 0xFFFF);
                 }
             }
 
