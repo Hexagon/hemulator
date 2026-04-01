@@ -91,13 +91,19 @@ pub struct Ppu {
     /// Uses Cell for interior mutability as reads update the buffer
     vram_read_buffer: Cell<u16>,
     /// CGRAM address register ($2121)
-    cgram_addr: u8,
+    /// Uses Cell for interior mutability as reads auto-increment
+    cgram_addr: Cell<u8>,
     /// CGRAM write latch (alternates between low and high byte)
     cgram_write_latch: bool,
+    /// CGRAM read latch (separate from write latch, toggles on read)
+    cgram_read_latch: Cell<bool>,
     /// OAM address register ($2102/$2103)
-    oam_addr: u16,
-    /// OAM write latch
+    /// Uses Cell for interior mutability as reads auto-increment
+    oam_addr: Cell<u16>,
+    /// OAM write latch toggle (false=first/low byte, true=second/high byte)
     oam_write_latch: bool,
+    /// OAM write latch buffer (stores low byte until high byte is written)
+    oam_latch_byte: u8,
     /// Sprite priority rotation enable (bit 7 of $2103)
     /// When set, sprite at (OAMAddr>>1) gets priority for next frame
     oam_priority_rotation: bool,
@@ -195,7 +201,6 @@ pub struct Ppu {
     /// Previous write value for scroll registers (used for 2-write protocol)
     scroll_prev: u8,
     /// Latch for scroll register writes
-    scroll_latch: bool,
 
     // Mode 7 registers
     /// Mode 7 settings ($211A)
@@ -499,6 +504,13 @@ pub struct Ppu {
     /// Latched V counter value (from $2137 read)
     /// Uses Cell for interior mutability as reading $213D updates the toggle
     v_counter_latched: Cell<u16>,
+
+    /// Per-scanline fixed color snapshots for HDMA-driven effects
+    /// HDMA can write different COLDATA values each scanline (e.g., SMW sky gradient).
+    /// Since we render the full frame at once, we capture the fixed color state at
+    /// the start of each visible scanline so apply_color_math() can use per-scanline values.
+    /// Format: [scanline][0=R, 1=G, 2=B], 5-bit values (0-31)
+    scanline_fixed_colors: [[u8; 3]; 224],
 }
 
 impl Ppu {
@@ -510,10 +522,12 @@ impl Ppu {
             vram_addr: Cell::new(0),
             vmain: 0x80, // Default: bit 7 = 1, increment after high byte write
             vram_read_buffer: Cell::new(0),
-            cgram_addr: 0,
+            cgram_addr: Cell::new(0),
             cgram_write_latch: false,
-            oam_addr: 0,
+            cgram_read_latch: Cell::new(false),
+            oam_addr: Cell::new(0),
             oam_write_latch: false,
+            oam_latch_byte: 0,
             oam_priority_rotation: false,
             ppu1_open_bus: 0,
             ppu2_open_bus: 0,
@@ -543,7 +557,6 @@ impl Ppu {
             bg4_hofs: 0,
             bg4_vofs: 0,
             scroll_prev: 0,
-            scroll_latch: false,
             // Mode 7 defaults
             m7sel: 0,
             m7a: 0x0100, // Identity matrix: A=1.0 (0x0100 in 8.8 fixed point)
@@ -583,6 +596,7 @@ impl Ppu {
             hv_latch_toggle: Cell::new(false),
             h_counter_latched: Cell::new(0),
             v_counter_latched: Cell::new(0),
+            scanline_fixed_colors: [[0u8; 3]; 224],
         }
     }
 
@@ -620,26 +634,49 @@ impl Ppu {
 
             // $2102 - OAMADDL - OAM Address (low byte)
             0x2102 => {
-                self.oam_addr = (self.oam_addr & 0xFF00) | val as u16;
+                let current = self.oam_addr.get();
+                self.oam_addr.set((current & 0xFF00) | val as u16);
                 self.oam_write_latch = false;
             }
 
             // $2103 - OAMADDH - OAM Address (high byte) and priority rotation
             0x2103 => {
-                self.oam_addr = (self.oam_addr & 0x00FF) | ((val as u16 & 0x01) << 8);
+                let current = self.oam_addr.get();
+                self.oam_addr
+                    .set((current & 0x00FF) | ((val as u16 & 0x01) << 8));
                 self.oam_write_latch = false;
                 // Bit 7 enables sprite priority rotation
                 self.oam_priority_rotation = (val & 0x80) != 0;
             }
 
             // $2104 - OAMDATA - OAM Data Write
+            // Hardware behavior: For addresses 0-511 (main table), even-address writes
+            // are buffered in a latch and only written to OAM when the odd address is
+            // written. For addresses 512-543 (high table), writes go directly.
             0x2104 => {
-                let addr = self.oam_addr as usize;
-                if addr < OAM_SIZE {
-                    self.oam[addr] = val;
+                let addr = self.oam_addr.get() as usize;
+                if addr >= 512 {
+                    // High table: write directly
+                    if addr < OAM_SIZE {
+                        self.oam[addr] = val;
+                    }
+                    self.oam_addr.set(((addr as u16) + 1) % (OAM_SIZE as u16));
+                } else if !self.oam_write_latch {
+                    // First write (even byte): buffer in latch
+                    self.oam_latch_byte = val;
+                    self.oam_write_latch = true;
+                } else {
+                    // Second write (odd byte): write both latch and val to OAM
+                    let current = self.oam_addr.get();
+                    let even_addr = (current & !1) as usize;
+                    if even_addr < 512 {
+                        self.oam[even_addr] = self.oam_latch_byte;
+                        self.oam[even_addr + 1] = val;
+                    }
+                    self.oam_write_latch = false;
+                    // Increment word address (advance by 2 bytes)
+                    self.oam_addr.set(((current & !1) + 2) % (OAM_SIZE as u16));
                 }
-                // Auto-increment address
-                self.oam_addr = (self.oam_addr + 1) % (OAM_SIZE as u16);
             }
 
             // $2105 - BGMODE - BG Mode and Character Size
@@ -692,116 +729,74 @@ impl Ppu {
                 self.bg34nba = val;
             }
 
-            // $210D - BG1HOFS and M7HOFS (2 writes)
-            // Sets both BG1 horizontal scroll (10-bit) and Mode 7 scroll (13-bit)
+            // $210D - BG1HOFS and M7HOFS
+            // Hardware behavior: no toggle latch. Every write computes scroll value
+            // from current byte and shared scroll_prev, then updates scroll_prev.
+            // Game writes low byte first, then high byte. Only the second write
+            // produces the correct value, but that's fine since rendering reads later.
             0x210D => {
-                if !self.scroll_latch {
-                    self.scroll_prev = val;
-                    self.scroll_latch = true;
+                self.bg1_hofs = ((val as u16 & 0x03) << 8) | (self.scroll_prev as u16);
+                self.scroll_prev = val;
+                // M7HOFS: 13-bit value from current byte + m7_prev
+                let raw = ((val as u16 & 0x1F) << 8) | (self.m7_prev as u16);
+                // Sign-extend from bit 12
+                self.m7hofs = if raw & 0x1000 != 0 {
+                    (raw | 0xE000) as i16
                 } else {
-                    // BG1HOFS: 10-bit value from bits 0-1 of second write + prev
-                    self.bg1_hofs = ((val as u16 & 0x03) << 8) | (self.scroll_prev as u16);
-                    // M7HOFS: 13-bit value from bits 0-4 of second write + m7_prev
-                    let raw = ((val as u16 & 0x1F) << 8) | (self.m7_prev as u16);
-                    // Sign-extend from bit 12
-                    self.m7hofs = if raw & 0x1000 != 0 {
-                        (raw | 0xE000) as i16
-                    } else {
-                        raw as i16
-                    };
-                    self.scroll_latch = false;
-                }
-                // $210D also updates the M7 latch
+                    raw as i16
+                };
                 self.m7_prev = val;
             }
 
-            // $210E - BG1VOFS and M7VOFS (2 writes)
-            // Sets both BG1 vertical scroll (10-bit) and Mode 7 scroll (13-bit)
+            // $210E - BG1VOFS and M7VOFS
             0x210E => {
-                if !self.scroll_latch {
-                    self.scroll_prev = val;
-                    self.scroll_latch = true;
+                self.bg1_vofs = ((val as u16 & 0x03) << 8) | (self.scroll_prev as u16);
+                self.scroll_prev = val;
+                // M7VOFS: 13-bit value from current byte + m7_prev
+                let raw = ((val as u16 & 0x1F) << 8) | (self.m7_prev as u16);
+                // Sign-extend from bit 12
+                self.m7vofs = if raw & 0x1000 != 0 {
+                    (raw | 0xE000) as i16
                 } else {
-                    // BG1VOFS: 10-bit value from bits 0-1 of second write + prev
-                    self.bg1_vofs = ((val as u16 & 0x03) << 8) | (self.scroll_prev as u16);
-                    // M7VOFS: 13-bit value from bits 0-4 of second write + m7_prev
-                    let raw = ((val as u16 & 0x1F) << 8) | (self.m7_prev as u16);
-                    // Sign-extend from bit 12
-                    self.m7vofs = if raw & 0x1000 != 0 {
-                        (raw | 0xE000) as i16
-                    } else {
-                        raw as i16
-                    };
-                    self.scroll_latch = false;
-                }
-                // $210E also updates the M7 latch
+                    raw as i16
+                };
                 self.m7_prev = val;
             }
 
-            // $210F - BG2HOFS - BG2 Horizontal Scroll (2 writes)
+            // $210F - BG2HOFS - BG2 Horizontal Scroll
             0x210F => {
-                if !self.scroll_latch {
-                    self.scroll_prev = val;
-                    self.scroll_latch = true;
-                } else {
-                    self.bg2_hofs = ((val as u16 & 0x03) << 8) | (self.scroll_prev as u16);
-                    self.scroll_latch = false;
-                }
+                self.bg2_hofs = ((val as u16 & 0x03) << 8) | (self.scroll_prev as u16);
+                self.scroll_prev = val;
             }
 
-            // $2110 - BG2VOFS - BG2 Vertical Scroll (2 writes)
+            // $2110 - BG2VOFS - BG2 Vertical Scroll
             0x2110 => {
-                if !self.scroll_latch {
-                    self.scroll_prev = val;
-                    self.scroll_latch = true;
-                } else {
-                    self.bg2_vofs = ((val as u16 & 0x03) << 8) | (self.scroll_prev as u16);
-                    self.scroll_latch = false;
-                }
+                self.bg2_vofs = ((val as u16 & 0x03) << 8) | (self.scroll_prev as u16);
+                self.scroll_prev = val;
             }
 
-            // $2111 - BG3HOFS - BG3 Horizontal Scroll (2 writes)
+            // $2111 - BG3HOFS - BG3 Horizontal Scroll
             0x2111 => {
-                if !self.scroll_latch {
-                    self.scroll_prev = val;
-                    self.scroll_latch = true;
-                } else {
-                    self.bg3_hofs = ((val as u16 & 0x03) << 8) | (self.scroll_prev as u16);
-                    self.scroll_latch = false;
-                }
+                self.bg3_hofs = ((val as u16 & 0x03) << 8) | (self.scroll_prev as u16);
+                self.scroll_prev = val;
             }
 
-            // $2112 - BG3VOFS - BG3 Vertical Scroll (2 writes)
+            // $2112 - BG3VOFS - BG3 Vertical Scroll
             0x2112 => {
-                if !self.scroll_latch {
-                    self.scroll_prev = val;
-                    self.scroll_latch = true;
-                } else {
-                    self.bg3_vofs = ((val as u16 & 0x03) << 8) | (self.scroll_prev as u16);
-                    self.scroll_latch = false;
-                }
+                self.bg3_vofs = ((val as u16 & 0x03) << 8) | (self.scroll_prev as u16);
+                self.scroll_prev = val;
             }
 
-            // $2113 - BG4HOFS - BG4 Horizontal Scroll (2 writes)
+            // $2113 - BG4HOFS - BG4 Horizontal Scroll
             0x2113 => {
-                if !self.scroll_latch {
-                    self.scroll_prev = val;
-                    self.scroll_latch = true;
-                } else {
-                    self.bg4_hofs = ((val as u16 & 0x03) << 8) | (self.scroll_prev as u16);
-                    self.scroll_latch = false;
-                }
+                self.bg4_hofs = ((val as u16 & 0x03) << 8) | (self.scroll_prev as u16);
+                self.scroll_prev = val;
             }
 
-            // $2114 - BG4VOFS - BG4 Vertical Scroll (2 writes)
+            // $2114 - BG4VOFS - BG4 Vertical Scroll
             0x2114 => {
-                if !self.scroll_latch {
-                    self.scroll_prev = val;
-                    self.scroll_latch = true;
-                } else {
-                    self.bg4_vofs = ((val as u16 & 0x03) << 8) | (self.scroll_prev as u16);
-                    self.scroll_latch = false;
-                }
+                self.bg4_vofs = ((val as u16 & 0x03) << 8) | (self.scroll_prev as u16);
+                self.scroll_prev = val;
             }
 
             // Mode 7 registers ($211A-$2120)
@@ -965,27 +960,27 @@ impl Ppu {
 
             // $2121 - CGADD - CGRAM Address
             0x2121 => {
-                self.cgram_addr = val;
+                self.cgram_addr.set(val);
                 self.cgram_write_latch = false; // Reset write latch
+                self.cgram_read_latch.set(false); // Reset read latch
             }
 
             // $2122 - CGDATA - CGRAM Data Write
             0x2122 => {
+                let cg_addr = self.cgram_addr.get();
                 let addr = if self.cgram_write_latch {
                     // High byte
-                    (self.cgram_addr as usize * 2 + 1) % CGRAM_SIZE
+                    (cg_addr as usize * 2 + 1) % CGRAM_SIZE
                 } else {
                     // Low byte
-                    (self.cgram_addr as usize * 2) % CGRAM_SIZE
+                    (cg_addr as usize * 2) % CGRAM_SIZE
                 };
 
                 self.cgram[addr] = val;
 
                 // Log complete palette entry write (after high byte)
-                // Note: This happens BEFORE cgram_addr is incremented below,
-                // so color_addr correctly points to the color entry we just completed
                 if self.cgram_write_latch {
-                    let color_addr = self.cgram_addr as usize;
+                    let color_addr = cg_addr as usize;
                     let low = self.cgram[(color_addr * 2) % CGRAM_SIZE] as u16;
                     let high = self.cgram[(color_addr * 2 + 1) % CGRAM_SIZE] as u16;
                     let color = low | (high << 8);
@@ -1003,7 +998,7 @@ impl Ppu {
 
                 // Toggle latch and increment address after high byte
                 if self.cgram_write_latch {
-                    self.cgram_addr = self.cgram_addr.wrapping_add(1);
+                    self.cgram_addr.set(cg_addr.wrapping_add(1));
                 }
                 self.cgram_write_latch = !self.cgram_write_latch;
             }
@@ -1291,12 +1286,11 @@ impl Ppu {
 
             // $2138 - OAMDATAREAD - OAM Data Read
             0x2138 => {
-                let addr = self.oam_addr as usize;
-                if addr < OAM_SIZE {
-                    self.oam[addr]
-                } else {
-                    0
-                }
+                let addr = self.oam_addr.get() as usize;
+                let result = if addr < OAM_SIZE { self.oam[addr] } else { 0 };
+                // Auto-increment address after read
+                self.oam_addr.set(((addr as u16) + 1) % (OAM_SIZE as u16));
+                result
             }
 
             // $2139 - VMDATALREAD - VRAM Data Read (low byte)
@@ -1328,13 +1322,23 @@ impl Ppu {
             }
 
             // $213B - CGDATAREAD - CGRAM Data Read
+            // Uses its own read latch (separate from write latch)
+            // Auto-increments cgram_addr after reading high byte
             0x213B => {
-                let addr = if self.cgram_write_latch {
-                    (self.cgram_addr as usize * 2 + 1) % CGRAM_SIZE
+                let cg_addr = self.cgram_addr.get();
+                let read_latch = self.cgram_read_latch.get();
+                let addr = if read_latch {
+                    (cg_addr as usize * 2 + 1) % CGRAM_SIZE
                 } else {
-                    (self.cgram_addr as usize * 2) % CGRAM_SIZE
+                    (cg_addr as usize * 2) % CGRAM_SIZE
                 };
-                self.cgram[addr]
+                let result = self.cgram[addr];
+                // Toggle read latch and increment address after high byte
+                if read_latch {
+                    self.cgram_addr.set(cg_addr.wrapping_add(1));
+                }
+                self.cgram_read_latch.set(!read_latch);
+                result
             }
 
             // $213C - OPHCT - Horizontal Counter
@@ -1573,6 +1577,17 @@ impl Ppu {
         frame
     }
 
+    /// Snapshot the current fixed color state for the given scanline.
+    /// Called at the start of each visible scanline so that HDMA-driven
+    /// per-scanline color effects (e.g., sky gradients) are captured for
+    /// the deferred full-frame render pass.
+    pub fn snapshot_scanline_state(&mut self, scanline: usize) {
+        if scanline < 224 {
+            self.scanline_fixed_colors[scanline] =
+                [self.fixed_color_r, self.fixed_color_g, self.fixed_color_b];
+        }
+    }
+
     /// Update H/V counters based on elapsed cycles
     ///
     /// This should be called periodically by the system to update the beam position.
@@ -1656,12 +1671,13 @@ impl Ppu {
                 let bg3_priority = (self.bgmode & 0x08) != 0;
 
                 if bg3_priority {
-                    // BG3 high priority mode for Mode 1
-                    // When bit 3 of BGMODE is set, BG3 priority 1 becomes the highest priority
+                    // BG3 high priority mode for Mode 1 (BGMODE bit 3 = 1)
+                    // BG3 priority 1 tiles become the absolute highest priority layer.
+                    // Reference: anomie's SNES docs, superfamicom wiki
                     // Priority order (back to front):
-                    // BG3.0 -> BG2.0 -> BG1.0 -> OBJ.0 -> OBJ.1 -> BG3.1 -> BG2.1 -> BG1.1 -> OBJ.2 -> OBJ.3
+                    // BG3.P0 → OBJ.P0 → OBJ.P1 → BG2.P0 → BG1.P0 → OBJ.P2 → BG2.P1 → BG1.P1 → OBJ.P3 → BG3.P1
 
-                    // 1. BG3 priority 0
+                    // 1. BG3 priority 0 (lowest)
                     if layer_enable & 0x04 != 0 {
                         self.render_bg_layer_2bpp_priority(
                             frame,
@@ -1671,7 +1687,15 @@ impl Ppu {
                             0,
                         );
                     }
-                    // 2. BG2 priority 0
+                    // 2. OBJ priority 0
+                    if layer_enable & 0x10 != 0 {
+                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 0, 0);
+                    }
+                    // 3. OBJ priority 1
+                    if layer_enable & 0x10 != 0 {
+                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 1, 1);
+                    }
+                    // 4. BG2 priority 0
                     if layer_enable & 0x02 != 0 {
                         self.render_bg_layer_4bpp_priority(
                             frame,
@@ -1681,7 +1705,7 @@ impl Ppu {
                             0,
                         );
                     }
-                    // 3. BG1 priority 0
+                    // 5. BG1 priority 0
                     if layer_enable & 0x01 != 0 {
                         self.render_bg_layer_4bpp_priority(
                             frame,
@@ -1691,23 +1715,9 @@ impl Ppu {
                             0,
                         );
                     }
-                    // 4. OBJ priority 0
+                    // 6. OBJ priority 2
                     if layer_enable & 0x10 != 0 {
-                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 0, 0);
-                    }
-                    // 5. OBJ priority 1
-                    if layer_enable & 0x10 != 0 {
-                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 1, 1);
-                    }
-                    // 6. BG3 priority 1 (high priority mode - appears in middle)
-                    if layer_enable & 0x04 != 0 {
-                        self.render_bg_layer_2bpp_priority(
-                            frame,
-                            priority_buffer,
-                            layer_buffer,
-                            2,
-                            1,
-                        );
+                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 2, 2);
                     }
                     // 7. BG2 priority 1
                     if layer_enable & 0x02 != 0 {
@@ -1729,20 +1739,25 @@ impl Ppu {
                             1,
                         );
                     }
-                    // 9. OBJ priority 2
-                    if layer_enable & 0x10 != 0 {
-                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 2, 2);
-                    }
-                    // 10. OBJ priority 3
+                    // 9. OBJ priority 3
                     if layer_enable & 0x10 != 0 {
                         self.render_sprites_priority(frame, priority_buffer, layer_buffer, 3, 3);
                     }
+                    // 10. BG3 priority 1 (highest - the whole point of bg3_priority mode)
+                    if layer_enable & 0x04 != 0 {
+                        self.render_bg_layer_2bpp_priority(
+                            frame,
+                            priority_buffer,
+                            layer_buffer,
+                            2,
+                            1,
+                        );
+                    }
                 } else {
-                    // Normal priority mode for Mode 1
-                    // Priority order (back to front, per superfamicom wiki):
-                    // backdrop -> BG3.0 -> OBJ.0 -> OBJ.1 -> BG2.0 -> BG1.0 -> OBJ.2 -> BG2.1 -> BG1.1 -> OBJ.3 -> BG3.1
-                    //
-                    // Render in order from back to front (painter's algorithm)
+                    // Normal priority mode for Mode 1 (BGMODE bit 3 = 0)
+                    // Reference: anomie's SNES docs — BG3.P1 is between OBJ.P0 and OBJ.P1
+                    // Priority order (back to front):
+                    // BG3.P0 → OBJ.P0 → BG3.P1 → OBJ.P1 → BG2.P0 → BG1.P0 → OBJ.P2 → BG2.P1 → BG1.P1 → OBJ.P3
 
                     // 1. BG3 priority 0 (lowest, furthest back)
                     if layer_enable & 0x04 != 0 {
@@ -1760,66 +1775,7 @@ impl Ppu {
                         self.render_sprites_priority(frame, priority_buffer, layer_buffer, 0, 0);
                     }
 
-                    // 3. OBJ priority 1
-                    if layer_enable & 0x10 != 0 {
-                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 1, 1);
-                    }
-
-                    // 4. BG2 priority 0
-                    if layer_enable & 0x02 != 0 {
-                        self.render_bg_layer_4bpp_priority(
-                            frame,
-                            priority_buffer,
-                            layer_buffer,
-                            1,
-                            0,
-                        );
-                    }
-
-                    // 5. BG1 priority 0
-                    if layer_enable & 0x01 != 0 {
-                        self.render_bg_layer_4bpp_priority(
-                            frame,
-                            priority_buffer,
-                            layer_buffer,
-                            0,
-                            0,
-                        );
-                    }
-
-                    // 6. OBJ priority 2
-                    if layer_enable & 0x10 != 0 {
-                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 2, 2);
-                    }
-
-                    // 7. BG2 priority 1
-                    if layer_enable & 0x02 != 0 {
-                        self.render_bg_layer_4bpp_priority(
-                            frame,
-                            priority_buffer,
-                            layer_buffer,
-                            1,
-                            1,
-                        );
-                    }
-
-                    // 8. BG1 priority 1
-                    if layer_enable & 0x01 != 0 {
-                        self.render_bg_layer_4bpp_priority(
-                            frame,
-                            priority_buffer,
-                            layer_buffer,
-                            0,
-                            1,
-                        );
-                    }
-
-                    // 9. OBJ priority 3
-                    if layer_enable & 0x10 != 0 {
-                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 3, 3);
-                    }
-
-                    // 10. BG3 priority 1 (highest, on top)
+                    // 3. BG3 priority 1 (between OBJ.P0 and OBJ.P1 in normal mode)
                     if layer_enable & 0x04 != 0 {
                         self.render_bg_layer_2bpp_priority(
                             frame,
@@ -1828,6 +1784,65 @@ impl Ppu {
                             2,
                             1,
                         );
+                    }
+
+                    // 4. OBJ priority 1
+                    if layer_enable & 0x10 != 0 {
+                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 1, 1);
+                    }
+
+                    // 5. BG2 priority 0
+                    if layer_enable & 0x02 != 0 {
+                        self.render_bg_layer_4bpp_priority(
+                            frame,
+                            priority_buffer,
+                            layer_buffer,
+                            1,
+                            0,
+                        );
+                    }
+
+                    // 6. BG1 priority 0
+                    if layer_enable & 0x01 != 0 {
+                        self.render_bg_layer_4bpp_priority(
+                            frame,
+                            priority_buffer,
+                            layer_buffer,
+                            0,
+                            0,
+                        );
+                    }
+
+                    // 7. OBJ priority 2
+                    if layer_enable & 0x10 != 0 {
+                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 2, 2);
+                    }
+
+                    // 8. BG2 priority 1
+                    if layer_enable & 0x02 != 0 {
+                        self.render_bg_layer_4bpp_priority(
+                            frame,
+                            priority_buffer,
+                            layer_buffer,
+                            1,
+                            1,
+                        );
+                    }
+
+                    // 9. BG1 priority 1
+                    if layer_enable & 0x01 != 0 {
+                        self.render_bg_layer_4bpp_priority(
+                            frame,
+                            priority_buffer,
+                            layer_buffer,
+                            0,
+                            1,
+                        );
+                    }
+
+                    // 10. OBJ priority 3 (highest)
+                    if layer_enable & 0x10 != 0 {
+                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 3, 3);
                     }
                 }
             }
@@ -2346,10 +2361,13 @@ impl Ppu {
         block_offset + in_block_offset
     }
 
-    /// Check if offset-per-tile mode is enabled
-    /// Bit 3 of BGMODE ($2105) enables offset-per-tile for modes 2, 4, 6
+    /// Check if offset-per-tile mode is active
+    /// Offset-per-tile is an inherent feature of BG Modes 2, 4, and 6.
+    /// It is NOT controlled by bit 3 of BGMODE — in Mode 1, bit 3 is the
+    /// BG3 priority flag, which has nothing to do with offset-per-tile.
     fn is_offset_per_tile_enabled(&self) -> bool {
-        (self.bgmode & 0x08) != 0
+        let mode = self.bgmode & 0x07;
+        mode == 2 || mode == 4 || mode == 6
     }
 
     /// Get offset-per-tile value from BG3 tilemap
@@ -2794,9 +2812,18 @@ impl Ppu {
                     continue;
                 }
 
-                // Calculate rendering priority (0-7 scale)
-                // Priority 0 BG = priority level 1, Priority 1 BG = priority level 3
-                let render_priority = if filter_priority == 0 { 1 } else { 3 };
+                // In Mode 0, each BG layer uses a separate 32-color region of CGRAM:
+                // BG1 = 0-31, BG2 = 32-63, BG3 = 64-95, BG4 = 96-127
+                let color = if (self.bgmode & 0x07) == 0 {
+                    color + (bg_index as u8 * 32)
+                } else {
+                    color
+                };
+
+                // Painter's algorithm: later-rendered layers always overwrite earlier ones.
+                // All layers use uniform priority 1 so the rendering order alone determines
+                // which layer appears on top. Priority 0 = unrendered (backdrop).
+                let render_priority: u8 = 1;
 
                 // Check window masking for this layer
                 if self.is_pixel_masked_by_window(screen_x, bg_index) {
@@ -2958,7 +2985,8 @@ impl Ppu {
 
                 // Calculate rendering priority (0-7 scale)
                 // Priority 0 BG = priority level 1, Priority 1 BG = priority level 3
-                let render_priority = if filter_priority == 0 { 1 } else { 3 };
+                // Painter's algorithm: uniform priority ensures rendering order determines layering
+                let render_priority: u8 = 1;
 
                 // Check window masking for this layer
                 if self.is_pixel_masked_by_window(screen_x, bg_index) {
@@ -3109,8 +3137,8 @@ impl Ppu {
                     continue;
                 }
 
-                // Calculate rendering priority
-                let render_priority = if filter_priority == 0 { 1 } else { 3 };
+                // Painter's algorithm: uniform priority ensures rendering order determines layering
+                let render_priority: u8 = 1;
 
                 // Check window masking for this layer
                 if self.is_pixel_masked_by_window(screen_x, bg_index) {
@@ -3138,7 +3166,7 @@ impl Ppu {
         frame: &mut Frame,
         priority_buffer: &mut [u8],
         layer_buffer: &mut [u8],
-        filter_priority: u8,
+        _filter_priority: u8,
     ) {
         let layer_id = LAYER_BG1;
         // Mode 7 uses separate 13-bit scroll values (not the 10-bit BG1 scroll)
@@ -3271,8 +3299,8 @@ impl Ppu {
                     continue;
                 }
 
-                // Calculate rendering priority
-                let render_priority = if filter_priority == 0 { 1 } else { 3 };
+                // Painter's algorithm: uniform priority ensures rendering order determines layering
+                let render_priority: u8 = 1;
 
                 // Draw pixel if it has equal or higher priority (later layers paint on top)
                 let frame_offset = screen_y * 256 + screen_x;
@@ -3424,8 +3452,8 @@ impl Ppu {
                     continue;
                 }
 
-                // Calculate rendering priority
-                let render_priority = if filter_priority == 0 { 1 } else { 3 };
+                // Painter's algorithm: uniform priority ensures rendering order determines layering
+                let render_priority: u8 = 1;
 
                 // Check window masking for this layer (use x/2 for 512px mode)
                 if self.is_pixel_masked_by_window(screen_x / 2, bg_index) {
@@ -3571,8 +3599,8 @@ impl Ppu {
                     continue;
                 }
 
-                // Calculate rendering priority
-                let render_priority = if filter_priority == 0 { 1 } else { 3 };
+                // Painter's algorithm: uniform priority ensures rendering order determines layering
+                let render_priority: u8 = 1;
 
                 // Check window masking for this layer (use x/2 for 512px mode)
                 if self.is_pixel_masked_by_window(screen_x / 2, bg_index) {
@@ -3625,7 +3653,7 @@ impl Ppu {
         // If priority rotation is enabled (bit 7 of $2103), the sprite at (OAMAddr & 0xFE) >> 1
         // gets priority. Otherwise, sprite 0 has priority.
         let first_sprite = if self.oam_priority_rotation {
-            ((self.oam_addr & 0x1FE) >> 1) as usize
+            ((self.oam_addr.get() & 0x1FE) >> 1) as usize
         } else {
             0
         };
@@ -3818,7 +3846,7 @@ impl Ppu {
         nameselect: bool,
         nameselect_gap: usize,
         palette: usize,
-        sprite_priority: u8,
+        _sprite_priority: u8,
         width: usize,
         height: usize,
         flip_x: bool,
@@ -3830,16 +3858,10 @@ impl Ppu {
         let tiles_wide = width / 8;
         let tiles_high = height / 8;
 
-        // Calculate rendering priority
-        // Since we use painter's algorithm (back to front rendering), we need distinct
-        // priority values for each OBJ priority level. The render_priority only needs
-        // to be > priority_buffer value to paint over, so we just need monotonically
-        // increasing values. Using sprite_priority + 2 gives us values 2-5 for OBJ
-        // priorities 0-3, which works with BG priorities of 1 (BG.0) and 3 (BG.1).
-        // Actually, since we now render in proper order (back to front), the priority
-        // buffer comparison ensures correct layering, so any non-zero value works.
-        // We use sprite_priority + 2 to keep OBJ distinct from BG (which uses 1 and 3).
-        let render_priority = sprite_priority + 2;
+        // Painter's algorithm: uniform priority ensures rendering order determines layering.
+        // All layers (BG and OBJ) use priority 1; rendering order alone controls which
+        // layer appears on top. Priority 0 = unrendered backdrop.
+        let render_priority: u8 = 1;
 
         // Calculate base address for this sprite's tiles
         // If nameselect is set, add the gap to access second sprite page
@@ -3861,15 +3883,6 @@ impl Ppu {
         } else {
             obj_base
         };
-
-        // Track pixels drawn for diagnostics (only log first sprite)
-        static mut SPRITE_COUNT: usize = 0;
-        let is_first_sprite = unsafe {
-            let count = SPRITE_COUNT;
-            SPRITE_COUNT += 1;
-            count == 0
-        };
-        let mut pixels_drawn = 0;
 
         for ty in 0..tiles_high {
             for tx in 0..tiles_wide {
@@ -3975,31 +3988,10 @@ impl Ppu {
                             frame.pixels[frame_offset] = color;
                             priority_buffer[frame_offset] = render_priority;
                             layer_buffer[frame_offset] = layer_id;
-                            pixels_drawn += 1;
-
-                            // Log first few pixels for the first sprite
-                            if is_first_sprite && pixels_drawn <= 5 {
-                                log(LogCategory::PPU, LogLevel::Debug, || {
-                                    format!(
-                                        "OBJ pixel: screen=({},{}), tile_addr=${:04X}, bp=[{:02X},{:02X},{:02X},{:02X}], color_idx={}, cgram_idx={}, color=${:08X}",
-                                        wrapped_x, screen_y, tile_addr, bp0, bp1, bp2, bp3, color_index, cgram_index, color
-                                    )
-                                });
-                            }
                         }
                     }
                 }
             }
-        }
-
-        // Log summary for first sprite only
-        if is_first_sprite {
-            log(LogCategory::PPU, LogLevel::Debug, || {
-                format!(
-                    "First sprite rendered: pos=({},{}), size={}x{}, tile=${:02X}, tile_addr=${:04X}, palette={}, pixels_drawn={}",
-                    x, y, width, height, tile, sprite_tile_base, palette, pixels_drawn
-                )
-            });
         }
     }
 
@@ -4057,24 +4049,27 @@ impl Ppu {
         };
 
         // Apply window inversion based on enable bits
-        let w1_masked = if w1_enable & 0x01 != 0 {
-            if w1_enable & 0x02 != 0 {
-                !in_w1
+        // Per hardware: bit 1 = enable, bit 0 = invert
+        let w1_masked = if w1_enable & 0x02 != 0 {
+            // Window 1 enabled
+            if w1_enable & 0x01 != 0 {
+                !in_w1 // Inverted
             } else {
-                in_w1
+                in_w1 // Not inverted
             }
         } else {
-            false
+            false // Window 1 disabled
         };
 
-        let w2_masked = if w2_enable & 0x01 != 0 {
-            if w2_enable & 0x02 != 0 {
-                !in_w2
+        let w2_masked = if w2_enable & 0x02 != 0 {
+            // Window 2 enabled
+            if w2_enable & 0x01 != 0 {
+                !in_w2 // Inverted
             } else {
-                in_w2
+                in_w2 // Not inverted
             }
         } else {
-            false
+            false // Window 2 disabled
         };
 
         // Get window logic for this layer
@@ -4205,13 +4200,6 @@ impl Ppu {
     /// - <https://wiki.superfamicom.org/rendering-the-screen#color-math>
     /// - <https://wiki.superfamicom.org/transparency>
     fn apply_color_math(&self, frame: &mut Frame, layer_buffer: &[u8], sub_frame: &Frame) {
-        // Get fixed color for blending (from $2132 COLDATA register)
-        // Convert 5-bit components to 8-bit
-        let fixed_r = (self.fixed_color_r << 3) as u32;
-        let fixed_g = (self.fixed_color_g << 3) as u32;
-        let fixed_b = (self.fixed_color_b << 3) as u32;
-        let fixed_color = 0xFF000000 | (fixed_r << 16) | (fixed_g << 8) | fixed_b;
-
         // Get color math control flags
         let subtract_mode = (self.cgadsub & 0x80) != 0; // Bit 7: 0=add, 1=subtract
         let half_math = (self.cgadsub & 0x40) != 0; // Bit 6: half the result
@@ -4226,59 +4214,67 @@ impl Ppu {
         // 11 = Disable everywhere
         let clip_mode = (self.cgwsel >> 4) & 0x03;
 
-        // Apply color math to each pixel
+        // Apply color math to each pixel, using per-scanline fixed color values
+        // to support HDMA-driven effects like sky gradients
         let width = frame.width as usize;
-        let mut x = 0usize;
-        for (i, &layer) in layer_buffer.iter().enumerate() {
-            // Ensure layer value is within the valid range before using it as a bit index
-            if layer > LAYER_BACKDROP {
-                continue;
+        let height = frame.height as usize;
+        let mut prev_scanline = usize::MAX;
+        let mut fixed_color = 0u32;
+
+        for scanline in 0..height {
+            // Get per-scanline fixed color from snapshot
+            if scanline != prev_scanline {
+                let [r5, g5, b5] = if scanline < 224 {
+                    self.scanline_fixed_colors[scanline]
+                } else {
+                    [self.fixed_color_r, self.fixed_color_g, self.fixed_color_b]
+                };
+                let (r5, g5, b5) = (r5 as u32, g5 as u32, b5 as u32);
+                let fr = (r5 << 3) | (r5 >> 2);
+                let fg = (g5 << 3) | (g5 >> 2);
+                let fb = (b5 << 3) | (b5 >> 2);
+                fixed_color = 0xFF000000 | (fr << 16) | (fg << 8) | fb;
+                prev_scanline = scanline;
             }
-            // Check if color math is enabled for this layer (CGADSUB bits 0-5)
-            let layer_bit = 1u8 << layer;
 
-            // Only apply color math when enabled for this layer and allowed by window clipping
-            if (self.cgadsub & layer_bit) != 0
-                && self.is_color_math_enabled_at_position(x, clip_mode)
-            {
-                // Get the main screen pixel color
-                let main_pixel = frame.pixels[i];
+            for x in 0..width {
+                let i = scanline * width + x;
+                let layer = layer_buffer[i];
 
-                // Choose blend source: sub-screen or fixed color
-                // IMPORTANT: When blending backdrop pixels, always use backdrop color as the
-                // sub-screen source, not whatever was rendered on the sub-screen. This matches
-                // real SNES hardware behavior where backdrop blends with backdrop.
-                let blend_color = if use_subscreen {
-                    if layer == LAYER_BACKDROP {
-                        // For backdrop pixels, blend with sub-screen backdrop (CGRAM[0])
-                        self.get_color(0)
+                // Ensure layer value is within the valid range
+                if layer > LAYER_BACKDROP {
+                    continue;
+                }
+                // Check if color math is enabled for this layer (CGADSUB bits 0-5)
+                let layer_bit = 1u8 << layer;
+
+                if (self.cgadsub & layer_bit) != 0
+                    && self.is_color_math_enabled_at_position(x, clip_mode)
+                {
+                    let main_pixel = frame.pixels[i];
+
+                    let blend_color = if use_subscreen {
+                        if layer == LAYER_BACKDROP {
+                            self.get_color(0)
+                        } else {
+                            sub_frame.pixels[i]
+                        }
                     } else {
-                        // For layer pixels, blend with corresponding sub-screen pixel
-                        sub_frame.pixels[i]
-                    }
-                } else {
-                    fixed_color
-                };
+                        fixed_color
+                    };
 
-                // Apply color math: add or subtract
-                let result = if subtract_mode {
-                    self.subtract_colors(main_pixel, blend_color)
-                } else {
-                    self.add_colors(main_pixel, blend_color)
-                };
+                    let result = if subtract_mode {
+                        self.subtract_colors(main_pixel, blend_color)
+                    } else {
+                        self.add_colors(main_pixel, blend_color)
+                    };
 
-                // Apply half-color if enabled
-                frame.pixels[i] = if half_math {
-                    self.halve_color(result)
-                } else {
-                    result
-                };
-            }
-
-            // Advance x position, wrapping at the end of the scanline
-            x += 1;
-            if x == width {
-                x = 0;
+                    frame.pixels[i] = if half_math {
+                        self.halve_color(result)
+                    } else {
+                        result
+                    };
+                }
             }
         }
     }
@@ -4360,10 +4356,10 @@ impl Ppu {
         // Apply window logic from wobjlog register bits 0-1 (for color window)
         let logic = self.wobjlog & 0x03;
         match logic {
-            0 => in_win1 || in_win2,    // OR
-            1 => in_win1 && in_win2,    // AND
-            2 => in_win1 ^ in_win2,     // XOR
-            3 => !(in_win1 || in_win2), // XNOR
+            0 => in_win1 || in_win2,   // OR
+            1 => in_win1 && in_win2,   // AND
+            2 => in_win1 ^ in_win2,    // XOR
+            3 => !(in_win1 ^ in_win2), // XNOR
             _ => false,
         }
     }
@@ -4467,7 +4463,7 @@ mod tests {
         // Check that color was written
         assert_eq!(ppu.cgram[2], 0xFF);
         assert_eq!(ppu.cgram[3], 0x7F);
-        assert_eq!(ppu.cgram_addr, 0x02); // Incremented
+        assert_eq!(ppu.cgram_addr.get(), 0x02); // Incremented
     }
 
     #[test]
@@ -4754,16 +4750,19 @@ mod tests {
         // Test OAM address registers
         ppu.write_register(0x2102, 0x40); // Low byte
         ppu.write_register(0x2103, 0x01); // High byte (only bit 0 used)
-        assert_eq!(ppu.oam_addr, 0x0140);
+        assert_eq!(ppu.oam_addr.get(), 0x0140);
 
-        // Test OAM data write
+        // Test OAM data write (address 0x140 = 320, in main table)
+        // Main table uses write-pair latch: first write buffers, second writes both
+        // But addr 320 is in the main table (< 512), so latching applies
+        // Write low byte (buffered)
         ppu.write_register(0x2104, 0xAA);
-        assert_eq!(ppu.oam[0x0140], 0xAA);
-        assert_eq!(ppu.oam_addr, 0x0141); // Auto-incremented
-
+        // Write high byte (both are written)
         ppu.write_register(0x2104, 0xBB);
+        assert_eq!(ppu.oam[0x0140], 0xAA);
         assert_eq!(ppu.oam[0x0141], 0xBB);
-        assert_eq!(ppu.oam_addr, 0x0142);
+        // After a word write, address advances by 2
+        assert_eq!(ppu.oam_addr.get(), 0x0142);
     }
 
     #[test]
@@ -5112,18 +5111,21 @@ mod tests {
     fn test_oam_read_register() {
         let mut ppu = Ppu::new();
 
-        // Write some data to OAM
+        // Write a pair of bytes to OAM (main table uses 2-write latching)
         ppu.write_register(0x2102, 0x10); // OAM address $10
         ppu.write_register(0x2103, 0x00);
-        ppu.write_register(0x2104, 0xAB); // Write data
+        ppu.write_register(0x2104, 0xAB); // Even byte: buffered in latch
+        ppu.write_register(0x2104, 0xCD); // Odd byte: commits both to OAM[0x10]=0xAB, OAM[0x11]=0xCD
 
-        // Reset address
+        // Reset address to read back
         ppu.write_register(0x2102, 0x10);
         ppu.write_register(0x2103, 0x00);
 
-        // Read back
+        // Read back (auto-increments after each read)
         let val = ppu.read_register(0x2138);
         assert_eq!(val, 0xAB);
+        let val2 = ppu.read_register(0x2138);
+        assert_eq!(val2, 0xCD);
     }
 
     #[test]
@@ -5641,13 +5643,39 @@ mod tests {
     fn test_offset_per_tile_mode() {
         let mut ppu = Ppu::new();
 
-        // Test that offset-per-tile is disabled by default
+        // Test that offset-per-tile is disabled by default (Mode 0)
         assert!(!ppu.is_offset_per_tile_enabled());
 
-        // Enable offset-per-tile (bit 3 of BGMODE)
-        ppu.write_register(0x2105, 0x0A); // Mode 2, offset-per-tile enabled
+        // Mode 1 with BG3 priority (bit 3) should NOT enable offset-per-tile
+        ppu.write_register(0x2105, 0x09); // Mode 1 + bit 3
+        assert!(!ppu.is_offset_per_tile_enabled());
+        assert_eq!(ppu.bgmode & 0x07, 1, "Should be Mode 1");
+
+        // Mode 2 should enable offset-per-tile (inherent feature)
+        ppu.write_register(0x2105, 0x02); // Mode 2
         assert!(ppu.is_offset_per_tile_enabled());
         assert_eq!(ppu.bgmode & 0x07, 2, "Should be Mode 2");
+
+        // Mode 4 should enable offset-per-tile
+        ppu.write_register(0x2105, 0x04); // Mode 4
+        assert!(ppu.is_offset_per_tile_enabled());
+
+        // Mode 6 should enable offset-per-tile
+        ppu.write_register(0x2105, 0x06); // Mode 6
+        assert!(ppu.is_offset_per_tile_enabled());
+
+        // Modes 0, 1, 3, 5, 7 should NOT enable offset-per-tile
+        for mode in [0, 1, 3, 5, 7] {
+            ppu.write_register(0x2105, mode);
+            assert!(
+                !ppu.is_offset_per_tile_enabled(),
+                "Mode {} should not have offset-per-tile",
+                mode
+            );
+        }
+
+        // Now test actual offset-per-tile data reading in Mode 2
+        ppu.write_register(0x2105, 0x02); // Mode 2
 
         // Set up BG3 tilemap (for offset data)
         ppu.write_register(0x2109, 0x00); // BG3 tilemap at VRAM $0000
@@ -5795,8 +5823,8 @@ mod tests {
         ppu.write_register(0x2127, 100); // WH1 - Window 1 right
 
         // Enable window 1 for BG1 (no inversion)
-        // W12SEL bits 0-1: Window 1 enable for BG1
-        ppu.write_register(0x2123, 0x01); // W12SEL
+        // W12SEL: bit 0 = invert, bit 1 = enable
+        ppu.write_register(0x2123, 0x02); // W12SEL: enable W1, no invert
 
         // Set window logic to OR (default)
         ppu.write_register(0x212A, 0x00); // WBGLOG
@@ -5813,7 +5841,7 @@ mod tests {
         assert!(!ppu.is_pixel_masked_by_window(255, 0)); // Far right
 
         // Test window inversion
-        // W12SEL bits 0-1: Window 1 enable + invert for BG1
+        // W12SEL: bit 0 = invert, bit 1 = enable
         ppu.write_register(0x2123, 0x03); // Enable + invert
 
         // Now pixels inside window should NOT be masked
@@ -5845,9 +5873,8 @@ mod tests {
         ppu.write_register(0x2129, 120); // WH3
 
         // Enable both windows for BG1 (no inversion)
-        // Bits 0-1: W1 enable for BG1
-        // Bits 2-3: W2 enable for BG1
-        ppu.write_register(0x2123, 0x05); // Enable W1 and W2 for BG1
+        // Bits: bit 0 = W1 invert, bit 1 = W1 enable, bit 2 = W2 invert, bit 3 = W2 enable
+        ppu.write_register(0x2123, 0x0A); // Enable W1 (bit 1) and W2 (bit 3), no inversion
 
         // Test OR logic (default) - masked if in either window
         ppu.write_register(0x212A, 0x00); // WBGLOG OR
@@ -6152,24 +6179,24 @@ mod tests {
         // Set OAM address to byte 0x28 (sprite 10 starts at byte 40)
         ppu.write_register(0x2102, 0x28); // Low byte
         ppu.write_register(0x2103, 0x00); // High byte, bit 7 = 0 (rotation off)
-        assert_eq!(ppu.oam_addr, 0x28);
+        assert_eq!(ppu.oam_addr.get(), 0x28);
         assert!(!ppu.oam_priority_rotation);
 
         // Enable priority rotation (bit 7 of $2103)
         ppu.write_register(0x2103, 0x80); // Bit 7 = 1 (rotation on)
         assert!(ppu.oam_priority_rotation);
         // Address should be preserved (bit 0 of value is for bit 8 of address)
-        assert_eq!(ppu.oam_addr, 0x28);
+        assert_eq!(ppu.oam_addr.get(), 0x28);
 
         // Test that address bit 8 works independently
         ppu.write_register(0x2102, 0x00);
         ppu.write_register(0x2103, 0x81); // Bit 7 = 1 (rotation), bit 0 = 1 (addr bit 8)
-        assert_eq!(ppu.oam_addr, 0x100);
+        assert_eq!(ppu.oam_addr.get(), 0x100);
         assert!(ppu.oam_priority_rotation);
 
         // Disable priority rotation again
         ppu.write_register(0x2103, 0x01); // Bit 7 = 0 (rotation off), bit 0 = 1
-        assert_eq!(ppu.oam_addr, 0x100);
+        assert_eq!(ppu.oam_addr.get(), 0x100);
         assert!(!ppu.oam_priority_rotation);
     }
 
@@ -6280,27 +6307,34 @@ mod tests {
         // Set to 511 (max 9-bit value)
         ppu.write_register(0x2102, 0xFF); // Low byte = 255
         ppu.write_register(0x2103, 0x01); // High byte bit 0 = 1
-        assert_eq!(ppu.oam_addr, 511);
+        assert_eq!(ppu.oam_addr.get(), 511);
 
         // Write bytes until we exceed OAM_SIZE (544)
-        // From 511, we need 33 more writes to reach 544
-        for _ in 0..33 {
+        // From 511 (main table), first 2 writes form a latch pair → advances to 512
+        // Then 32 direct writes (high table 512-543) → wraps to 0
+        // Total: 2 + 32 = 34 writes
+        for _ in 0..34 {
             ppu.write_register(0x2104, 0xFF);
         }
-        // After 33 writes from 511, we're at 544, which wraps to 0
+        // After 34 writes from 511, we're at 544, which wraps to 0
         assert_eq!(
-            ppu.oam_addr, 0,
+            ppu.oam_addr.get(),
+            0,
             "OAM address should wrap to 0 after reaching 544"
         );
 
         // Test direct wrap by setting to 543
         ppu.write_register(0x2102, 0x1F); // Low 8 bits
         ppu.write_register(0x2103, 0x01); // Bit 8 set
-        assert_eq!(ppu.oam_addr, 287); // 256 + 31 = 287
-                                       // We need to manually set to 543 using direct field access for this test
-        ppu.oam_addr = 543;
+        assert_eq!(ppu.oam_addr.get(), 287); // 256 + 31 = 287
+                                             // We need to manually set to 543 using direct field access for this test
+        ppu.oam_addr.set(543);
         ppu.write_register(0x2104, 0xFF);
-        assert_eq!(ppu.oam_addr, 0, "OAM address should wrap to 0 after 543");
+        assert_eq!(
+            ppu.oam_addr.get(),
+            0,
+            "OAM address should wrap to 0 after 543"
+        );
     }
 
     #[test]
@@ -6403,27 +6437,24 @@ mod tests {
     fn test_scroll_register_shared_latch() {
         let mut ppu = Ppu::new();
 
-        // According to hardware docs, scroll registers share the "previous value"
-        // This test verifies that behavior
+        // Hardware behavior: scroll registers have NO toggle latch.
+        // Every write computes value = (d & 0x03) << 8 | scroll_prev,
+        // then updates scroll_prev = d.
 
-        // Write first byte to BG1H
-        ppu.write_register(0x210D, 0x12); // BG1HOFS low byte
-        assert!(ppu.scroll_latch, "Latch should be set after first write");
+        // Write first byte to BG1H (low byte, stored as scroll_prev)
+        ppu.write_register(0x210D, 0x12); // scroll_prev = 0x12, bg1_hofs = (0x12 & 0x03) << 8 | 0 = 0x200
+        assert_eq!(ppu.scroll_prev, 0x12);
 
-        // Write to different register (BG2H) without completing BG1H
-        ppu.write_register(0x210F, 0x34); // BG2HOFS - uses 0x12 as low byte!
-                                          // Hardware: second write to different register completes using previous value
-                                          // Note: Only 10 bits are used for scroll (bits 0-1 of high byte, all 8 bits of low byte)
-                                          // So 0x34 & 0x03 = 0, making the value just 0x12
+        // Write to different register (BG2H) - uses 0x12 as scroll_prev
+        ppu.write_register(0x210F, 0x34); // bg2_hofs = (0x34 & 0x03) << 8 | 0x12 = 0x12, scroll_prev = 0x34
         assert_eq!(
             ppu.bg2_hofs, 0x12,
-            "BG2HOFS should use BG1's first write as low byte, high bits are masked"
+            "BG2HOFS should use 0x12 as low byte, high bits masked"
         );
 
-        // Now write complete value to BG1H with high bits set
-        ppu.write_register(0x210D, 0x56); // BG1HOFS low byte (new sequence)
-        ppu.write_register(0x210D, 0x03); // BG1HOFS high byte (use value with bits set)
-                                          // 0x03 & 0x03 = 0x03, shifted left 8 = 0x300, OR with 0x56 = 0x356
+        // Now write complete value to BG1H
+        ppu.write_register(0x210D, 0x56); // bg1_hofs = (0x56 & 0x03) << 8 | 0x34 = 0x234, scroll_prev = 0x56
+        ppu.write_register(0x210D, 0x03); // bg1_hofs = (0x03 & 0x03) << 8 | 0x56 = 0x356, scroll_prev = 0x03
         assert_eq!(ppu.bg1_hofs, 0x356);
     }
 
@@ -6601,7 +6632,7 @@ mod tests {
         // OAM address register is 9 bits (0-511)
         ppu.write_register(0x2102, 0x28); // Low byte = 40
         ppu.write_register(0x2103, 0x80); // High bit 0 = 0, rotation bit = 1
-        assert_eq!(ppu.oam_addr, 0x28);
+        assert_eq!(ppu.oam_addr.get(), 0x28);
 
         // First sprite calculation: (oam_addr & 0x1FE) >> 1
         // 0x28 = 40, 0x1FE = 510
@@ -6611,15 +6642,15 @@ mod tests {
         // Test with odd address
         ppu.write_register(0x2102, 0x29); // Byte 41
         ppu.write_register(0x2103, 0x80); // Rotation enabled
-        assert_eq!(ppu.oam_addr, 0x29);
+        assert_eq!(ppu.oam_addr.get(), 0x29);
         // First sprite: (0x29 & 0x1FE) >> 1 = (0x28) >> 1 = 20 (mask makes it even)
 
         // Test with address in upper range (bit 8 set)
         ppu.write_register(0x2102, 0x00); // Low byte = 0
         ppu.write_register(0x2103, 0x81); // Bit 8 = 1, rotation bit = 1
-        assert_eq!(ppu.oam_addr, 0x100); // 256
-                                         // First sprite: (0x100 & 0x1FE) >> 1 = (0x100) >> 1 = 128
-                                         // But there are only 128 sprites (0-127), so rendering code wraps with % 128
+        assert_eq!(ppu.oam_addr.get(), 0x100); // 256
+                                               // First sprite: (0x100 & 0x1FE) >> 1 = (0x100) >> 1 = 128
+                                               // But there are only 128 sprites (0-127), so rendering code wraps with % 128
 
         // The OAM address register can store values up to 511 (9 bits)
         // But sprite indices are derived from even addresses (2 bytes per sprite main entry)
