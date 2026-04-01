@@ -298,12 +298,17 @@ impl MemorySpc700 for Spc700Memory {
             // DSP data register
             DSP_DATA => self.dsp.read_register(self.dsp_addr & 0x7F),
             // Other I/O registers
+            // $F0 (TEST) is write-only, returns 0
             TEST_REG => 0,
-            CONTROL_REG => self.control,
+            // $F1 (CONTROL) is write-only, returns 0
+            // Reference: fullsnes "00F1h - CONTROL - Timer, I/O and ROM Control (W)"
+            // Reference: bsnes/ares readIO: case 0xf1: return 0x00;
+            CONTROL_REG => 0,
             DSP_ADDR => self.dsp_addr,
-            TIMER0 => self.timer_divisor[0],
-            TIMER1 => self.timer_divisor[1],
-            TIMER2 => self.timer_divisor[2],
+            // $FA-$FC (timer targets) are write-only, return 0
+            // Reference: fullsnes "00FAh - T0TARGET (W)", "00FBh - T1TARGET (W)", "00FCh - T2TARGET (W)"
+            // Reference: bsnes/ares readIO: case 0xfa/fb/fc: return 0x00;
+            TIMER0 | TIMER1 | TIMER2 => 0,
             AUX_IO4 | AUX_IO5 => 0,
             // RAM
             _ => self.ram[addr as usize],
@@ -383,12 +388,18 @@ impl MemorySpc700 for Spc700Memory {
             // DSP address register
             DSP_ADDR => {
                 self.ram[addr as usize] = val; // Writes also go to RAM
-                self.dsp_addr = val & 0x7F; // Only 7 bits used
+                                               // Store full 8-bit value; bit 7 is checked on DSP_DATA writes
+                                               // Reference: fullsnes "80h..FFh are read-only mirrors"
+                self.dsp_addr = val;
             }
             // DSP data register
             DSP_DATA => {
                 self.ram[addr as usize] = val; // Writes also go to RAM
-                self.dsp.write_register(self.dsp_addr & 0x7F, val);
+                                               // Block writes when DSP address bit 7 is set (read-only mirror region)
+                                               // Reference: bsnes/ares writeIO: case 0xf3: if(io.dspAddr & 0x80) break;
+                if self.dsp_addr & 0x80 == 0 {
+                    self.dsp.write_register(self.dsp_addr, val);
+                }
             }
             // Timer divisors
             TIMER0 => {

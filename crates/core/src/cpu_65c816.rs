@@ -57,7 +57,7 @@ pub struct Cpu65c816<M: Memory65c816> {
     /// NMI in progress flag
     in_nmi: bool,
     /// WAI (Wait for Interrupt) state - CPU is halted until interrupt occurs
-    waiting_for_interrupt: bool,
+    pub waiting_for_interrupt: bool,
     /// STP (Stop Processor) state - CPU is halted until reset
     stopped: bool,
 }
