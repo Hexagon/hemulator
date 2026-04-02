@@ -1,6 +1,6 @@
 # Game Boy Advance (GBA)
 
-**Status**: In Development (CPU + PPU + DMA + Timers + Debugger functional)
+**Status**: Functional (most games working; CPU + PPU + DMA + Timers + Debugger)
 
 ## Overview
 
