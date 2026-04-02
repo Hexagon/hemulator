@@ -13,10 +13,13 @@ This document describes the overall architecture of the Hemulator multi-system c
 - **[Game Boy](https://github.com/Hexagon/hemulator/blob/main/crates/systems/gb/README.md)**: Game Boy / Game Boy Color implementation
 - **[GBA](https://github.com/Hexagon/hemulator/blob/main/crates/systems/gba/README.md)**: Game Boy Advance implementation
 - **[Atari 2600](https://github.com/Hexagon/hemulator/blob/main/crates/systems/atari2600/README.md)**: Atari 2600 implementation
+- **[Atari 5200](https://github.com/Hexagon/hemulator/blob/main/crates/systems/atari5200/README.md)**: Atari 5200 implementation
 - **[CHIP-8](https://github.com/Hexagon/hemulator/blob/main/crates/systems/chip8/README.md)**: CHIP-8 / Super-CHIP / XO-CHIP / Mega-CHIP implementation
 - **[SMS](https://github.com/Hexagon/hemulator/blob/main/crates/systems/sms/README.md)**: Sega Master System implementation
 - **[ColecoVision](https://github.com/Hexagon/hemulator/blob/main/crates/systems/colecovision/README.md)**: ColecoVision implementation
 - **[SG-1000](https://github.com/Hexagon/hemulator/blob/main/crates/systems/sg1000/README.md)**: Sega SG-1000 implementation
+- **[Game & Watch](https://github.com/Hexagon/hemulator/blob/main/crates/systems/gameandwatch/README.md)**: Game & Watch (SM510) implementation
+- **[Mega Drive](https://github.com/Hexagon/hemulator/blob/main/crates/systems/megadrive/README.md)**: Sega Mega Drive / Genesis implementation
 - **[SNES](https://github.com/Hexagon/hemulator/blob/main/crates/systems/snes/README.md)**: Super Nintendo Entertainment System implementation
 - **[N64](https://github.com/Hexagon/hemulator/blob/main/crates/systems/n64/README.md)**: Nintendo 64 implementation
 - **[PS1](https://github.com/Hexagon/hemulator/blob/main/crates/systems/ps1/README.md)**: Sony PlayStation 1 implementation
