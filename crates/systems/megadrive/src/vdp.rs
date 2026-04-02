@@ -337,11 +337,16 @@ impl Vdp {
 
     /// Execute 68K-to-VRAM DMA, return words transferred
     pub fn do_dma_68k(&mut self, read_word: &dyn Fn(u32) -> u16) -> u32 {
-        if self.dma_mode != DmaMode::MemoryToVram || self.dma_length == 0 {
+        if self.dma_mode != DmaMode::MemoryToVram {
             return 0;
         }
 
-        let count = self.dma_length as u32;
+        // Length 0 = 65536 on real hardware
+        let count = if self.dma_length == 0 {
+            0x10000u32
+        } else {
+            self.dma_length as u32
+        };
         let mut src = self.dma_source;
 
         for _ in 0..count {
@@ -359,7 +364,12 @@ impl Vdp {
 
     fn do_dma_fill(&mut self, fill_val: u16) {
         let fill_byte = (fill_val >> 8) as u8;
-        let count = self.dma_length;
+        // Length 0 = 65536 on real hardware
+        let count = if self.dma_length == 0 {
+            0x10000u32
+        } else {
+            self.dma_length as u32
+        };
 
         // First word write
         let addr = self.control_address as usize;
@@ -383,7 +393,12 @@ impl Vdp {
     }
 
     fn do_dma_copy(&mut self) {
-        let count = self.dma_length;
+        // Length 0 = 65536 on real hardware
+        let count = if self.dma_length == 0 {
+            0x10000u32
+        } else {
+            self.dma_length as u32
+        };
         let mut src = self.dma_source as usize;
         let mut dst = self.control_address as usize;
 
@@ -458,7 +473,7 @@ impl Vdp {
 
     /// Whether DMA is pending (68K-to-VRAM)
     pub fn dma_pending(&self) -> bool {
-        self.dma_mode == DmaMode::MemoryToVram && self.dma_length > 0
+        self.dma_mode == DmaMode::MemoryToVram
     }
 
     pub fn get_frame(&self) -> &Frame {

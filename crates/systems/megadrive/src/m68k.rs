@@ -114,8 +114,9 @@ impl<M: Memory68k> M68k<M> {
     }
 
     /// Request an interrupt at the given level (1-7)
+    /// Higher levels take priority — only accept if higher than current pending
     pub fn interrupt(&mut self, level: u8) {
-        if level > 0 && level <= 7 {
+        if level > 0 && level <= 7 && level > self.pending_interrupt {
             self.pending_interrupt = level;
         }
     }
@@ -547,8 +548,14 @@ impl<M: Memory68k> M68k<M> {
         let d = dst & sm != 0;
         let r = result & sm != 0;
 
-        self.set_flag(SR_CARRY, result > size.max_val());
-        self.set_flag(SR_EXTEND, result > size.max_val());
+        // For Long, u32 wrapping_add can't overflow u32, so detect carry via u64
+        let carry = match size {
+            Size::Byte => result > 0xFF,
+            Size::Word => result > 0xFFFF,
+            Size::Long => (src as u64).wrapping_add(dst as u64) > 0xFFFF_FFFF,
+        };
+        self.set_flag(SR_CARRY, carry);
+        self.set_flag(SR_EXTEND, carry);
         self.set_flag(SR_OVERFLOW, (s && d && !r) || (!s && !d && r));
         self.set_flag(SR_ZERO, (result & size.mask()) == 0);
         self.set_flag(SR_NEGATIVE, r);
@@ -629,8 +636,8 @@ impl<M: Memory68k> M68k<M> {
             return self.do_bit_op(op_type, bit_num, mode, reg);
         }
 
-        if opcode & 0x0800 != 0 && (opcode & 0x0100) == 0 {
-            // Static bit operations (immediate bit number)
+        if opcode & 0x0E00 == 0x0800 && (opcode & 0x0100) == 0 {
+            // Static bit operations (immediate bit number, bits 11:9 = 100)
             let bit_num = self.fetch_word() as u32;
             let mode = ((opcode >> 3) & 7) as u8;
             let reg = (opcode & 7) as u8;
@@ -3007,5 +3014,67 @@ mod tests {
         // Only lower 5 bits (CCR) should be affected, upper byte unchanged
         assert_eq!(cpu.sr & 0x1F, 0x1F);
         assert_eq!(cpu.sr & 0xFF00, old_sr_upper);
+    }
+
+    #[test]
+    fn test_add_long_carry() {
+        let mut cpu = setup_cpu();
+        cpu.d[0] = 0xFFFF_FFFF;
+        cpu.d[1] = 0x0000_0001;
+        // ADD.L D0, D1 = 0xD280
+        write_opcode(&mut cpu, 0x0400, 0xD280);
+        cpu.step();
+        assert_eq!(cpu.d[1], 0); // wraps to 0
+        assert!(cpu.flag_c(), "carry must be set on 32-bit overflow");
+        assert!(cpu.flag_x(), "extend must mirror carry");
+        assert!(cpu.flag_z(), "result is zero");
+    }
+
+    #[test]
+    fn test_add_long_no_carry() {
+        let mut cpu = setup_cpu();
+        cpu.d[0] = 0x0000_0001;
+        cpu.d[1] = 0x0000_0002;
+        // ADD.L D0, D1 = 0xD280
+        write_opcode(&mut cpu, 0x0400, 0xD280);
+        cpu.step();
+        assert_eq!(cpu.d[1], 3);
+        assert!(!cpu.flag_c(), "no carry for small add");
+    }
+
+    #[test]
+    fn test_cmpi_word() {
+        let mut cpu = setup_cpu();
+        cpu.d[0] = 0x0042;
+        // CMPI.W #$0042, D0 = 0x0C40 0x0042
+        write_opcode(&mut cpu, 0x0400, 0x0C40);
+        cpu.memory.write_word(0x0402, 0x0042);
+        cpu.step();
+        assert!(cpu.flag_z(), "CMPI equal should set Z");
+        assert!(!cpu.flag_n(), "CMPI equal should clear N");
+        assert!(!cpu.flag_c(), "CMPI equal should clear C");
+    }
+
+    #[test]
+    fn test_cmpi_not_equal() {
+        let mut cpu = setup_cpu();
+        cpu.d[0] = 0x0010;
+        // CMPI.W #$0042, D0 — D0 - #$42 = negative
+        write_opcode(&mut cpu, 0x0400, 0x0C40);
+        cpu.memory.write_word(0x0402, 0x0042);
+        cpu.step();
+        assert!(!cpu.flag_z(), "CMPI not-equal should clear Z");
+    }
+
+    #[test]
+    fn test_eori_byte() {
+        let mut cpu = setup_cpu();
+        cpu.d[0] = 0xFF;
+        // EORI.B #$FF, D0 = 0x0A00 0x00FF
+        write_opcode(&mut cpu, 0x0400, 0x0A00);
+        cpu.memory.write_word(0x0402, 0x00FF);
+        cpu.step();
+        assert_eq!(cpu.d[0] & 0xFF, 0x00, "0xFF ^ 0xFF should be 0");
+        assert!(cpu.flag_z(), "result is zero");
     }
 }

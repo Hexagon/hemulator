@@ -4,7 +4,9 @@
 
 use crate::bus::MdBus;
 use crate::m68k::{M68k, Memory68k};
-use emu_core::debug::{CpuRegister, CpuState, DisassembledInstruction};
+use emu_core::debug::{
+    CpuRegister, CpuState, Debugger, DisassembledInstruction, MemoryRegion,
+};
 use emu_core::types::Frame;
 use emu_core::{MountPointInfo, System};
 use serde_json::Value;
@@ -195,6 +197,7 @@ impl System for MegaDriveSystem {
 
         // Get frame from VDP
         let frame = self.cpu.memory.vdp.borrow().get_frame().clone();
+
         Ok(frame)
     }
 
@@ -337,11 +340,112 @@ impl System for MegaDriveSystem {
     }
 
     fn debugger(&self) -> Option<&dyn emu_core::debug::Debugger> {
-        None // TODO: Implement Debugger trait for MegaDriveSystem
+        Some(self)
     }
 
     fn get_total_cycles(&self) -> u64 {
         self.total_cycles
+    }
+}
+
+impl Debugger for MegaDriveSystem {
+    fn disassemble_instruction(&self, address: u32) -> Option<DisassembledInstruction> {
+        if address > 0x00FF_FFFF {
+            return None;
+        }
+        let (mnemonic, len) = self.cpu.disassemble(address);
+        let mut bytes = Vec::with_capacity(len as usize);
+        for i in 0..len {
+            bytes.push(self.cpu.memory.read_byte(address + i));
+        }
+        Some(DisassembledInstruction::new(address, bytes, mnemonic))
+    }
+
+    fn read_memory(&self, address: u32, length: usize) -> Option<Vec<u8>> {
+        if address > 0x00FF_FFFF {
+            return None;
+        }
+        let mut result = Vec::with_capacity(length);
+        for i in 0..length {
+            let addr = address.wrapping_add(i as u32) & 0x00FF_FFFF;
+            result.push(self.cpu.memory.read_byte(addr));
+        }
+        Some(result)
+    }
+
+    fn get_memory_regions(&self) -> Vec<MemoryRegion> {
+        let rom_end = if self.cpu.memory.rom.is_empty() {
+            0x3FFFFF
+        } else {
+            (self.cpu.memory.rom.len() as u32 - 1).min(0x3FFFFF)
+        };
+        vec![
+            MemoryRegion::new(
+                "Cartridge ROM",
+                0x000000,
+                rom_end,
+                format!("Cartridge ROM ({}KB)", self.cpu.memory.rom.len() / 1024),
+                true,
+                false,
+            ),
+            MemoryRegion::new(
+                "Z80 RAM",
+                0xA00000,
+                0xA01FFF,
+                "8KB Z80 sound RAM",
+                true,
+                true,
+            ),
+            MemoryRegion::new(
+                "I/O Registers",
+                0xA10000,
+                0xA1001F,
+                "I/O area (controllers, Z80 bus control)",
+                true,
+                true,
+            ),
+            MemoryRegion::new(
+                "VDP",
+                0xC00000,
+                0xC0001F,
+                "VDP data, control, HV counter, PSG",
+                true,
+                true,
+            ),
+            MemoryRegion::new(
+                "Work RAM",
+                0xFF0000,
+                0xFFFFFF,
+                "64KB 68K work RAM",
+                true,
+                true,
+            ),
+        ]
+    }
+
+    fn get_cpu_state(&self) -> CpuState {
+        let mut state = CpuState::new(self.cpu.pc);
+        state.add_register(CpuRegister::new_32bit("PC", self.cpu.pc));
+        for i in 0..8 {
+            state.add_register(CpuRegister::new_32bit(format!("D{}", i), self.cpu.d[i]));
+        }
+        for i in 0..8 {
+            state.add_register(CpuRegister::new_32bit(format!("A{}", i), self.cpu.a[i]));
+        }
+        state.add_register(CpuRegister::new_16bit("SR", self.cpu.sr));
+        state.add_register(CpuRegister::new_32bit("USP", self.cpu.usp));
+        state.add_register(CpuRegister::new_32bit("SSP", self.cpu.ssp));
+
+        // Flags
+        state.add_flag("C", self.cpu.sr & 0x0001 != 0);
+        state.add_flag("V", self.cpu.sr & 0x0002 != 0);
+        state.add_flag("Z", self.cpu.sr & 0x0004 != 0);
+        state.add_flag("N", self.cpu.sr & 0x0008 != 0);
+        state.add_flag("X", self.cpu.sr & 0x0010 != 0);
+        state.add_flag("S", self.cpu.sr & 0x2000 != 0);
+        state.add_flag("T", self.cpu.sr & 0x8000 != 0);
+
+        state
     }
 }
 
