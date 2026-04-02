@@ -59,10 +59,6 @@ not available in CI or in headless `cargo test` runs.  They can be run manually 
 
 ## GBA
 
-### Critical
-- [ ] **APU audio not implemented**: The GBA audio system (direct sound channels, PCM mixing, tone generators) is not emulated; all games are completely silent. — `crates/systems/gba/src/`
-- [ ] **No save state support**: `save_state()` / `load_state()` are not implemented; save states cannot be created or loaded for GBA games. — `crates/systems/gba/src/lib.rs`
-
 ### High
 - [ ] **Affine ref point writes via DMA**: Verify HBlank DMA correctly updates PPU affine reference points for Mode 7 games (F-Zero, Mario Kart)
 - [ ] **Medal of Honor white screen**: HBlank polling loop — verify HBlank timing fix resolves the issue
@@ -135,7 +131,7 @@ not available in CI or in headless `cargo test` runs.  They can be run manually 
 - [ ] **Video output not functional**: ANTIC display list processor and GTIA are partially implemented but the rendering pipeline is incomplete; most games cannot be played. — `crates/systems/atari5200/src/`
 
 ### High
-- [ ] **BIOS ROM not loadable**: No BIOS loading mechanism is implemented; the built-in BIOS stub at $F800–$FFFF is incomplete. Games that rely on BIOS routines will malfunction. — `crates/systems/atari5200/src/`
+- [ ] **BIOS behavior/integration incomplete**: Custom BIOS images can be loaded via the BIOS mount point, but the built-in BIOS stub at $F800–$FFFF is incomplete and BIOS compatibility is not yet accurate. Games that rely on specific BIOS routines will malfunction. — `crates/systems/atari5200/src/`
 - [ ] **Paddle/analog input not connected**: POKEY analog input is not wired to the frontend input system; affects all 5200 games using the console's non-centering analog joystick. — `crates/systems/atari5200/src/`
 
 ## CHIP-8
@@ -154,13 +150,13 @@ not available in CI or in headless `cargo test` runs.  They can be run manually 
 - [ ] **Z80 sub-CPU integration incomplete**: Z80 bus access and banking are not fully integrated. Most commercial games use the Z80 to drive the YM2612 audio driver; without it, sound is missing or incorrect in the majority of titles. — `crates/systems/megadrive/src/`
 
 ### High
-- [ ] **Audio mixing not complete**: YM2612 FM synthesizer and SN76489 PSG audio channels are not mixed together in the output pipeline; only one audio source plays at a time. — `crates/systems/megadrive/src/`
-- [ ] **Save RAM (SRAM/EEPROM) not supported**: Battery-backed save cartridges are not emulated; games with save features cannot persist progress. — `crates/systems/megadrive/src/`
+- [ ] **Audio output accuracy needs refinement**: YM2612 FM and SN76489 PSG samples are already mixed into the stereo output, but overall audio behavior still likely needs accuracy work in areas such as relative levels, panning, filtering, and timing/synchronization. — `crates/systems/megadrive/src/`
+- [ ] **SRAM not included in save states**: Battery-backed SRAM is detected from the ROM header and memory-mapped for reads/writes, but SRAM contents are not serialized in `save_state()`/`load_state()`. Game progress stored in SRAM is lost when the emulator exits. — `crates/systems/megadrive/src/system.rs`
 
 ## PC
 
 ### High
-- [ ] **INT 21h (DOS API) mostly stubbed**: File I/O, program management, process control, and most DOS services beyond basic console output are not implemented. Most real-world DOS programs will fail. — `crates/systems/pc/src/bios.rs`
+- [ ] **INT 21h (DOS API) mostly stubbed**: Real file I/O, program management, process control, and many DOS services beyond basic console output are not implemented. Most real-world DOS programs will fail. — `crates/systems/pc/src/cpu.rs`
 - [ ] **No 32-bit (80386+) support**: 32-bit register extensions (EAX, EBX, ECX, EDX, ESI, EDI, EBP, ESP) and 32-bit addressing modes are not implemented. Software requiring 386+ features will not run. — `crates/core/src/cpu_8086/`
 
 ### Medium
