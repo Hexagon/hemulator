@@ -17,13 +17,13 @@
 - **[NES](crates/systems/nes/README.md)**: Nintendo Entertainment System
 - **[Game Boy](crates/systems/gb/README.md)**: Game Boy / Game Boy Color
 - **[Atari 2600](crates/systems/atari2600/README.md)**: Atari 2600
-- **[Atari 5200](crates/systems/atari5200/src/lib.rs)**: Atari 5200
+- **[Atari 5200](crates/systems/atari5200/README.md)**: Atari 5200
 - **[CHIP-8](crates/systems/chip8/README.md)**: CHIP-8 / Super-CHIP / XO-CHIP / Mega-CHIP
 - **[SMS](crates/systems/sms/README.md)**: Sega Master System
 - **[ColecoVision](crates/systems/colecovision/README.md)**: ColecoVision
 - **[SG-1000](crates/systems/sg1000/README.md)**: Sega SG-1000
 - **[Game & Watch](crates/systems/gameandwatch/README.md)**: Game & Watch (SM510)
-- **[Mega Drive](crates/systems/megadrive/src/lib.rs)**: Sega Mega Drive / Genesis
+- **[Mega Drive](crates/systems/megadrive/README.md)**: Sega Mega Drive / Genesis
 - **[SNES](crates/systems/snes/README.md)**: Super Nintendo Entertainment System
 - **[N64](crates/systems/n64/README.md)**: Nintendo 64
 - **[PS1](crates/systems/ps1/README.md)**: Sony PlayStation 1
@@ -250,13 +250,13 @@ For system-specific implementation details, see each system's README:
 - **[Game Boy](crates/systems/gb/README.md)** - PPU, APU, MBCs
 - **[GBA](crates/systems/gba/README.md)** - ARM7TDMI CPU, PPU, saves
 - **[Atari 2600](crates/systems/atari2600/README.md)** - TIA, RIOT, cartridges
-- **[Atari 5200](crates/systems/atari5200/src/lib.rs)** - 6502C CPU, ANTIC, GTIA, POKEY
+- **[Atari 5200](crates/systems/atari5200/README.md)** - 6502C CPU, ANTIC, GTIA, POKEY
 - **[CHIP-8](crates/systems/chip8/README.md)** - VM architecture, display modes
 - **[SMS](crates/systems/sms/README.md)** - Z80 CPU, VDP, PSG
 - **[ColecoVision](crates/systems/colecovision/README.md)** - Z80 CPU, TMS9918A VDP, PSG
 - **[SG-1000](crates/systems/sg1000/README.md)** - Z80 CPU, TMS9918A VDP, PSG
 - **[Game & Watch](crates/systems/gameandwatch/README.md)** - SM510 CPU, LCD segments, .mgw format
-- **[Mega Drive](crates/systems/megadrive/src/lib.rs)** - M68000 CPU, VDP, YM2612, SN76489
+- **[Mega Drive](crates/systems/megadrive/README.md)** - M68000 CPU, VDP, YM2612, SN76489
 - **[SNES](crates/systems/snes/README.md)** - PPU modes, memory map
 - **[N64](crates/systems/n64/README.md)** - RDP renderer, RSP
 - **[PS1](crates/systems/ps1/README.md)** - MIPS R3000A CPU, GPU, SPU

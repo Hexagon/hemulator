@@ -1107,7 +1107,7 @@ The Atari 5200 (1982) is a home video game console based on the Atari 400/800 co
 
 ### Game & Watch
 
-**Status**: �� In Development
+**Status**: 🚧 In Development
 
 Nintendo's Game & Watch handheld series (1980–1991), based on the Sharp SM510 4-bit microcontroller.
 
