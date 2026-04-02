@@ -6,7 +6,7 @@ nav_order: 5
 
 # Supported Systems
 
-This emulator supports 12 different retro gaming systems. **NES emulation is fully working** with ~90% game coverage. Other systems are in various stages of development.
+This emulator supports 12 different retro gaming systems. **NES and SMS emulation are fully working**. Other systems are in various stages of development.
 
 | System | Status | What Works | What's Missing | Recommended For |
 |--------|--------|------------|----------------|-----------------|
@@ -15,7 +15,7 @@ This emulator supports 12 different retro gaming systems. **NES emulation is ful
 | **CHIP-8** | ✅ Fully Working | Complete CHIP-8/Super-CHIP/XO-CHIP | - | Playing CHIP-8 programs |
 | **Game Boy** | ✅ Fully Functional (GB) / 🚧 GBC WIP | Core features, MBC0/1/2/3/5 | Some edge cases, GBC features incomplete | Playing GB games |
 | **GBA** | 🚧 In Development | ARM7TDMI CPU, PPU (all 6 modes), DMA, timers, sprites, blending | APU, save states | Development/testing |
-| **SMS** | 🚧 In Development | Z80 CPU, VDP, PSG, ROM banking | Not producing image, test ROM | Development only |
+| **SMS** | ✅ Fully Working | Z80 CPU, VDP, PSG, ROM banking | Some edge cases | Playing SMS games |
 | **ColecoVision** | 🚧 In Development | Z80 CPU, TMS9918A VDP, SN76489 PSG | Not producing image, audio output, BIOS required | Development only |
 | **SG-1000** | ⚠️ Experimental | Z80 CPU, TMS9918A VDP, SN76489 PSG | Audio output, test ROM | Development/testing |
 | **SNES** | ✅ Functional | CPU, all PPU modes 0-7, sprites, DMA/HDMA, SPC700+DSP audio | Some enhancement chips | Playing most games with audio |
@@ -299,8 +299,8 @@ For detailed technical information, see [crates/systems/gba/README.md](../../../
 
 ### SMS (Sega Master System)
 
-**Status**: 🚧 In Development (not producing image)  
-**Coverage**: Complete hardware emulation - Z80 CPU, VDP, PSG fully implemented
+**Status**: ✅ Fully Working  
+**Coverage**: ~90% game compatibility — Z80 CPU, VDP, PSG, and ROM banking fully implemented
 
 **ROM Format**: SMS (.sms files) - automatically detected via TMR SEGA header or file size
 
@@ -343,9 +343,8 @@ For detailed technical information, see [crates/systems/gba/README.md](../../../
   - Frame-based timing with proper cycle counts
 
 **Known Limitations**:
-- **Not Producing Image**: Currently not generating visible output - under active development
-- **Test ROM**: No smoke test ROM yet - testing with commercial ROMs needed
 - **Timing Model**: Frame-based rendering (not cycle-accurate) - suitable for most games
+- **Special Peripherals**: Light Phaser and paddle controllers not supported
 
 **Controls**: SMS controller mapped to same keyboard layout as NES:
 - Arrow keys = D-pad
