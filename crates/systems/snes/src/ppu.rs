@@ -69,10 +69,10 @@ struct ScanlineState {
     cgwsel: u8,
     cgadsub: u8,
     screen_display: u8,
-    #[allow(dead_code)]
     tm: u8,
-    #[allow(dead_code)]
     ts: u8,
+    #[allow(dead_code)]
+    bgmode: u8,
     bg_hofs: [u16; 4],
     bg_vofs: [u16; 4],
 }
@@ -88,6 +88,7 @@ impl Default for ScanlineState {
             screen_display: 0x80, // Start with screen blanked
             tm: 0,
             ts: 0,
+            bgmode: 0,
             bg_hofs: [0; 4],
             bg_vofs: [0; 4],
         }
@@ -209,11 +210,11 @@ pub struct Ppu {
     tm: u8,
 
     /// Mosaic register ($2106)
-    /// Bits 0-3: Mosaic pixel size (0 = 1x1 (no mosaic), 1 = 2x2, ..., 15 = 16x16)
-    /// Bit 4: Enable mosaic on BG1
-    /// Bit 5: Enable mosaic on BG2
-    /// Bit 6: Enable mosaic on BG3
-    /// Bit 7: Enable mosaic on BG4
+    /// Bit 0: Enable mosaic on BG1
+    /// Bit 1: Enable mosaic on BG2
+    /// Bit 2: Enable mosaic on BG3
+    /// Bit 3: Enable mosaic on BG4
+    /// Bits 4-7: Mosaic pixel size (0 = 1x1 (no mosaic), 1 = 2x2, ..., 15 = 16x16)
     mosaic: u8,
 
     /// BG1 horizontal scroll offset ($210D) - 10-bit value, written twice
@@ -540,11 +541,28 @@ pub struct Ppu {
     /// Uses Cell for interior mutability as reading $213D updates the toggle
     v_counter_latched: Cell<u16>,
 
+    /// Interlace field flag - toggles every frame when interlace is enabled.
+    /// Bit 7 of $213F (STAT78). Even on non-interlaced games this toggles.
+    interlace_field: bool,
+
+    /// Counter latch flag - set when H/V counters are latched ($2137 read).
+    /// Bit 6 of $213F (STAT78). Cleared when $213F is read.
+    counter_latch_flag: Cell<bool>,
+
     /// Per-scanline PPU state snapshots for HDMA-driven effects.
     /// HDMA can write different register values each scanline (e.g., SMW sky gradient,
     /// status bar layer enables, brightness fades). Since we render the full frame
     /// at once, we capture critical register state at the start of each visible scanline.
     scanline_state: [ScanlineState; 224],
+
+    /// Temporary per-scanline layer enables used during frame rendering.
+    /// Set from scanline_state[].tm or .ts before each render_screen_layers call.
+    /// Renderers check this to skip scanlines where their layer is disabled.
+    render_scanline_enables: [u8; 224],
+
+    /// Whether snapshot_scanline_state was called at least once this frame.
+    /// Used to detect unit test mode where no per-scanline state was captured.
+    scanline_state_captured: bool,
 }
 
 impl Ppu {
@@ -630,7 +648,11 @@ impl Ppu {
             hv_latch_toggle: Cell::new(false),
             h_counter_latched: Cell::new(0),
             v_counter_latched: Cell::new(0),
+            interlace_field: false,
+            counter_latch_flag: Cell::new(false),
             scanline_state: [ScanlineState::default(); 224],
+            render_scanline_enables: [0u8; 224],
+            scanline_state_captured: false,
         }
     }
 
@@ -1057,15 +1079,15 @@ impl Ppu {
             0x2106 => {
                 self.mosaic = val;
                 log(LogCategory::PPU, LogLevel::Debug, || {
-                    let size = (val & 0x0F) + 1;
+                    let size = ((val >> 4) & 0x0F) + 1;
                     format!(
                         "SNES PPU: Mosaic size={}x{} (BG1={} BG2={} BG3={} BG4={})",
                         size,
                         size,
-                        if val & 0x10 != 0 { "ON" } else { "OFF" },
-                        if val & 0x20 != 0 { "ON" } else { "OFF" },
-                        if val & 0x40 != 0 { "ON" } else { "OFF" },
-                        if val & 0x80 != 0 { "ON" } else { "OFF" }
+                        if val & 0x01 != 0 { "ON" } else { "OFF" },
+                        if val & 0x02 != 0 { "ON" } else { "OFF" },
+                        if val & 0x04 != 0 { "ON" } else { "OFF" },
+                        if val & 0x08 != 0 { "ON" } else { "OFF" }
                     )
                 });
             }
@@ -1313,6 +1335,8 @@ impl Ppu {
                 // Store current counter values into latched values
                 self.h_counter_latched.set(self.h_counter);
                 self.v_counter_latched.set(self.v_counter);
+                // Set counter latch flag (bit 6 of $213F)
+                self.counter_latch_flag.set(true);
                 // Reset toggle to prepare for reading low byte first
                 self.hv_latch_toggle.set(false);
                 0 // Reading $2137 always returns 0 (write-only functionality)
@@ -1427,15 +1451,24 @@ impl Ppu {
                 time_over | range_over | 0x01 // Version 1
             }
 
-            // $213F - STAT78 - PPU Status and NMI Flag
+            // $213F - STAT78 - PPU2 Status Register
             0x213F => {
-                // Bit 7: NMI flag (cleared on read)
-                // Bit 6: Master/slave mode
-                // Bits 0-3: PPU version
-                // Note: Reading this register clears the NMI flag
-                let nmi_val = if self.nmi_flag.get() { 0x80 } else { 0x00 };
-                self.nmi_flag.set(false); // Clear NMI flag on read
-                nmi_val | 0x01 // Version 1
+                // Bit 7: Interlace field (even/odd, toggles each frame)
+                // Bit 6: External latch flag (set by $2137 read, cleared by reading $213F)
+                // Bit 5: PAL mode (1) or NTSC mode (0)
+                // Bit 4: PPU2 master/slave (always 0 on consumer SNES)
+                // Bits 0-3: PPU2 chip version number
+                let field = if self.interlace_field { 0x80 } else { 0x00 };
+                let latch = if self.counter_latch_flag.get() {
+                    0x40
+                } else {
+                    0x00
+                };
+                // Clear counter latch flag on read
+                self.counter_latch_flag.set(false);
+                // Reset H/V counter toggle so next $213C/$213D read starts with low byte
+                self.hv_latch_toggle.set(false);
+                field | latch | 0x01 // NTSC, version 1
             }
 
             // $4212 - HVBJOY - H/V-Blank and Joypad Status
@@ -1460,6 +1493,10 @@ impl Ppu {
 
     /// Render a frame
     pub fn render_frame(&mut self) -> Frame {
+        // Reset per-frame tracking (will be set again by snapshot_scanline_state next frame)
+        let scanline_state_was_captured = self.scanline_state_captured;
+        self.scanline_state_captured = false;
+
         // Determine frame width based on BG mode
         // Modes 5 and 6 support hi-res (512px wide)
         let bg_mode = self.bgmode & 0x07;
@@ -1494,23 +1531,32 @@ impl Ppu {
         // Get BG mode (bits 0-2 of BGMODE register)
         let bg_mode = self.bgmode & 0x07;
 
-        // Render main screen (layers enabled in TM register $212C)
-        self.render_screen_layers(
-            bg_mode,
-            &mut frame,
-            &mut priority_buffer,
-            &mut layer_buffer,
-            self.tm, // Use main screen enable mask
-        );
+        // Build per-scanline main screen enables from captured scanline state
+        if scanline_state_was_captured {
+            for i in 0..224 {
+                self.render_scanline_enables[i] = self.scanline_state[i].tm;
+            }
+        } else {
+            // No per-scanline state captured (e.g., unit tests) - use current values
+            self.render_scanline_enables = [self.tm; 224];
+        }
+        // Render main screen (layers enabled in TM register $212C, per-scanline)
+        self.render_screen_layers(bg_mode, &mut frame, &mut priority_buffer, &mut layer_buffer);
 
-        // Render sub-screen (layers enabled in TS register $212D)
-        // Sub-screen uses the same rendering logic but with ts instead of tm
+        // Build per-scanline sub-screen enables from captured scanline state
+        if scanline_state_was_captured {
+            for i in 0..224 {
+                self.render_scanline_enables[i] = self.scanline_state[i].ts;
+            }
+        } else {
+            self.render_scanline_enables = [self.ts; 224];
+        }
+        // Render sub-screen (layers enabled in TS register $212D, per-scanline)
         self.render_screen_layers(
             bg_mode,
             &mut sub_frame,
             &mut sub_priority_buffer,
             &mut sub_layer_buffer,
-            self.ts, // Use sub-screen enable mask
         );
 
         // Fill backdrop color for all pixels that weren't rendered
@@ -1538,11 +1584,12 @@ impl Ppu {
         // COLOR WINDOW CLIPPING (BEFORE COLOR MATH) - per scanline
         // ============================================================================
         // CGWSEL bits 6-7 control color clipping to black based on window regions
+        let fw = frame_width as usize;
         for scanline in 0..224usize {
             let color_clip_mode = (self.scanline_state[scanline].cgwsel >> 6) & 0x03;
             if color_clip_mode != 0 {
-                let start = scanline * 256;
-                for x in 0..256 {
+                let start = scanline * fw;
+                for x in 0..fw {
                     let should_clip = match color_clip_mode {
                         1 => !self.is_inside_color_window(x),
                         2 => self.is_inside_color_window(x),
@@ -1571,13 +1618,13 @@ impl Ppu {
             let brightness = (sd & 0x0F) as u32;
 
             if !force_blank && brightness != 15 {
-                let start = scanline * 256;
+                let start = scanline * fw;
                 if brightness == 0 {
-                    for pixel in &mut frame.pixels[start..start + 256] {
+                    for pixel in &mut frame.pixels[start..start + fw] {
                         *pixel = 0xFF000000;
                     }
                 } else {
-                    for pixel in &mut frame.pixels[start..start + 256] {
+                    for pixel in &mut frame.pixels[start..start + fw] {
                         let a = (*pixel >> 24) & 0xFF;
                         let r = ((*pixel >> 16) & 0xFF) * brightness / 15;
                         let g = ((*pixel >> 8) & 0xFF) * brightness / 15;
@@ -1615,6 +1662,7 @@ impl Ppu {
     /// are captured for the deferred full-frame render pass.
     pub fn snapshot_scanline_state(&mut self, scanline: usize) {
         if scanline < 224 {
+            self.scanline_state_captured = true;
             self.scanline_state[scanline] = ScanlineState {
                 fixed_color_r: self.fixed_color_r,
                 fixed_color_g: self.fixed_color_g,
@@ -1624,6 +1672,7 @@ impl Ppu {
                 screen_display: self.screen_display,
                 tm: self.tm,
                 ts: self.ts,
+                bgmode: self.bgmode,
                 bg_hofs: [self.bg1_hofs, self.bg2_hofs, self.bg3_hofs, self.bg4_hofs],
                 bg_vofs: [self.bg1_vofs, self.bg2_vofs, self.bg3_vofs, self.bg4_vofs],
             };
@@ -1651,8 +1700,12 @@ impl Ppu {
         frame: &mut Frame,
         priority_buffer: &mut [u8],
         layer_buffer: &mut [u8],
-        layer_enable: u8, // TM for main screen, TS for sub-screen
     ) {
+        // Compute global enable mask: a layer is called if it's enabled on ANY scanline
+        let layer_enable = self
+            .render_scanline_enables
+            .iter()
+            .fold(0u8, |acc, &e| acc | e);
         match bg_mode {
             // Mode 0: 4 BG layers, 2bpp each
             // Priority order (back to front, per superfamicom wiki):
@@ -2165,7 +2218,7 @@ impl Ppu {
 
     /// Get mosaic pixel size (1 to 16)
     fn get_mosaic_size(&self) -> usize {
-        ((self.mosaic & 0x0F) + 1) as usize
+        (((self.mosaic >> 4) & 0x0F) + 1) as usize
     }
 
     /// Check if mosaic is enabled for a background layer (0-3)
@@ -2173,7 +2226,7 @@ impl Ppu {
         if bg_index >= 4 {
             return false;
         }
-        (self.mosaic & (0x10 << bg_index)) != 0
+        (self.mosaic & (1 << bg_index)) != 0
     }
 
     /// Apply mosaic effect to screen coordinates
@@ -2202,6 +2255,8 @@ impl Ppu {
             // Clear sprite overflow flags at start of new frame
             self.sprite_time_over = false;
             self.sprite_range_over = false;
+            // Toggle interlace field each frame (used by $213F bit 7)
+            self.interlace_field = !self.interlace_field;
         }
     }
 
@@ -2229,7 +2284,6 @@ impl Ppu {
     }
 
     /// Clear NMI flag (called when $4210 is read)
-    /// Note: Reading $213F also clears the flag, but that's handled in read_register
     pub fn clear_nmi_flag(&self) {
         self.nmi_flag.set(false);
     }
@@ -2758,6 +2812,10 @@ impl Ppu {
 
         // Render all visible tiles
         for screen_y in 0..224 {
+            // Skip scanlines where this BG layer is disabled (per-scanline HDMA)
+            if self.render_scanline_enables[screen_y] & (1 << bg_index) == 0 {
+                continue;
+            }
             // Use per-scanline scroll offsets from HDMA snapshot
             let (hofs, vofs) = (
                 self.scanline_state[screen_y].bg_hofs[bg_index],
@@ -2912,6 +2970,10 @@ impl Ppu {
 
         // Render all visible tiles
         for screen_y in 0..224 {
+            // Skip scanlines where this BG layer is disabled (per-scanline HDMA)
+            if self.render_scanline_enables[screen_y] & (1 << bg_index) == 0 {
+                continue;
+            }
             // Use per-scanline scroll offsets from HDMA snapshot
             let (hofs, vofs) = (
                 self.scanline_state[screen_y].bg_hofs[bg_index],
@@ -3068,6 +3130,10 @@ impl Ppu {
 
         // Render all visible tiles
         for screen_y in 0..224 {
+            // Skip scanlines where this BG layer is disabled (per-scanline HDMA)
+            if self.render_scanline_enables[screen_y] & (1 << bg_index) == 0 {
+                continue;
+            }
             // Use per-scanline scroll offsets from HDMA snapshot
             let (hofs, vofs) = (
                 self.scanline_state[screen_y].bg_hofs[bg_index],
@@ -3239,6 +3305,10 @@ impl Ppu {
         // Tilemap starts at VRAM address 0 (interleaved with tile data)
 
         for screen_y in 0..224 {
+            // Skip scanlines where BG1 is disabled (Mode 7 uses BG1)
+            if self.render_scanline_enables[screen_y] & 0x01 == 0 {
+                continue;
+            }
             for screen_x in 0..256 {
                 // Apply mosaic effect to screen coordinates if enabled
                 let (render_x, render_y) = if mosaic_enabled {
@@ -3386,6 +3456,10 @@ impl Ppu {
         // Render all visible tiles at 512px width
         // In hi-res mode, each logical pixel is rendered as 2 physical pixels horizontally
         for screen_y in 0..224 {
+            // Skip scanlines where this BG layer is disabled (per-scanline HDMA)
+            if self.render_scanline_enables[screen_y] & (1 << bg_index) == 0 {
+                continue;
+            }
             for screen_x in 0..512 {
                 // Apply mosaic effect to screen coordinates if enabled
                 let (render_x, render_y) = if mosaic_enabled {
@@ -3540,6 +3614,10 @@ impl Ppu {
 
         // Render all visible tiles at 512px width
         for screen_y in 0..224 {
+            // Skip scanlines where this BG layer is disabled (per-scanline HDMA)
+            if self.render_scanline_enables[screen_y] & (1 << bg_index) == 0 {
+                continue;
+            }
             for screen_x in 0..512 {
                 // Apply mosaic effect to screen coordinates if enabled
                 let (render_x, render_y) = if mosaic_enabled {
@@ -3967,6 +4045,11 @@ impl Ppu {
                             continue;
                         }
 
+                        // Skip scanlines where OBJ layer is disabled (per-scanline HDMA)
+                        if self.render_scanline_enables[screen_y as usize] & 0x10 == 0 {
+                            continue;
+                        }
+
                         // Read 4 bitplanes for this pixel
                         // SNES 4bpp tile format: bitplanes are interleaved in pairs
                         // Bytes 0-15: BP0 and BP1 interleaved (row N: BP0 at N*2, BP1 at N*2+1)
@@ -4233,6 +4316,7 @@ impl Ppu {
                     screen_display: self.screen_display,
                     tm: self.tm,
                     ts: self.ts,
+                    bgmode: self.bgmode,
                     bg_hofs: [self.bg1_hofs, self.bg2_hofs, self.bg3_hofs, self.bg4_hofs],
                     bg_vofs: [self.bg1_vofs, self.bg2_vofs, self.bg3_vofs, self.bg4_vofs],
                 }
@@ -5175,15 +5259,26 @@ mod tests {
         let stat77 = ppu.read_register(0x213E);
         assert_eq!(stat77 & 0x0F, 0x01); // Version 1
 
-        // Test STAT78 without NMI flag
+        // Test STAT78 ($213F) - PPU2 status register
+        // Bit 7: interlace field, bit 6: counter latch flag, bit 5: PAL, bits 0-3: version
         let stat78 = ppu.read_register(0x213F);
-        assert_eq!(stat78 & 0x80, 0x00); // NMI flag clear
         assert_eq!(stat78 & 0x0F, 0x01); // Version 1
+        assert_eq!(stat78 & 0x20, 0x00); // NTSC mode
+        assert_eq!(stat78 & 0x80, 0x00); // interlace_field starts false
 
-        // Set NMI flag and test again
-        ppu.set_vblank(true);
-        let stat78_nmi = ppu.read_register(0x213F);
-        assert_eq!(stat78_nmi & 0x80, 0x80); // NMI flag set
+        // Interlace field toggles at start of each frame (when vblank ends)
+        ppu.set_vblank(true); // Enter vblank (no toggle yet)
+        ppu.set_vblank(false); // Start of new frame → toggle
+        let stat78_toggled = ppu.read_register(0x213F);
+        assert_eq!(stat78_toggled & 0x80, 0x80); // interlace_field now true
+
+        // Counter latch flag: set by reading $2137, cleared by reading $213F
+        ppu.read_register(0x2137); // Latch H/V counters
+        let stat78_latch = ppu.read_register(0x213F);
+        assert_eq!(stat78_latch & 0x40, 0x40); // Latch flag set
+                                               // Reading $213F clears the latch flag
+        let stat78_cleared = ppu.read_register(0x213F);
+        assert_eq!(stat78_cleared & 0x40, 0x00); // Latch flag cleared
     }
 
     #[test]
@@ -6725,7 +6820,7 @@ mod tests {
         assert_eq!(ppu.get_mosaic_size(), 2, "Mosaic size should be 2x2");
 
         // Test enabling mosaic for all BGs, size 4x4
-        ppu.write_register(0x2106, 0xF3); // Size=3 (4x4), all BGs enabled
+        ppu.write_register(0x2106, 0x3F); // Size=3 (4x4) in bits 4-7, all BGs enabled in bits 0-3
         assert!(ppu.is_mosaic_enabled(0));
         assert!(ppu.is_mosaic_enabled(1));
         assert!(ppu.is_mosaic_enabled(2));
@@ -6733,7 +6828,7 @@ mod tests {
         assert_eq!(ppu.get_mosaic_size(), 4, "Mosaic size should be 4x4");
 
         // Test maximum mosaic size 16x16
-        ppu.write_register(0x2106, 0x0F); // Size=15 (16x16), no BGs enabled
+        ppu.write_register(0x2106, 0xF0); // Size=15 (16x16) in bits 4-7, no BGs enabled
         assert_eq!(ppu.get_mosaic_size(), 16, "Mosaic size should be 16x16");
         assert!(!ppu.is_mosaic_enabled(0));
         assert!(!ppu.is_mosaic_enabled(1));
@@ -6741,7 +6836,7 @@ mod tests {
         assert!(!ppu.is_mosaic_enabled(3));
 
         // Test enabling selective BGs
-        ppu.write_register(0x2106, 0x62); // Size=2 (3x3), BG2 and BG3 enabled
+        ppu.write_register(0x2106, 0x26); // Size=2 (3x3) in bits 4-7, BG2 and BG3 enabled in bits 0-3
         assert!(!ppu.is_mosaic_enabled(0));
         assert!(ppu.is_mosaic_enabled(1), "BG2 should have mosaic enabled");
         assert!(ppu.is_mosaic_enabled(2), "BG3 should have mosaic enabled");
@@ -6769,7 +6864,7 @@ mod tests {
         assert_eq!(ppu.apply_mosaic(3, 1), (2, 0));
 
         // Test 4x4 mosaic
-        ppu.write_register(0x2106, 0x13); // Size=3 (4x4)
+        ppu.write_register(0x2106, 0x31); // Size=3 (4x4) in bits 4-7, BG1 enabled
 
         // Block (0,0)-(3,3) should all map to (0,0)
         assert_eq!(ppu.apply_mosaic(0, 0), (0, 0));
@@ -6787,7 +6882,7 @@ mod tests {
         assert_eq!(ppu.apply_mosaic(1, 6), (0, 4));
 
         // Test 16x16 mosaic (maximum size)
-        ppu.write_register(0x2106, 0x0F); // Size=15 (16x16)
+        ppu.write_register(0x2106, 0xF1); // Size=15 (16x16) in bits 4-7, BG1 enabled
 
         // Block (0,0)-(15,15) should all map to (0,0)
         assert_eq!(ppu.apply_mosaic(0, 0), (0, 0));

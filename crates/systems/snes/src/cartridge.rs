@@ -278,7 +278,9 @@ impl Cartridge {
 
     pub fn read(&self, addr: u32) -> u8 {
         // Check if this address should be handled by the enhancement chip
-        // DSP-1 in LoROM: banks $30-$3F at $3000-$3FFF (DR) and $7000-$7FFF (SR)
+        // DSP-1 in LoROM: two common PCB mappings (both supported):
+        //   - Banks $00-$1F / $80-$9F at $6000-$7FFF (DR at $6xxx, SR at $7xxx)
+        //   - Banks $20-$3F / $A0-$BF at $8000-$FFFF (DR bit14=0, SR bit14=1)
         // DSP-1 in HiROM: banks $00-$1F at $6000-$7FFF
         if let Some(ref chip) = self.chip {
             let bank = (addr >> 16) as u8;
@@ -286,7 +288,18 @@ impl Cartridge {
 
             match (self.chip_type, self.mapping_mode) {
                 (ChipType::Dsp1, MappingMode::LoROM) => {
-                    // DSP-1 LoROM mapping (Mode B, default for <16Mbit ROMs like SMK):
+                    // DSP-1 LoROM mapping - support both PCB variants:
+                    //
+                    // Variant 1 (SHVC-1DSP-01, used by Super Mario Kart):
+                    //   Banks $00-$1F / $80-$9F at $6000-$7FFF
+                    //   DR (Data Register):   $6000-$6FFF (bit 12 = 0)
+                    //   SR (Status Register): $7000-$7FFF (bit 12 = 1)
+                    if matches!(bank, 0x00..=0x1F | 0x80..=0x9F)
+                        && (0x6000..=0x7FFF).contains(&offset)
+                    {
+                        return chip.borrow_mut().read(addr);
+                    }
+                    // Variant 2 (SHVC-1A3M, used by some Pilotwings revisions):
                     //   Banks $20-$3F / $A0-$BF at $8000-$FFFF
                     //   DR (Data Register):   offset bit 14 = 0 ($8000-$BFFF)
                     //   SR (Status Register): offset bit 14 = 1 ($C000-$FFFF)
@@ -522,10 +535,16 @@ impl Cartridge {
 
             match (self.chip_type, self.mapping_mode) {
                 (ChipType::Dsp1, MappingMode::LoROM) => {
-                    // DSP-1 LoROM mapping (Mode B):
-                    //   Banks $20-$3F / $A0-$BF at $8000-$FFFF
-                    //   DR (Data Register) at $8000-$BFFF is writable
-                    //   SR (Status Register) at $C000-$FFFF is read-only
+                    // DSP-1 LoROM mapping - support both PCB variants:
+                    // Variant 1: Banks $00-$1F / $80-$9F at $6000-$6FFF (DR writable)
+                    if matches!(bank, 0x00..=0x1F | 0x80..=0x9F)
+                        && (0x6000..=0x6FFF).contains(&offset)
+                    {
+                        chip.borrow_mut().write(addr, val);
+                        return;
+                    }
+                    // Variant 2: Banks $20-$3F / $A0-$BF at $8000-$BFFF (DR writable)
+                    //   SR at $C000-$FFFF is read-only
                     if matches!(bank, 0x20..=0x3F | 0xA0..=0xBF) && offset >= 0x8000 {
                         chip.borrow_mut().write(addr, val);
                         return;

@@ -25,6 +25,7 @@ pub enum SystemType {
     PS1,
     GameAndWatch,
     Atari5200,
+    MegaDrive,
 }
 
 #[derive(Debug)]
@@ -57,6 +58,7 @@ pub fn detect_rom_type_with_extension(
             "ch8" | "c8" => return Ok(SystemType::Chip8),
             "gw" | "gnw" | "mgw" => return Ok(SystemType::GameAndWatch),
             "a52" => return Ok(SystemType::Atari5200),
+            "md" | "gen" | "smd" => return Ok(SystemType::MegaDrive),
             "nes" => {
                 // For .nes extension, still verify it has iNES header
                 if data.len() >= 16 && &data[0..4] == b"NES\x1A" {
@@ -246,6 +248,12 @@ pub fn detect_rom_type_with_extension(
 }
 
 pub fn detect_rom_type(data: &[u8]) -> Result<SystemType, UnsupportedRomError> {
+    // Check for Mega Drive / Genesis
+    // "SEGA" string at offset 0x100 in the ROM header
+    if data.len() >= 0x200 && &data[0x100..0x104] == b"SEGA" {
+        return Ok(SystemType::MegaDrive);
+    }
+
     // Check for NES (iNES format)
     if data.len() >= 16 && &data[0..4] == b"NES\x1A" {
         return Ok(SystemType::NES);

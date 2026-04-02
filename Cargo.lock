@@ -772,6 +772,7 @@ dependencies = [
  "emu_core",
  "emu_gameandwatch",
  "emu_gb",
+ "emu_megadrive",
  "emu_n64",
  "emu_nes",
  "emu_pc",
@@ -794,6 +795,16 @@ dependencies = [
  "serde_json",
  "sha2",
  "winres",
+]
+
+[[package]]
+name = "emu_megadrive"
+version = "0.1.0"
+dependencies = [
+ "emu_core",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

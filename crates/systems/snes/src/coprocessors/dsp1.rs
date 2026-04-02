@@ -10,7 +10,14 @@
 //!
 //! ## Memory Mapping
 //!
-//! In LoROM games (Mode B, <16Mbit, most DSP-1 games like SMK/Pilotwings):
+//! In LoROM games, two PCB variants exist:
+//!
+//! Variant 1 (SHVC-1DSP-01, used by Super Mario Kart):
+//! - Banks $00-$1F / $80-$9F at $6000-$7FFF
+//! - DR (Data Register): $6000-$6FFF (bit 12 = 0)
+//! - SR (Status Register): $7000-$7FFF (bit 12 = 1)
+//!
+//! Variant 2 (SHVC-1A3M, used by some Pilotwings revisions):
 //! - Banks $20-$3F / $A0-$BF at $8000-$FFFF
 //! - DR (Data Register): offset bit 14 = 0 ($8000-$BFFF)
 //! - SR (Status Register): offset bit 14 = 1 ($C000-$FFFF)

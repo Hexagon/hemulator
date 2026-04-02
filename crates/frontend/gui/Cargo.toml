@@ -23,6 +23,7 @@ emu_colecovision = { path = "../../systems/colecovision" }
 emu_sg1000 = { path = "../../systems/sg1000" }
 emu_ps1 = { path = "../../systems/ps1" }
 emu_gameandwatch = { path = "../../systems/gameandwatch" }
+emu_megadrive = { path = "../../systems/megadrive" }
 rodio = "0.22"
 log = "0.4"
 env_logger = "0.11"

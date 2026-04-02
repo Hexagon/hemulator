@@ -172,6 +172,16 @@ impl MenuBar {
                     }
 
                     if ui
+                        .button("Mega Drive")
+                        .on_hover_text("Sega Mega Drive / Genesis")
+                        .clicked()
+                    {
+                        self.pending_action =
+                            Some(MenuAction::NewProjectSystem("Mega Drive".to_string()));
+                        ui.close();
+                    }
+
+                    if ui
                         .button("ColecoVision")
                         .on_hover_text("ColecoVision")
                         .clicked()

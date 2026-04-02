@@ -103,6 +103,7 @@ enum EmulatorSystem {
     PS1(Box<emu_ps1::Ps1System>),
     GameAndWatch(Box<emu_gameandwatch::GameAndWatchSystem>),
     Atari5200(Box<emu_atari5200::Atari5200System>),
+    MegaDrive(Box<emu_megadrive::MegaDriveSystem>),
 }
 
 #[allow(dead_code)]
@@ -151,6 +152,9 @@ impl EmulatorSystem {
             EmulatorSystem::Atari5200(sys) => sys
                 .step_frame()
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::MegaDrive(sys) => sys
+                .step_frame()
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         }
     }
 
@@ -170,6 +174,7 @@ impl EmulatorSystem {
             EmulatorSystem::PS1(sys) => sys.reset(),
             EmulatorSystem::GameAndWatch(sys) => sys.reset(),
             EmulatorSystem::Atari5200(sys) => sys.reset(),
+            EmulatorSystem::MegaDrive(sys) => sys.reset(),
         }
     }
 
@@ -189,6 +194,7 @@ impl EmulatorSystem {
             EmulatorSystem::PS1(sys) => sys.debugger(),
             EmulatorSystem::GameAndWatch(sys) => sys.debugger(),
             EmulatorSystem::Atari5200(sys) => sys.debugger(),
+            EmulatorSystem::MegaDrive(sys) => sys.debugger(),
         }
     }
 
@@ -208,6 +214,7 @@ impl EmulatorSystem {
             EmulatorSystem::PS1(sys) => sys.get_total_cycles(),
             EmulatorSystem::GameAndWatch(sys) => sys.get_total_cycles(),
             EmulatorSystem::Atari5200(sys) => sys.get_total_cycles(),
+            EmulatorSystem::MegaDrive(sys) => sys.get_total_cycles(),
         }
     }
 
@@ -260,6 +267,9 @@ impl EmulatorSystem {
             EmulatorSystem::Atari5200(sys) => sys
                 .mount(mount_point_id, data)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::MegaDrive(sys) => sys
+                .mount(mount_point_id, data)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         }
     }
 
@@ -280,6 +290,7 @@ impl EmulatorSystem {
             EmulatorSystem::PS1(sys) => sys.mount_points(),
             EmulatorSystem::GameAndWatch(sys) => sys.mount_points(),
             EmulatorSystem::Atari5200(sys) => sys.mount_points(),
+            EmulatorSystem::MegaDrive(sys) => sys.mount_points(),
         }
     }
 
@@ -328,6 +339,9 @@ impl EmulatorSystem {
             EmulatorSystem::Atari5200(sys) => sys
                 .unmount(mount_point_id)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::MegaDrive(sys) => sys
+                .unmount(mount_point_id)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         }
     }
 
@@ -348,6 +362,7 @@ impl EmulatorSystem {
             EmulatorSystem::PS1(sys) => sys.is_mounted(mount_point_id),
             EmulatorSystem::GameAndWatch(sys) => sys.is_mounted(mount_point_id),
             EmulatorSystem::Atari5200(sys) => sys.is_mounted(mount_point_id),
+            EmulatorSystem::MegaDrive(sys) => sys.is_mounted(mount_point_id),
         }
     }
 
@@ -378,6 +393,7 @@ impl EmulatorSystem {
             EmulatorSystem::PS1(sys) => sys.supports_save_states(),
             EmulatorSystem::GameAndWatch(sys) => sys.supports_save_states(),
             EmulatorSystem::Atari5200(sys) => sys.supports_save_states(),
+            EmulatorSystem::MegaDrive(sys) => sys.supports_save_states(),
         }
     }
 
@@ -397,6 +413,7 @@ impl EmulatorSystem {
             EmulatorSystem::PS1(sys) => sys.save_state(),
             EmulatorSystem::GameAndWatch(sys) => sys.save_state(),
             EmulatorSystem::Atari5200(sys) => sys.save_state(),
+            EmulatorSystem::MegaDrive(sys) => sys.save_state(),
         }
     }
 
@@ -416,6 +433,7 @@ impl EmulatorSystem {
             EmulatorSystem::PS1(sys) => sys.load_state(state),
             EmulatorSystem::GameAndWatch(sys) => sys.load_state(state),
             EmulatorSystem::Atari5200(sys) => sys.load_state(state),
+            EmulatorSystem::MegaDrive(sys) => sys.load_state(state),
         }
     }
 
@@ -557,6 +575,41 @@ impl EmulatorSystem {
                 // Game & Watch uses 16-bit controller via set_controller_16
             }
             EmulatorSystem::Atari5200(sys) => sys.set_controller(port, state),
+            EmulatorSystem::MegaDrive(sys) => {
+                // Mega Drive 3-button pad (active LOW: 0=pressed, 1=released)
+                // MD bits: 0=Up, 1=Down, 2=Left, 3=Right, 4=B, 5=C, 6=A, 7=Start
+                // GUI bits: 0=A, 1=B, 2=Select, 3=Start, 4=Up, 5=Down, 6=Left, 7=Right
+                let mut md_state: u16 = 0xFFFF; // All released
+                if state & 0x10 != 0 {
+                    md_state &= !0x01;
+                } // Up
+                if state & 0x20 != 0 {
+                    md_state &= !0x02;
+                } // Down
+                if state & 0x40 != 0 {
+                    md_state &= !0x04;
+                } // Left
+                if state & 0x80 != 0 {
+                    md_state &= !0x08;
+                } // Right
+                if state & 0x02 != 0 {
+                    md_state &= !0x10;
+                } // B -> MD B
+                if state & 0x04 != 0 {
+                    md_state &= !0x20;
+                } // Select -> MD C
+                if state & 0x01 != 0 {
+                    md_state &= !0x40;
+                } // A -> MD A
+                if state & 0x08 != 0 {
+                    md_state &= !0x80;
+                } // Start -> MD Start
+                if port == 0 {
+                    sys.set_controller_1(md_state);
+                } else if port == 1 {
+                    sys.set_controller_2(md_state);
+                }
+            }
         }
     }
 
@@ -668,6 +721,7 @@ impl EmulatorSystem {
             }
             EmulatorSystem::GameAndWatch(sys) => Some(sys.cpu.pc as u32),
             EmulatorSystem::Atari5200(_) => None,
+            EmulatorSystem::MegaDrive(_) => None,
         }
     }
 
@@ -688,6 +742,7 @@ impl EmulatorSystem {
             EmulatorSystem::PS1(_) => Some(33.87),    // PS1 R3000A (33.8688 MHz)
             EmulatorSystem::GameAndWatch(_) => Some(0.033), // SM510 (32.768 kHz)
             EmulatorSystem::Atari5200(_) => Some(1.79), // Atari 5200 6502C (1.79 MHz)
+            EmulatorSystem::MegaDrive(_) => Some(7.67), // M68000 (7.67 MHz NTSC)
         }
     }
 
@@ -715,6 +770,7 @@ impl EmulatorSystem {
             EmulatorSystem::PS1(_) => emu_nes::RuntimeStats::default(),
             EmulatorSystem::GameAndWatch(_) => emu_nes::RuntimeStats::default(),
             EmulatorSystem::Atari5200(_) => emu_nes::RuntimeStats::default(),
+            EmulatorSystem::MegaDrive(_) => emu_nes::RuntimeStats::default(),
         }
     }
 
@@ -734,6 +790,7 @@ impl EmulatorSystem {
             EmulatorSystem::PS1(_) => emu_core::apu::TimingMode::Ntsc,
             EmulatorSystem::GameAndWatch(_) => emu_core::apu::TimingMode::Ntsc,
             EmulatorSystem::Atari5200(_) => emu_core::apu::TimingMode::Ntsc,
+            EmulatorSystem::MegaDrive(_) => emu_core::apu::TimingMode::Ntsc,
         }
     }
 
@@ -778,6 +835,7 @@ impl EmulatorSystem {
             EmulatorSystem::PS1(sys) => sys.get_audio_samples(count),
             EmulatorSystem::GameAndWatch(sys) => sys.generate_audio_samples(count),
             EmulatorSystem::Atari5200(sys) => sys.get_audio_samples(count),
+            EmulatorSystem::MegaDrive(sys) => sys.get_audio_samples(count),
         }
     }
 
@@ -797,6 +855,7 @@ impl EmulatorSystem {
             EmulatorSystem::PS1(_) => (320, 240),          // PS1 standard resolution
             EmulatorSystem::GameAndWatch(_) => (160, 120), // LCD segment grid
             EmulatorSystem::Atari5200(_) => (320, 192),    // ANTIC standard resolution
+            EmulatorSystem::MegaDrive(_) => (320, 224),    // Mega Drive standard resolution
         }
     }
 
@@ -816,6 +875,7 @@ impl EmulatorSystem {
             EmulatorSystem::PS1(_) => "ps1",
             EmulatorSystem::GameAndWatch(_) => "gameandwatch",
             EmulatorSystem::Atari5200(_) => "atari5200",
+            EmulatorSystem::MegaDrive(_) => "megadrive",
         }
     }
 
@@ -836,6 +896,7 @@ impl EmulatorSystem {
             EmulatorSystem::PS1(_) => SystemType::PS1,
             EmulatorSystem::GameAndWatch(_) => SystemType::GameAndWatch,
             EmulatorSystem::Atari5200(_) => SystemType::Atari5200,
+            EmulatorSystem::MegaDrive(_) => SystemType::MegaDrive,
         }
     }
 
@@ -903,6 +964,7 @@ impl EmulatorSystem {
             EmulatorSystem::PS1(_) => "Software".to_string(),
             EmulatorSystem::GameAndWatch(_) => "Software".to_string(),
             EmulatorSystem::Atari5200(_) => "Software".to_string(),
+            EmulatorSystem::MegaDrive(_) => "Software".to_string(),
         }
     }
 
@@ -940,6 +1002,7 @@ impl EmulatorSystem {
             EmulatorSystem::PS1(_) => vec!["Software".to_string()],
             EmulatorSystem::GameAndWatch(_) => vec!["Software".to_string()],
             EmulatorSystem::Atari5200(_) => vec!["Software".to_string()],
+            EmulatorSystem::MegaDrive(_) => vec!["Software".to_string()],
         }
     }
 
@@ -961,6 +1024,7 @@ impl EmulatorSystem {
             EmulatorSystem::PS1(_) => None,
             EmulatorSystem::GameAndWatch(_) => None,
             EmulatorSystem::Atari5200(sys) => sys.check_breakpoint(),
+            EmulatorSystem::MegaDrive(sys) => sys.check_breakpoint(),
         }
     }
 
@@ -981,6 +1045,7 @@ impl EmulatorSystem {
             EmulatorSystem::PS1(_) => Vec::new(),
             EmulatorSystem::GameAndWatch(_) => Vec::new(),
             EmulatorSystem::Atari5200(sys) => sys.get_breakpoint_manager().get_all(),
+            EmulatorSystem::MegaDrive(sys) => sys.get_breakpoint_manager().get_all(),
         }
     }
 
@@ -1001,6 +1066,7 @@ impl EmulatorSystem {
             EmulatorSystem::PS1(_) => None,
             EmulatorSystem::GameAndWatch(_) => None,
             EmulatorSystem::Atari5200(sys) => Some(sys.get_instruction_tracer()),
+            EmulatorSystem::MegaDrive(sys) => Some(sys.get_instruction_tracer()),
         }
     }
 
@@ -1023,6 +1089,7 @@ impl EmulatorSystem {
             EmulatorSystem::PS1(_) => None,
             EmulatorSystem::GameAndWatch(_) => None,
             EmulatorSystem::Atari5200(sys) => Some(sys.get_instruction_tracer_mut()),
+            EmulatorSystem::MegaDrive(sys) => Some(sys.get_instruction_tracer_mut()),
         }
     }
 }
@@ -1438,7 +1505,7 @@ fn save_project(
         let relevant_mounts: Vec<&str> = match system_name {
             "pc" => vec!["BIOS", "FloppyA", "FloppyB", "HardDrive"],
             "atari5200" => vec!["BIOS", "Cartridge"],
-            "nes" | "gameboy" | "gba" | "atari2600" | "snes" | "n64" => {
+            "nes" | "gameboy" | "gba" | "atari2600" | "snes" | "n64" | "megadrive" => {
                 vec!["Cartridge"]
             }
             _ => vec![],
@@ -2076,7 +2143,7 @@ impl CliArgs {
     fn print_version() {
         println!("Hemulator v{}", env!("CARGO_PKG_VERSION"));
         println!("Multi-System Emulator");
-        println!("Supported systems: NES, Game Boy, Atari 2600, Atari 5200, PC/DOS, SNES, N64");
+        println!("Supported systems: NES, Game Boy, Atari 2600, Atari 5200, Mega Drive, PC/DOS, SNES, N64");
     }
 }
 
@@ -2148,6 +2215,10 @@ fn create_atari2600_system(_settings: &Settings) -> emu_atari2600::Atari2600Syst
 
 fn create_atari5200_system(_settings: &Settings) -> emu_atari5200::Atari5200System {
     emu_atari5200::Atari5200System::new()
+}
+
+fn create_megadrive_system(_settings: &Settings) -> emu_megadrive::MegaDriveSystem {
+    emu_megadrive::MegaDriveSystem::new()
 }
 
 /// Helper function to load BIOS from CLI argument or auto-search in ROM directory
@@ -2372,6 +2443,12 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
                     s.get_instruction_tracer_mut().set_max_history(limit);
                 }
             }
+            EmulatorSystem::MegaDrive(s) => {
+                s.set_instruction_tracing(true);
+                if let Some(limit) = cli_args.trace_limit {
+                    s.get_instruction_tracer_mut().set_max_history(limit);
+                }
+            }
         }
     }
 
@@ -2392,6 +2469,7 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
             EmulatorSystem::PS1(_) => {} // PS1 breakpoints not yet implemented
             EmulatorSystem::GameAndWatch(_) => {} // Game & Watch breakpoints not yet implemented
             EmulatorSystem::Atari5200(s) => s.add_breakpoint(addr),
+            EmulatorSystem::MegaDrive(s) => s.add_breakpoint(addr),
         }
     }
 
@@ -2412,6 +2490,7 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
             EmulatorSystem::PS1(_) => {}
             EmulatorSystem::GameAndWatch(_) => {}
             EmulatorSystem::Atari5200(s) => s.add_read_breakpoint(addr),
+            EmulatorSystem::MegaDrive(s) => s.add_read_breakpoint(addr),
         }
     }
 
@@ -2432,6 +2511,7 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
             EmulatorSystem::PS1(_) => {}
             EmulatorSystem::GameAndWatch(_) => {}
             EmulatorSystem::Atari5200(s) => s.add_write_breakpoint(addr),
+            EmulatorSystem::MegaDrive(s) => s.add_write_breakpoint(addr),
         }
     }
 }
@@ -3012,6 +3092,34 @@ fn main() {
                     }
                 }
             }
+            "megadrive" | "genesis" | "md" | "gen" => {
+                sys = EmulatorSystem::MegaDrive(Box::new(create_megadrive_system(&settings)));
+                rom_loaded = true;
+                status_message = "Clean Mega Drive system started".to_string();
+                println!("Started clean Mega Drive system");
+
+                if let Some(ref p) = rom_path {
+                    if !p.to_lowercase().ends_with(".hemu") {
+                        match std::fs::read(p) {
+                            Ok(data) => {
+                                rom_hash = Some(GameSaves::rom_hash(&data));
+                                if let EmulatorSystem::MegaDrive(md_sys) = &mut sys {
+                                    if let Err(e) = md_sys.mount("cartridge", &data) {
+                                        eprintln!("Failed to load Mega Drive ROM: {}", e);
+                                        status_message = format!("Error: {}", e);
+                                        rom_hash = None;
+                                    } else {
+                                        status_message = "Mega Drive ROM loaded".to_string();
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to read file: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
             "pc" => {
                 sys = EmulatorSystem::PC(Box::new(emu_pc::PcSystem::new()));
                 rom_loaded = true; // Mark system as loaded even without ROM
@@ -3141,7 +3249,7 @@ fn main() {
             }
             _ => {
                 eprintln!("Error: Unknown system '{}'", system_name);
-                eprintln!("Valid systems: pc, nes, gb, gba, atari2600, atari5200, snes, n64, gameandwatch");
+                eprintln!("Valid systems: pc, nes, gb, gba, atari2600, atari5200, megadrive, snes, n64, gameandwatch");
                 std::process::exit(1);
             }
         }
@@ -3384,6 +3492,22 @@ fn main() {
                                 rom_loaded = true;
                                 sys = EmulatorSystem::Atari5200(Box::new(a5200_sys));
                                 runtime_state.set_mount("Cartridge".to_string(), p.clone());
+                                if let Err(e) = settings.save() {
+                                    eprintln!("Warning: Failed to save settings: {}", e);
+                                }
+                            }
+                        }
+                        Ok(SystemType::MegaDrive) => {
+                            rom_hash = Some(GameSaves::rom_hash(&data));
+                            let mut md_sys = create_megadrive_system(&settings);
+                            if let Err(e) = md_sys.mount("cartridge", &data) {
+                                eprintln!("Failed to load Mega Drive ROM: {}", e);
+                                status_message = format!("Error: {}", e);
+                                rom_hash = None;
+                            } else {
+                                rom_loaded = true;
+                                sys = EmulatorSystem::MegaDrive(Box::new(md_sys));
+                                runtime_state.set_mount("cartridge".to_string(), p.clone());
                                 if let Err(e) = settings.save() {
                                     eprintln!("Warning: Failed to save settings: {}", e);
                                 }
@@ -4524,6 +4648,7 @@ fn main() {
                     }
                 }
                 EmulatorSystem::Atari5200(_) => SystemDebugInfo::new("Atari 5200".to_string()),
+                EmulatorSystem::MegaDrive(_) => SystemDebugInfo::new("Mega Drive".to_string()),
             };
             egui_app.tab_manager.update_debug_info(debug_info);
 
@@ -4580,6 +4705,7 @@ fn main() {
                     Some(create_enhanced_debug_state("Game & Watch", debugger, &sys))
                 }
                 EmulatorSystem::Atari5200(_) => None,
+                EmulatorSystem::MegaDrive(_) => None,
             };
 
             if let Some(enhanced_state) = enhanced_state_opt {
@@ -4603,6 +4729,7 @@ fn main() {
                     EmulatorSystem::PS1(_) => None,
                     EmulatorSystem::GameAndWatch(s) => Some(s.as_ref()),
                     EmulatorSystem::Atari5200(_) => None,
+                    EmulatorSystem::MegaDrive(_) => None,
                 };
 
                 if let Some(debugger) = debugger {
@@ -5034,6 +5161,19 @@ fn main() {
                                 &runtime_state,
                             );
                         }
+                        "Mega Drive" => {
+                            sys = EmulatorSystem::MegaDrive(Box::new(create_megadrive_system(
+                                &settings,
+                            )));
+                            configure_system_ui(
+                                &mut egui_app,
+                                &sys,
+                                "Mega Drive",
+                                &mut rom_loaded,
+                                "Created new Mega Drive system",
+                                &runtime_state,
+                            );
+                        }
                         "SMS" => {
                             sys = EmulatorSystem::SMS(Box::new(emu_sms::SmsSystem::new()));
                             configure_system_ui(
@@ -5164,7 +5304,7 @@ fn main() {
                             &[
                                 "nes", "unf", "gb", "gbc", "gba", "bin", "a26", "a52", "smc",
                                 "sfc", "z64", "n64", "v64", "com", "exe", "sms", "ch8", "c8",
-                                "col", "sg", "sc", "gw", "gnw", "mgw",
+                                "col", "sg", "sc", "gw", "gnw", "mgw", "md", "gen", "smd",
                             ],
                         )
                         .add_filter("NES ROMs", &["nes", "unf"])
@@ -5172,6 +5312,7 @@ fn main() {
                         .add_filter("GBA ROMs", &["gba"])
                         .add_filter("Atari 2600 ROMs", &["a26", "bin"])
                         .add_filter("Atari 5200 ROMs", &["a52", "bin"])
+                        .add_filter("Mega Drive ROMs", &["md", "gen", "smd", "bin"])
                         .add_filter("SNES ROMs", &["smc", "sfc", "bin"])
                         .add_filter("N64 ROMs", &["z64", "n64", "v64", "bin"])
                         .add_filter("SMS ROMs", &["sms", "bin"])
@@ -5429,6 +5570,46 @@ fn main() {
                                             egui_app
                                                 .status_bar
                                                 .set_message("Atari 5200 ROM loaded".to_string());
+                                            let _ = sys.resolution();
+                                            if let Some(ref hash) = rom_hash {
+                                                _game_saves = GameSaves::load(hash);
+                                            }
+                                        }
+                                    }
+                                    Ok(SystemType::MegaDrive) => {
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        let mut md_sys = create_megadrive_system(&settings);
+                                        if let Err(e) = md_sys.mount("cartridge", &data) {
+                                            egui_app
+                                                .status_bar
+                                                .set_message(format!("Error: {}", e));
+                                            rom_hash = None;
+                                        } else {
+                                            rom_loaded = true;
+                                            sys = EmulatorSystem::MegaDrive(Box::new(md_sys));
+                                            egui_app.property_pane.system_name =
+                                                "Mega Drive".to_string();
+                                            egui_app.property_pane.rendering_backend =
+                                                sys.get_current_renderer_name();
+                                            egui_app.property_pane.available_renderers =
+                                                sys.get_available_renderers();
+                                            runtime_state.set_mount(
+                                                "cartridge".to_string(),
+                                                path_str.clone(),
+                                            );
+                                            settings.add_recent_file(path_str.clone());
+                                            if let Err(e) = settings.save() {
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
+                                            }
+                                            egui_app.update_recent_files(
+                                                settings.get_recent_files().to_vec(),
+                                            );
+                                            egui_app
+                                                .status_bar
+                                                .set_message("Mega Drive ROM loaded".to_string());
                                             let _ = sys.resolution();
                                             if let Some(ref hash) = rom_hash {
                                                 _game_saves = GameSaves::load(hash);
@@ -6250,6 +6431,46 @@ fn main() {
                                             egui_app
                                                 .status_bar
                                                 .set_message("Atari 5200 ROM loaded".to_string());
+                                            let _ = sys.resolution();
+                                            if let Some(ref hash) = rom_hash {
+                                                _game_saves = GameSaves::load(hash);
+                                            }
+                                        }
+                                    }
+                                    Ok(SystemType::MegaDrive) => {
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        let mut md_sys = create_megadrive_system(&settings);
+                                        if let Err(e) = md_sys.mount("cartridge", &data) {
+                                            egui_app
+                                                .status_bar
+                                                .set_message(format!("Error: {}", e));
+                                            rom_hash = None;
+                                        } else {
+                                            rom_loaded = true;
+                                            sys = EmulatorSystem::MegaDrive(Box::new(md_sys));
+                                            egui_app.property_pane.system_name =
+                                                "Mega Drive".to_string();
+                                            egui_app.property_pane.rendering_backend =
+                                                sys.get_current_renderer_name();
+                                            egui_app.property_pane.available_renderers =
+                                                sys.get_available_renderers();
+                                            runtime_state.set_mount(
+                                                "cartridge".to_string(),
+                                                file_path.clone(),
+                                            );
+                                            settings.add_recent_file(file_path.clone());
+                                            if let Err(e) = settings.save() {
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
+                                            }
+                                            egui_app.update_recent_files(
+                                                settings.get_recent_files().to_vec(),
+                                            );
+                                            egui_app
+                                                .status_bar
+                                                .set_message("Mega Drive ROM loaded".to_string());
                                             let _ = sys.resolution();
                                             if let Some(ref hash) = rom_hash {
                                                 _game_saves = GameSaves::load(hash);
@@ -7553,6 +7774,22 @@ fn main() {
                             egui_app
                                 .status_bar
                                 .set_message("Created new SMS system".to_string());
+                        }
+                        "Mega Drive" => {
+                            sys = EmulatorSystem::MegaDrive(Box::new(create_megadrive_system(
+                                &settings,
+                            )));
+                            rom_loaded = true;
+                            rom_hash = None;
+                            runtime_state.clear_mounts();
+                            egui_app.property_pane.system_name = "Mega Drive".to_string();
+                            egui_app.property_pane.rendering_backend =
+                                sys.get_current_renderer_name();
+                            egui_app.property_pane.available_renderers =
+                                sys.get_available_renderers();
+                            egui_app
+                                .status_bar
+                                .set_message("Created new Mega Drive system".to_string());
                         }
                         "CHIP-8" => {
                             sys = EmulatorSystem::Chip8(Box::new(emu_chip8::Chip8System::new()));
