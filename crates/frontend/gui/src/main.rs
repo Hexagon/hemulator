@@ -8361,7 +8361,7 @@ fn main() {
             // Handle keyboard input for emulator
             // We check if egui wants input (e.g., text field focused) and only skip controller updates then.
             // This allows controller input to work even when docked panels are visible.
-            let egui_wants_input = egui_backend.egui_ctx().wants_keyboard_input();
+            let egui_wants_input = egui_backend.egui_ctx().egui_wants_keyboard_input();
 
             if !matches!(&sys, EmulatorSystem::PC(_)) {
                 // For non-PC systems, use standard controller mapping (always update, even if egui has focus)

@@ -603,7 +603,6 @@ version = "0.33.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "71ddb8ac7643d1dba1bb02110e804406dd459a838efcb14011ced10556711a8e"
 dependencies = [
- "bytemuck",
  "emath 0.33.3",
 ]
 
@@ -613,6 +612,7 @@ version = "0.34.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "137c0ce4ce4152ff7e223a7ce22ee1057cdff61fce0a45c32459c3ccec64868d"
 dependencies = [
+ "bytemuck",
  "emath 0.34.1",
 ]
 
@@ -653,23 +653,24 @@ dependencies = [
 
 [[package]]
 name = "egui_dock"
-version = "0.18.0"
+version = "0.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2fd0f689738efbd4afb811433b873379c6a8f3af48f2d296d9849fe70ee021d6"
+checksum = "db51b9023b9d65cb4d561fd981946f987c54f25413c75b2c8e634c774c3d70ad"
 dependencies = [
  "duplicate",
- "egui 0.33.3",
+ "egui 0.34.1",
  "paste",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
 name = "egui_extras"
-version = "0.33.3"
+version = "0.34.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d01d34e845f01c62e3fded726961092e70417d66570c499b9817ab24674ca4ed"
+checksum = "62bfc6870c68d3f254e33aca8200095d422e09edacb0f365f79fe23a5ba10963"
 dependencies = [
  "ahash",
- "egui 0.33.3",
+ "egui 0.34.1",
  "enum-map",
  "image",
  "log",
@@ -679,13 +680,13 @@ dependencies = [
 
 [[package]]
 name = "egui_glow"
-version = "0.33.3"
+version = "0.34.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6420863ea1d90e750f75075231a260030ad8a9f30a7cef82cdc966492dc4c4eb"
+checksum = "a3b28d39ab6c0cac238190e6cb1e8c9047d02cb470ab942a7a3302e4cb3a8e74"
 dependencies = [
  "bytemuck",
- "egui 0.33.3",
- "glow",
+ "egui 0.34.1",
+ "glow 0.17.0",
  "log",
  "memoffset",
  "profiling",
@@ -717,15 +718,15 @@ name = "emath"
 version = "0.33.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "491bdf728bf25ddd9ad60d4cf1c48588fa82c013a2440b91aa7fc43e34a07c32"
-dependencies = [
- "bytemuck",
-]
 
 [[package]]
 name = "emath"
 version = "0.34.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0a05cd8bdf3b598488c627ca97c7fe8909448ffa26278dd3c7e535cdb554d721"
+dependencies = [
+ "bytemuck",
+]
 
 [[package]]
 name = "emu_atari2600"
@@ -763,7 +764,7 @@ name = "emu_colecovision"
 version = "0.1.0"
 dependencies = [
  "emu_core",
- "glow",
+ "glow 0.16.0",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -832,7 +833,7 @@ dependencies = [
  "emu_sms",
  "emu_snes",
  "env_logger",
- "glow",
+ "glow 0.16.0",
  "hemu_gba",
  "image",
  "log",
@@ -865,7 +866,7 @@ dependencies = [
  "bytemuck",
  "crc32fast",
  "emu_core",
- "glow",
+ "glow 0.16.0",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -878,7 +879,7 @@ dependencies = [
  "crc32fast",
  "criterion",
  "emu_core",
- "glow",
+ "glow 0.16.0",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -919,7 +920,7 @@ name = "emu_sms"
 version = "0.1.0"
 dependencies = [
  "emu_core",
- "glow",
+ "glow 0.16.0",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -997,7 +998,6 @@ checksum = "009d0dd3c2163823a0abdb899451ecbc78798dec545ee91b43aff1fa790bab62"
 dependencies = [
  "ab_glyph",
  "ahash",
- "bytemuck",
  "ecolor 0.33.3",
  "emath 0.33.3",
  "epaint_default_fonts 0.33.3",
@@ -1014,6 +1014,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "04f3017dd67f147a697ee0c8484fb568fd9553e2a0c114be5020dbbc11962841"
 dependencies = [
  "ahash",
+ "bytemuck",
  "ecolor 0.34.1",
  "emath 0.34.1",
  "epaint_default_fonts 0.34.1",
@@ -1211,6 +1212,18 @@ name = "glow"
 version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c5e5ea60d70410161c8bf5da3fdfeaa1c72ed2c15f8bbb9d19fe3a4fad085f08"
+dependencies = [
+ "js-sys",
+ "slotmap",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
+name = "glow"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29038e1c483364cc6bb3cf78feee1816002e127c331a1eec55a4d202b9e1adb5"
 dependencies = [
  "js-sys",
  "slotmap",

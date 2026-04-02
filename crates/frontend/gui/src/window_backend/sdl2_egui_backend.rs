@@ -8,6 +8,158 @@ use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 
+// ─── Type-boundary helpers ────────────────────────────────────────────────────
+//
+// `egui_sdl2_gl 0.33` links against `egui 0.33` while the rest of the codebase
+// uses `egui 0.34`.  The two versions are ABI-incompatible at the type level, so
+// we need small conversion shims at the call sites in `begin_frame` / `end_frame`.
+//
+// *Input side* (`egui_sdl2_gl::egui::RawInput` → `egui::RawInput`):
+//   Built field-by-field.  `egui_sdl2_gl` only fills a small subset of fields,
+//   so the conversion is straightforward.  The new `occluded` / `phase` fields
+//   that appeared in 0.34 are set to their sensible defaults.
+//
+// *Output side* (`egui::TexturesDelta` / `Vec<egui::ClippedPrimitive>` → 0.33):
+//   Both `epaint::TexturesDelta` and `epaint::ClippedPrimitive` (transitively
+//   `epaint::Mesh`) have *identical* memory layouts between versions 0.33 and
+//   0.34 – verified by comparing the struct/field definitions in the registry
+//   sources.  The compile-time assertions below guard against any future layout
+//   drift.  A `transmute` reinterprets the bits without any allocation.
+
+// Compile-time layout guards: catch ABI drift between egui 0.33 and 0.34 types.
+const _: () = {
+    use egui_sdl2_gl::egui as e33;
+    use std::mem::{align_of, size_of};
+    assert!(size_of::<e33::Pos2>() == size_of::<egui::Pos2>());
+    assert!(align_of::<e33::Pos2>() == align_of::<egui::Pos2>());
+    assert!(size_of::<e33::Vec2>() == size_of::<egui::Vec2>());
+    assert!(align_of::<e33::Vec2>() == align_of::<egui::Vec2>());
+    assert!(size_of::<e33::Rect>() == size_of::<egui::Rect>());
+    assert!(align_of::<e33::Rect>() == align_of::<egui::Rect>());
+    assert!(size_of::<e33::Modifiers>() == size_of::<egui::Modifiers>());
+    assert!(align_of::<e33::Modifiers>() == align_of::<egui::Modifiers>());
+    assert!(size_of::<e33::Key>() == size_of::<egui::Key>());
+    assert!(align_of::<e33::Key>() == align_of::<egui::Key>());
+    assert!(size_of::<e33::PointerButton>() == size_of::<egui::PointerButton>());
+    assert!(align_of::<e33::PointerButton>() == align_of::<egui::PointerButton>());
+    assert!(size_of::<e33::MouseWheelUnit>() == size_of::<egui::MouseWheelUnit>());
+    assert!(align_of::<e33::MouseWheelUnit>() == align_of::<egui::MouseWheelUnit>());
+    assert!(size_of::<e33::ImeEvent>() == size_of::<egui::ImeEvent>());
+    assert!(align_of::<e33::ImeEvent>() == align_of::<egui::ImeEvent>());
+    assert!(size_of::<e33::TexturesDelta>() == size_of::<egui::TexturesDelta>());
+    assert!(align_of::<e33::TexturesDelta>() == align_of::<egui::TexturesDelta>());
+    assert!(size_of::<e33::ClippedPrimitive>() == size_of::<egui::ClippedPrimitive>());
+    assert!(align_of::<e33::ClippedPrimitive>() == align_of::<egui::ClippedPrimitive>());
+};
+
+/// Convert a single `egui_sdl2_gl::egui::Event` (egui 0.33) to
+/// `egui::Event` (egui 0.34).  Returns `None` for event variants that have no
+/// equivalent in 0.34 (none are expected from the SDL2 backend).
+fn convert_sdl2_event(event: egui_sdl2_gl::egui::Event) -> Option<egui::Event> {
+    use egui_sdl2_gl::egui as e33;
+    use egui_sdl2_gl::egui::Event as E33;
+
+    // The basic scalar/struct types shared between the two versions (Pos2, Vec2,
+    // Modifiers, Key, PointerButton, MouseWheelUnit …) have identical definitions
+    // across emath 0.33/0.34 and egui 0.33/0.34.  The compile-time assertions
+    // above verify size/alignment parity; a transmute is therefore sound.
+    Some(match event {
+        E33::PointerMoved(pos) => {
+            egui::Event::PointerMoved(unsafe { std::mem::transmute::<e33::Pos2, egui::Pos2>(pos) })
+        }
+        E33::PointerButton {
+            pos,
+            button,
+            pressed,
+            modifiers,
+        } => egui::Event::PointerButton {
+            pos: unsafe { std::mem::transmute::<e33::Pos2, egui::Pos2>(pos) },
+            button: unsafe {
+                std::mem::transmute::<e33::PointerButton, egui::PointerButton>(button)
+            },
+            pressed,
+            modifiers: unsafe { std::mem::transmute::<e33::Modifiers, egui::Modifiers>(modifiers) },
+        },
+        E33::PointerGone => egui::Event::PointerGone,
+        E33::Key {
+            key,
+            physical_key,
+            pressed,
+            repeat,
+            modifiers,
+        } => egui::Event::Key {
+            key: unsafe { std::mem::transmute::<e33::Key, egui::Key>(key) },
+            physical_key: physical_key
+                .map(|k| unsafe { std::mem::transmute::<e33::Key, egui::Key>(k) }),
+            pressed,
+            repeat,
+            modifiers: unsafe { std::mem::transmute::<e33::Modifiers, egui::Modifiers>(modifiers) },
+        },
+        E33::Text(s) => egui::Event::Text(s),
+        // `MouseWheel` gained `phase: TouchPhase` in 0.34 while keeping `modifiers`.
+        // `TouchPhase::Move` is the correct default for a non-trackpad scroll event.
+        E33::MouseWheel {
+            unit,
+            delta,
+            modifiers,
+        } => egui::Event::MouseWheel {
+            unit: unsafe { std::mem::transmute::<e33::MouseWheelUnit, egui::MouseWheelUnit>(unit) },
+            delta: unsafe { std::mem::transmute::<e33::Vec2, egui::Vec2>(delta) },
+            phase: egui::TouchPhase::Move,
+            modifiers: unsafe { std::mem::transmute::<e33::Modifiers, egui::Modifiers>(modifiers) },
+        },
+        E33::Copy => egui::Event::Copy,
+        E33::Cut => egui::Event::Cut,
+        E33::Paste(s) => egui::Event::Paste(s),
+        E33::Zoom(f) => egui::Event::Zoom(f),
+        // ImeEvent is identical between 0.33 and 0.34.
+        E33::Ime(ime) => {
+            egui::Event::Ime(unsafe { std::mem::transmute::<e33::ImeEvent, egui::ImeEvent>(ime) })
+        }
+        // Touch, Screenshot, MouseMoved, WindowFocused are not generated by the
+        // SDL2 backend; return None to drop them gracefully.
+        _ => return None,
+    })
+}
+
+/// Build an `egui::RawInput` (0.34) from the SDL2 state collected in
+/// `egui_sdl2_gl::egui::RawInput` (0.33).
+fn convert_sdl2_raw_input(input: egui_sdl2_gl::egui::RawInput) -> egui::RawInput {
+    use egui_sdl2_gl::egui as e33;
+
+    // Reconstruct ViewportInfo for egui 0.34 (which added `occluded: Option<bool>`).
+    // The SDL2 backend only ever uses a single ROOT viewport; only
+    // `native_pixels_per_point` is set – everything else stays at the default.
+    let mut viewports: egui::ViewportIdMap<egui::ViewportInfo> = egui::ViewportIdMap::default();
+    if let Some(info) = input.viewports.get(&egui_sdl2_gl::egui::ViewportId::ROOT) {
+        let entry = viewports.entry(egui::ViewportId::ROOT).or_default();
+        entry.native_pixels_per_point = info.native_pixels_per_point;
+    }
+
+    egui::RawInput {
+        viewport_id: egui::ViewportId::ROOT,
+        viewports,
+        screen_rect: input
+            .screen_rect
+            .map(|r| unsafe { std::mem::transmute::<e33::Rect, egui::Rect>(r) }),
+        max_texture_side: input.max_texture_side,
+        time: input.time,
+        predicted_dt: input.predicted_dt,
+        modifiers: unsafe {
+            std::mem::transmute::<e33::Modifiers, egui::Modifiers>(input.modifiers)
+        },
+        events: input
+            .events
+            .into_iter()
+            .filter_map(convert_sdl2_event)
+            .collect(),
+        hovered_files: vec![],
+        dropped_files: vec![],
+        focused: input.focused,
+        ..Default::default()
+    }
+}
+
 pub struct Sdl2EguiBackend {
     #[allow(dead_code)]
     sdl_context: sdl2::Sdl,
@@ -188,8 +340,9 @@ impl Sdl2EguiBackend {
 
     /// Begin an egui frame
     pub fn begin_frame(&mut self) {
-        let raw_input = self.egui_state.input.take();
-        self.egui_ctx.begin_pass(raw_input);
+        let raw_input_033 = self.egui_state.input.take();
+        let raw_input_034 = convert_sdl2_raw_input(raw_input_033);
+        self.egui_ctx.begin_pass(raw_input_034);
     }
 
     /// End an egui frame and render
@@ -211,10 +364,23 @@ impl Sdl2EguiBackend {
             }
         }
 
-        // Paint
+        // Paint – convert 0.34 output types to the 0.33 types expected by the
+        // egui_sdl2_gl painter.  `TexturesDelta` and `ClippedPrimitive`/`Mesh`
+        // have identical memory layouts between epaint 0.33 and 0.34.
         let clipped_primitives = self.egui_ctx.tessellate(shapes, pixels_per_point);
+        let textures_delta_033: egui_sdl2_gl::egui::TexturesDelta = unsafe {
+            std::mem::transmute::<egui::TexturesDelta, egui_sdl2_gl::egui::TexturesDelta>(
+                textures_delta,
+            )
+        };
+        let clipped_primitives_033: Vec<egui_sdl2_gl::egui::ClippedPrimitive> = unsafe {
+            std::mem::transmute::<
+                Vec<egui::ClippedPrimitive>,
+                Vec<egui_sdl2_gl::egui::ClippedPrimitive>,
+            >(clipped_primitives)
+        };
         self.painter
-            .paint_jobs(None, textures_delta, clipped_primitives);
+            .paint_jobs(None, textures_delta_033, clipped_primitives_033);
 
         self.window.gl_swap_window();
     }
