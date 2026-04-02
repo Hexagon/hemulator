@@ -1425,7 +1425,7 @@ impl Ppu {
                                 "Sprite 0 hit FOUND at scanline {} x={} (will trigger at dot {})",
                                 y,
                                 x,
-                                x + 2
+                                x + 1
                             )
                         });
                     }
@@ -1448,7 +1448,7 @@ impl Ppu {
                             "Sprite 0 HIT scheduled at scanline {} x={} (dot {})",
                             y,
                             hit_x,
-                            hit_x + 2
+                            hit_x + 1
                         )
                     });
                 }
@@ -1586,13 +1586,14 @@ impl Ppu {
 
         // Cycle-accurate sprite 0 hit: check if we've reached the pending hit position.
         // On real hardware, sprite 0 hit is detected during visible scanline rendering
-        // at approximately dot = X_position + 2 (accounting for PPU pipeline delay).
-        // The hit can only occur during dots 2-257 of visible scanlines (0-239).
-        if scanline < 240 && dot >= 2 && dot <= 257 {
+        // at dot = X_position + 1 (dot 1 = pixel x=0, so hit fires at dot = x + 1).
+        // The hit can only occur during dots 1-256 of visible scanlines (0-239).
+        // Reference: NESdev wiki PPU sprite evaluation, Mesen2 NesPpu.cpp GetPixelColor()
+        if scanline < 240 && dot >= 1 && dot <= 256 {
             if let Some((hit_scanline, hit_x)) = self.sprite_0_hit_pending.get() {
                 // Check if we're on the right scanline and have reached the hit position
-                // Hit triggers at dot = X + 2 (2 cycle pipeline delay)
-                let trigger_dot = hit_x.saturating_add(2);
+                // Hit triggers at dot = X + 1 (dot 1 = pixel x=0)
+                let trigger_dot = hit_x.saturating_add(1);
                 if scanline == hit_scanline && dot >= trigger_dot && !self.sprite_0_hit.get() {
                     log(LogCategory::PPU, LogLevel::Info, || {
                         format!(
@@ -1665,7 +1666,13 @@ impl Ppu {
         // the pre-render scanline, not the start of the next frame).
         // Reference: https://www.nesdev.org/wiki/PPU_frame_timing
         // "For odd frames, the cycle at the end of the scanline is skipped"
-        if scanline == pre_render_scanline && dot == 339 && self.odd_frame.get() {
+        // NOTE: The PAL PPU (2C07) never performs this skip; every PAL frame is
+        // exactly 312 × 341 dots. This guard is NTSC-only.
+        if scanline == pre_render_scanline
+            && dot == 339
+            && self.odd_frame.get()
+            && self.timing_mode == TimingMode::Ntsc
+        {
             let rendering_enabled = (self.mask & 0x18) != 0;
             if rendering_enabled {
                 next_dot = 341; // Force end-of-scanline wrap
