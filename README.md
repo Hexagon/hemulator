@@ -1,10 +1,10 @@
 # Hemulator — Multi-System Console Emulator
 
-A cross-platform, multi-system console emulator written in Rust. **NES emulation is fully working** with ~90% game coverage. **GBA emulation is functional** with most games working. Other systems (Game Boy, CHIP-8, SMS, ColecoVision, SG-1000, Atari 2600, SNES, N64, PS1, PC/DOS) are in various stages of development.
+A cross-platform, multi-system console emulator written in Rust. **NES emulation is fully working** with ~90% game coverage. **GBA emulation is functional** with most games working. 15 systems are supported in various stages of development — see [System Status](#system-status) below.
 
 ## Features
 
-- 🎮 **Multiple Systems**: NES, Game Boy, GBA, CHIP-8, SMS, ColecoVision, SG-1000, Atari 2600, SNES, N64, PS1, PC/DOS
+- 🎮 **Multiple Systems**: 15 emulated platforms — see [System Status](#system-status) for details
 - 💾 **Save States**: 5 slots per game with menu-based save/load (Ctrl+1-5 / Ctrl+Shift+1-5)
 - ⚙️ **Persistent Settings**: Customizable controls, window scaling, and project files
 - 🖥️ **Cross-Platform GUI**: Built with SDL2 for Windows, Linux, and macOS
@@ -22,9 +22,12 @@ A cross-platform, multi-system console emulator written in Rust. **NES emulation
 | **GBA** | ✅ Functional | Most games working; ARM7TDMI CPU, PPU, Flash/EEPROM/SRAM saves |
 | **CHIP-8** | ✅ Fully Working | CHIP-8/Hires/Super-CHIP/XO-CHIP/Mega-CHIP |
 | **SMS** | ✅ Fully Working | Z80 CPU, VDP, PSG, ROM banking; ~90% game compatibility |
+| **Game & Watch** | 🚧 In Development | SM510 CPU, LCD artwork rendering, .mgw container support |
 | **ColecoVision** | 🚧 In Development | Not producing image; full hardware emulation |
 | **SG-1000** | ⚠️ Experimental | Full hardware emulation |
 | **Atari 2600** | 🚧 In Development | Most cartridge formats; rendering WIP |
+| **Atari 5200** | 🚧 In Development | 6502C CPU, ANTIC, GTIA, POKEY; early development |
+| **Mega Drive** | 🚧 In Development | M68000 CPU, VDP, YM2612 FM audio, SN76489 PSG; early development |
 | **SNES** | ✅ Functional | All PPU modes 0-7, sprites, DMA/HDMA, SPC700+DSP audio |
 | **N64** | 🚧 In Development | 3D rendering works; limited game support |
 | **PS1** | 🚧 In Development | MIPS R3000A CPU, GPU (2D/3D), DMA, timers; Audio/CD-ROM WIP |
@@ -121,6 +124,9 @@ hemulator/
 │   │   ├── colecovision/  # ColecoVision
 │   │   ├── sg1000/        # Sega SG-1000
 │   │   ├── atari2600/     # Atari 2600
+│   │   ├── atari5200/     # Atari 5200
+│   │   ├── gameandwatch/  # Game & Watch (SM510)
+│   │   ├── megadrive/     # Sega Mega Drive / Genesis
 │   │   ├── snes/          # Super Nintendo
 │   │   ├── n64/           # Nintendo 64
 │   │   ├── ps1/           # Sony PlayStation 1
