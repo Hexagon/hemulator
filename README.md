@@ -1,6 +1,6 @@
 # Hemulator — Multi-System Console Emulator
 
-A cross-platform, multi-system console emulator written in Rust. **NES emulation is fully working** with ~90% game coverage. Other systems (Game Boy, GBA, CHIP-8, SMS, ColecoVision, SG-1000, Atari 2600, SNES, N64, PS1, PC/DOS) are in various stages of development.
+A cross-platform, multi-system console emulator written in Rust. **NES and SMS emulation are fully working**. Other systems (Game Boy, GBA, CHIP-8, ColecoVision, SG-1000, Atari 2600, SNES, N64, PS1, PC/DOS) are in various stages of development.
 
 ## Features
 
@@ -21,7 +21,7 @@ A cross-platform, multi-system console emulator written in Rust. **NES emulation
 | **Game Boy** | ✅ Fully Functional | ~99% of games; MBC0/1/2/3/5, HuC1 |
 | **GBA** | 🚧 In Development | Simple games working; ARM7TDMI CPU, PPU, Flash/EEPROM/SRAM saves |
 | **CHIP-8** | ✅ Fully Working | CHIP-8/Hires/Super-CHIP/XO-CHIP/Mega-CHIP |
-| **SMS** | 🚧 In Development | VDP initialization issue; test ROMs work, real games don't display |
+| **SMS** | ✅ Fully Working | Z80 CPU, VDP, PSG, ROM banking; ~90% game compatibility |
 | **ColecoVision** | 🚧 In Development | Not producing image; full hardware emulation |
 | **SG-1000** | ⚠️ Experimental | Full hardware emulation |
 | **Atari 2600** | 🚧 In Development | Most cartridge formats; rendering WIP |
