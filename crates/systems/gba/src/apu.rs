@@ -1296,7 +1296,7 @@ mod tests {
     fn test_master_enable() {
         let mut apu = GbaApu::new();
         assert!(!apu.power_on); // Sound starts OFF on real hardware
-        // Enable master sound
+                                // Enable master sound
         apu.write_register(0x04000084, 0x80);
         assert!(apu.power_on);
         // Write 0 to SOUNDCNT_X to disable
