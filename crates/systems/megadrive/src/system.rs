@@ -4,9 +4,7 @@
 
 use crate::bus::MdBus;
 use crate::m68k::{M68k, Memory68k};
-use emu_core::debug::{
-    CpuRegister, CpuState, Debugger, DisassembledInstruction, MemoryRegion,
-};
+use emu_core::debug::{CpuRegister, CpuState, Debugger, DisassembledInstruction, MemoryRegion};
 use emu_core::types::Frame;
 use emu_core::{MountPointInfo, System};
 use serde_json::Value;

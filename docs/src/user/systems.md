@@ -6,18 +6,21 @@ nav_order: 5
 
 # Supported Systems
 
-This emulator supports 12 different retro gaming systems. **NES emulation is fully working** with ~90% game coverage. Other systems are in various stages of development.
+This emulator supports 15 different retro gaming systems. **NES and SMS emulation are fully working**. Other systems are in various stages of development.
 
 | System | Status | What Works | What's Missing | Recommended For |
 |--------|--------|------------|----------------|-----------------|
 | **NES** | ✅ Fully Working | Everything | - | Playing NES games |
 | **Atari 2600** | 🚧 In Development | TIA, RIOT, cartridge formats | Rendering issues, stability | Testing/development |
+| **Atari 5200** | 🚧 In Development | 6502C CPU, ANTIC, GTIA, POKEY | Video output, full game support | Development/testing |
 | **CHIP-8** | ✅ Fully Working | Complete CHIP-8/Super-CHIP/XO-CHIP | - | Playing CHIP-8 programs |
 | **Game Boy** | ✅ Fully Functional (GB) / 🚧 GBC WIP | Core features, MBC0/1/2/3/5 | Some edge cases, GBC features incomplete | Playing GB games |
-| **GBA** | 🚧 In Development | ARM7TDMI CPU, PPU (all 6 modes), DMA, timers, sprites, blending | APU, save states | Development/testing |
-| **SMS** | 🚧 In Development | Z80 CPU, VDP, PSG, ROM banking | Not producing image, test ROM | Development only |
+| **GBA** | ✅ Functional | ARM7TDMI CPU, PPU (all 6 modes), DMA, timers, sprites, blending | APU, save states | Most games playable |
+| **Game & Watch** | 🚧 In Development | SM510 CPU, LCD artwork rendering, .mgw container | SM511/SM5A variants, melody playback | Playing .mgw games |
+| **SMS** | ✅ Fully Working | Z80 CPU, VDP, PSG, ROM banking | Some edge cases | Playing SMS games |
 | **ColecoVision** | 🚧 In Development | Z80 CPU, TMS9918A VDP, SN76489 PSG | Not producing image, audio output, BIOS required | Development only |
 | **SG-1000** | ⚠️ Experimental | Z80 CPU, TMS9918A VDP, SN76489 PSG | Audio output, test ROM | Development/testing |
+| **Mega Drive** | 🚧 In Development | M68000 CPU, VDP, YM2612, SN76489 PSG | Full game support, audio mixing | Development/testing |
 | **SNES** | ✅ Functional | CPU, all PPU modes 0-7, sprites, DMA/HDMA, SPC700+DSP audio | Some enhancement chips | Playing most games with audio |
 | **N64** | 🚧 In Development | 3D rendering, CPU | Full graphics, audio, games | Development/testing |
 | **PS1** | 🚧 In Development | MIPS R3000A CPU, GPU (2D/3D), DMA, timers | Audio, CD-ROM, save states | Development/testing |
@@ -248,8 +251,8 @@ For more technical information, see [crates/systems/chip8/README.md](../../../cr
 
 ### GBA (Game Boy Advance)
 
-**Status**: 🚧 In Development  
-**Coverage**: CPU, PPU, DMA, timers, cartridge ID, and debugger implemented; no audio
+**Status**: ✅ Functional  
+**Coverage**: Most games working; CPU, PPU, DMA, timers, cartridge ID, and debugger implemented; no audio
 
 **ROM Format**: GBA (.gba files) - extension-based detection with full header parsing
 
@@ -299,8 +302,8 @@ For detailed technical information, see [crates/systems/gba/README.md](../../../
 
 ### SMS (Sega Master System)
 
-**Status**: 🚧 In Development (not producing image)  
-**Coverage**: Complete hardware emulation - Z80 CPU, VDP, PSG fully implemented
+**Status**: ✅ Fully Working  
+**Coverage**: ~90% game compatibility — Z80 CPU, VDP, PSG, and ROM banking fully implemented
 
 **ROM Format**: SMS (.sms files) - automatically detected via TMR SEGA header or file size
 
@@ -343,9 +346,8 @@ For detailed technical information, see [crates/systems/gba/README.md](../../../
   - Frame-based timing with proper cycle counts
 
 **Known Limitations**:
-- **Not Producing Image**: Currently not generating visible output - under active development
-- **Test ROM**: No smoke test ROM yet - testing with commercial ROMs needed
 - **Timing Model**: Frame-based rendering (not cycle-accurate) - suitable for most games
+- **Special Peripherals**: Light Phaser and paddle controllers not supported
 
 **Controls**: SMS controller mapped to same keyboard layout as NES:
 - Arrow keys = D-pad
@@ -1079,3 +1081,76 @@ There are two ways to mount disk images and BIOS:
 - **No audio**: PC speaker tone generation not connected (PIT channel 2 tracks frequency but audio output not implemented)
 - **Timing**: Frame-based execution with PIT timer (INT 08h) - not cycle-accurate
 
+
+
+### Atari 5200
+
+**Status**: 🚧 In Development
+
+The Atari 5200 (1982) is a home video game console based on the Atari 400/800 computer architecture.
+
+**Hardware**:
+- **CPU**: MOS 6502C @ 1.79 MHz (NTSC)
+- **ANTIC**: DMA-driven display list processor (320×192 hi-res / 160×192 standard)
+- **GTIA**: Color generation, player-missile graphics, collision detection
+- **POKEY**: 4-channel audio, analog input, timers, serial I/O
+
+**What Works**:
+- 6502C CPU execution via reusable core
+- ANTIC, GTIA, and POKEY hardware emulation
+
+**Known Limitations**:
+- Video output not yet fully functional
+- Limited game compatibility
+
+---
+
+### Game & Watch
+
+**Status**: 🚧 In Development
+
+Nintendo's Game & Watch handheld series (1980–1991), based on the Sharp SM510 4-bit microcontroller.
+
+**Hardware**:
+- **SM510 CPU**: 4-bit @ 32.768 kHz, 12-bit PC, single-level stack
+- **LCD Display**: Segment-based, up to 64 segments per group (8 groups)
+- **Input**: Multiplexed 4-bit K port + BA/B inputs
+- **Audio**: Piezo buzzer via melody generator
+
+**Supported ROM Formats**:
+- **.mgw** (preferred): Compressed container with CPU ROM, background artwork, segment masks, and key mapping (LZ4/ZLIB/uncompressed)
+- **.gw / .gnw / .bin**: Raw SM510 program ROM (diagnostic grid shown without artwork)
+
+**What Works**:
+- Full SM510 CPU (all 49 instruction types)
+- .mgw container parsing with LCD segment compositing
+- Per-game keyboard mapping from .mgw ROMs
+
+**Known Limitations**:
+- SM511/SM5A CPU variants not yet implemented
+- Accurate melody ROM playback not implemented
+- JPEG background support in .mgw pending
+
+---
+
+### Mega Drive
+
+**Status**: 🚧 In Development
+
+Sega Mega Drive / Genesis (1988) — one of the defining 16-bit home consoles.
+
+**Hardware**:
+- **Main CPU**: Motorola 68000 @ 7.67 MHz (NTSC)
+- **Sound CPU**: Zilog Z80 @ 3.58 MHz (NTSC)
+- **VDP**: Yamaha YM7101 — 64KB VRAM, hardware sprites, scrolling planes
+- **FM Synth**: Yamaha YM2612 (6 FM channels)
+- **PSG**: SN76489 (4 channels, integrated in VDP)
+
+**What Works**:
+- M68000 CPU execution
+- Basic VDP, YM2612, and SN76489 PSG implementation
+- ROM loading
+
+**Known Limitations**:
+- Full game compatibility is not yet achieved
+- Audio mixing and Z80 sub-CPU integration in progress
