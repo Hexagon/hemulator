@@ -42,7 +42,7 @@ impl EguiApp {
         height: usize,
     ) {
         // Convert ARGB to RGBA for egui
-        // The egui_sdl2_gl shader already handles sRGB round-trip correctly:
+        // The egui_glow shader handles sRGB round-trip correctly:
         // texture sRGB → linear_from_srgba → linear → GL_FRAMEBUFFER_SRGB → sRGB
         // So we just upload the raw sRGB values directly
         let rgba_pixels: Vec<u8> = pixels

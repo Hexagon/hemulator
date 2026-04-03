@@ -40,14 +40,13 @@ chrono = "0.4"
 
 # Window and rendering support
 sdl2 = { version = "0.38", features = ["bundled"] }
-glow = "0.16"
+glow = "0.17"
 bytemuck = "1.14"
 
 # egui support
 egui = "0.34"
 egui_glow = "0.34"
 egui_extras = { version = "0.34", features = ["image"] }
-egui_sdl2_gl = "0.33"
 egui_dock = "0.19"
 
 [build-dependencies]
