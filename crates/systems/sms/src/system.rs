@@ -229,7 +229,7 @@ impl System for SmsSystem {
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
         // Calculate target cycles and scanlines based on timing mode
         let (target_cycles, total_scanlines) = match self.timing_mode {
-            emu_core::apu::TimingMode::Ntsc => {
+            emu_core::apu::TimingMode::Ntsc | emu_core::apu::TimingMode::Gba => {
                 // NTSC: 3.579545 MHz / 60 Hz = 59659 cycles/frame
                 // 262 scanlines total
                 (59659_u64, 262_u64)
@@ -303,7 +303,7 @@ impl System for SmsSystem {
             "version": 1,
             "cycles": self.cycles,
             "timing_mode": match self.timing_mode {
-                emu_core::apu::TimingMode::Ntsc => "ntsc",
+                emu_core::apu::TimingMode::Ntsc | emu_core::apu::TimingMode::Gba => "ntsc",
                 emu_core::apu::TimingMode::Pal => "pal",
             },
             "cpu": {

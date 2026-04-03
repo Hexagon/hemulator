@@ -44,6 +44,9 @@ pub struct MdBus {
     z80_bank_register: u32,
     z80_bank_shift: u8,
 
+    // Region (PAL/NTSC)
+    pub region_pal: bool,
+
     // SRAM (battery-backed)
     sram: Vec<u8>,
     sram_enabled: bool,
@@ -69,6 +72,7 @@ impl MdBus {
             z80_reset: true,
             z80_bank_register: 0,
             z80_bank_shift: 0,
+            region_pal: false,
             sram: Vec::new(),
             sram_enabled: false,
             sram_start: 0,
@@ -78,6 +82,23 @@ impl MdBus {
 
     pub fn load_rom(&mut self, data: &[u8]) {
         self.rom = data.to_vec();
+
+        // Detect region from ROM header at $1F0
+        self.region_pal = false;
+        if data.len() > 0x1F0 {
+            // Region string is at $1F0, up to 16 bytes
+            let region_end = (data.len()).min(0x200);
+            let region_bytes = &data[0x1F0..region_end];
+            let has_europe = region_bytes.iter().any(|&b| b == b'E' || b == b'8');
+            let has_ntsc = region_bytes.iter().any(|&b| b == b'J' || b == b'U' || b == b'1' || b == b'4');
+            // PAL if Europe-only (no NTSC regions)
+            if has_europe && !has_ntsc {
+                self.region_pal = true;
+            }
+        }
+
+        // Pass PAL flag to VDP
+        self.vdp.borrow_mut().region_pal = self.region_pal;
 
         // Check for SRAM info in header at $1B0-$1BF
         if self.rom.len() > 0x1C0 {
@@ -208,8 +229,8 @@ impl Memory68k for MdBus {
 
             // I/O registers (byte-wide, mirrored to even addresses)
             0xA10000 | 0xA10001 => {
-                // Version register: overseas NTSC, no expansion
-                0xA0
+                // Version register: bit 7 = overseas, bit 6 = PAL, bits 3-0 = revision
+                if self.region_pal { 0xE0 } else { 0xA0 }
             }
             0xA10002 | 0xA10003 => self.read_controller(self.controller_1, self.io_ctrl_1),
             0xA10004 | 0xA10005 => self.read_controller(self.controller_2, self.io_ctrl_2),

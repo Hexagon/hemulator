@@ -339,6 +339,12 @@ impl Dma {
     /// Returns channels that should be activated.
     pub fn notify_timing(&mut self, timing: DmaStartTiming) {
         for (ch_idx, ch) in self.channels.iter_mut().enumerate() {
+            // Sound FIFO Special timing only applies to DMA1 and DMA2.
+            // DMA3 Special = Video Capture which has its own trigger.
+            if timing == DmaStartTiming::Special && ch_idx == 3 {
+                continue;
+            }
+
             if ch.enabled() && ch.start_timing() == timing {
                 ch.active = true;
 
@@ -382,11 +388,20 @@ impl Dma {
                 continue;
             }
 
-            let transfer_32 = ch.transfer_32();
+            // Sound FIFO DMA: channels 1 and 2 with Special timing
+            // Hardware overrides: forced 32-bit, 4 words, fixed destination
+            let is_sound_fifo = (ch_idx == 1 || ch_idx == 2)
+                && ch.start_timing() == DmaStartTiming::Special;
+
+            let transfer_32 = if is_sound_fifo { true } else { ch.transfer_32() };
             let step = if transfer_32 { 4u32 } else { 2u32 };
             let src_ctrl = ch.src_control();
-            let dst_ctrl = ch.dest_control();
-            let word_count = ch.word_count;
+            let dst_ctrl = if is_sound_fifo {
+                AddrControl::Fixed
+            } else {
+                ch.dest_control()
+            };
+            let word_count = if is_sound_fifo { 4 } else { ch.word_count };
 
             // Calculate address adjustments
             let src_step: i32 = match src_ctrl {

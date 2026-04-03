@@ -99,3 +99,20 @@ not available in CI or in headless `cargo test` runs.  They can be run manually 
 - [ ] **cputest-full fails at test `0x0025`** — next failing emulation-mode test after dp-wrap fix; needs investigation
   - File: `crates/core/src/cpu_65c816.rs`
   - Raise `MIN_PASSING` in `test_cputest_full_loads_and_runs` once resolved
+
+## Mega Drive
+
+### High
+- [ ] **SVP chip (Samsung SSP1601 DSP)**: Virtua Racing requires the SVP coprocessor — a dedicated 16-bit DSP with its own instruction set, ~2KB IRAM, ~2KB DRAM, and a communication protocol with the M68K. Without SVP, Virtua Racing shows a blank screen. — `crates/systems/megadrive/src/`
+  - Current: Not implemented
+  - Impact: Only one retail game (Virtua Racing) uses SVP, but it's a high-profile title
+- [ ] **Z80 CPU emulation**: Z80 is currently stubbed (bus grant/release only). Needed for proper YM2612 music playback and PSG sound — `crates/systems/megadrive/src/bus.rs`
+
+### Medium
+- [ ] **VDP FIFO emulation**: The VDP FIFO (4-entry write buffer) is not emulated. Some games rely on FIFO timing for mid-frame effects. STATUS_FIFO_FULL/FIFO_EMPTY flags are always static. — `crates/systems/megadrive/src/vdp.rs`
+- [ ] **HBlank status flag**: STATUS_HBLANK is defined but never set/cleared during rendering. Some games poll this flag. — `crates/systems/megadrive/src/vdp.rs`
+- [ ] **Interlace mode**: VDP register $0C bit 1 (interlace) is not implemented. Rarely used but needed for some games. — `crates/systems/megadrive/src/vdp.rs`
+
+### Low
+- [ ] **Sprite pixel masking**: Sprite at X=0 should mask subsequent sprites on that line (sprite masking). Some games use this to hide sprite glitches. — `crates/systems/megadrive/src/vdp.rs`
+- [ ] **V-counter jump for PAL**: PAL V-counter should jump from $F2 to $CA (not linear). Currently uses linear counter. — `crates/systems/megadrive/src/vdp.rs`

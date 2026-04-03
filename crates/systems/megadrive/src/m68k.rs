@@ -774,7 +774,7 @@ impl<M: Memory68k> M68k<M> {
         if mode == 7 && reg == 4 {
             if size == Size::Byte {
                 // ANDI to CCR — only affect lower 5 bits
-                self.sr &= 0xFF00 | (imm as u16 & 0x1F) | 0xFFE0;
+                self.sr &= (imm as u16 & 0x1F) | 0xFFE0;
             } else {
                 // ANDI to SR — full 16-bit
                 if !self.is_supervisor() {

@@ -778,7 +778,7 @@ impl EmulatorSystem {
         match self {
             EmulatorSystem::NES(sys) => sys.timing(),
             EmulatorSystem::GameBoy(_) => emu_core::apu::TimingMode::Ntsc,
-            EmulatorSystem::GBA(_) => emu_core::apu::TimingMode::Ntsc,
+            EmulatorSystem::GBA(_) => emu_core::apu::TimingMode::Gba,
             EmulatorSystem::Atari2600(_) => emu_core::apu::TimingMode::Ntsc,
             EmulatorSystem::PC(_) => emu_core::apu::TimingMode::Ntsc,
             EmulatorSystem::SNES(_) => emu_core::apu::TimingMode::Ntsc,

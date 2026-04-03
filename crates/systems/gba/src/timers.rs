@@ -174,6 +174,31 @@ impl Timers {
         irq_flags
     }
 
+    /// Calculate the minimum number of CPU cycles until any enabled
+    /// non-cascade timer overflows. Returns 0 if no timers are running.
+    /// Used for halt fast-forward to batch idle cycles.
+    pub fn cycles_until_overflow(&self) -> u64 {
+        let mut min_cycles = u64::MAX;
+
+        for timer in &self.timers {
+            if !timer.is_enabled() || timer.is_cascade() {
+                continue;
+            }
+
+            let divider = timer.prescaler() as u64;
+            let remaining_ticks = 0x10000u64 - timer.counter as u64;
+            // Cycles needed = remaining_ticks * divider - prescaler_counter
+            let cycles = remaining_ticks * divider - timer.prescaler_counter as u64;
+            min_cycles = min_cycles.min(cycles);
+        }
+
+        if min_cycles == u64::MAX {
+            0
+        } else {
+            min_cycles
+        }
+    }
+
     /// Tick a timer using its prescaler divider.
     /// Returns the number of times the timer overflowed.
     fn tick_timer_prescaled(&mut self, index: usize, cycles: u32) -> u32 {

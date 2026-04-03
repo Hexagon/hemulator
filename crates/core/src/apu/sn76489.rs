@@ -222,7 +222,7 @@ impl Sn76489Psg {
             "latched_reg": self.latched_reg,
             "prescaler": self.prescaler,
             "timing_mode": match self.timing_mode {
-                TimingMode::Ntsc => "ntsc",
+                TimingMode::Ntsc | TimingMode::Gba => "ntsc",
                 TimingMode::Pal => "pal",
             },
         })
@@ -400,7 +400,7 @@ impl Sn76489Adapter {
     pub fn generate_samples(&mut self, sample_count: usize) -> Vec<i16> {
         const SAMPLE_HZ: f64 = 44_100.0;
         let cpu_hz = match self.timing {
-            TimingMode::Ntsc => self.cpu_hz_ntsc,
+            TimingMode::Ntsc | TimingMode::Gba => self.cpu_hz_ntsc,
             TimingMode::Pal => self.cpu_hz_pal,
         };
         let cycles_per_sample = cpu_hz / SAMPLE_HZ;
@@ -431,7 +431,7 @@ impl Sn76489Adapter {
             "psg": self.psg.get_state(),
             "cycle_accum": self.cycle_accum,
             "timing": match self.timing {
-                TimingMode::Ntsc => "ntsc",
+                TimingMode::Ntsc | TimingMode::Gba => "ntsc",
                 TimingMode::Pal => "pal",
             },
         })

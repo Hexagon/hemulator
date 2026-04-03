@@ -147,8 +147,13 @@ pub struct GbApu {
     wave_frequency: u16,
     wave_dac_enabled: bool,
 
+    // Direct GB noise timer (bypasses NES period table)
+    noise_period: u16,
+    noise_timer: u16,
+
     // Sample generation
-    _cycle_accum: f64,
+    cycle_accum: f64,
+    sample_buffer: Vec<i16>,
     last_pulse1_sample: i16,
     last_pulse2_sample: i16,
     last_wave_sample: i16,
@@ -157,8 +162,6 @@ pub struct GbApu {
     dc_prev_output_l: f32,
     dc_prev_input_r: f32,
     dc_prev_output_r: f32,
-    lp_prev_l: f32,
-    lp_prev_r: f32,
 }
 
 impl GbApu {
@@ -194,7 +197,11 @@ impl GbApu {
             wave_frequency: 0,
             wave_dac_enabled: false,
 
-            _cycle_accum: 0.0,
+            noise_period: 8,
+            noise_timer: 0,
+
+            cycle_accum: 0.0,
+            sample_buffer: Vec::with_capacity(2200),
             last_pulse1_sample: 0,
             last_pulse2_sample: 0,
             last_wave_sample: 0,
@@ -203,8 +210,6 @@ impl GbApu {
             dc_prev_output_l: 0.0,
             dc_prev_input_r: 0.0,
             dc_prev_output_r: 0.0,
-            lp_prev_l: 0.0,
-            lp_prev_r: 0.0,
         }
     }
 
@@ -225,7 +230,21 @@ impl GbApu {
             self.last_pulse1_sample = self.pulse1.clock();
             self.last_pulse2_sample = self.pulse2.clock();
             self.last_wave_sample = self.wave.clock();
-            let _ = self.noise.clock();
+
+            // Clock noise with direct GB period (not NES table)
+            if self.noise_timer > 0 {
+                self.noise_timer -= 1;
+            } else {
+                self.noise_timer = self.noise_period;
+                // Clock the LFSR manually
+                let sr = self.noise.shift_register;
+                let feedback = if self.noise.mode {
+                    ((sr & 1) ^ ((sr >> 6) & 1)) & 1
+                } else {
+                    ((sr & 1) ^ ((sr >> 1) & 1)) & 1
+                };
+                self.noise.shift_register = (sr >> 1) | (feedback << 14);
+            }
         }
     }
 
@@ -486,6 +505,15 @@ impl GbApu {
                         .set_timer(gb_square_timer(self.pulse1_frequency));
                     self.pulse1_envelope.trigger();
                     self.pulse1_sweep.trigger(self.pulse1_frequency);
+                    self.pulse1.reset_phase();
+
+                    // GB manages length externally via pulse1_length.
+                    // Keep internal length_counter nonzero so PulseChannel::clock()
+                    // produces output — the real gating happens in the mixer.
+                    self.pulse1.length_counter = u8::MAX;
+
+                    // Load envelope volume immediately (rboy behaviour).
+                    self.pulse1.envelope = self.pulse1_envelope.initial_volume();
 
                     // If length counter is 0, reload it
                     if self.pulse1_length.value() == 0 {
@@ -533,6 +561,13 @@ impl GbApu {
                     self.pulse2
                         .set_timer(gb_square_timer(self.pulse2_frequency));
                     self.pulse2_envelope.trigger();
+                    self.pulse2.reset_phase();
+
+                    // GB manages length externally via pulse2_length.
+                    self.pulse2.length_counter = u8::MAX;
+
+                    // Load envelope volume immediately (rboy behaviour).
+                    self.pulse2.envelope = self.pulse2_envelope.initial_volume();
 
                     if self.pulse2_length.value() == 0 {
                         self.pulse2_length.load_gb(0, 64);
@@ -607,12 +642,21 @@ impl GbApu {
                 // W = width mode (0 = 15-bit, 1 = 7-bit)
                 // D = divisor code (0-7)
 
-                let _shift = (val >> 4) & 0x0F;
+                let shift = (val >> 4) & 0x0F;
                 let width = (val & 0x08) != 0;
-                let _divisor = val & 0x07;
+                let divisor_code = val & 0x07;
 
                 self.noise.mode = width;
-                self.noise.set_period(gb_noise_period_index(val));
+
+                // Compute GB noise period directly (rboy formula):
+                // divisor = if code == 0 { 8 } else { code * 16 }
+                // period = divisor << shift
+                let divisor: u32 = if divisor_code == 0 {
+                    8
+                } else {
+                    (divisor_code as u32) * 16
+                };
+                self.noise_period = (divisor << shift) as u16;
             }
             // NR44: Noise control
             0xFF23 => {
@@ -624,6 +668,11 @@ impl GbApu {
                 if trigger {
                     self.noise.enabled = true;
                     self.noise_envelope.trigger();
+                    self.noise.shift_register = 0x7FFF; // All bits set
+                    self.noise_timer = 0;
+
+                    // Load envelope volume immediately (rboy behaviour).
+                    self.noise.envelope = self.noise_envelope.initial_volume();
 
                     if self.noise_length.value() == 0 {
                         self.noise_length.load_gb(0, 64);
@@ -695,181 +744,166 @@ impl GbApu {
         self.dc_prev_output_l = 0.0;
         self.dc_prev_input_r = 0.0;
         self.dc_prev_output_r = 0.0;
-        self.lp_prev_l = 0.0;
-        self.lp_prev_r = 0.0;
     }
 
-    /// Generate audio samples for a number of CPU cycles
+    /// Clock the APU for `cpu_cycles` CPU cycles, generating internal
+    /// samples at 65,536 Hz (CPU_CLOCK / 64) into the sample buffer.
+    pub fn generate_samples_stereo(&mut self, cpu_cycles: u32) {
+        /// GB CPU clock = 4,194,304 Hz
+        const CPU_CLOCK: f64 = 4_194_304.0;
+        /// Internal sample rate: CPU_CLOCK / 64 = 65,536 Hz exactly
+        const INTERNAL_RATE: f64 = 65_536.0;
+        /// CPU cycles per internal sample = 64 exactly
+        const CYCLES_PER_SAMPLE: f64 = CPU_CLOCK / INTERNAL_RATE;
+
+        for _ in 0..cpu_cycles {
+            self.clock();
+
+            self.cycle_accum += 1.0;
+            if self.cycle_accum >= CYCLES_PER_SAMPLE {
+                self.cycle_accum -= CYCLES_PER_SAMPLE;
+
+                let (left, right) = self.mix_channels_stereo();
+                self.sample_buffer.push(left);
+                self.sample_buffer.push(right);
+            }
+        }
+    }
+
+    /// Drain and resample the internal sample buffer (65,536 Hz)
+    /// to the target count at 44,100 Hz using linear interpolation.
+    pub fn drain_samples(&mut self, target_stereo_count: usize) -> Vec<i16> {
+        let target_mono = target_stereo_count / 2;
+        let internal_mono = self.sample_buffer.len() / 2;
+
+        if internal_mono < 2 || target_mono == 0 {
+            self.sample_buffer.clear();
+            return vec![0; target_stereo_count];
+        }
+
+        let step = (internal_mono - 1) as f64 / (target_mono - 1).max(1) as f64;
+        let mut output = Vec::with_capacity(target_stereo_count);
+        let mut pos = 0.0f64;
+
+        for _ in 0..target_mono {
+            let idx = pos as usize;
+            let frac = (pos - idx as f64) as f32;
+
+            let i0 = idx.min(internal_mono - 1);
+            let i1 = (idx + 1).min(internal_mono - 1);
+
+            // Left channel
+            let l0 = self.sample_buffer[i0 * 2] as f32;
+            let l1 = self.sample_buffer[i1 * 2] as f32;
+            output.push((l0 + (l1 - l0) * frac) as i16);
+
+            // Right channel
+            let r0 = self.sample_buffer[i0 * 2 + 1] as f32;
+            let r1 = self.sample_buffer[i1 * 2 + 1] as f32;
+            output.push((r0 + (r1 - r0) * frac) as i16);
+
+            pos += step;
+        }
+
+        self.sample_buffer.clear();
+        output
+    }
+
+    /// Mix all active channels into a single stereo sample.
     ///
-    /// Returns samples at 44.1 kHz sample rate.
-    #[allow(dead_code)]
-    pub fn generate_samples(&mut self, cpu_cycles: u32) -> Vec<i16> {
-        const SAMPLE_RATE: f64 = 44100.0;
-        const CPU_CLOCK: f64 = 4194304.0;
-        const CYCLES_PER_SAMPLE: f64 = CPU_CLOCK / SAMPLE_RATE;
-
-        let mut samples = Vec::new();
-        let mut cycle_accum = 0.0;
-
-        for _ in 0..cpu_cycles {
-            self.clock();
-
-            cycle_accum += 1.0;
-            if cycle_accum >= CYCLES_PER_SAMPLE {
-                cycle_accum -= CYCLES_PER_SAMPLE;
-
-                // Mix all channels
-                let (left, right) = self.mix_channels_stereo();
-                let sample = ((left as i32) + (right as i32)) / 2;
-                samples.push(sample as i16);
-            }
-        }
-
-        samples
-    }
-
-    /// Generate interleaved stereo samples for a number of CPU cycles
-    pub fn generate_samples_stereo(&mut self, cpu_cycles: u32) -> Vec<i16> {
-        const SAMPLE_RATE: f64 = 44100.0;
-        const CPU_CLOCK: f64 = 4194304.0;
-        const CYCLES_PER_SAMPLE: f64 = CPU_CLOCK / SAMPLE_RATE;
-
-        let mut samples = Vec::new();
-        let mut cycle_accum = 0.0;
-
-        for _ in 0..cpu_cycles {
-            self.clock();
-
-            cycle_accum += 1.0;
-            if cycle_accum >= CYCLES_PER_SAMPLE {
-                cycle_accum -= CYCLES_PER_SAMPLE;
-
-                let (left, right) = self.mix_channels_stereo();
-                samples.push(left);
-                samples.push(right);
-            }
-        }
-
-        samples
-    }
-
-    /// Mix all active channels into a single sample
+    /// Follows the mixing approach from rboy/mohanson reference emulators:
+    /// - Sum channels (not average)
+    /// - Volume scale: (master_vol / 7.0) * (1.0 / 15.0) * 0.25
+    /// - 0.25 headroom factor ensures 4 channels at max don't clip
     fn mix_channels_stereo(&mut self) -> (i16, i16) {
         if !self.power_on {
             return (0, 0);
         }
 
-        let mut left_sum = 0i32;
-        let mut right_sum = 0i32;
-        let mut left_weight = 0i32;
-        let mut right_weight = 0i32;
-
+        let mut left = 0.0f32;
+        let mut right = 0.0f32;
         let pan = self.channel_panning;
-        let ch_pan = |left_bit: u8, right_bit: u8| -> (i32, i32) {
-            let left = (pan >> left_bit) & 0x01;
-            let right = (pan >> right_bit) & 0x01;
-            (left as i32, right as i32)
-        };
 
-        // Add pulse 1
+        // Core channels output ±(envelope << 10) = ±(vol * 1024).
+        // Divide by 1024 to get DAC-level values (range ±15).
+        const INV_1024: f32 = 1.0 / 1024.0;
+
+        // Pulse 1
         if self.channel_mask[0] && self.pulse1.enabled && self.pulse1_length.is_active() {
-            let (l, r) = ch_pan(4, 0);
-            if l > 0 {
-                left_sum += (self.last_pulse1_sample as i32 / 2) * l;
-                left_weight += l;
+            let dac = self.last_pulse1_sample as f32 * INV_1024;
+            if pan & 0x10 != 0 {
+                left += dac;
             }
-            if r > 0 {
-                right_sum += (self.last_pulse1_sample as i32 / 2) * r;
-                right_weight += r;
+            if pan & 0x01 != 0 {
+                right += dac;
             }
         }
 
-        // Add pulse 2
+        // Pulse 2
         if self.channel_mask[1] && self.pulse2.enabled && self.pulse2_length.is_active() {
-            let (l, r) = ch_pan(5, 1);
-            if l > 0 {
-                left_sum += (self.last_pulse2_sample as i32 / 2) * l;
-                left_weight += l;
+            let dac = self.last_pulse2_sample as f32 * INV_1024;
+            if pan & 0x20 != 0 {
+                left += dac;
             }
-            if r > 0 {
-                right_sum += (self.last_pulse2_sample as i32 / 2) * r;
-                right_weight += r;
+            if pan & 0x02 != 0 {
+                right += dac;
             }
         }
 
-        // Add wave
+        // Wave — unsigned 4-bit DAC output, center to make bipolar
         if self.channel_mask[2]
             && self.wave.enabled
             && self.wave_length.is_active()
             && self.wave_dac_enabled
         {
-            // Wave channel outputs unsigned 4-bit samples; center around zero
-            let wave_sample = ((self.last_wave_sample as i32) - 7680) * 2;
-            let (l, r) = ch_pan(6, 2);
-            if l > 0 {
-                left_sum += (wave_sample / 2) * l;
-                left_weight += l;
+            // Wave outputs (sample >> vol_shift) << 10.
+            // Divide by 1024 to get DAC level, then center around 7.5.
+            let raw_dac = self.last_wave_sample as f32 * INV_1024;
+            let dac = raw_dac - 7.5;
+            if pan & 0x40 != 0 {
+                left += dac;
             }
-            if r > 0 {
-                right_sum += (wave_sample / 2) * r;
-                right_weight += r;
+            if pan & 0x04 != 0 {
+                right += dac;
             }
         }
 
-        // Add noise
+        // Noise — bipolar from LFSR bit 0
         if self.channel_mask[3] && self.noise.enabled && self.noise_length.is_active() {
-            let noise_sample = if self.noise.is_silenced() {
-                -((self.noise.envelope as i32) << 10)
-            } else {
-                (self.noise.envelope as i32) << 10
-            };
-            let (l, r) = ch_pan(7, 3);
-            if l > 0 {
-                left_sum += (noise_sample / 2) * l;
-                left_weight += l;
+            let vol = self.noise.envelope as f32;
+            let dac = if self.noise.is_silenced() { -vol } else { vol };
+            if pan & 0x80 != 0 {
+                left += dac;
             }
-            if r > 0 {
-                right_sum += (noise_sample / 2) * r;
-                right_weight += r;
+            if pan & 0x08 != 0 {
+                right += dac;
             }
         }
 
-        // Average and apply master volume
-        let left = if left_weight > 0 {
-            let mut sample = left_sum / left_weight;
-            sample = sample * (self.left_volume as i32) / 7;
-            apply_filters(
-                sample as f32,
-                &mut self.dc_prev_input_l,
-                &mut self.dc_prev_output_l,
-                &mut self.lp_prev_l,
-            )
-        } else {
-            0
-        };
+        // Apply master volume and normalize to i16 range.
+        // rboy formula: (master_vol / 7.0) * (1.0 / 15.0) * 0.25
+        // × 32767 to convert to i16 range.
+        let left_scale = (self.left_volume as f32 / 7.0) * (1.0 / 15.0) * 0.25 * 32767.0;
+        let right_scale = (self.right_volume as f32 / 7.0) * (1.0 / 15.0) * 0.25 * 32767.0;
 
-        let right = if right_weight > 0 {
-            let mut sample = right_sum / right_weight;
-            sample = sample * (self.right_volume as i32) / 7;
-            apply_filters(
-                sample as f32,
-                &mut self.dc_prev_input_r,
-                &mut self.dc_prev_output_r,
-                &mut self.lp_prev_r,
-            )
-        } else {
-            0
-        };
+        let left_i16 = (left * left_scale).clamp(-32768.0, 32767.0);
+        let right_i16 = (right * right_scale).clamp(-32768.0, 32767.0);
 
-        (left, right)
+        // DC-blocking high-pass filter
+        let left_out = apply_filters(
+            left_i16,
+            &mut self.dc_prev_input_l,
+            &mut self.dc_prev_output_l,
+        );
+        let right_out = apply_filters(
+            right_i16,
+            &mut self.dc_prev_input_r,
+            &mut self.dc_prev_output_r,
+        );
+
+        (left_out, right_out)
     }
 }
-
-const GB_NOISE_PERIOD_TABLE: [u16; 16] = [
-    4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068,
-];
-
-const GB_NOISE_DIVISOR_TABLE: [u16; 8] = [8, 16, 32, 48, 64, 80, 96, 112];
 
 fn gb_square_timer(freq: u16) -> u16 {
     let period = (2048u32.saturating_sub(freq as u32)) * 4;
@@ -882,42 +916,18 @@ fn gb_wave_timer(freq: u16) -> u16 {
     period.saturating_sub(1) as u16
 }
 
-fn gb_noise_period_index(val: u8) -> u8 {
-    let shift = (val >> 4) & 0x0F;
-    let divisor_code = val & 0x07;
-    let divisor = GB_NOISE_DIVISOR_TABLE[divisor_code as usize] as u32;
-    let target_cycles = divisor << shift;
-
-    let mut best_idx = 0;
-    let mut best_diff = u32::MAX;
-    for (idx, &period) in GB_NOISE_PERIOD_TABLE.iter().enumerate() {
-        let diff = period.abs_diff(target_cycles as u16) as u32;
-        if diff < best_diff {
-            best_diff = diff;
-            best_idx = idx as u8;
-        }
-    }
-
-    best_idx
-}
-
 fn apply_filters(
     input: f32,
     prev_input: &mut f32,
     prev_output: &mut f32,
-    lp_prev: &mut f32,
 ) -> i16 {
     // DC-blocking high-pass filter
     let y = input - *prev_input + (0.995 * *prev_output);
     *prev_input = input;
     *prev_output = y;
 
-    // One-pole low-pass filter to smooth harsh edges
-    let lp = *lp_prev + (0.08 * (y - *lp_prev));
-    *lp_prev = lp;
-
     // Soft clip to avoid hard saturation
-    let clipped = lp / (1.0 + lp.abs() / 32768.0);
+    let clipped = y / (1.0 + y.abs() / 32768.0);
 
     clipped.clamp(i16::MIN as f32, i16::MAX as f32) as i16
 }

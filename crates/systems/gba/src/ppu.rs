@@ -798,16 +798,16 @@ impl Ppu {
             let offset = page + tex_y as usize * SCREEN_WIDTH + tex_x as usize;
             if offset < vram.len() {
                 let idx = vram[offset] as usize;
-                if idx != 0 {
-                    let color = palette_lookup(palette, idx);
-                    self.bg_lines[2][x] = LayerPixel {
-                        color,
-                        priority,
-                        layer: PixelLayer::Bg2,
-                        is_transparent: false,
-                        obj_semi_transparent: false,
-                    };
-                }
+                // In bitmap modes, palette index 0 is a valid color (not transparent).
+                // Transparency only applies to tiled/text/affine modes.
+                let color = palette_lookup(palette, idx);
+                self.bg_lines[2][x] = LayerPixel {
+                    color,
+                    priority,
+                    layer: PixelLayer::Bg2,
+                    is_transparent: false,
+                    obj_semi_transparent: false,
+                };
             }
         }
     }

@@ -108,6 +108,8 @@ pub struct GbaBus {
     pub affine_ref_dirty: u8,
     /// Audio Processing Unit
     pub apu: apu::GbaApu,
+    /// HALTCNT halt request - set by bus when game writes HALTCNT, consumed by CPU
+    halt_requested: bool,
 }
 
 impl std::fmt::Debug for GbaBus {
@@ -188,6 +190,7 @@ impl GbaBus {
             keyinput: 0x03FF, // All buttons released
             affine_ref_dirty: 0,
             apu: apu::GbaApu::new(),
+            halt_requested: false,
         }
     }
 
@@ -317,7 +320,11 @@ impl GbaBus {
 
             // HALTCNT (0x04000301) - Halt/Stop
             0x04000301 => {
-                // TODO: Implement halt/stop modes
+                if val & 0x80 == 0 {
+                    // Bit 7 = 0: Halt mode (wait for interrupt)
+                    self.halt_requested = true;
+                }
+                // Bit 7 = 1: Stop mode (deep sleep) — treat as halt for emulation
             }
 
             // Affine reference point registers - writing immediately updates
@@ -415,7 +422,17 @@ impl MemoryArm7 for GbaBus {
                     return self.eeprom.borrow_mut().read_bit() as u8;
                 }
                 let offset = (addr & 0x01FFFFFF) as usize;
-                self.rom.get(offset).copied().unwrap_or(0)
+                if offset < self.rom.len() {
+                    self.rom[offset]
+                } else {
+                    // Open-bus: GBA returns (addr/2) as halfword for out-of-bounds ROM
+                    let halfword = (addr >> 1) as u16;
+                    if addr & 1 == 0 {
+                        halfword as u8
+                    } else {
+                        (halfword >> 8) as u8
+                    }
+                }
             }
 
             // Cartridge SRAM / Flash (0x0E000000 - 0x0E00FFFF)
@@ -658,6 +675,12 @@ impl MemoryArm7 for GbaBus {
             self.iwram[0x7FF8] = new_bios_if as u8;
             self.iwram[0x7FF9] = (new_bios_if >> 8) as u8;
         }
+    }
+
+    fn take_halt_request(&mut self) -> bool {
+        let req = self.halt_requested;
+        self.halt_requested = false;
+        req
     }
 }
 
@@ -976,9 +999,37 @@ impl System for GbaSystem {
         let frame_end = self.total_cycles + CYCLES_PER_FRAME;
 
         while self.total_cycles < frame_end {
-            // Execute one CPU instruction
+            // Execute one CPU instruction (or advance halted cycles)
             let pc_before = self.cpu.pc();
-            let cycles = self.cpu.step() as u64;
+            let mut cycles = self.cpu.step() as u64;
+
+            // Fast-forward halted CPU: batch multiple idle cycles together
+            // When halted (step returns 1), advance to the nearest event boundary
+            // instead of looping one cycle at a time.
+            if cycles == 1 && self.cpu.halted {
+                // Calculate cycles until next scanline event
+                let cycles_to_hblank = if !self.hblank_triggered && self.scanline_cycles < HBLANK_START {
+                    HBLANK_START - self.scanline_cycles
+                } else {
+                    u64::MAX
+                };
+                let cycles_to_scanline_end = CYCLES_PER_SCANLINE - self.scanline_cycles;
+                let cycles_to_frame_end = frame_end.saturating_sub(self.total_cycles);
+
+                let mut batch = cycles_to_hblank
+                    .min(cycles_to_scanline_end)
+                    .min(cycles_to_frame_end);
+
+                // Also limit by next timer overflow to keep FIFO fed accurately
+                let timer_batch = self.cpu.memory.timers.cycles_until_overflow();
+                if timer_batch > 0 {
+                    batch = batch.min(timer_batch);
+                }
+
+                // Ensure at least 1 cycle
+                cycles = batch.max(1);
+            }
+
             self.total_cycles += cycles;
             self.scanline_cycles += cycles;
 
@@ -1029,6 +1080,8 @@ impl System for GbaSystem {
                 let dma_cycles = self.execute_dma();
                 self.total_cycles += dma_cycles;
                 self.scanline_cycles += dma_cycles;
+                // APU continues running during DMA (hardware doesn't halt audio)
+                self.cpu.memory.apu.tick(dma_cycles as u32);
             }
 
             // Clock APU and generate output samples in real-time.
@@ -1041,6 +1094,8 @@ impl System for GbaSystem {
                 let dma_cycles = self.execute_dma();
                 self.total_cycles += dma_cycles;
                 self.scanline_cycles += dma_cycles;
+                // APU continues running during non-sound DMA too
+                self.cpu.memory.apu.tick(dma_cycles as u32);
             }
 
             // Update DISPSTAT flags after every CPU step so polling games
@@ -1168,6 +1223,7 @@ impl System for GbaSystem {
                 "spsr_und": cpu_state.spsr_und,
                 "pipeline_flushed": cpu_state.pipeline_flushed,
                 "halted": cpu_state.halted,
+                "intr_wait_flags": cpu_state.intr_wait_flags,
                 "cycles": cpu_state.cycles,
             },
             "memory": {
@@ -1231,6 +1287,7 @@ impl System for GbaSystem {
             spsr_und: cpu_json["spsr_und"].as_u64().unwrap_or(0) as u32,
             pipeline_flushed: cpu_json["pipeline_flushed"].as_bool().unwrap_or(false),
             halted: cpu_json["halted"].as_bool().unwrap_or(false),
+            intr_wait_flags: cpu_json["intr_wait_flags"].as_u64().unwrap_or(0) as u16,
             cycles: cpu_json["cycles"].as_u64().unwrap_or(0),
         };
 
