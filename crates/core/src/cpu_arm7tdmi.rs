@@ -957,7 +957,11 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
                 // SoundBiasChange - ramp SOUNDBIAS to target
                 // R0: 0 = ramp down to 0x000, 1 = ramp up to 0x200
                 // In emulation, just set it immediately
-                let target = if self.gpr[0] != 0 { 0x0200u16 } else { 0x0000u16 };
+                let target = if self.gpr[0] != 0 {
+                    0x0200u16
+                } else {
+                    0x0000u16
+                };
                 self.memory.write_byte(0x04000088, target as u8);
                 self.memory.write_byte(0x04000089, (target >> 8) as u8);
                 true
@@ -1794,10 +1798,8 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
                 if bios_flags & self.intr_wait_flags != 0 {
                     // Desired interrupt fired — clear matched flags and resume
                     let current = self.memory.read_word(bios_if_addr);
-                    self.memory.write_word(
-                        bios_if_addr,
-                        current & !(self.intr_wait_flags as u32),
-                    );
+                    self.memory
+                        .write_word(bios_if_addr, current & !(self.intr_wait_flags as u32));
                     self.intr_wait_flags = 0;
                 } else {
                     // Desired interrupt hasn't fired yet — re-halt to wait
@@ -2440,8 +2442,7 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
         // - LDM without R15 + S bit: load to user-mode registers
         // - STM with S bit: store user-mode registers
         // For user bank access, temporarily switch to System mode (shares user regs).
-        let use_user_bank =
-            psr_force_user && !(is_load && (reg_list & (1 << 15)) != 0);
+        let use_user_bank = psr_force_user && !(is_load && (reg_list & (1 << 15)) != 0);
         let saved_mode = if use_user_bank {
             let mode = ProcessorMode::from_bits(self.cpsr).unwrap_or(ProcessorMode::System);
             if mode != ProcessorMode::User && mode != ProcessorMode::System {

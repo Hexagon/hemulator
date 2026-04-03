@@ -1,10 +1,10 @@
 # Hemulator — Multi-System Console Emulator
 
-A cross-platform, multi-system console emulator written in Rust. **NES emulation is fully working** with ~90% game coverage. **GBA emulation is functional** with most games working. 15 systems are supported in various stages of development — see [System Status](#system-status) below.
+A cross-platform, multi-system console emulator written in Rust. **NES emulation is fully working** with ~90% game coverage. **GBA emulation is functional** with most games working. 16 systems are supported in various stages of development — see [System Status](#system-status) below.
 
 ## Features
 
-- 🎮 **Multiple Systems**: 15 emulated platforms — see [System Status](#system-status) for details
+- 🎮 **Multiple Systems**: 16 emulated platforms — see [System Status](#system-status) for details
 - 💾 **Save States**: 5 slots per game with menu-based save/load (Ctrl+1-5 / Ctrl+Shift+1-5)
 - ⚙️ **Persistent Settings**: Customizable controls, window scaling, and project files
 - 🖥️ **Cross-Platform GUI**: Built with SDL2 for Windows, Linux, and macOS
@@ -22,6 +22,7 @@ A cross-platform, multi-system console emulator written in Rust. **NES emulation
 | **GBA** | ✅ Functional | Most games working; ARM7TDMI CPU, PPU, Flash/EEPROM/SRAM saves |
 | **CHIP-8** | ✅ Fully Working | CHIP-8/Hires/Super-CHIP/XO-CHIP/Mega-CHIP |
 | **SMS** | ✅ Fully Working | Z80 CPU, VDP, PSG, ROM banking; ~90% game compatibility |
+| **Game Gear** | ✅ Fully Working | SMS-compatible; 160×144 viewport, 12-bit CRAM, GG I/O ports |
 | **Game & Watch** | 🚧 In Development | SM510 CPU, LCD artwork rendering, .mgw container support |
 | **ColecoVision** | 🚧 In Development | Not producing image; full hardware emulation |
 | **SG-1000** | ⚠️ Experimental | Full hardware emulation |

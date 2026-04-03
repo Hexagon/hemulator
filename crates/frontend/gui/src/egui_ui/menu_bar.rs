@@ -172,6 +172,16 @@ impl MenuBar {
                     }
 
                     if ui
+                        .button("Game Gear")
+                        .on_hover_text("Sega Game Gear")
+                        .clicked()
+                    {
+                        self.pending_action =
+                            Some(MenuAction::NewProjectSystem("Game Gear".to_string()));
+                        ui.close();
+                    }
+
+                    if ui
                         .button("Mega Drive")
                         .on_hover_text("Sega Mega Drive / Genesis")
                         .clicked()

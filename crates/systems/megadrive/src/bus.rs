@@ -90,7 +90,9 @@ impl MdBus {
             let region_end = (data.len()).min(0x200);
             let region_bytes = &data[0x1F0..region_end];
             let has_europe = region_bytes.iter().any(|&b| b == b'E' || b == b'8');
-            let has_ntsc = region_bytes.iter().any(|&b| b == b'J' || b == b'U' || b == b'1' || b == b'4');
+            let has_ntsc = region_bytes
+                .iter()
+                .any(|&b| b == b'J' || b == b'U' || b == b'1' || b == b'4');
             // PAL if Europe-only (no NTSC regions)
             if has_europe && !has_ntsc {
                 self.region_pal = true;
@@ -230,7 +232,11 @@ impl Memory68k for MdBus {
             // I/O registers (byte-wide, mirrored to even addresses)
             0xA10000 | 0xA10001 => {
                 // Version register: bit 7 = overseas, bit 6 = PAL, bits 3-0 = revision
-                if self.region_pal { 0xE0 } else { 0xA0 }
+                if self.region_pal {
+                    0xE0
+                } else {
+                    0xA0
+                }
             }
             0xA10002 | 0xA10003 => self.read_controller(self.controller_1, self.io_ctrl_1),
             0xA10004 | 0xA10005 => self.read_controller(self.controller_2, self.io_ctrl_2),

@@ -34,17 +34,6 @@ not available in CI or in headless `cargo test` runs.  They can be run manually 
 - [ ] **Memory alignment validation**: Load/store instructions that require alignment (LH/SH = 2 B, LW/SW = 4 B, LD/SD = 8 B) do not raise `AddressError` exceptions on misaligned access. — `crates/core/src/cpu_mips_r4300i/`
 - [ ] **Full cache coherency**: The TLB/cache is direct-mapped only; cache invalidation and dirty-line write-back are not emulated. — `crates/systems/n64/src/bus.rs`
 
-## SMS
-
-### High
-- [ ] **TMS9918A mode sprite rendering missing**: Sprites are not rendered in TMS9918A compatibility modes (0–3); only Mode 4 (SMS native) supports sprites. Affects backward-compatible SMS software that uses TMS modes. — `crates/systems/sms/src/vdp.rs`
-
-### Medium
-- [ ] **Line interrupt counter reload timing**: The line counter is reloaded from R10 at scanline 192 (start of VBlank). Verify correct reload behavior for games that change R10 mid-frame. — `crates/systems/sms/src/vdp.rs`
-
-### Low
-- [ ] **Game Gear not supported**: The Game Gear is a handheld derived from the SMS with a 160×144 display viewport, 64-byte CRAM, and different I/O port layout. — `crates/systems/sms/`
-
 ## Game & Watch
 
 ### Medium

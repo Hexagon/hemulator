@@ -53,6 +53,8 @@ pub struct SmsSystem {
     cartridge_loaded: bool,
     /// Whether a BIOS is loaded
     bios_loaded: bool,
+    /// Whether this is a Game Gear system
+    is_game_gear: bool,
 
     // Debugging
     /// Instruction tracer for debugging
@@ -72,9 +74,6 @@ impl SmsSystem {
         let rom = vec![0; 0x8000];
         let memory = SmsMemory::new(rom, Rc::clone(&vdp), Rc::clone(&psg));
 
-        // Don't load BIOS by default - games should work without it
-        // BIOS can be loaded via mount() if needed
-
         // Create CPU
         let cpu = CpuZ80::new(memory);
 
@@ -86,10 +85,40 @@ impl SmsSystem {
             total_cycles: 0,
             timing_mode: emu_core::apu::TimingMode::Ntsc,
             cartridge_loaded: false,
-            bios_loaded: false, // No BIOS by default
+            bios_loaded: false,
+            is_game_gear: false,
             instruction_tracer: emu_core::instruction_tracer::InstructionTracer::new(),
             breakpoint_manager: emu_core::breakpoints::BreakpointManager::new(),
         }
+    }
+
+    /// Create a new Game Gear system
+    pub fn new_game_gear() -> Self {
+        let vdp = Rc::new(RefCell::new(Vdp::new_game_gear()));
+        let psg = Rc::new(RefCell::new(SmsPsg::new()));
+
+        let rom = vec![0; 0x8000];
+        let memory = SmsMemory::new_game_gear(rom, Rc::clone(&vdp), Rc::clone(&psg));
+        let cpu = CpuZ80::new(memory);
+
+        Self {
+            cpu,
+            vdp,
+            psg,
+            cycles: 0,
+            total_cycles: 0,
+            timing_mode: emu_core::apu::TimingMode::Ntsc, // GG is always NTSC
+            cartridge_loaded: false,
+            bios_loaded: false,
+            is_game_gear: true,
+            instruction_tracer: emu_core::instruction_tracer::InstructionTracer::new(),
+            breakpoint_manager: emu_core::breakpoints::BreakpointManager::new(),
+        }
+    }
+
+    /// Check if this is a Game Gear system
+    pub fn is_game_gear(&self) -> bool {
+        self.is_game_gear
     }
 
     /// Load a ROM
@@ -102,8 +131,10 @@ impl SmsSystem {
             )
         });
 
-        // Detect timing mode from ROM header
-        self.timing_mode = Self::detect_timing_mode(&rom_data);
+        // Game Gear is always NTSC; SMS detects from ROM header
+        if !self.is_game_gear {
+            self.timing_mode = Self::detect_timing_mode(&rom_data);
+        }
         log(LogCategory::CPU, LogLevel::Info, || {
             format!("SMS: Detected timing mode: {:?}", self.timing_mode)
         });
@@ -192,6 +223,11 @@ impl SmsSystem {
     /// Set controller 2 state
     pub fn set_controller_2(&mut self, state: u8) {
         self.cpu.memory.set_controller_2(state);
+    }
+
+    /// Set Game Gear Start button state
+    pub fn set_gg_start_button(&mut self, pressed: bool) {
+        self.cpu.memory.set_gg_start_button(pressed);
     }
 }
 
@@ -301,6 +337,7 @@ impl System for SmsSystem {
         serde_json::json!({
             "system": "sms",
             "version": 1,
+            "is_game_gear": self.is_game_gear,
             "cycles": self.cycles,
             "timing_mode": match self.timing_mode {
                 emu_core::apu::TimingMode::Ntsc | emu_core::apu::TimingMode::Gba => "ntsc",
@@ -395,6 +432,11 @@ impl System for SmsSystem {
             self.cycles = cycles;
         }
 
+        // Restore is_game_gear (backward-compatible: defaults to current value)
+        if let Some(gg) = state.get("is_game_gear").and_then(|v| v.as_bool()) {
+            self.is_game_gear = gg;
+        }
+
         // Load timing mode
         if let Some(timing_str) = state.get("timing_mode").and_then(|v| v.as_str()) {
             self.timing_mode = match timing_str {
@@ -485,17 +527,23 @@ impl System for SmsSystem {
     }
 
     fn mount_points(&self) -> Vec<MountPointInfo> {
+        let cart_extensions = if self.is_game_gear {
+            vec!["gg".to_string()]
+        } else {
+            vec!["sms".to_string()]
+        };
+
         vec![
             MountPointInfo {
                 id: "bios".to_string(),
                 name: "BIOS ROM".to_string(),
                 extensions: vec!["sms".to_string(), "bin".to_string(), "rom".to_string()],
-                required: false, // Optional: system starts without a BIOS and games can run without one
+                required: false,
             },
             MountPointInfo {
                 id: "cartridge".to_string(),
                 name: "Cartridge".to_string(),
-                extensions: vec!["sms".to_string()],
+                extensions: cart_extensions,
                 required: true,
             },
         ]

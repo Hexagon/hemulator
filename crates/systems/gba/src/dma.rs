@@ -390,10 +390,14 @@ impl Dma {
 
             // Sound FIFO DMA: channels 1 and 2 with Special timing
             // Hardware overrides: forced 32-bit, 4 words, fixed destination
-            let is_sound_fifo = (ch_idx == 1 || ch_idx == 2)
-                && ch.start_timing() == DmaStartTiming::Special;
+            let is_sound_fifo =
+                (ch_idx == 1 || ch_idx == 2) && ch.start_timing() == DmaStartTiming::Special;
 
-            let transfer_32 = if is_sound_fifo { true } else { ch.transfer_32() };
+            let transfer_32 = if is_sound_fifo {
+                true
+            } else {
+                ch.transfer_32()
+            };
             let step = if transfer_32 { 4u32 } else { 2u32 };
             let src_ctrl = ch.src_control();
             let dst_ctrl = if is_sound_fifo {
