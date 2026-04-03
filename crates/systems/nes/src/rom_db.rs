@@ -228,11 +228,11 @@ mod tests {
 
     #[test]
     fn test_lookup_rom_found() {
-        // If we add an entry to the database, it should be found
+        // Verify that an existing entry can be found by its CRC32.
+        // Using ROM_DATABASE[0] keeps the test database-agnostic — it does not
+        // hardcode any specific game's CRC and won't break if entries are reordered.
         assert!(!ROM_DATABASE.is_empty());
 
-        // Look up the first entry using its actual CRC32 to keep the test
-        // database-agnostic (not tied to any specific game's hardcoded CRC).
         let first_entry = &ROM_DATABASE[0];
         let result = lookup_rom(first_entry.crc32);
         assert!(result.is_some());
