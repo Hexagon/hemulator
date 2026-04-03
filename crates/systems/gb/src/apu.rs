@@ -916,11 +916,7 @@ fn gb_wave_timer(freq: u16) -> u16 {
     period.saturating_sub(1) as u16
 }
 
-fn apply_filters(
-    input: f32,
-    prev_input: &mut f32,
-    prev_output: &mut f32,
-) -> i16 {
+fn apply_filters(input: f32, prev_input: &mut f32, prev_output: &mut f32) -> i16 {
     // DC-blocking high-pass filter
     let y = input - *prev_input + (0.995 * *prev_output);
     *prev_input = input;

@@ -1008,11 +1008,12 @@ impl System for GbaSystem {
             // instead of looping one cycle at a time.
             if cycles == 1 && self.cpu.halted {
                 // Calculate cycles until next scanline event
-                let cycles_to_hblank = if !self.hblank_triggered && self.scanline_cycles < HBLANK_START {
-                    HBLANK_START - self.scanline_cycles
-                } else {
-                    u64::MAX
-                };
+                let cycles_to_hblank =
+                    if !self.hblank_triggered && self.scanline_cycles < HBLANK_START {
+                        HBLANK_START - self.scanline_cycles
+                    } else {
+                        u64::MAX
+                    };
                 let cycles_to_scanline_end = CYCLES_PER_SCANLINE - self.scanline_cycles;
                 let cycles_to_frame_end = frame_end.saturating_sub(self.total_cycles);
 

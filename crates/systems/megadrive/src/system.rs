@@ -146,8 +146,16 @@ impl System for MegaDriveSystem {
 
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
         let is_pal = self.cpu.memory.region_pal;
-        let scanlines = if is_pal { PAL_SCANLINES } else { NTSC_SCANLINES };
-        let cycles_per_frame = if is_pal { PAL_CYCLES_PER_FRAME } else { NTSC_CYCLES_PER_FRAME };
+        let scanlines = if is_pal {
+            PAL_SCANLINES
+        } else {
+            NTSC_SCANLINES
+        };
+        let cycles_per_frame = if is_pal {
+            PAL_CYCLES_PER_FRAME
+        } else {
+            NTSC_CYCLES_PER_FRAME
+        };
         let cycles_per_scanline = cycles_per_frame / scanlines;
         let frame_start = self.cpu.cycles;
 
@@ -1340,7 +1348,7 @@ mod tests {
         // Set up VRAM write at address $1000 with DMA
         // Word 1: CD1:CD0=01 (VRAM write), addr[13:0]=0x1000
         vdp.write_control(0x5000); // $4000 | $1000
-        // Word 2: CD5=1 (DMA), addr[15:14]=0
+                                   // Word 2: CD5=1 (DMA), addr[15:14]=0
         vdp.write_control(0x0080);
 
         // Write fill value to data port (triggers DMA fill)
