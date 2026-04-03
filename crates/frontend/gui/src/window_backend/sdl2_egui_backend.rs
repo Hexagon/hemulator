@@ -2,7 +2,8 @@
 //!
 //! This module handles:
 //! - Window creation and OpenGL context management via SDL2
-//! - SDL2 event → egui `RawInput` conversion (no `unsafe`, no `transmute`)
+//! - SDL2 event → egui `RawInput` conversion without `transmute`;
+//!   any `unsafe` is limited to OpenGL loader/context setup
 //! - egui output rendering via `egui_glow::Painter` (egui 0.34 types natively)
 //! - Clipboard integration via SDL2's clipboard API
 //! - Cursor integration via SDL2's system cursor API
@@ -82,8 +83,17 @@ impl EguiInputState {
                     .native_pixels_per_point = Some(ppp);
             }
 
-            // Mouse button press/release
-            Event::MouseButtonDown { mouse_btn, .. } => {
+            // Mouse button press/release – sync pointer_pos from the event
+            // coordinates before reporting the click so egui always receives the
+            // correct position even when no prior MouseMotion was delivered
+            // (e.g., the very first click after launch, or after a pointer warp).
+            Event::MouseButtonDown {
+                mouse_btn, x, y, ..
+            } => {
+                self.pointer_pos = egui::pos2(*x as f32 / ppp, *y as f32 / ppp);
+                self.raw_input
+                    .events
+                    .push(egui::Event::PointerMoved(self.pointer_pos));
                 if let Some(button) = sdl_mouse_button(*mouse_btn) {
                     self.raw_input.events.push(egui::Event::PointerButton {
                         pos: self.pointer_pos,
@@ -93,7 +103,13 @@ impl EguiInputState {
                     });
                 }
             }
-            Event::MouseButtonUp { mouse_btn, .. } => {
+            Event::MouseButtonUp {
+                mouse_btn, x, y, ..
+            } => {
+                self.pointer_pos = egui::pos2(*x as f32 / ppp, *y as f32 / ppp);
+                self.raw_input
+                    .events
+                    .push(egui::Event::PointerMoved(self.pointer_pos));
                 if let Some(button) = sdl_mouse_button(*mouse_btn) {
                     self.raw_input.events.push(egui::Event::PointerButton {
                         pos: self.pointer_pos,
@@ -113,9 +129,18 @@ impl EguiInputState {
             }
 
             // Scroll wheel – `phase: TouchPhase::Move` is the standard default for
-            // non-trackpad devices.
-            Event::MouseWheel { x, y, .. } => {
-                let delta = egui::vec2(*x as f32 * 8.0, *y as f32 * 8.0);
+            // non-trackpad devices.  Invert the delta when SDL reports a flipped
+            // (natural-scroll) device so the direction matches user expectation.
+            Event::MouseWheel {
+                x, y, direction, ..
+            } => {
+                use sdl2::mouse::MouseWheelDirection;
+                let sign = if *direction == MouseWheelDirection::Flipped {
+                    -1.0_f32
+                } else {
+                    1.0_f32
+                };
+                let delta = egui::vec2(*x as f32 * 8.0 * sign, *y as f32 * 8.0 * sign);
                 self.raw_input.events.push(egui::Event::MouseWheel {
                     unit: egui::MouseWheelUnit::Point,
                     delta,
@@ -512,8 +537,11 @@ impl Sdl2EguiBackend {
         })
     }
 
-    /// Get OpenGL context for renderer initialization
-    /// Returns a clone of the shared `Arc<glow::Context>`.
+    /// Get an OpenGL context backed by the same SDL2 GL entry points as the
+    /// painter.  Each call creates a new `glow::Context` value from the SDL2
+    /// GL proc-address loader; the underlying function pointers are shared with
+    /// the painter's context, so the returned context is usable for rendering
+    /// into the same window.
     pub fn gl_context(&self) -> Option<glow::Context> {
         // Create a new context sharing the same SDL2 GL entry points.
         // glow::Context is Send+Sync, so cloning via the loader is safe here.
