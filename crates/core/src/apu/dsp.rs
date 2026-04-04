@@ -1007,7 +1007,7 @@ impl Dsp {
             let ram_mut = unsafe { &mut *ptr };
 
             let buf_base = (self.echo_addr as usize) << 8; // ESA * 256
-            // EDL=0 is treated as 1 block (2048 bytes) by hardware
+                                                           // EDL=0 is treated as 1 block (2048 bytes) by hardware
             let buf_len = (self.echo_delay as usize).max(1) * 2048;
 
             // Skip echo processing if the buffer would extend past the end of RAM:
@@ -1019,10 +1019,8 @@ impl Dsp {
                 let pos_addr = buf_base + echo_pos;
 
                 // STEP 1 – Read old echo sample from ring buffer
-                let echo_in_l =
-                    i16::from_le_bytes([ram_mut[pos_addr], ram_mut[pos_addr + 1]]);
-                let echo_in_r =
-                    i16::from_le_bytes([ram_mut[pos_addr + 2], ram_mut[pos_addr + 3]]);
+                let echo_in_l = i16::from_le_bytes([ram_mut[pos_addr], ram_mut[pos_addr + 1]]);
+                let echo_in_r = i16::from_le_bytes([ram_mut[pos_addr + 2], ram_mut[pos_addr + 3]]);
 
                 // STEP 2 – Push samples into the FIR history ring and compute FIR output
                 self.fir_buf_left[self.fir_pos] = echo_in_l;
@@ -1045,10 +1043,9 @@ impl Dsp {
 
                 // STEP 3 – Mix echo output into main output
                 // EVC (echo volume) is 8-bit signed; result is scaled by 1/128
-                left = (left + ((fir_l * self.echo_volume_left as i32) >> 7))
-                    .clamp(-32768, 32767);
-                right = (right + ((fir_r * self.echo_volume_right as i32) >> 7))
-                    .clamp(-32768, 32767);
+                left = (left + ((fir_l * self.echo_volume_left as i32) >> 7)).clamp(-32768, 32767);
+                right =
+                    (right + ((fir_r * self.echo_volume_right as i32) >> 7)).clamp(-32768, 32767);
 
                 // STEP 4 – Write new echo sample to ring buffer
                 // FLG bit 5 = echo write disable; skip write when that bit is set
@@ -1057,11 +1054,9 @@ impl Dsp {
                     //            + previous FIR output scaled by EFB feedback
                     let echo_in_scaled_l = (echo_left * self.master_volume_left as i32) >> 7;
                     let echo_in_scaled_r = (echo_right * self.master_volume_right as i32) >> 7;
-                    let new_echo_l = (echo_in_scaled_l
-                        + ((fir_l * self.echo_feedback as i32) >> 7))
+                    let new_echo_l = (echo_in_scaled_l + ((fir_l * self.echo_feedback as i32) >> 7))
                         .clamp(-32768, 32767) as i16;
-                    let new_echo_r = (echo_in_scaled_r
-                        + ((fir_r * self.echo_feedback as i32) >> 7))
+                    let new_echo_r = (echo_in_scaled_r + ((fir_r * self.echo_feedback as i32) >> 7))
                         .clamp(-32768, 32767) as i16;
 
                     // Hardware clears bit 0 of echo writes
