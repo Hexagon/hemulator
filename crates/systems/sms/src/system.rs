@@ -312,10 +312,10 @@ impl System for SmsSystem {
                 (self.cycles * total_scanlines / target_cycles) % total_scanlines;
             self.vdp.borrow_mut().set_scanline(current_scanline as u16);
 
-            // Update H-counter with approximate position within the scanline
+            // Update cycle-in-scanline on the bus so TH transitions can latch H-counter
             let cycles_per_scanline = target_cycles / total_scanlines;
             let cycle_in_scanline = (self.cycles % cycles_per_scanline) as u32;
-            self.vdp.borrow_mut().latch_h_counter(cycle_in_scanline);
+            self.cpu.memory.set_cycle_in_scanline(cycle_in_scanline);
 
             // Check if VDP /INT line is active (any enabled interrupt pending).
             // On real SMS hardware, the Z80 has a single /IRQ line driven by
