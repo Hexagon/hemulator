@@ -26,7 +26,11 @@ impl GameSaves {
     pub fn rom_hash(rom_data: &[u8]) -> String {
         let mut hasher = Sha256::new();
         hasher.update(rom_data);
-        format!("{:x}", hasher.finalize())
+        hasher
+            .finalize()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect()
     }
 
     /// Get the saves directory path
