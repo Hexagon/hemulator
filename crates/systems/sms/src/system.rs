@@ -312,6 +312,11 @@ impl System for SmsSystem {
                 (self.cycles * total_scanlines / target_cycles) % total_scanlines;
             self.vdp.borrow_mut().set_scanline(current_scanline as u16);
 
+            // Update cycle-in-scanline on the bus so TH transitions can latch H-counter
+            let cycles_per_scanline = target_cycles / total_scanlines;
+            let cycle_in_scanline = (self.cycles % cycles_per_scanline) as u32;
+            self.cpu.memory.set_cycle_in_scanline(cycle_in_scanline);
+
             // Check if VDP /INT line is active (any enabled interrupt pending).
             // On real SMS hardware, the Z80 has a single /IRQ line driven by
             // the VDP:  /INT = (frame_pending AND IE0) OR (line_pending AND IE1).
@@ -384,6 +389,7 @@ impl System for SmsSystem {
                 "controller_1": self.cpu.memory.get_controller_1(),
                 "controller_2": self.cpu.memory.get_controller_2(),
                 "memory_control": self.cpu.memory.get_memory_control(),
+                "io_control": self.cpu.memory.get_io_control(),
                 "mapper": self.cpu.memory.get_mapper_state(),
             },
             "vdp": vdp.get_state(),
@@ -506,6 +512,9 @@ impl System for SmsSystem {
             }
             if let Some(mem_ctrl) = mem_state.get("memory_control").and_then(|v| v.as_u64()) {
                 self.cpu.memory.set_memory_control(mem_ctrl as u8);
+            }
+            if let Some(io_ctrl) = mem_state.get("io_control").and_then(|v| v.as_u64()) {
+                self.cpu.memory.set_io_control(io_ctrl as u8);
             }
             // Restore full mapper state (new format, backward-compatible)
             if let Some(mapper_state) = mem_state.get("mapper") {

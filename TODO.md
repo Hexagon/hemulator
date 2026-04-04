@@ -89,9 +89,7 @@ not available in CI or in headless `cargo test` runs.  They can be run manually 
 
 ### High
 - [ ] **DSP echo/reverb FIR filter not implemented**: The SPC700 DSP echo buffer and 8-tap FIR reverb filter are not emulated. Many games rely on reverb for audio quality (e.g., Donkey Kong Country series). — `crates/systems/snes/src/`
-- [ ] **cputest-basic fails at test `0x025d`** — next failing test after bank-wrap fix; needs investigation
-  - File: `crates/core/src/cpu_65c816.rs`
-  - Raise `MIN_PASSING` in `test_cputest_basic_loads_and_runs` once resolved
-- [ ] **cputest-full fails at test `0x0025`** — next failing emulation-mode test after dp-wrap fix; needs investigation
-  - File: `crates/core/src/cpu_65c816.rs`
-  - Raise `MIN_PASSING` in `test_cputest_full_loads_and_runs` once resolved
+- [ ] **SuperFX coprocessor incomplete**: Only ~20% of SuperFX opcodes implemented. Star Fox, Yoshi's Island, Doom etc. will not work. — `crates/systems/snes/src/coprocessors/superfx.rs`
+
+### Medium
+- [ ] **Multiply/divide hardware timing**: Math unit computes results immediately. Hardware takes 8 cycles (multiply) / 16 cycles (divide). May affect timing-sensitive code. — `crates/systems/snes/src/bus.rs`

@@ -126,6 +126,8 @@ pub struct Dsp1 {
     output_size: usize,
     /// Cached parameter words for projection/target operations
     param_words: [i16; 16],
+    /// Accumulator for MultiplyAccumulate command
+    mac_accumulator: i32,
 }
 
 impl Default for Dsp1 {
@@ -140,6 +142,7 @@ impl Default for Dsp1 {
             expected_params: 0,
             output_size: 0,
             param_words: [0; 16],
+            mac_accumulator: 0,
         }
     }
 }
@@ -227,13 +230,15 @@ impl Dsp1 {
             Dsp1Command::Multiply => {
                 let a = self.read_s16(0) as i32;
                 let b = self.read_s16(2) as i32;
-                self.write_s32(0, a * b);
+                let result = a * b;
+                self.mac_accumulator = result;
+                self.write_s32(0, result);
             }
             Dsp1Command::MultiplyAccumulate => {
-                // Same as multiply for now (accumulation would require state)
                 let a = self.read_s16(0) as i32;
                 let b = self.read_s16(2) as i32;
-                self.write_s32(0, a * b);
+                self.mac_accumulator = self.mac_accumulator.wrapping_add(a * b);
+                self.write_s32(0, self.mac_accumulator);
             }
             Dsp1Command::Parameter => {
                 // Cache 16 parameter words for projection-related commands.
