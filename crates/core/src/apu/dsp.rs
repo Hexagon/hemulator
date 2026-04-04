@@ -998,17 +998,21 @@ impl Dsp {
         // A FIR filter with 8 taps is applied to the echo history before mixing.
 
         if let Some(ptr) = ram_ptr {
-            // SAFETY: ptr is valid for the lifetime of the DSP; we hold the only
-            // reference here (no other code aliases it within this function).
+            // SAFETY: ptr is valid for the lifetime of the DSP.  The immutable
+            // `ram` reference created earlier in this function (used only inside
+            // the voice-update loop) has gone out of scope by this point, so no
+            // aliasing occurs.
             let ram_mut = unsafe { &mut *ptr };
 
             let buf_base = (self.echo_addr as usize) << 8; // ESA * 256
             // EDL=0 is treated as 1 block (2048 bytes) by hardware
             let buf_len = (self.echo_delay as usize).max(1) * 2048;
 
-            let pos_addr = buf_base + self.echo_pos;
-            // Guard against an echo buffer that would run off the end of RAM
-            if pos_addr + 3 < 0x10000 {
+            // Skip echo processing if the buffer would extend past the end of RAM:
+            // a game with valid settings will always fit within 64 KB.
+            if buf_base + buf_len <= 0x10000 {
+                let pos_addr = buf_base + self.echo_pos;
+
                 // STEP 1 – Read old echo sample from ring buffer
                 let echo_in_l =
                     i16::from_le_bytes([ram_mut[pos_addr], ram_mut[pos_addr + 1]]);
