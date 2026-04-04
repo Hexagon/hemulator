@@ -673,11 +673,13 @@ pub struct Dsp {
     /// Reference to APU RAM (for BRR sample access and echo buffer writes)
     ///
     /// # Safety
-    /// This pointer is set once during Spc700Memory::new() and points to the RAM
-    /// Box owned by the same Spc700Memory struct that contains this DSP.
-    /// Since Spc700Memory is never moved after creation (it's stored in CpuSpc700),
-    /// the pointer remains valid for the lifetime of the DSP.
-    /// All dereferencing is done through checked unsafe blocks.
+    /// This pointer points into the heap-allocated `Box<[u8; 0x10000]>` owned by the
+    /// `Spc700Memory` struct that also owns this `Dsp`.  Because the data lives on the
+    /// heap, its address is stable regardless of whether `Spc700Memory` is ever moved.
+    /// The pointer is set once (in `Spc700Memory::new()`) and is never replaced.
+    /// Exclusive access (`&mut`) is only created inside `clock()` for the echo write-back
+    /// step, and only after the earlier shared `&` reference (used for BRR decoding) has
+    /// gone out of scope, so no simultaneous aliasing occurs.
     ram: Option<*mut [u8; 0x10000]>,
 }
 
@@ -1011,7 +1013,10 @@ impl Dsp {
             // Skip echo processing if the buffer would extend past the end of RAM:
             // a game with valid settings will always fit within 64 KB.
             if buf_base + buf_len <= 0x10000 {
-                let pos_addr = buf_base + self.echo_pos;
+                // Normalize echo_pos in case ESA/EDL changed mid-run and left
+                // echo_pos pointing past the current buffer boundary.
+                let echo_pos = self.echo_pos % buf_len;
+                let pos_addr = buf_base + echo_pos;
 
                 // STEP 1 – Read old echo sample from ring buffer
                 let echo_in_l =
@@ -1069,7 +1074,7 @@ impl Dsp {
                 }
 
                 // STEP 5 – Advance echo ring position, wrapping at buffer length
-                self.echo_pos = (self.echo_pos + 4) % buf_len;
+                self.echo_pos = (echo_pos + 4) % buf_len;
             }
         }
         // ────────────────────────────────────────────────────────────────────────
@@ -1351,5 +1356,116 @@ mod tests {
         assert_eq!(voice.sample_history[0], 1400);
         assert_eq!(voice.sample_history[1], 1500);
         assert_eq!(voice.sample_history[2], 1600);
+    }
+
+    // ── Echo / FIR tests ────────────────────────────────────────────────────────
+
+    /// Helper: build a minimal Dsp with a live RAM buffer, pre-keyed voices muted
+    /// so only echo behavior is exercised.
+    fn make_dsp_with_ram() -> (Dsp, Box<[u8; 0x10000]>) {
+        let mut ram = Box::new([0u8; 0x10000]);
+        let mut dsp = Dsp::new();
+        dsp.set_ram(&mut *ram as *mut [u8; 0x10000]);
+
+        // Un-mute (flags=0) but leave echo write-enable default (bit 5 = 0 = enabled)
+        dsp.write_register(0x6C, 0x00); // FLG: no reset, no mute, echo writes enabled
+
+        // Set EON=0: no voices contribute to echo input → echo input = silence
+        dsp.write_register(0x4D, 0x00);
+
+        (dsp, ram)
+    }
+
+    #[test]
+    fn test_echo_pos_wraps_with_edl_1() {
+        let (mut dsp, _ram) = make_dsp_with_ram();
+
+        // EDL=1 → buf_len = 2048 bytes → 512 stereo samples of 4 bytes each
+        dsp.write_register(0x7D, 1); // EDL = 1
+
+        // Start with echo_pos at the very last slot (buf_len - 4)
+        dsp.echo_pos = 2044; // 512th slot = offset 2044
+
+        // After one clock(), echo_pos should wrap to 0
+        dsp.clock();
+        assert_eq!(dsp.echo_pos, 0, "echo_pos should wrap from 2044 to 0");
+
+        // After another clock it should advance to 4
+        dsp.clock();
+        assert_eq!(dsp.echo_pos, 4);
+    }
+
+    #[test]
+    fn test_echo_pos_normalized_on_edl_shrink() {
+        let (mut dsp, _ram) = make_dsp_with_ram();
+
+        // Start with EDL=4 (buf_len=8192), advance echo_pos well into the buffer
+        dsp.write_register(0x7D, 4); // EDL = 4
+        dsp.echo_pos = 4000; // valid for buf_len=8192
+
+        // Now shrink to EDL=1 (buf_len=2048) – echo_pos is now out of range
+        dsp.write_register(0x7D, 1); // EDL = 1, buf_len = 2048
+
+        // clock() must normalize echo_pos before use (4000 % 2048 = 1952)
+        dsp.clock();
+        // After normalization (1952) + 4 step = 1956
+        assert_eq!(dsp.echo_pos, 1956);
+    }
+
+    #[test]
+    fn test_echo_write_disable_flag() {
+        let (mut dsp, mut ram) = make_dsp_with_ram();
+
+        // Put a known value in the echo buffer slot 0 (ESA=0, EDL=1, pos=0)
+        dsp.write_register(0x7D, 1); // EDL=1
+        ram[0] = 0xAA;
+        ram[1] = 0xBB;
+        ram[2] = 0xCC;
+        ram[3] = 0xDD;
+
+        // Set FLG bit 5 = echo write disable
+        dsp.write_register(0x6C, 0x20);
+
+        dsp.clock();
+
+        // RAM should be unchanged because write-disable was set
+        assert_eq!(ram[0], 0xAA, "echo write should be disabled by FLG bit 5");
+        assert_eq!(ram[1], 0xBB);
+        assert_eq!(ram[2], 0xCC);
+        assert_eq!(ram[3], 0xDD);
+    }
+
+    #[test]
+    fn test_echo_bit0_cleared_on_write() {
+        let (mut dsp, mut ram) = make_dsp_with_ram();
+
+        // Enable echo writes (FLG bit 5 = 0 already from make_dsp_with_ram)
+        dsp.write_register(0x7D, 1); // EDL=1
+
+        // Pre-fill echo buffer with 0xFF so we can clearly see the write
+        for b in ram[0..4].iter_mut() {
+            *b = 0xFF;
+        }
+
+        // Set EVC to non-zero so FIR output contributes to echo mix
+        // With all-zero FIR history the output will be 0, meaning the written
+        // value comes purely from the voice mix path (which is also silent here).
+        // The important invariant is that bit 0 of each 16-bit write is 0.
+        dsp.clock();
+
+        // Read back the two 16-bit values written at pos 0
+        let written_l = i16::from_le_bytes([ram[0], ram[1]]);
+        let written_r = i16::from_le_bytes([ram[2], ram[3]]);
+
+        assert_eq!(
+            written_l & 1,
+            0,
+            "bit 0 of left echo sample must be cleared by hardware"
+        );
+        assert_eq!(
+            written_r & 1,
+            0,
+            "bit 0 of right echo sample must be cleared by hardware"
+        );
     }
 }
