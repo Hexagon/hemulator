@@ -228,16 +228,20 @@ mod tests {
 
     #[test]
     fn test_lookup_rom_found() {
-        // If we add an entry to the database, it should be found
-        // The database currently has at least one entry (Bee 52)
+        // Verify that an existing entry can be found by its CRC32.
+        // Using ROM_DATABASE[0] keeps the test database-agnostic — it does not
+        // hardcode any specific game's CRC and won't break if entries are reordered.
         assert!(!ROM_DATABASE.is_empty());
 
-        // Look up the Bee 52 ROM entry
-        let bee52_entry = lookup_rom(0xE19C2722);
-        assert!(bee52_entry.is_some());
-        let entry = bee52_entry.unwrap();
-        assert_eq!(entry.crc32, 0xE19C2722);
-        assert_eq!(entry.mirroring, Some(Mirroring::Vertical));
+        let first_entry = &ROM_DATABASE[0];
+        let result = lookup_rom(first_entry.crc32);
+        assert!(result.is_some());
+        let entry = result.unwrap();
+        assert_eq!(entry.crc32, first_entry.crc32);
+        assert_eq!(entry.mapper, first_entry.mapper);
+        assert_eq!(entry.mirroring, first_entry.mirroring);
+        assert_eq!(entry.timing, first_entry.timing);
+        assert_eq!(entry.board, first_entry.board);
     }
 
     #[test]
