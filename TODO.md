@@ -34,17 +34,6 @@ not available in CI or in headless `cargo test` runs.  They can be run manually 
 - [ ] **Memory alignment validation**: Load/store instructions that require alignment (LH/SH = 2 B, LW/SW = 4 B, LD/SD = 8 B) do not raise `AddressError` exceptions on misaligned access. — `crates/core/src/cpu_mips_r4300i/`
 - [ ] **Full cache coherency**: The TLB/cache is direct-mapped only; cache invalidation and dirty-line write-back are not emulated. — `crates/systems/n64/src/bus.rs`
 
-## SMS
-
-### High
-- [ ] **TMS9918A mode sprite rendering missing**: Sprites are not rendered in TMS9918A compatibility modes (0–3); only Mode 4 (SMS native) supports sprites. Affects backward-compatible SMS software that uses TMS modes. — `crates/systems/sms/src/vdp.rs`
-
-### Medium
-- [ ] **Line interrupt counter reload timing**: The line counter is reloaded from R10 at scanline 192 (start of VBlank). Verify correct reload behavior for games that change R10 mid-frame. — `crates/systems/sms/src/vdp.rs`
-
-### Low
-- [ ] **Game Gear not supported**: The Game Gear is a handheld derived from the SMS with a 160×144 display viewport, 64-byte CRAM, and different I/O port layout. — `crates/systems/sms/`
-
 ## Game & Watch
 
 ### Medium
@@ -95,64 +84,7 @@ not available in CI or in headless `cargo test` runs.  They can be run manually 
 
 ### High
 - [ ] **DSP echo/reverb FIR filter not implemented**: The SPC700 DSP echo buffer and 8-tap FIR reverb filter are not emulated. Many games rely on reverb for audio quality (e.g., Donkey Kong Country series). — `crates/systems/snes/src/`
-- [ ] **cputest-basic fails at test `0x025d`** — next failing test after bank-wrap fix; needs investigation
-  - File: `crates/core/src/cpu_65c816.rs`
-  - Raise `MIN_PASSING` in `test_cputest_basic_loads_and_runs` once resolved
-- [ ] **cputest-full fails at test `0x0025`** — next failing emulation-mode test after dp-wrap fix; needs investigation
-  - File: `crates/core/src/cpu_65c816.rs`
-  - Raise `MIN_PASSING` in `test_cputest_full_loads_and_runs` once resolved
+- [ ] **SuperFX coprocessor incomplete**: Only ~20% of SuperFX opcodes implemented. Star Fox, Yoshi's Island, Doom etc. will not work. — `crates/systems/snes/src/coprocessors/superfx.rs`
 
 ### Medium
-- [ ] **DSP noise generator and pitch modulation missing**: Noise generation and FM-style pitch modulation between DSP voices are not implemented; affects some sound effects in games. — `crates/systems/snes/src/`
-- [ ] **Interlace and overscan modes not rendered**: SETINI register bits for interlace (bit 0) and overscan (bit 2) are tracked but not applied; games using these modes may display at incorrect resolution or crop incorrectly. — `crates/systems/snes/src/ppu.rs`
-
-## Game Boy
-
-### Medium
-- [ ] **MBC3 RTC accuracy**: RTC ticks at ~60 Hz (frame rate) instead of hardware-accurate 1 Hz, causing real-time drift. RTC state is not persisted across emulator sessions. — `crates/systems/gb/src/mappers/mbc3.rs`
-- [ ] **Link cable not emulated**: Serial transfer uses loopback only; multiplayer and Pokémon trading features require actual link cable protocol emulation. — `crates/systems/gb/src/bus.rs`
-
-### Low
-- [ ] **Unimplemented mappers** (MBC6, MBC7, HuC3, MMM01, TAMA5): Affects <3% of games combined. MBC7 required for Kirby Tilt 'n' Tumble (tilt sensor), HuC3 for Robopon series. — `crates/systems/gb/src/mappers/`
-
-## Atari 2600
-
-### Medium
-- [ ] **Paddle controller GUI integration**: TIA analog input (INPT0–INPT3) with capacitor timing simulation is fully implemented in hardware, but no frontend input mapping exists. Required for paddle games (Breakout, Kaboom!, Warlords). — `crates/frontend/gui/src/`
-
-## Atari 5200
-
-### Critical
-- [ ] **Video output not functional**: ANTIC display list processor and GTIA are partially implemented but the rendering pipeline is incomplete; most games cannot be played. — `crates/systems/atari5200/src/`
-
-### High
-- [ ] **BIOS behavior/integration incomplete**: Custom BIOS images can be loaded via the BIOS mount point, but the built-in BIOS stub at $F800–$FFFF is incomplete and BIOS compatibility is not yet accurate. Games that rely on specific BIOS routines will malfunction. — `crates/systems/atari5200/src/`
-- [ ] **Paddle/analog input not connected**: POKEY analog input is not wired to the frontend input system; affects all 5200 games using the console's non-centering analog joystick. — `crates/systems/atari5200/src/`
-
-## CHIP-8
-
-### Low
-- [ ] **No audio synthesis**: Sound timer and XO-CHIP audio pattern buffer are tracked correctly but no actual tone is generated. All CHIP-8 programs are silent. — `crates/systems/chip8/src/lib.rs`
-
-## ColecoVision
-
-### High
-- [ ] **Numeric keypad not implemented**: Only joystick and fire buttons are connected in the controller input system; the 12-key numeric keypad is not functional. Affects games that require keypad input for difficulty selection or gameplay. — `crates/systems/colecovision/src/lib.rs`
-
-## Mega Drive
-
-### Critical
-- [ ] **Z80 sub-CPU integration incomplete**: Z80 bus access and banking are not fully integrated. Most commercial games use the Z80 to drive the YM2612 audio driver; without it, sound is missing or incorrect in the majority of titles. — `crates/systems/megadrive/src/`
-
-### High
-- [ ] **Audio output accuracy needs refinement**: YM2612 FM and SN76489 PSG samples are already mixed into the stereo output, but overall audio behavior still likely needs accuracy work in areas such as relative levels, panning, filtering, and timing/synchronization. — `crates/systems/megadrive/src/`
-- [ ] **SRAM not included in save states**: Battery-backed SRAM is detected from the ROM header and memory-mapped for reads/writes, but SRAM contents are not serialized in `save_state()`/`load_state()`. Game progress stored in SRAM is lost when the emulator exits. — `crates/systems/megadrive/src/system.rs`
-
-## PC
-
-### High
-- [ ] **INT 21h (DOS API) mostly stubbed**: Real file I/O, program management, process control, and many DOS services beyond basic console output are not implemented. Most real-world DOS programs will fail. — `crates/systems/pc/src/cpu.rs`
-- [ ] **No 32-bit (80386+) support**: 32-bit register extensions (EAX, EBX, ECX, EDX, ESI, EDI, EBP, ESP) and 32-bit addressing modes are not implemented. Software requiring 386+ features will not run. — `crates/core/src/cpu_8086/`
-
-### Medium
-- [ ] **PC speaker audio not connected**: PIT channel 2 frequency and gate state are tracked internally but audio output is not generated. Programs using PC speaker sound will be silent. — `crates/systems/pc/src/lib.rs`
+- [ ] **Multiply/divide hardware timing**: Math unit computes results immediately. Hardware takes 8 cycles (multiply) / 16 cycles (divide). May affect timing-sensitive code. — `crates/systems/snes/src/bus.rs`

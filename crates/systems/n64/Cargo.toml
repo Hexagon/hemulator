@@ -11,7 +11,7 @@ thiserror = "1.0"
 crc32fast = "1.4"
 
 # OpenGL dependencies (required)
-glow = "0.16"
+glow = "0.17"
 bytemuck = "1.14"
 
 [features]

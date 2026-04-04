@@ -542,6 +542,10 @@ impl EmulatorSystem {
                 if state & 0x01 != 0 {
                     sms_state &= !0x20;
                 } // A -> Button 2
+                  // Game Gear Start button (active-low on port 0x00 bit 7)
+                if sys.is_game_gear() {
+                    sys.set_gg_start_button(state & 0x08 != 0);
+                }
                 if port == 0 {
                     sys.set_controller_1(sms_state);
                 } else if port == 1 {
@@ -778,7 +782,7 @@ impl EmulatorSystem {
         match self {
             EmulatorSystem::NES(sys) => sys.timing(),
             EmulatorSystem::GameBoy(_) => emu_core::apu::TimingMode::Ntsc,
-            EmulatorSystem::GBA(_) => emu_core::apu::TimingMode::Ntsc,
+            EmulatorSystem::GBA(_) => emu_core::apu::TimingMode::Gba,
             EmulatorSystem::Atari2600(_) => emu_core::apu::TimingMode::Ntsc,
             EmulatorSystem::PC(_) => emu_core::apu::TimingMode::Ntsc,
             EmulatorSystem::SNES(_) => emu_core::apu::TimingMode::Ntsc,
@@ -848,7 +852,13 @@ impl EmulatorSystem {
             EmulatorSystem::PC(_) => (320, 200),
             EmulatorSystem::SNES(_) => (256, 224),
             EmulatorSystem::N64(_) => (320, 240),
-            EmulatorSystem::SMS(_) => (256, 192),
+            EmulatorSystem::SMS(sys) => {
+                if sys.is_game_gear() {
+                    (160, 144)
+                } else {
+                    (256, 192)
+                }
+            }
             EmulatorSystem::Chip8(_) => (64, 32),
             EmulatorSystem::ColecoVision(_) => (256, 192), // TMS9918A resolution
             EmulatorSystem::SG1000(_) => (256, 192),       // TMS9918A resolution
@@ -868,7 +878,13 @@ impl EmulatorSystem {
             EmulatorSystem::PC(_) => "pc",
             EmulatorSystem::SNES(_) => "snes",
             EmulatorSystem::N64(_) => "n64",
-            EmulatorSystem::SMS(_) => "sms",
+            EmulatorSystem::SMS(sys) => {
+                if sys.is_game_gear() {
+                    "gamegear"
+                } else {
+                    "sms"
+                }
+            }
             EmulatorSystem::Chip8(_) => "chip8",
             EmulatorSystem::ColecoVision(_) => "colecovision",
             EmulatorSystem::SG1000(_) => "sg1000",
@@ -889,7 +905,13 @@ impl EmulatorSystem {
             EmulatorSystem::PC(_) => SystemType::PC,
             EmulatorSystem::SNES(_) => SystemType::SNES,
             EmulatorSystem::N64(_) => SystemType::N64,
-            EmulatorSystem::SMS(_) => SystemType::SMS,
+            EmulatorSystem::SMS(sys) => {
+                if sys.is_game_gear() {
+                    SystemType::GameGear
+                } else {
+                    SystemType::SMS
+                }
+            }
             EmulatorSystem::Chip8(_) => SystemType::Chip8,
             EmulatorSystem::ColecoVision(_) => SystemType::ColecoVision,
             EmulatorSystem::SG1000(_) => SystemType::SG1000,
@@ -2031,7 +2053,7 @@ impl CliArgs {
             "  --no-gui                 Run in a plain SDL2 window without the egui overlay (faster startup, minimal UI)"
         );
         eprintln!(
-            "  -S, --system <SYSTEM>    Start clean system (pc, nes, gb, gba, atari2600, atari5200, snes, n64)"
+            "  -S, --system <SYSTEM>    Start clean system (pc, nes, gb, gba, atari2600, atari5200, sms, gg, snes, n64)"
         );
         eprintln!("  --bios <file>            Load BIOS file (for PS1, ColecoVision, SMS, PC)");
         eprintln!("  --slot1 <file>           Load file into slot 1 (BIOS for PC)");
@@ -3247,9 +3269,77 @@ fn main() {
                     }
                 }
             }
+            "sms" => {
+                sys = EmulatorSystem::SMS(Box::new(emu_sms::SmsSystem::new()));
+                rom_loaded = true;
+                status_message = "Clean SMS system started".to_string();
+                println!("Started clean SMS system");
+
+                if let Some(ref p) = rom_path {
+                    if !p.to_lowercase().ends_with(".hemu") {
+                        match std::fs::read(p) {
+                            Ok(data) => {
+                                rom_hash = Some(GameSaves::rom_hash(&data));
+                                if let EmulatorSystem::SMS(sms_sys) = &mut sys {
+                                    if let Err(e) = sms_sys.mount("cartridge", &data) {
+                                        eprintln!("Failed to load SMS ROM: {}", e);
+                                        status_message = format!("Error: {}", e);
+                                        rom_hash = None;
+                                    } else {
+                                        rom_loaded = true;
+                                        runtime_state.set_mount("cartridge".to_string(), p.clone());
+                                        if let Err(e) = settings.save() {
+                                            eprintln!("Warning: Failed to save settings: {}", e);
+                                        }
+                                        status_message = "SMS ROM loaded".to_string();
+                                        println!("Loaded SMS ROM: {}", p);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to read file: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
+            "gg" | "gamegear" => {
+                sys = EmulatorSystem::SMS(Box::new(emu_sms::SmsSystem::new_game_gear()));
+                rom_loaded = true;
+                status_message = "Clean Game Gear system started".to_string();
+                println!("Started clean Game Gear system");
+
+                if let Some(ref p) = rom_path {
+                    if !p.to_lowercase().ends_with(".hemu") {
+                        match std::fs::read(p) {
+                            Ok(data) => {
+                                rom_hash = Some(GameSaves::rom_hash(&data));
+                                if let EmulatorSystem::SMS(gg_sys) = &mut sys {
+                                    if let Err(e) = gg_sys.mount("cartridge", &data) {
+                                        eprintln!("Failed to load Game Gear ROM: {}", e);
+                                        status_message = format!("Error: {}", e);
+                                        rom_hash = None;
+                                    } else {
+                                        rom_loaded = true;
+                                        runtime_state.set_mount("cartridge".to_string(), p.clone());
+                                        if let Err(e) = settings.save() {
+                                            eprintln!("Warning: Failed to save settings: {}", e);
+                                        }
+                                        status_message = "Game Gear ROM loaded".to_string();
+                                        println!("Loaded Game Gear ROM: {}", p);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to read file: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
             _ => {
                 eprintln!("Error: Unknown system '{}'", system_name);
-                eprintln!("Valid systems: pc, nes, gb, gba, atari2600, atari5200, megadrive, snes, n64, gameandwatch");
+                eprintln!("Valid systems: pc, nes, gb, gba, atari2600, atari5200, megadrive, sms, gg, snes, n64, gameandwatch");
                 std::process::exit(1);
             }
         }
@@ -3640,6 +3730,25 @@ fn main() {
                                 }
                                 status_message = "SMS ROM loaded".to_string();
                                 println!("Loaded SMS ROM: {}", p);
+                            }
+                        }
+                        Ok(SystemType::GameGear) => {
+                            rom_hash = Some(GameSaves::rom_hash(&data));
+                            let mut gg_sys = emu_sms::SmsSystem::new_game_gear();
+
+                            if let Err(e) = gg_sys.mount("cartridge", &data) {
+                                eprintln!("Failed to load Game Gear ROM: {}", e);
+                                status_message = format!("Error: {}", e);
+                                rom_hash = None;
+                            } else {
+                                rom_loaded = true;
+                                sys = EmulatorSystem::SMS(Box::new(gg_sys));
+                                runtime_state.set_mount("cartridge".to_string(), p.clone());
+                                if let Err(e) = settings.save() {
+                                    eprintln!("Warning: Failed to save settings: {}", e);
+                                }
+                                status_message = "Game Gear ROM loaded".to_string();
+                                println!("Loaded Game Gear ROM: {}", p);
                             }
                         }
                         Ok(SystemType::Chip8) => {
@@ -5185,6 +5294,18 @@ fn main() {
                                 &runtime_state,
                             );
                         }
+                        "Game Gear" => {
+                            sys =
+                                EmulatorSystem::SMS(Box::new(emu_sms::SmsSystem::new_game_gear()));
+                            configure_system_ui(
+                                &mut egui_app,
+                                &sys,
+                                "Game Gear",
+                                &mut rom_loaded,
+                                "Created new Game Gear system",
+                                &runtime_state,
+                            );
+                        }
                         "ColecoVision" => {
                             sys = EmulatorSystem::ColecoVision(Box::new(
                                 emu_colecovision::ColecoVisionSystem::new(),
@@ -5303,7 +5424,7 @@ fn main() {
                             "All ROM Files",
                             &[
                                 "nes", "unf", "gb", "gbc", "gba", "bin", "a26", "a52", "smc",
-                                "sfc", "z64", "n64", "v64", "com", "exe", "sms", "ch8", "c8",
+                                "sfc", "z64", "n64", "v64", "com", "exe", "sms", "gg", "ch8", "c8",
                                 "col", "sg", "sc", "gw", "gnw", "mgw", "md", "gen", "smd",
                             ],
                         )
@@ -5316,6 +5437,7 @@ fn main() {
                         .add_filter("SNES ROMs", &["smc", "sfc", "bin"])
                         .add_filter("N64 ROMs", &["z64", "n64", "v64", "bin"])
                         .add_filter("SMS ROMs", &["sms", "bin"])
+                        .add_filter("Game Gear ROMs", &["gg"])
                         .add_filter("ColecoVision ROMs", &["col", "bin"])
                         .add_filter("SG-1000 ROMs", &["sg", "sc", "bin"])
                         .add_filter("CHIP-8 Programs", &["ch8", "c8"])
@@ -5813,6 +5935,42 @@ fn main() {
                                                 .set_message("SMS ROM loaded".to_string());
                                             let _ = sys.resolution();
                                             // Load save states for this ROM
+                                            if let Some(ref hash) = rom_hash {
+                                                _game_saves = GameSaves::load(hash);
+                                            }
+                                        }
+                                    }
+                                    Ok(SystemType::GameGear) => {
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        let mut gg_sys = emu_sms::SmsSystem::new_game_gear();
+                                        if let Err(e) = gg_sys.mount("cartridge", &data) {
+                                            egui_app
+                                                .status_bar
+                                                .set_message(format!("Error: {}", e));
+                                            rom_hash = None;
+                                        } else {
+                                            rom_loaded = true;
+                                            sys = EmulatorSystem::SMS(Box::new(gg_sys));
+                                            egui_app.property_pane.system_name =
+                                                "Game Gear".to_string();
+                                            runtime_state.set_mount(
+                                                "cartridge".to_string(),
+                                                path_str.clone(),
+                                            );
+                                            settings.add_recent_file(path_str.clone());
+                                            if let Err(e) = settings.save() {
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
+                                            }
+                                            egui_app.update_recent_files(
+                                                settings.get_recent_files().to_vec(),
+                                            );
+                                            egui_app
+                                                .status_bar
+                                                .set_message("Game Gear ROM loaded".to_string());
+                                            let _ = sys.resolution();
                                             if let Some(ref hash) = rom_hash {
                                                 _game_saves = GameSaves::load(hash);
                                             }
@@ -6656,6 +6814,46 @@ fn main() {
                                             egui_app
                                                 .status_bar
                                                 .set_message("SMS ROM loaded".to_string());
+                                            let _ = sys.resolution();
+                                            if let Some(ref hash) = rom_hash {
+                                                _game_saves = GameSaves::load(hash);
+                                            }
+                                        }
+                                    }
+                                    Ok(SystemType::GameGear) => {
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        let mut gg_sys = emu_sms::SmsSystem::new_game_gear();
+                                        if let Err(e) = gg_sys.mount("cartridge", &data) {
+                                            egui_app
+                                                .status_bar
+                                                .set_message(format!("Error: {}", e));
+                                            rom_hash = None;
+                                        } else {
+                                            rom_loaded = true;
+                                            sys = EmulatorSystem::SMS(Box::new(gg_sys));
+                                            egui_app.property_pane.system_name =
+                                                "Game Gear".to_string();
+                                            egui_app.property_pane.rendering_backend =
+                                                sys.get_current_renderer_name();
+                                            egui_app.property_pane.available_renderers =
+                                                sys.get_available_renderers();
+                                            runtime_state.set_mount(
+                                                "cartridge".to_string(),
+                                                file_path.clone(),
+                                            );
+                                            settings.add_recent_file(file_path.clone());
+                                            if let Err(e) = settings.save() {
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
+                                            }
+                                            egui_app.update_recent_files(
+                                                settings.get_recent_files().to_vec(),
+                                            );
+                                            egui_app
+                                                .status_bar
+                                                .set_message("Game Gear ROM loaded".to_string());
                                             let _ = sys.resolution();
                                             if let Some(ref hash) = rom_hash {
                                                 _game_saves = GameSaves::load(hash);
@@ -7775,6 +7973,21 @@ fn main() {
                                 .status_bar
                                 .set_message("Created new SMS system".to_string());
                         }
+                        "Game Gear" => {
+                            sys =
+                                EmulatorSystem::SMS(Box::new(emu_sms::SmsSystem::new_game_gear()));
+                            rom_loaded = true;
+                            rom_hash = None;
+                            runtime_state.clear_mounts();
+                            egui_app.property_pane.system_name = "Game Gear".to_string();
+                            egui_app.property_pane.rendering_backend =
+                                sys.get_current_renderer_name();
+                            egui_app.property_pane.available_renderers =
+                                sys.get_available_renderers();
+                            egui_app
+                                .status_bar
+                                .set_message("Created new Game Gear system".to_string());
+                        }
                         "Mega Drive" => {
                             sys = EmulatorSystem::MegaDrive(Box::new(create_megadrive_system(
                                 &settings,
@@ -8361,7 +8574,7 @@ fn main() {
             // Handle keyboard input for emulator
             // We check if egui wants input (e.g., text field focused) and only skip controller updates then.
             // This allows controller input to work even when docked panels are visible.
-            let egui_wants_input = egui_backend.egui_ctx().wants_keyboard_input();
+            let egui_wants_input = egui_backend.egui_ctx().egui_wants_keyboard_input();
 
             if !matches!(&sys, EmulatorSystem::PC(_)) {
                 // For non-PC systems, use standard controller mapping (always update, even if egui has focus)

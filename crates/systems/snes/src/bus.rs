@@ -160,6 +160,16 @@ pub struct SnesBus {
     wrdivb: u8,
     div_quotient: u16,
 
+    /// Hardware math delay counters (in master cycles)
+    /// Multiply takes 8 CPU cycles ≈ 48-96 master cycles
+    /// Divide takes 16 CPU cycles ≈ 96-192 master cycles
+    /// While > 0, results at $4214-$4217 are not yet valid
+    math_timer: u32,
+    /// Pending math result (multiply product or divide remainder+quotient)
+    /// Stored as: [quotient, product_or_remainder]
+    math_pending_quotient: u16,
+    math_pending_product: u16,
+
     /// $4207-$420A - H/V timer registers
     htime: u16,
     vtime: u16,
@@ -262,6 +272,9 @@ impl SnesBus {
             wrdiv: 0,
             wrdivb: 0,
             div_quotient: 0,
+            math_timer: 0,
+            math_pending_quotient: 0,
+            math_pending_product: 0,
             htime: 0,
             vtime: 0,
             irq_flag: Cell::new(false),
@@ -490,6 +503,16 @@ impl SnesBus {
                 self.auto_joypad_busy_cycles.saturating_sub(master_cycles);
         }
 
+        // Tick hardware math timer (multiply/divide completion delay)
+        if self.math_timer > 0 {
+            self.math_timer = self.math_timer.saturating_sub(master_cycles);
+            if self.math_timer == 0 {
+                // Math operation complete — latch results
+                self.div_quotient = self.math_pending_quotient;
+                self.math_4216 = self.math_pending_product;
+            }
+        }
+
         // Tick cartridge enhancement chip (e.g., SuperFX) with master cycles
         // SuperFX runs at the master clock frequency (21.48 MHz)
         if let Some(ref mut cart) = self.cartridge {
@@ -592,8 +615,14 @@ impl SnesBus {
     /// - Mode 11 (hv_irq_mode=3): HV-IRQ - triggers at V=VTIME and H=HTIME
     ///
     /// `h_dot` is the current dot position (0-339) within the scanline.
-    /// Returns true if IRQ should be triggered
+    /// Returns true if IRQ should be triggered.
+    /// Only fires when TIMEUP ($4211 bit 7) is not already set, preventing
+    /// duplicate IRQ triggers for the same timer event.
     pub fn check_hv_timer_irq(&self, scanline: u32, h_dot: u32) -> bool {
+        // Don't re-trigger if TIMEUP flag is already set (prevents duplicate IRQs)
+        if self.irq_flag.get() {
+            return false;
+        }
         match self.hv_irq_mode {
             0 => false, // Timer off
             1 => {
@@ -602,7 +631,7 @@ impl SnesBus {
             }
             2 => {
                 // V-timer only: trigger on specific scanline at ~dot 2-4
-                scanline as u16 == self.vtime && h_dot < 4
+                scanline as u16 == self.vtime && (2..5).contains(&h_dot)
             }
             3 => {
                 // HV-timer: trigger on specific scanline AND dot position
@@ -760,12 +789,12 @@ impl SnesBus {
 
                 for i in 0..count {
                     // Calculate B-bus register address based on transfer mode for each byte.
-                    // Note: bytes_per_transfer is precomputed, but b_reg is still computed per byte.
+                    // B-bus address wraps within 8-bit range ($2100-$21FF)
                     let b_reg = match transfer_mode {
                         0 => 0x2100 | (dma.b_addr as u16),
                         1 | 5 => {
                             // Alternate: b_addr, b_addr+1
-                            0x2100 | ((dma.b_addr as u16) + (i as u16 & 1))
+                            0x2100 | ((dma.b_addr as u16 + (i as u16 & 1)) & 0xFF)
                         }
                         2 | 6 => {
                             // Write twice to same register: b_addr, b_addr
@@ -773,12 +802,11 @@ impl SnesBus {
                         }
                         3 | 7 => {
                             // Pattern: b_addr, b_addr, b_addr+1, b_addr+1
-                            0x2100 | ((dma.b_addr as u16) + ((i as u16 >> 1) & 1))
+                            0x2100 | ((dma.b_addr as u16 + ((i as u16 >> 1) & 1)) & 0xFF)
                         }
                         4 => {
                             // Four consecutive registers: b_addr, b_addr+1, b_addr+2, b_addr+3
-                            // e.g., if b_addr=0x18, accesses $2118, $2119, $211A, $211B
-                            0x2100 | ((dma.b_addr as u16) + (i as u16 & 3))
+                            0x2100 | ((dma.b_addr as u16 + (i as u16 & 3)) & 0xFF)
                         }
                         _ => 0x2100 | (dma.b_addr as u16),
                     };
@@ -948,12 +976,13 @@ impl SnesBus {
                 // Transfer the bytes (source address wraps within bank)
                 let source_bank = source_addr & 0xFF0000;
                 for i in 0..bytes_to_transfer {
+                    // B-bus address wraps within 8-bit range ($2100-$21FF)
                     let b_reg = match transfer_mode {
                         0 => 0x2100 | (dma.b_addr as u16),
-                        1 | 5 => 0x2100 | ((dma.b_addr as u16) + (i as u16 & 1)),
+                        1 | 5 => 0x2100 | ((dma.b_addr as u16 + (i as u16 & 1)) & 0xFF),
                         2 | 6 => 0x2100 | (dma.b_addr as u16),
-                        3 | 7 => 0x2100 | ((dma.b_addr as u16) + ((i as u16 >> 1) & 1)),
-                        4 => 0x2100 | ((dma.b_addr as u16) + (i as u16 & 3)),
+                        3 | 7 => 0x2100 | ((dma.b_addr as u16 + ((i as u16 >> 1) & 1)) & 0xFF),
+                        4 => 0x2100 | ((dma.b_addr as u16 + (i as u16 & 3)) & 0xFF),
                         _ => 0x2100 | (dma.b_addr as u16),
                     };
 
@@ -1206,7 +1235,7 @@ impl Memory65c816 for SnesBus {
                     0x4016 => {
                         // Bit 0: Serial data for controller 1
                         // Bits 1-7: Open bus (typically 0)
-                        if self.controller_strobe {
+                        let v = if self.controller_strobe {
                             // While strobed, return bit 0 of the current state
                             (self.controller_state[0] & 1) as u8
                         } else {
@@ -1215,20 +1244,24 @@ impl Memory65c816 for SnesBus {
                             let bit = (cur & 1) as u8;
                             self.controller_shift[0].set(cur >> 1);
                             bit
-                        }
+                        };
+                        self.open_bus.set(v);
+                        v
                     }
                     // $4017 - JOYSER1 - Controller 2 Serial Data
                     0x4017 => {
                         // Bit 0: Serial data for controller 2
                         // Bits 1-4: Not used (0x1E if nothing connected)
-                        if self.controller_strobe {
+                        let v = if self.controller_strobe {
                             (self.controller_state[1] & 1) as u8
                         } else {
                             let cur = self.controller_shift[1].get();
                             let bit = (cur & 1) as u8;
                             self.controller_shift[1].set(cur >> 1);
                             bit
-                        }
+                        };
+                        self.open_bus.set(v);
+                        v
                     }
                     // $4218-$421F - JOYxL/JOYxH - Auto-joypad read (only valid when auto-read enabled)
                     0x4218 => {
@@ -1632,7 +1665,13 @@ impl Memory65c816 for SnesBus {
                     0x4203 => {
                         self.open_bus.set(val);
                         self.wrmpyb = val;
-                        self.math_4216 = (self.wrmpya as u16).wrapping_mul(self.wrmpyb as u16);
+                        // Hardware multiply takes 8 CPU cycles.
+                        // CPU cycle = 6-12 master cycles depending on speed.
+                        // Use 8 * 8 = 64 master cycles as a reasonable average.
+                        let product = (self.wrmpya as u16).wrapping_mul(self.wrmpyb as u16);
+                        self.math_pending_quotient = self.div_quotient; // unchanged
+                        self.math_pending_product = product;
+                        self.math_timer = 64;
                     }
                     // $4204-$4205 - WRDIVL/WRDIVH - Dividend
                     0x4204 => {
@@ -1647,15 +1686,17 @@ impl Memory65c816 for SnesBus {
                     0x4206 => {
                         self.open_bus.set(val);
                         self.wrdivb = val;
-
-                        if self.wrdivb == 0 {
-                            self.div_quotient = 0xFFFF;
-                            self.math_4216 = self.wrdiv;
+                        // Hardware divide takes 16 CPU cycles.
+                        // Use 16 * 8 = 128 master cycles as a reasonable average.
+                        let (quotient, remainder) = if self.wrdivb == 0 {
+                            (0xFFFF, self.wrdiv)
                         } else {
                             let divisor = self.wrdivb as u16;
-                            self.div_quotient = self.wrdiv / divisor;
-                            self.math_4216 = self.wrdiv % divisor;
-                        }
+                            (self.wrdiv / divisor, self.wrdiv % divisor)
+                        };
+                        self.math_pending_quotient = quotient;
+                        self.math_pending_product = remainder;
+                        self.math_timer = 128;
                     }
                     // $4207-$420A - H/V timer registers
                     0x4207 => {
@@ -2262,6 +2303,9 @@ mod tests {
         bus.write(0x4202, 10); // WRMPYA
         bus.write(0x4203, 20); // WRMPYB (triggers multiplication)
 
+        // Tick enough cycles for multiply to complete (8 CPU cycles ≈ 64 master cycles)
+        bus.tick_cycles(64);
+
         // Read result from $4216-$4217
         let result_low = bus.read(0x4216);
         let result_high = bus.read(0x4217);
@@ -2271,6 +2315,7 @@ mod tests {
         // Test maximum values: 255 * 255 = 65025
         bus.write(0x4202, 255);
         bus.write(0x4203, 255);
+        bus.tick_cycles(64);
         let result_low = bus.read(0x4216);
         let result_high = bus.read(0x4217);
         let result = (result_high as u16) << 8 | result_low as u16;
@@ -2279,6 +2324,7 @@ mod tests {
         // Test zero multiplication
         bus.write(0x4202, 100);
         bus.write(0x4203, 0);
+        bus.tick_cycles(64);
         let result_low = bus.read(0x4216);
         let result_high = bus.read(0x4217);
         let result = (result_high as u16) << 8 | result_low as u16;
@@ -2293,6 +2339,9 @@ mod tests {
         bus.write(0x4204, 100); // WRDIVL
         bus.write(0x4205, 0); // WRDIVH
         bus.write(0x4206, 5); // WRDIVB (triggers division)
+
+        // Tick enough cycles for divide to complete (16 CPU cycles ≈ 128 master cycles)
+        bus.tick_cycles(128);
 
         // Read quotient from $4214-$4215
         let quotient_low = bus.read(0x4214);
@@ -2310,6 +2359,7 @@ mod tests {
         bus.write(0x4204, 107);
         bus.write(0x4205, 0);
         bus.write(0x4206, 10);
+        bus.tick_cycles(128);
         let quotient_low = bus.read(0x4214);
         let quotient_high = bus.read(0x4215);
         let quotient = (quotient_high as u16) << 8 | quotient_low as u16;
@@ -2323,6 +2373,7 @@ mod tests {
         bus.write(0x4204, 123);
         bus.write(0x4205, 0);
         bus.write(0x4206, 0); // Divide by zero
+        bus.tick_cycles(128);
         let quotient_low = bus.read(0x4214);
         let quotient_high = bus.read(0x4215);
         let quotient = (quotient_high as u16) << 8 | quotient_low as u16;
@@ -2339,6 +2390,7 @@ mod tests {
         bus.write(0x4204, 0x50); // Low byte (50000 = 0xC350)
         bus.write(0x4205, 0xC3); // High byte
         bus.write(0x4206, 100);
+        bus.tick_cycles(128);
         let quotient_low = bus.read(0x4214);
         let quotient_high = bus.read(0x4215);
         let quotient = (quotient_high as u16) << 8 | quotient_low as u16;

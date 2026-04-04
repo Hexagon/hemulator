@@ -334,6 +334,20 @@ pub struct SmsMemory {
 
     /// Memory control register (port $3E)
     memory_control: u8,
+
+    /// I/O port control register (port $3F) — controls TH/TR pin direction and output.
+    /// Bits: TH_B_dir(7) TR_B_dir(6) TH_A_dir(5) TR_A_dir(4) TH_B_out(3) TR_B_out(2) TH_A_out(1) TR_A_out(0)
+    /// Direction: 0 = input (reads from controller), 1 = output (drives from this register).
+    io_control: u8,
+
+    /// True if this bus is for a Game Gear system
+    is_game_gear: bool,
+
+    /// Game Gear Start button state (active low: bit 7 = 0 when pressed)
+    gg_start_button: u8,
+
+    /// Current cycle position within the scanline (set by system, used for H-counter latching)
+    cycle_in_scanline: u32,
 }
 
 impl SmsMemory {
@@ -384,7 +398,18 @@ impl SmsMemory {
             controller_1: 0xFF,
             controller_2: 0xFF,
             memory_control: 0x08, // Bit 3 set → BIOS disabled by default
+            io_control: 0xFF,     // All pins input, all outputs high
+            is_game_gear: false,
+            gg_start_button: 0x80, // Not pressed (active low)
+            cycle_in_scanline: 0,
         }
+    }
+
+    /// Create a new Game Gear memory bus.
+    pub fn new_game_gear(rom: Vec<u8>, vdp: Rc<RefCell<Vdp>>, psg: Rc<RefCell<SmsPsg>>) -> Self {
+        let mut bus = Self::new(rom, vdp, psg);
+        bus.is_game_gear = true;
+        bus
     }
 
     // -----------------------------------------------------------------------
@@ -501,6 +526,46 @@ impl SmsMemory {
     }
     pub fn set_memory_control(&mut self, value: u8) {
         self.memory_control = value;
+    }
+    pub fn get_io_control(&self) -> u8 {
+        self.io_control
+    }
+    pub fn set_io_control(&mut self, value: u8) {
+        self.io_control = value;
+    }
+
+    /// Update the current cycle position within the scanline (called by system each step).
+    pub fn set_cycle_in_scanline(&mut self, cycle: u32) {
+        self.cycle_in_scanline = cycle;
+    }
+
+    /// Compute effective TH pin levels from an io_control value.
+    /// Returns (th_a_high, th_b_high).
+    fn th_levels(io_control: u8) -> (bool, bool) {
+        // TH_A: direction = bit 5, output = bit 1
+        let th_a = if (io_control & 0x20) != 0 {
+            (io_control & 0x02) != 0
+        } else {
+            true // input mode → reads high
+        };
+        // TH_B: direction = bit 7, output = bit 3
+        let th_b = if (io_control & 0x80) != 0 {
+            (io_control & 0x08) != 0
+        } else {
+            true // input mode → reads high
+        };
+        (th_a, th_b)
+    }
+
+    /// Set the Game Gear Start button state (bit 7: 0 = pressed, 0x80 = not pressed).
+    pub fn set_gg_start_button(&mut self, pressed: bool) {
+        self.gg_start_button = if pressed { 0x00 } else { 0x80 };
+    }
+
+    /// Returns true if this is a Game Gear bus.
+    #[allow(dead_code)]
+    pub fn is_game_gear(&self) -> bool {
+        self.is_game_gear
     }
 
     // -----------------------------------------------------------------------
@@ -634,26 +699,6 @@ impl SmsMemory {
     }
 
     // -----------------------------------------------------------------------
-    // Sega mapper banking (RAM-based at $FFFC-$FFFF)
-    // -----------------------------------------------------------------------
-
-    fn update_sega_banking(&mut self) {
-        // $FFFC → cart RAM control
-        let fffc = self.ram[0x1FFC];
-        self.cart_ram_enabled = (fffc & 0x08) != 0;
-        self.cart_ram_bank = ((fffc >> 2) & 1) as usize;
-        // Allocate cart RAM on first enable (up to 32 KB = 2 × 16 KB)
-        if self.cart_ram_enabled && self.cart_ram.is_empty() {
-            self.cart_ram.resize(0x8000, 0);
-        }
-
-        // $FFFD / $FFFE / $FFFF → page for slots 0 / 1 / 2
-        let nb = self.num_banks.max(1);
-        self.sega_banks[0] = (self.ram[0x1FFD] as usize) % nb;
-        self.sega_banks[1] = (self.ram[0x1FFE] as usize) % nb;
-        self.sega_banks[2] = (self.ram[0x1FFF] as usize) % nb;
-    }
-
     // -----------------------------------------------------------------------
     // ROM read helper (with bounds check)
     // -----------------------------------------------------------------------
@@ -858,12 +903,32 @@ impl SmsMemory {
                 // bank updates.  Their RAM mirror at $DFFC-$DFFF shares the same
                 // physical bytes but must NOT update the mapper – the real SMS
                 // hardware mapper decoder only fires on the $FFFC-$FFFF range.
-                // This matters when a real Sega BIOS clears work-RAM ($C000-$DFFF):
-                // without this guard, writes to $DFFE would zero sega_banks[1],
-                // causing the BIOS header check at $7FF0 to read the wrong ROM bank
-                // and fall back to the built-in Snail Maze game.
-                if addr >= 0xFFFC {
-                    self.update_sega_banking();
+                //
+                // Each register is updated independently — writing $FFFC must NOT
+                // re-read $FFFD/$FFFE/$FFFF from RAM, because the RAM mirror copies
+                // may have been zeroed by LDIR ($C000-$DFFF clear) without triggering
+                // a mapper update.  Re-reading all banks would reset them to zero.
+                // (Phantasy Star writes $FFFC=$80 after boot RAM clear, which was
+                // resetting slot 1/2 banks to 0 and causing a crash.)
+                let nb = self.num_banks.max(1);
+                match addr {
+                    0xFFFC => {
+                        self.cart_ram_enabled = (val & 0x08) != 0;
+                        self.cart_ram_bank = ((val >> 2) & 1) as usize;
+                        if self.cart_ram_enabled && self.cart_ram.is_empty() {
+                            self.cart_ram.resize(0x8000, 0);
+                        }
+                    }
+                    0xFFFD => {
+                        self.sega_banks[0] = (val as usize) % nb;
+                    }
+                    0xFFFE => {
+                        self.sega_banks[1] = (val as usize) % nb;
+                    }
+                    0xFFFF => {
+                        self.sega_banks[2] = (val as usize) % nb;
+                    }
+                    _ => {}
                 }
             }
             _ => {} // writes to ROM area ignored
@@ -945,9 +1010,26 @@ impl SmsMemory {
             0xC000..=0xFFFF => {
                 let ram_addr = (addr & 0x1FFF) as usize;
                 self.ram[ram_addr] = val;
-                // Same rule as Sega mapper: only $FFFC-$FFFF fire the mapper update.
-                if addr >= 0xFFFC {
-                    self.update_sega_banking();
+                // Same rule as Sega mapper: each register updated independently.
+                let nb = self.num_banks.max(1);
+                match addr {
+                    0xFFFC => {
+                        self.cart_ram_enabled = (val & 0x08) != 0;
+                        self.cart_ram_bank = ((val >> 2) & 1) as usize;
+                        if self.cart_ram_enabled && self.cart_ram.is_empty() {
+                            self.cart_ram.resize(0x8000, 0);
+                        }
+                    }
+                    0xFFFD => {
+                        self.sega_banks[0] = (val as usize) % nb;
+                    }
+                    0xFFFE => {
+                        self.sega_banks[1] = (val as usize) % nb;
+                    }
+                    0xFFFF => {
+                        self.sega_banks[2] = (val as usize) % nb;
+                    }
+                    _ => {}
                 }
             }
             _ => {}
@@ -1045,6 +1127,16 @@ impl MemoryZ80 for SmsMemory {
 
     fn io_read(&mut self, port: u8) -> u8 {
         let value = match port {
+            // Game Gear specific: port 0x00 = Start button + region
+            0x00 if self.is_game_gear => {
+                // Bit 7: Start button (0 = pressed, 1 = not pressed)
+                // Bit 6: Njap (0 = Japanese, 1 = overseas/export)
+                // Bit 5: NNTS (0 = NTSC, 1 = PAL) – always NTSC for GG
+                // Bits 4-0: unused, normally 0x1F
+                0x7F | self.gg_start_button
+            }
+            // Game Gear specific: port 0x06 = stereo control (read returns last written)
+            0x06 if self.is_game_gear => 0xFF,
             // 0x40-0x7F: V-counter (even ports) / H-counter (odd ports)
             p if (0x40..=0x7F).contains(&p) => {
                 if p & 0x01 == 0 {
@@ -1066,9 +1158,44 @@ impl MemoryZ80 for SmsMemory {
             // 0xC0-0xFF: Controller ports
             p if (0xC0..=0xFF).contains(&p) => {
                 if p & 0x01 == 0 {
+                    // Port $DC: P1 buttons + P2 Up/Down
                     self.controller_1
                 } else {
-                    self.controller_2
+                    // Port $DD: P2 Left/Right/TL/TR + Reset + TH pins
+                    // Bits 0-3: P2 Left, Right, Button1, Button2
+                    // Bit 4: RESET button (active low, always 1 = not pressed)
+                    // Bit 5: unused (always 1)
+                    // Bit 6: TH pin A (depends on io_control direction/output)
+                    // Bit 7: TH pin B (depends on io_control direction/output)
+                    let mut val = self.controller_2 | 0x30; // Bits 4,5 always high
+
+                    // TH pin A (bit 6): if direction bit 5 of io_control is set (output),
+                    // use the output value from bit 1; otherwise input = high (1).
+                    if (self.io_control & 0x20) != 0 {
+                        // TH_A is output — use bit 1 of io_control
+                        if (self.io_control & 0x02) != 0 {
+                            val |= 0x40;
+                        } else {
+                            val &= !0x40;
+                        }
+                    } else {
+                        val |= 0x40; // Input mode: TH reads high
+                    }
+
+                    // TH pin B (bit 7): if direction bit 7 of io_control is set (output),
+                    // use the output value from bit 3; otherwise input = high (1).
+                    if (self.io_control & 0x80) != 0 {
+                        // TH_B is output — use bit 3 of io_control
+                        if (self.io_control & 0x08) != 0 {
+                            val |= 0x80;
+                        } else {
+                            val &= !0x80;
+                        }
+                    } else {
+                        val |= 0x80; // Input mode: TH reads high
+                    }
+
+                    val
                 }
             }
             _ => 0xFF,
@@ -1083,12 +1210,25 @@ impl MemoryZ80 for SmsMemory {
 
     fn io_write(&mut self, port: u8, val: u8) {
         match port {
-            // 0x00-0x3F: Memory control registers
-            0x3E => {
-                self.memory_control = val;
-            }
-            0x3F => {
-                // I/O port control (nationalization adapter) – not yet implemented.
+            // 0x00-0x3F: Memory/IO control registers
+            // SMS uses partial address decoding: even ports in this range → memory control,
+            // odd ports → I/O port control.  Games typically use $3E/$3F explicitly.
+            p if p <= 0x3F => {
+                if p & 0x01 == 0 {
+                    // Even port ($3E mirror): Memory control register
+                    self.memory_control = val;
+                } else {
+                    // Odd port ($3F mirror): I/O port control (TH/TR direction + output)
+                    // Detect TH high→low transitions to latch the VDP H-counter.
+                    let (old_th_a, old_th_b) = Self::th_levels(self.io_control);
+                    self.io_control = val;
+                    let (new_th_a, new_th_b) = Self::th_levels(val);
+                    if (old_th_a && !new_th_a) || (old_th_b && !new_th_b) {
+                        self.vdp
+                            .borrow_mut()
+                            .latch_h_counter(self.cycle_in_scanline);
+                    }
+                }
             }
             // 0x40-0x7F: PSG write
             p if (0x40..=0x7F).contains(&p) => {

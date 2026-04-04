@@ -2113,32 +2113,52 @@ impl Ppu {
                     self.render_sprites_priority(frame, priority_buffer, layer_buffer, 3, 3);
                 }
             }
-            // Mode 7: 1 BG layer, 8bpp
-            // Priority order: BG1.0 -> OBJ.0 -> OBJ.1 -> BG1.1 -> OBJ.2 -> OBJ.3
+            // Mode 7: 1 BG layer, 8bpp (+ optional EXTBG BG2)
             7 => {
-                // 1. BG1 priority 0 (Mode 7 has only BG1)
-                if layer_enable & 0x01 != 0 {
-                    self.render_mode7(frame, priority_buffer, layer_buffer, 0);
-                }
-                // 2. OBJ priority 0
-                if layer_enable & 0x10 != 0 {
-                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 0, 0);
-                }
-                // 3. OBJ priority 1
-                if layer_enable & 0x10 != 0 {
-                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 1, 1);
-                }
-                // 4. BG1 priority 1
-                if layer_enable & 0x01 != 0 {
-                    self.render_mode7(frame, priority_buffer, layer_buffer, 1);
-                }
-                // 5. OBJ priority 2
-                if layer_enable & 0x10 != 0 {
-                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 2, 2);
-                }
-                // 6. OBJ priority 3
-                if layer_enable & 0x10 != 0 {
-                    self.render_sprites_priority(frame, priority_buffer, layer_buffer, 3, 3);
+                let extbg = self.setini & 0x40 != 0;
+                if extbg {
+                    // Mode 7 EXTBG priority order:
+                    // BG2.0 -> OBJ.0 -> BG1 -> OBJ.1 -> BG2.1 -> OBJ.2 -> OBJ.3
+                    if layer_enable & 0x02 != 0 {
+                        self.render_mode7_extbg(frame, priority_buffer, layer_buffer, 0);
+                    }
+                    if layer_enable & 0x10 != 0 {
+                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 0, 0);
+                    }
+                    if layer_enable & 0x01 != 0 {
+                        self.render_mode7(frame, priority_buffer, layer_buffer, 0);
+                    }
+                    if layer_enable & 0x10 != 0 {
+                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 1, 1);
+                    }
+                    if layer_enable & 0x02 != 0 {
+                        self.render_mode7_extbg(frame, priority_buffer, layer_buffer, 1);
+                    }
+                    if layer_enable & 0x10 != 0 {
+                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 2, 2);
+                    }
+                    if layer_enable & 0x10 != 0 {
+                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 3, 3);
+                    }
+                } else {
+                    // Mode 7 (no EXTBG) priority order:
+                    // BG1 -> OBJ.0 -> OBJ.1 -> OBJ.2 -> OBJ.3
+                    // BG1 has no per-pixel priority - rendered once at lowest level
+                    if layer_enable & 0x01 != 0 {
+                        self.render_mode7(frame, priority_buffer, layer_buffer, 0);
+                    }
+                    if layer_enable & 0x10 != 0 {
+                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 0, 0);
+                    }
+                    if layer_enable & 0x10 != 0 {
+                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 1, 1);
+                    }
+                    if layer_enable & 0x10 != 0 {
+                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 2, 2);
+                    }
+                    if layer_enable & 0x10 != 0 {
+                        self.render_sprites_priority(frame, priority_buffer, layer_buffer, 3, 3);
+                    }
                 }
             }
             _ => {
@@ -3412,6 +3432,131 @@ impl Ppu {
         }
     }
 
+    /// Render Mode 7 EXTBG BG2 layer
+    /// In EXTBG mode, BG2 shares Mode 7's tilemap but uses bit 7 of each pixel
+    /// as a priority bit. Color is derived from bits 0-6 (128 colors).
+    fn render_mode7_extbg(
+        &self,
+        frame: &mut Frame,
+        priority_buffer: &mut [u8],
+        layer_buffer: &mut [u8],
+        filter_priority: u8,
+    ) {
+        let layer_id = LAYER_BG2;
+        let hofs = self.m7hofs as i32;
+        let vofs = self.m7vofs as i32;
+
+        let a = self.m7a as i32;
+        let b = self.m7b as i32;
+        let c = self.m7c as i32;
+        let d = self.m7d as i32;
+
+        let center_x = (self.m7x as i32) & 0x1FFF;
+        let center_y = (self.m7y as i32) & 0x1FFF;
+        let center_x = if center_x & 0x1000 != 0 {
+            center_x | !0x1FFF
+        } else {
+            center_x
+        };
+        let center_y = if center_y & 0x1000 != 0 {
+            center_y | !0x1FFF
+        } else {
+            center_y
+        };
+
+        let screen_over = (self.m7sel >> 6) & 0x03;
+        let flip_h = (self.m7sel & 0x01) != 0;
+        let flip_v = (self.m7sel & 0x02) != 0;
+
+        let mosaic_enabled = self.is_mosaic_enabled(1); // BG2 = index 1
+        let _mosaic_size = if mosaic_enabled {
+            self.get_mosaic_size()
+        } else {
+            1
+        };
+
+        for screen_y in 0..224 {
+            if self.render_scanline_enables[screen_y] & 0x02 == 0 {
+                continue;
+            }
+            for screen_x in 0..256 {
+                let (render_x, render_y) = if mosaic_enabled {
+                    self.apply_mosaic(screen_x, screen_y)
+                } else {
+                    (screen_x, screen_y)
+                };
+
+                let sx = if flip_h {
+                    255 - render_x as i32
+                } else {
+                    render_x as i32
+                };
+                let sy = if flip_v {
+                    223 - render_y as i32
+                } else {
+                    render_y as i32
+                };
+
+                let x_offset = sx + hofs - center_x;
+                let y_offset = sy + vofs - center_y;
+
+                let tx = ((a * x_offset) + (b * y_offset) + (center_x << 8)) >> 8;
+                let ty = ((c * x_offset) + (d * y_offset) + (center_y << 8)) >> 8;
+
+                let (tile_x, tile_y) = match screen_over {
+                    0 => ((tx & 0x3FF) / 8, (ty & 0x3FF) / 8),
+                    1 => {
+                        if !(0..1024).contains(&tx) || !(0..1024).contains(&ty) {
+                            continue;
+                        }
+                        (tx / 8, ty / 8)
+                    }
+                    _ => {
+                        if !(0..1024).contains(&tx) || !(0..1024).contains(&ty) {
+                            (0, 0)
+                        } else {
+                            (tx / 8, ty / 8)
+                        }
+                    }
+                };
+
+                let pixel_x = tx & 7;
+                let pixel_y = ty & 7;
+
+                let tilemap_word = ((tile_y & 0x7F) * 128 + (tile_x & 0x7F)) as usize;
+                let tilemap_addr = tilemap_word * 2;
+                let tile_index = self.vram_read(tilemap_addr);
+
+                let pixel_word =
+                    (tile_index as usize) * 64 + ((pixel_y & 7) * 8 + (pixel_x & 7)) as usize;
+                let pixel_addr = pixel_word * 2 + 1;
+                let raw_color = self.vram_read(pixel_addr);
+
+                // BG2 EXTBG: bit 7 = priority, bits 0-6 = color index
+                let pixel_priority = (raw_color >> 7) & 1;
+                let color = raw_color & 0x7F;
+
+                // Filter by priority
+                if pixel_priority != filter_priority {
+                    continue;
+                }
+
+                // Skip transparent pixels (color 0)
+                if color == 0 {
+                    continue;
+                }
+
+                let render_priority: u8 = 1;
+                let frame_offset = screen_y * 256 + screen_x;
+                if render_priority >= priority_buffer[frame_offset] {
+                    frame.pixels[frame_offset] = self.get_color_with_palette(color, 0, false);
+                    priority_buffer[frame_offset] = render_priority;
+                    layer_buffer[frame_offset] = layer_id;
+                }
+            }
+        }
+    }
+
     /// Render a single BG layer in 4bpp mode with hi-res (512px) support
     /// Used in Modes 5 and 6
     fn render_bg_layer_4bpp_hires(
@@ -3802,12 +3947,13 @@ impl Ppu {
             };
 
             // Y coordinate: sprites appear 1 scanline later than their Y value
-            // Values 0xE0-0xFF (224-255) wrap to appear at top of screen (negative)
+            // Values >= 224 (screen height) wrap to negative for top-of-screen display
+            // This allows large sprites near the bottom to wrap around and appear at the top
             let y: i16 = {
-                let y_plus_one = y_raw.wrapping_add(1);
-                if y_plus_one >= 0xE1 {
+                let y_plus_one = y_raw.wrapping_add(1) as u16;
+                if y_plus_one >= 224 {
                     // Wrap: treat as negative (y - 256)
-                    (y_plus_one as i16) - 256
+                    y_plus_one as i16 - 256
                 } else {
                     y_plus_one as i16
                 }
@@ -4021,7 +4167,14 @@ impl Ppu {
 
                         // Screen position
                         let screen_x = x + (tx * 8) as i16 + px as i16;
-                        let screen_y = y + (ty * 8) as i16 + py as i16;
+                        let screen_y_raw = y + (ty * 8) as i16 + py as i16;
+
+                        // Wrap Y at 256 boundary (sprites wrap vertically in hardware)
+                        let screen_y = if screen_y_raw >= 256 {
+                            screen_y_raw - 256
+                        } else {
+                            screen_y_raw
+                        };
 
                         // Bounds check with horizontal wrapping
                         // SNES sprites wrap horizontally: X values 256-511 appear on left side
@@ -4466,8 +4619,8 @@ impl Ppu {
             false
         };
 
-        // Apply window logic from wobjlog register bits 0-1 (for color window)
-        let logic = self.wobjlog & 0x03;
+        // Apply window logic from wobjlog register bits 2-3 (for color window)
+        let logic = (self.wobjlog >> 2) & 0x03;
         match logic {
             0 => in_win1 || in_win2,   // OR
             1 => in_win1 && in_win2,   // AND

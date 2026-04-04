@@ -19,10 +19,12 @@ pub enum MegaDriveError {
 
 /// NTSC timing constants
 const M68K_CLOCK: u64 = 7_670_453; // ~7.67 MHz
-const SCANLINES_PER_FRAME: u64 = 262;
-const FPS: u64 = 60;
-const CYCLES_PER_FRAME: u64 = M68K_CLOCK / FPS; // ~127841
-const CYCLES_PER_SCANLINE: u64 = CYCLES_PER_FRAME / SCANLINES_PER_FRAME; // ~488
+const NTSC_SCANLINES: u64 = 262;
+const PAL_SCANLINES: u64 = 313;
+const NTSC_FPS: u64 = 60;
+const PAL_FPS: u64 = 50;
+const NTSC_CYCLES_PER_FRAME: u64 = M68K_CLOCK / NTSC_FPS;
+const PAL_CYCLES_PER_FRAME: u64 = M68K_CLOCK / PAL_FPS;
 
 /// Sega Mega Drive / Genesis emulator
 pub struct MegaDriveSystem {
@@ -143,10 +145,22 @@ impl System for MegaDriveSystem {
     }
 
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
+        let is_pal = self.cpu.memory.region_pal;
+        let scanlines = if is_pal {
+            PAL_SCANLINES
+        } else {
+            NTSC_SCANLINES
+        };
+        let cycles_per_frame = if is_pal {
+            PAL_CYCLES_PER_FRAME
+        } else {
+            NTSC_CYCLES_PER_FRAME
+        };
+        let cycles_per_scanline = cycles_per_frame / scanlines;
         let frame_start = self.cpu.cycles;
 
-        for scanline in 0..SCANLINES_PER_FRAME {
-            let target = frame_start + (scanline + 1) * CYCLES_PER_SCANLINE;
+        for scanline in 0..scanlines {
+            let target = frame_start + (scanline + 1) * cycles_per_scanline;
 
             // Run M68K until we've used up this scanline's cycles
             while self.cpu.cycles < target {
@@ -1313,5 +1327,51 @@ mod tests {
              Word displacement base is likely off by 2.",
             system.cpu.d[0]
         );
+    }
+
+    /// Test DMA fill byte swap — fill byte should go to addr^1 (odd byte in each word)
+    #[test]
+    fn test_dma_fill_byte_swap() {
+        let mut vdp = crate::vdp::Vdp::new();
+
+        // Set up VDP registers
+        vdp.write_control(0x8F02); // Register 15: auto-increment = 2
+        vdp.write_control(0x8174); // Register 1: display on, VInt enable, DMA enable
+
+        // Set DMA length = 4 words
+        vdp.write_control(0x9304); // R19: DMA length low = 4
+        vdp.write_control(0x9400); // R20: DMA length high = 0
+
+        // Set DMA mode to fill (reg 23 bits 7:6 = 10)
+        vdp.write_control(0x9780); // R23: DMA mode = fill
+
+        // Set up VRAM write at address $1000 with DMA
+        // Word 1: CD1:CD0=01 (VRAM write), addr[13:0]=0x1000
+        vdp.write_control(0x5000); // $4000 | $1000
+                                   // Word 2: CD5=1 (DMA), addr[15:14]=0
+        vdp.write_control(0x0080);
+
+        // Write fill value to data port (triggers DMA fill)
+        vdp.write_data(0xAB00);
+
+        // First word write at $1000: vram[$1000]=$AB, vram[$1001]=$00
+        assert_eq!(vdp.vram[0x1000], 0xAB, "First word high byte");
+        assert_eq!(vdp.vram[0x1001], 0x00, "First word low byte");
+
+        // Subsequent fills: fill_byte ($AB) goes to addr^1
+        // addr=$1002: vram[$1002^1=$1003]=$AB
+        assert_eq!(
+            vdp.vram[0x1003], 0xAB,
+            "DMA fill byte should go to addr^1 (odd byte)"
+        );
+        // addr=$1004: vram[$1004^1=$1005]=$AB
+        assert_eq!(vdp.vram[0x1005], 0xAB, "DMA fill at $1004^1=$1005");
+        // addr=$1006: vram[$1006^1=$1007]=$AB
+        assert_eq!(vdp.vram[0x1007], 0xAB, "DMA fill at $1006^1=$1007");
+
+        // Even bytes at $1002, $1004, $1006 should be unchanged (0)
+        assert_eq!(vdp.vram[0x1002], 0x00, "Even byte should be unchanged");
+        assert_eq!(vdp.vram[0x1004], 0x00, "Even byte should be unchanged");
+        assert_eq!(vdp.vram[0x1006], 0x00, "Even byte should be unchanged");
     }
 }

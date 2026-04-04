@@ -73,11 +73,12 @@ impl Sn76489Psg {
     /// Write a byte to the PSG
     pub fn write(&mut self, data: u8) {
         if data & 0x80 != 0 {
-            // Latch/data byte
+            // Latch/data byte: bits 6-5 = channel, bit 4 = type (0=tone/noise, 1=volume)
             let channel = (data >> 5) & 0x03;
             let is_volume = (data >> 4) & 0x01;
 
-            self.latched_reg = channel;
+            // Store full register identifier: (channel << 1) | is_volume
+            self.latched_reg = (channel << 1) | is_volume;
 
             if is_volume != 0 {
                 // Volume write
@@ -93,8 +94,17 @@ impl Sn76489Psg {
             }
         } else {
             // Data byte (continuation of previous latch)
-            let channel = self.latched_reg;
-            if channel < 3 {
+            let channel = self.latched_reg >> 1;
+            let is_volume = self.latched_reg & 1;
+
+            if is_volume != 0 {
+                // Volume update
+                self.volume[channel as usize] = data & 0x0F;
+            } else if channel == 3 {
+                // Noise control update
+                self.noise_control = data & 0x07;
+                self.noise_lfsr = 0x8000;
+            } else {
                 // Tone frequency (high 6 bits)
                 let ch = channel as usize;
                 self.tone_freq[ch] = (self.tone_freq[ch] & 0x00F) | (((data & 0x3F) as u16) << 4);
@@ -140,8 +150,8 @@ impl Sn76489Psg {
 
             // Clock LFSR
             let feedback = if (self.noise_control & 0x04) != 0 {
-                // White noise (tapped)
-                ((self.noise_lfsr & 1) ^ ((self.noise_lfsr >> 1) & 1)) != 0
+                // White noise - Sega variant: tapped at bits 0 and 3 (16-bit LFSR)
+                ((self.noise_lfsr & 1) ^ ((self.noise_lfsr >> 3) & 1)) != 0
             } else {
                 // Periodic noise
                 (self.noise_lfsr & 1) != 0
@@ -222,7 +232,7 @@ impl Sn76489Psg {
             "latched_reg": self.latched_reg,
             "prescaler": self.prescaler,
             "timing_mode": match self.timing_mode {
-                TimingMode::Ntsc => "ntsc",
+                TimingMode::Ntsc | TimingMode::Gba => "ntsc",
                 TimingMode::Pal => "pal",
             },
         })
@@ -400,7 +410,7 @@ impl Sn76489Adapter {
     pub fn generate_samples(&mut self, sample_count: usize) -> Vec<i16> {
         const SAMPLE_HZ: f64 = 44_100.0;
         let cpu_hz = match self.timing {
-            TimingMode::Ntsc => self.cpu_hz_ntsc,
+            TimingMode::Ntsc | TimingMode::Gba => self.cpu_hz_ntsc,
             TimingMode::Pal => self.cpu_hz_pal,
         };
         let cycles_per_sample = cpu_hz / SAMPLE_HZ;
@@ -431,7 +441,7 @@ impl Sn76489Adapter {
             "psg": self.psg.get_state(),
             "cycle_accum": self.cycle_accum,
             "timing": match self.timing {
-                TimingMode::Ntsc => "ntsc",
+                TimingMode::Ntsc | TimingMode::Gba => "ntsc",
                 TimingMode::Pal => "pal",
             },
         })

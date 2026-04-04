@@ -242,7 +242,7 @@ impl Ppu {
         };
         // Pre-render scanline: 261 for NTSC, 311 for PAL
         let pre_render_scanline = match timing_mode {
-            TimingMode::Ntsc => 261,
+            TimingMode::Ntsc | TimingMode::Gba => 261,
             TimingMode::Pal => 311,
         };
         Self {
@@ -288,7 +288,7 @@ impl Ppu {
     /// PAL: 312 scanlines (0-239 visible, 240 post-render, 241-310 vblank, 311 pre-render)
     fn total_scanlines(&self) -> u16 {
         match self.timing_mode {
-            TimingMode::Ntsc => 262,
+            TimingMode::Ntsc | TimingMode::Gba => 262,
             TimingMode::Pal => 312,
         }
     }
@@ -298,7 +298,7 @@ impl Ppu {
     #[inline(always)]
     fn pre_render_scanline(&self) -> u16 {
         match self.timing_mode {
-            TimingMode::Ntsc => 261,
+            TimingMode::Ntsc | TimingMode::Gba => 261,
             TimingMode::Pal => 311,
         }
     }
@@ -1750,7 +1750,7 @@ impl Ppu {
     pub fn is_in_vblank_region(&self) -> bool {
         let scanline = self.scanline.get();
         let vblank_end = match self.timing_mode {
-            TimingMode::Ntsc => 260,
+            TimingMode::Ntsc | TimingMode::Gba => 260,
             TimingMode::Pal => 310,
         };
         scanline >= 241 && scanline <= vblank_end

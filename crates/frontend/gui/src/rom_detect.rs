@@ -19,6 +19,7 @@ pub enum SystemType {
     SNES,
     N64,
     SMS,
+    GameGear,
     Chip8,
     ColecoVision,
     SG1000,
@@ -82,6 +83,10 @@ pub fn detect_rom_type_with_extension(
             "sms" => {
                 // Prefer SMS for .sms extension even without header
                 return Ok(SystemType::SMS);
+            }
+            "gg" => {
+                // Game Gear cartridge
+                return Ok(SystemType::GameGear);
             }
             "col" => {
                 // ColecoVision cartridge
@@ -372,12 +377,12 @@ pub fn detect_rom_type(data: &[u8]) -> Result<SystemType, UnsupportedRomError> {
     // Check if it might be a raw binary
     if data.len().is_multiple_of(1024) {
         return Err(UnsupportedRomError {
-            reason: "Unrecognized ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), GBA (.gba), Atari 2600 (.a26/.bin), Atari 5200 (.a52/.bin), DOS (.com/.exe), SNES (.smc/.sfc), N64 (.z64/.n64/.v64), SMS (.sms), CHIP-8 (.ch8/.c8), ColecoVision (.col), SG-1000 (.sg/.sc), PS1 (.exe/.psexe/.cue/.bin/.iso), Game & Watch (.gw/.gnw/.mgw)".to_string(),
+            reason: "Unrecognized ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), GBA (.gba), Atari 2600 (.a26/.bin), Atari 5200 (.a52/.bin), DOS (.com/.exe), SNES (.smc/.sfc), N64 (.z64/.n64/.v64), SMS (.sms), Game Gear (.gg), CHIP-8 (.ch8/.c8), ColecoVision (.col), SG-1000 (.sg/.sc), PS1 (.exe/.psexe/.cue/.bin/.iso), Game & Watch (.gw/.gnw/.mgw)".to_string(),
         });
     }
 
     Err(UnsupportedRomError {
-        reason: "Unknown ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), GBA (.gba), Atari 2600 (.a26/.bin), Atari 5200 (.a52/.bin), DOS (.com/.exe), SNES (.smc/.sfc), N64 (.z64/.n64/.v64), SMS (.sms), CHIP-8 (.ch8/.c8), ColecoVision (.col), SG-1000 (.sg/.sc), PS1 (.exe/.psexe/.cue/.bin/.iso), Game & Watch (.gw/.gnw/.mgw)"
+        reason: "Unknown ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), GBA (.gba), Atari 2600 (.a26/.bin), Atari 5200 (.a52/.bin), DOS (.com/.exe), SNES (.smc/.sfc), N64 (.z64/.n64/.v64), SMS (.sms), Game Gear (.gg), CHIP-8 (.ch8/.c8), ColecoVision (.col), SG-1000 (.sg/.sc), PS1 (.exe/.psexe/.cue/.bin/.iso), Game & Watch (.gw/.gnw/.mgw)"
             .to_string(),
     })
 }

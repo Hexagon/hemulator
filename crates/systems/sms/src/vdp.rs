@@ -25,8 +25,10 @@ pub struct Vdp {
     // Video RAM (16KB)
     vram: [u8; 0x4000],
 
-    // Color RAM (32 bytes for palette)
-    cram: [u8; 0x20],
+    // Color RAM (64 bytes: 32 for SMS, 64 for Game Gear)
+    cram: [u8; 0x40],
+    /// Number of CRAM bytes used (32 for SMS, 64 for GG)
+    cram_size: usize,
 
     // VDP registers (11 registers)
     registers: [u8; 11],
@@ -37,8 +39,17 @@ pub struct Vdp {
     read_buffer: u8,
     write_latch: bool,
 
-    // Rendering
+    // Game Gear CRAM write latch (GG CRAM is 12-bit, written as two bytes)
+    cram_latch: u8,
+
+    // Rendering — always renders to 256×192 internally
     frame: Frame,
+
+    // Game Gear cropped frame (160×144) — updated from `frame` when get_frame() is called
+    gg_frame: Frame,
+
+    /// True if this VDP is in Game Gear mode
+    is_game_gear: bool,
 
     // Interrupts
     frame_interrupt_pending: bool,
@@ -60,6 +71,9 @@ pub struct Vdp {
     // (before any set_scanline call) at the sentinel value 262 does not falsely
     // trigger an interrupt before VBlank has actually been reached.
     in_vblank: bool,
+
+    // H-counter latch value (latched by TH pin transition on controller port 2)
+    h_counter_latch: u8,
 }
 
 impl Vdp {
@@ -67,13 +81,17 @@ impl Vdp {
     pub fn new() -> Self {
         Self {
             vram: [0; 0x4000],
-            cram: [0; 0x20],
+            cram: [0; 0x40],
+            cram_size: 0x20, // SMS default
             registers: [0; 11],
             address_register: 0,
             code_register: 0,
             read_buffer: 0,
             write_latch: false,
+            cram_latch: 0,
             frame: Frame::new(256, 192),
+            gg_frame: Frame::new(160, 144),
+            is_game_gear: false,
             frame_interrupt_pending: false,
             line_interrupt_pending: false,
             line_counter: 0,
@@ -82,12 +100,46 @@ impl Vdp {
             scanline: 262, // Start at end of frame so first set_scanline(0) wraps around
             is_pal: false,
             in_vblank: false,
+            h_counter_latch: 0,
+        }
+    }
+
+    /// Create a new VDP in Game Gear mode
+    pub fn new_game_gear() -> Self {
+        Self {
+            vram: [0; 0x4000],
+            cram: [0; 0x40],
+            cram_size: 0x40, // GG uses 64 bytes
+            registers: [0; 11],
+            address_register: 0,
+            code_register: 0,
+            read_buffer: 0,
+            write_latch: false,
+            cram_latch: 0,
+            frame: Frame::new(256, 192),    // Internal render buffer
+            gg_frame: Frame::new(160, 144), // GG LCD viewport
+            is_game_gear: true,
+            frame_interrupt_pending: false,
+            line_interrupt_pending: false,
+            line_counter: 0,
+            sprite_overflow: false,
+            sprite_collision: false,
+            scanline: 262,
+            is_pal: false,
+            in_vblank: false,
+            h_counter_latch: 0,
         }
     }
 
     /// Set PAL/NTSC timing mode
     pub fn set_pal(&mut self, pal: bool) {
         self.is_pal = pal;
+    }
+
+    /// Check if this VDP is in Game Gear mode
+    #[allow(dead_code)]
+    pub fn is_game_gear(&self) -> bool {
+        self.is_game_gear
     }
 
     /// Get current PAL/NTSC timing mode (used in tests)
@@ -233,12 +285,29 @@ impl Vdp {
         match self.code_register {
             0x03 => {
                 // CRAM write
-                let addr = self.address_register & 0x1F;
-                self.cram[addr as usize] = data;
-                if addr == 16 {
-                    log(LogCategory::PPU, LogLevel::Info, || {
-                        format!("SMS VDP: Backdrop color = ${:02X}", data)
-                    });
+                if self.is_game_gear {
+                    // Game Gear: 12-bit colors, 2 bytes per entry
+                    // Even address: latch the low byte
+                    // Odd address: write both bytes
+                    let addr = self.address_register & 0x3F;
+                    if (addr & 1) == 0 {
+                        // Even: latch low byte
+                        self.cram_latch = data;
+                    } else {
+                        // Odd: write latched low byte + this high byte
+                        let base = (addr & 0x3E) as usize;
+                        self.cram[base] = self.cram_latch;
+                        self.cram[base + 1] = data;
+                    }
+                } else {
+                    // SMS: 6-bit colors, 1 byte per entry
+                    let addr = (self.address_register & 0x1F) as usize;
+                    self.cram[addr] = data;
+                    if addr == 16 {
+                        log(LogCategory::PPU, LogLevel::Info, || {
+                            format!("SMS VDP: Backdrop color = ${:02X}", data)
+                        });
+                    }
                 }
             }
             _ => {
@@ -297,29 +366,74 @@ impl Vdp {
 
     /// Read vertical counter
     pub fn read_vcounter(&self) -> u8 {
-        // The SMS V-counter does not directly expose the raw scanline number.
-        // NTSC (262 lines): scanlines 0-218 (0x00-0xDA) map 1:1; scanlines 219-261
-        //   jump to 0xD5-0xFF (subtract 6 from the scanline number).
-        // PAL  (313 lines): scanlines 0-242 (0x00-0xF2) map 1:1; scanlines 243-312
-        //   jump to 0xBA-0xFF (subtract 57 from the scanline number).
+        // The SMS V-counter mapping depends on both region and display height.
+        // The V-counter counts up linearly through the active display and into
+        // the blanking area, then "jumps" to skip some values:
+        //
+        // NTSC 192-line: 0x00..=0xDA, then 0xD5..=0xFF (jump at 219)
+        // NTSC 224-line: 0x00..=0xEA, then 0xE5..=0xFF (jump at 235)
+        // NTSC 240-line: 0x00..=0xFF, then 0x00..=0x05 (no jump, wraps)
+        // PAL  192-line: 0x00..=0xF2, then 0xBA..=0xFF (jump at 243)
+        // PAL  224-line: 0x00..=0xFF, then 0x00..=0x02, then 0xCA..=0xFF (jump at ~259)
+        // PAL  240-line: 0x00..=0xFF, then 0x00..=0x0A, then 0xD2..=0xFF (jump at ~267)
+        let display_height = self.get_display_height();
         let vcounter = if self.is_pal {
-            if self.scanline <= 0xF2 {
-                self.scanline as u8
-            } else {
-                self.scanline.wrapping_sub(57) as u8
+            match display_height {
+                224 => {
+                    if self.scanline <= 0xFF {
+                        self.scanline as u8
+                    } else if self.scanline <= 0x102 {
+                        (self.scanline - 0x100) as u8
+                    } else {
+                        (self.scanline - 0x39) as u8 // 0xCA..0xFF
+                    }
+                }
+                240 => {
+                    if self.scanline <= 0xFF {
+                        self.scanline as u8
+                    } else if self.scanline <= 0x10A {
+                        (self.scanline - 0x100) as u8
+                    } else {
+                        (self.scanline - 0x39) as u8 // 0xD2..0xFF
+                    }
+                }
+                _ => {
+                    // 192-line PAL
+                    if self.scanline <= 0xF2 {
+                        self.scanline as u8
+                    } else {
+                        self.scanline.wrapping_sub(57) as u8
+                    }
+                }
             }
         } else {
             // NTSC
-            if self.scanline <= 0xDA {
-                self.scanline as u8
-            } else {
-                self.scanline.wrapping_sub(6) as u8
+            match display_height {
+                224 => {
+                    if self.scanline <= 0xEA {
+                        self.scanline as u8
+                    } else {
+                        self.scanline.wrapping_sub(6) as u8 // 0xE5..0xFF
+                    }
+                }
+                240 => {
+                    // 240-line NTSC: no jump, just wraps at 262
+                    (self.scanline % 256) as u8
+                }
+                _ => {
+                    // 192-line NTSC
+                    if self.scanline <= 0xDA {
+                        self.scanline as u8
+                    } else {
+                        self.scanline.wrapping_sub(6) as u8
+                    }
+                }
             }
         };
         log(LogCategory::PPU, LogLevel::Debug, || {
             format!(
-                "SMS VDP: V-counter read = ${:02X} (scanline={})",
-                vcounter, self.scanline
+                "SMS VDP: V-counter read = ${:02X} (scanline={}, height={})",
+                vcounter, self.scanline, display_height
             )
         });
         vcounter
@@ -327,13 +441,36 @@ impl Vdp {
 
     /// Read horizontal counter.
     ///
-    /// The real SMS H-counter is latched via the TH pin and returns a value
-    /// from 0x00-0x93 (NTSC) representing the horizontal position divided by
-    /// 2.  Few games rely on precise H-counter reads; we return 0x00 as a
-    /// safe stub for maximum compatibility.
+    /// The SMS H-counter is latched by a TH-pin transition on controller
+    /// port 2. Reads return the most recently latched value. The counter
+    /// represents the horizontal pixel position divided by 2, ranging from
+    /// 0x00 to 0x93 during active display and continuing through HBlank.
     pub fn read_hcounter(&self) -> u8 {
-        // TODO: Implement proper H-counter latching for TH-pin triggered reads
-        0x00
+        self.h_counter_latch
+    }
+
+    /// Latch the current H-counter value.
+    ///
+    /// Called when the TH pin on controller port 2 transitions high-to-low,
+    /// or can be called with the current cycle position within the scanline
+    /// to provide a reasonable H-counter value.
+    pub fn latch_h_counter(&mut self, cycle_in_scanline: u32) {
+        // The SMS H-counter counts from 0x00 to 0x93 during the visible portion
+        // of the scanline (256 pixels / 2 = 128 values = 0x00-0x7F) and continues
+        // through HBlank (0x80-0x93, then 0xE9-0xFF wrapping around).
+        // Total dots per line: 342 NTSC, mapped to ~228 cycles.
+        // We approximate: visible area is ~171 dots (0-170), blanking after.
+        let cycles_per_line = 228u32; // NTSC: ~228 Z80 cycles per scanline
+        let clamped = cycle_in_scanline.min(cycles_per_line - 1);
+        // Map cycle position to H-counter value (0x00-0x93 visible, 0xE9-0xFF blanking)
+        let dot = (clamped * 342) / cycles_per_line;
+        self.h_counter_latch = if dot < 256 {
+            (dot / 2) as u8 // Active display: 0x00-0x7F
+        } else if dot < 296 {
+            (0x80 + (dot - 256) / 2) as u8 // Right border + HSync: 0x80-0x93
+        } else {
+            (0xE9 + (dot - 296) / 2) as u8 // Left border: 0xE9-0xFF
+        };
     }
 
     /// Step VDP by one scanline
@@ -403,6 +540,10 @@ impl Vdp {
             if !self.in_vblank {
                 self.frame_interrupt_pending = true;
             }
+            // Crop internal buffer to GG viewport on frame boundary
+            if self.is_game_gear {
+                self.crop_gg_viewport();
+            }
             // New frame: reset the VBlank latch, then set it if we're already past the
             // active display area (e.g. set_scanline jumped straight to scanline 192+).
             self.in_vblank = scanline >= display_height;
@@ -422,6 +563,10 @@ impl Vdp {
             if old_scanline < display_height && scanline >= display_height {
                 self.frame_interrupt_pending = true;
                 self.in_vblank = true;
+                // Crop internal buffer to GG viewport on VBlank entry
+                if self.is_game_gear {
+                    self.crop_gg_viewport();
+                }
                 // Reload line counter at start of VBlank (every VBlank scanline)
                 self.line_counter = self.registers[10];
             }
@@ -461,19 +606,15 @@ impl Vdp {
     /// Get tile viewer data for debugging
     pub fn get_tile_viewer_data(&self) -> crate::system::TileViewerData {
         // Convert CRAM colors to RGB
+        let num_colors = 32;
         let mut palette = Vec::new();
-        for i in 0..32 {
-            let cram_value = self.cram[i];
-            // SMS color format: --BBGGRR (2 bits per channel)
-            let r = ((cram_value & 0x03) as u32) * 85; // 0-3 -> 0-255
-            let g = (((cram_value >> 2) & 0x03) as u32) * 85;
-            let b = (((cram_value >> 4) & 0x03) as u32) * 85;
-            palette.push(0xFF000000 | (r << 16) | (g << 8) | b);
+        for i in 0..num_colors {
+            palette.push(self.cram_color(i));
         }
 
         crate::system::TileViewerData {
             vram: self.vram.to_vec(),
-            cram: self.cram.to_vec(),
+            cram: self.cram[..self.cram_size].to_vec(),
             palette,
             registers: self.registers.to_vec(),
         }
@@ -483,12 +624,15 @@ impl Vdp {
     pub fn get_state(&self) -> serde_json::Value {
         serde_json::json!({
             "vram": self.vram.to_vec(),
-            "cram": self.cram.to_vec(),
+            "cram": self.cram[..self.cram_size].to_vec(),
+            "cram_size": self.cram_size,
             "registers": self.registers.to_vec(),
             "address_register": self.address_register,
             "code_register": self.code_register,
             "read_buffer": self.read_buffer,
             "write_latch": self.write_latch,
+            "cram_latch": self.cram_latch,
+            "is_game_gear": self.is_game_gear,
             "frame_interrupt_pending": self.frame_interrupt_pending,
             "line_interrupt_pending": self.line_interrupt_pending,
             "line_counter": self.line_counter,
@@ -566,6 +710,11 @@ impl Vdp {
         load_u8!(state, "code_register", self.code_register);
         load_u8!(state, "read_buffer", self.read_buffer);
         load_bool!(state, "write_latch", self.write_latch);
+        load_u8!(state, "cram_latch", self.cram_latch);
+        load_bool!(state, "is_game_gear", self.is_game_gear);
+        if let Some(cs) = state.get("cram_size").and_then(|v| v.as_u64()) {
+            self.cram_size = cs as usize;
+        }
         load_bool!(
             state,
             "frame_interrupt_pending",
@@ -590,17 +739,16 @@ impl Vdp {
         // Per SMS Power VDP documentation: the counter is loaded from R10
         // during VBlank.  On each active-display scanline it is decremented.
         // When it reaches -1 (wraps to 0xFF), a line interrupt is asserted
-        // (if enabled) and the counter is reloaded from R10.
+        // and the counter is reloaded from R10.
+        // The pending flag is ALWAYS set on counter underflow, regardless of
+        // whether IE1 (register 0 bit 4) is set.  The enable bit only gates
+        // whether /INT is actually asserted (checked in irq_line_active()).
         if line < display_height {
             self.line_counter = self.line_counter.wrapping_sub(1);
             if self.line_counter == 0xFF {
                 // Counter underflowed → reload from R10 and latch line interrupt
                 self.line_counter = self.registers[10];
-
-                // Trigger line interrupt if enabled (bit 4 of register 0)
-                if (self.registers[0] & 0x10) != 0 {
-                    self.line_interrupt_pending = true;
-                }
+                self.line_interrupt_pending = true;
             }
         }
 
@@ -618,9 +766,14 @@ impl Vdp {
 
         // Render background and sprites if display is enabled
         if display_enabled {
+            let (mode_4, tms_mode) = self.get_video_mode();
             self.render_background(line, line_offset);
-            // Sprites in Mode 4 are always active when display is on (no separate enable bit)
-            self.render_sprites(line, line_offset);
+            if mode_4 {
+                self.render_sprites(line, line_offset);
+            } else if tms_mode != 1 {
+                // TMS Text Mode (mode 1) does not support sprites
+                self.render_tms_sprites(line, line_offset);
+            }
         }
 
         // Register 0 bit 5: Left column blank - mask leftmost 8 pixels with backdrop color
@@ -659,7 +812,22 @@ impl Vdp {
 
     /// Render Mode 4 (SMS native) background for a scanline
     fn render_mode4_background(&mut self, line: u8, line_offset: usize) {
-        let name_table_addr = ((self.registers[2] as u16) & 0x0E) << 10;
+        let display_height = self.get_display_height();
+
+        // Name table address depends on display height mode.
+        // 192-line: Register 2 bits 3-1 → base = (R2 & 0x0E) << 10
+        // 224/240-line: Only bit 2 of Register 2 is used → base = (R2 & 0x0C) << 10
+        //   (bit 1 is forced to 1 on SMS2, and the name table needs 2KB for 32 rows)
+        let name_table_addr = if display_height > 192 {
+            ((self.registers[2] as u16) & 0x0C) << 10
+        } else {
+            ((self.registers[2] as u16) & 0x0E) << 10
+        };
+
+        // Vertical scroll wrap height:
+        // 192-line mode: 28 rows × 8 pixels = 224
+        // 224/240-line mode: 32 rows × 8 pixels = 256
+        let v_scroll_wrap: u16 = if display_height > 192 { 256 } else { 224 };
 
         // Get scroll values
         // Register 0 bit 6: Horizontal scroll inhibit for top 2 tile rows (lines 0-15)
@@ -684,8 +852,7 @@ impl Vdp {
                 let y = line as u16;
                 (y >> 3, y & 7)
             } else {
-                // Vertical scroll wraps at 224 (28 rows * 8 pixels) in 192-line mode
-                let y = ((line as u16) + (scroll_y as u16)) % 224;
+                let y = ((line as u16) + (scroll_y as u16)) % v_scroll_wrap;
                 (y >> 3, y & 7)
             };
 
@@ -737,7 +904,7 @@ impl Vdp {
             if pixel != 0 {
                 let color_index = palette * 16 + pixel as usize;
                 // Strip alpha during rendering so PRIORITY_BIT (bit 24) is unambiguous
-                let color = self.decode_color(self.cram[color_index] & 0x3F) & RGB_MASK;
+                let color = self.cram_color(color_index) & RGB_MASK;
                 // Store the color and priority bit; alpha is restored at end of render_scanline
                 let pixel_data = if priority != 0 {
                     color | PRIORITY_BIT // Bit 24 set = sprite renders behind this tile
@@ -892,10 +1059,152 @@ impl Vdp {
                         // Sprites always use palette 1 (colors 16-31 in CRAM)
                         let color_index = 16 + pixel as usize;
                         // Strip alpha; render_scanline restores it after all rendering
-                        let color = self.decode_color(self.cram[color_index] & 0x3F) & RGB_MASK;
+                        let color = self.cram_color(color_index) & RGB_MASK;
                         self.frame.pixels[line_offset + x_index] = color;
                     }
                 }
+            }
+        }
+    }
+
+    /// TMS9918A sprite rendering for modes 0-3
+    ///
+    /// TMS9918A sprites:
+    /// - 32 sprites max (vs 64 in Mode 4)
+    /// - Sprite Attribute Table: 4 bytes per sprite (Y, X, pattern, color/flags)
+    /// - 4 sprites per scanline limit (5th sprite sets overflow flag)
+    /// - Per-sprite color from TMS fixed palette
+    /// - Sprite sizes: 8×8 or 16×16 (Register 1 bit 1)
+    /// - Magnification: 2× when Register 1 bit 0 is set
+    /// - Y=$D0 terminates sprite list
+    /// - Byte 3 bit 7: Early Clock (shift left 32 pixels)
+    fn render_tms_sprites(&mut self, line: u8, line_offset: usize) {
+        // Sprite Attribute Table: (Register 5 & 0x7F) << 7
+        let sat_base = ((self.registers[5] as u16) & 0x7F) << 7;
+        // Sprite Pattern Generator: (Register 6 & 0x07) << 11
+        let spg_base = ((self.registers[6] as u16) & 0x07) << 11;
+
+        let large_sprites = (self.registers[1] & 0x02) != 0; // 16×16 sprites
+        let magnified = (self.registers[1] & 0x01) != 0; // 2× magnification
+
+        let base_size: u8 = if large_sprites { 16 } else { 8 };
+        let effective_size: u8 = if magnified {
+            base_size.saturating_mul(2)
+        } else {
+            base_size
+        };
+
+        let mut sprites_on_line = 0;
+        let mut sprite_pixels = [false; 256];
+
+        // Collect visible sprites on this line (forward scan, respects $D0 terminator)
+        let mut visible: Vec<usize> = Vec::new();
+        for i in 0..32 {
+            let y = self.vram[(sat_base + i * 4) as usize];
+
+            // $D0 terminates sprite list in 192-line mode
+            if y == 0xD0 {
+                break;
+            }
+
+            // Y is the actual display line minus 1 (top of sprite)
+            let y_pos = y.wrapping_add(1);
+            let diff = line.wrapping_sub(y_pos);
+            if diff >= effective_size {
+                continue;
+            }
+
+            sprites_on_line += 1;
+            if sprites_on_line > 4 {
+                self.sprite_overflow = true;
+                break;
+            }
+
+            visible.push(i as usize);
+        }
+
+        // Render in reverse order so lower-numbered sprites have priority
+        for &i in visible.iter().rev() {
+            let sat_addr = sat_base + (i as u16) * 4;
+            let y = self.vram[sat_addr as usize];
+            let y_pos = y.wrapping_add(1);
+            let mut x_pos = self.vram[(sat_addr + 1) as usize] as i16;
+            let mut pattern = self.vram[(sat_addr + 2) as usize];
+            let attr = self.vram[(sat_addr + 3) as usize];
+
+            // Bit 7 of attribute: Early Clock — shift sprite left 32 pixels
+            if (attr & 0x80) != 0 {
+                x_pos -= 32;
+            }
+
+            // Lower 4 bits of attribute: sprite color (TMS palette)
+            let color_index = attr & 0x0F;
+            // Color 0 means transparent sprite
+            if color_index == 0 {
+                continue;
+            }
+            let color = self.decode_tms_color(color_index) & RGB_MASK;
+
+            // For 16×16 sprites, bit 0 and bit 1 of pattern are forced to 0
+            // (selects a group of 4 patterns: N, N+1, N+2, N+3 in 2×2 layout)
+            if large_sprites {
+                pattern &= 0xFC;
+            }
+
+            // Calculate sprite row
+            let raw_y = line.wrapping_sub(y_pos);
+            let sprite_y = if magnified { raw_y / 2 } else { raw_y };
+
+            // Determine which sub-pattern to use for 16×16 sprites
+            // Layout: top-left=N, bottom-left=N+1, top-right=N+2, bottom-right=N+3
+            let pixel_width: u8 = if magnified {
+                base_size.saturating_mul(2)
+            } else {
+                base_size
+            };
+
+            for px in 0..pixel_width {
+                let screen_x = x_pos + px as i16;
+                if !(0..256).contains(&screen_x) {
+                    continue;
+                }
+                let sx = screen_x as usize;
+
+                // Map to source pixel within sprite
+                let src_px = if magnified { px / 2 } else { px };
+
+                // For 16×16 sprites, determine which 8×8 quadrant
+                let (quad_pattern, qx, qy) = if large_sprites {
+                    let col = src_px / 8; // 0=left, 1=right
+                    let row = sprite_y / 8; // 0=top, 1=bottom
+                                            // TMS layout: N=top-left, N+1=bottom-left, N+2=top-right, N+3=bottom-right
+                    let quad = row + col * 2;
+                    (pattern + quad, src_px % 8, sprite_y % 8)
+                } else {
+                    (pattern, src_px, sprite_y)
+                };
+
+                // Read pattern data (8 bytes per 8×8 pattern, 1 bit per pixel)
+                let pattern_addr = spg_base + (quad_pattern as u16) * 8 + qy as u16;
+                if pattern_addr as usize >= self.vram.len() {
+                    continue;
+                }
+                let pattern_byte = self.vram[pattern_addr as usize];
+
+                // Extract pixel bit (MSB first)
+                let bit = (pattern_byte >> (7 - qx)) & 1;
+                if bit == 0 {
+                    continue; // Transparent pixel
+                }
+
+                // Collision detection
+                if sprite_pixels[sx] {
+                    self.sprite_collision = true;
+                }
+                sprite_pixels[sx] = true;
+
+                // TMS sprites always render on top of background
+                self.frame.pixels[line_offset + sx] = color;
             }
         }
     }
@@ -1122,10 +1431,39 @@ impl Vdp {
     }
 
     /// Get the current backdrop/overscan color (ARGB).
-    /// Register 7 bits 3-0 select a colour from the sprite palette (CRAM 16-31).
+    /// In Mode 4: Register 7 bits 3-0 select a colour from the sprite palette (CRAM 16-31).
+    /// In TMS modes: Register 7 bits 3-0 select a colour from the fixed TMS palette.
     fn backdrop_color(&self) -> u32 {
-        let index = 16 + (self.registers[7] & 0x0F) as usize;
-        self.decode_color(self.cram[index] & 0x3F)
+        let (mode_4, _) = self.get_video_mode();
+        if mode_4 {
+            let index = 16 + (self.registers[7] & 0x0F) as usize;
+            self.cram_color(index)
+        } else {
+            self.decode_tms_color(self.registers[7] & 0x0F)
+        }
+    }
+
+    /// Look up a CRAM colour entry and return ARGB8888.
+    /// Handles both SMS (6-bit, 1 byte/entry) and GG (12-bit, 2 bytes/entry).
+    fn cram_color(&self, index: usize) -> u32 {
+        if self.is_game_gear {
+            // GG: 2 bytes per entry, format: ----BBBBGGGGRRRR
+            let base = (index * 2) % self.cram_size;
+            let lo = self.cram[base] as u32;
+            let hi = self.cram[base + 1] as u32;
+            let word = lo | (hi << 8);
+            let r = word & 0x0F;
+            let g = (word >> 4) & 0x0F;
+            let b = (word >> 8) & 0x0F;
+            // Scale 4-bit to 8-bit (0-15 -> 0-255)
+            let r8 = (r << 4) | r;
+            let g8 = (g << 4) | g;
+            let b8 = (b << 4) | b;
+            0xFF000000 | (r8 << 16) | (g8 << 8) | b8
+        } else {
+            let cram_val = self.cram[index % self.cram_size];
+            self.decode_color(cram_val & 0x3F)
+        }
     }
 
     /// Decode 6-bit SMS color to 32-bit ARGB
@@ -1143,6 +1481,23 @@ impl Vdp {
         // Return ARGB8888
         0xFF000000 | (r8 << 16) | (g8 << 8) | b8
     }
+
+    /// Crop the internal 256×192 frame to the GG LCD viewport (160×144).
+    /// The viewport is centered: X offset = 48, Y offset = 24.
+    fn crop_gg_viewport(&mut self) {
+        const GG_X_OFFSET: usize = 48;
+        const GG_Y_OFFSET: usize = 24;
+        const GG_WIDTH: usize = 160;
+        const GG_HEIGHT: usize = 144;
+
+        for y in 0..GG_HEIGHT {
+            let src_y = y + GG_Y_OFFSET;
+            let src_offset = src_y * 256 + GG_X_OFFSET;
+            let dst_offset = y * GG_WIDTH;
+            self.gg_frame.pixels[dst_offset..dst_offset + GG_WIDTH]
+                .copy_from_slice(&self.frame.pixels[src_offset..src_offset + GG_WIDTH]);
+        }
+    }
 }
 
 impl Default for Vdp {
@@ -1155,11 +1510,15 @@ impl Renderer for Vdp {
     fn get_frame(&self) -> &Frame {
         // Log every time frame is retrieved
         let backdrop = self.backdrop_color();
-        // Register 1 bit 6: screen enable (1=on, 0=blank) — same for Mode 4 and TMS
         let display_enabled = (self.registers[1] & 0x40) != 0;
-        let sprite_enabled = display_enabled; // Sprites are active whenever display is on
+        let sprite_enabled = display_enabled;
+        let target_frame = if self.is_game_gear {
+            &self.gg_frame
+        } else {
+            &self.frame
+        };
         let mut non_backdrop = 0;
-        for &pixel in &self.frame.pixels {
+        for &pixel in &target_frame.pixels {
             if pixel != backdrop {
                 non_backdrop += 1;
             }
@@ -1170,7 +1529,7 @@ impl Renderer for Vdp {
                 display_enabled, sprite_enabled, self.registers[1], backdrop, non_backdrop
             )
         });
-        &self.frame
+        target_frame
     }
 
     fn clear(&mut self, color: u32) {
@@ -1189,6 +1548,7 @@ impl Renderer for Vdp {
         self.code_register = 0;
         self.read_buffer = 0;
         self.write_latch = false;
+        self.cram_latch = 0;
         self.frame_interrupt_pending = false;
         self.line_interrupt_pending = false;
         self.line_counter = 0;
@@ -1199,6 +1559,7 @@ impl Renderer for Vdp {
         // in_vblank starts false: the startup sentinel (262) must not be treated as VBlank
         // so that early R1 writes don't fire a spurious retroactive interrupt.
         self.in_vblank = false;
+        self.h_counter_latch = 0;
         self.clear(0xFF000000);
     }
 
@@ -1271,6 +1632,9 @@ mod tests {
     fn test_backdrop_uses_register7() {
         let mut vdp = Vdp::new();
 
+        // Enable Mode 4 so backdrop uses CRAM
+        vdp.registers[0] = 0x04;
+
         // Set CRAM[16] = sky blue, CRAM[17] = black
         vdp.cram[16] = 0x30; // Blue (--11_00_00)
         vdp.cram[17] = 0x00; // Black
@@ -1296,8 +1660,8 @@ mod tests {
     fn test_sprite_overflow_detection() {
         let mut vdp = Vdp::new();
 
-        // Enable display (bit 6 of register 1 = 1 enables display in TMS mode used here)
-        // Note: registers[0] = 0 means TMS mode (not Mode 4), so bit 6 = 1 enables display
+        // Enable Mode 4 and display
+        vdp.registers[0] = 0x04;
         vdp.registers[1] = 0x40;
 
         // Set sprite attribute table at 0x3F00 (register 5)
@@ -1328,7 +1692,8 @@ mod tests {
     fn test_sprite_collision_detection() {
         let mut vdp = Vdp::new();
 
-        // Enable display (bit 6 = 1 in TMS mode, used by these tests)
+        // Enable Mode 4 and display
+        vdp.registers[0] = 0x04;
         vdp.registers[1] = 0x40;
 
         // Set sprite attribute table
@@ -1585,5 +1950,104 @@ mod tests {
 
         vdp.set_pal(true); // PAL: 250 - 57 = 193 = 0xC1
         assert_eq!(vdp.read_vcounter(), 0xC1);
+    }
+
+    #[test]
+    fn test_line_counter_mid_frame_r10_change() {
+        let mut vdp = Vdp::new();
+
+        // Enable line interrupts
+        vdp.registers[0] = 0x10;
+        vdp.registers[10] = 3;
+        vdp.line_counter = 3;
+
+        // Scanlines 0-2: counter 3→2→1→0 (3 decrements)
+        for line in 0..3 {
+            vdp.render_scanline(line);
+        }
+        assert_eq!(vdp.line_counter, 0);
+        assert!(!vdp.line_interrupt_pending);
+
+        // Change R10 mid-frame BEFORE the underflow scanline
+        vdp.registers[10] = 10;
+
+        // Scanline 3: counter underflows (0→0xFF), should reload from NEW R10 value (10)
+        vdp.render_scanline(3);
+        assert!(vdp.line_interrupt_pending);
+        assert_eq!(vdp.line_counter, 10);
+    }
+
+    #[test]
+    fn test_tms_sprite_rendering() {
+        let mut vdp = Vdp::new();
+
+        // Set to TMS Graphics I mode (M4=0, M1=M2=M3=0)
+        vdp.registers[0] = 0x00; // M4=0, M3=0
+        vdp.registers[1] = 0x40; // Display enabled, M1=0, M2=0
+
+        // Set SAT at 0x3F00: (R5 & 0x7F) << 7 = 0x7E << 7 = 0x3F00
+        vdp.registers[5] = 0x7E;
+        // Set SPG at 0x0000: (R6 & 0x07) << 11 = 0
+        vdp.registers[6] = 0x00;
+
+        let sat_base: usize = 0x3F00;
+
+        // Create one sprite at line 100, X=50, pattern 0, color=8 (medium red)
+        vdp.vram[sat_base] = 99; // Y = 99 (sprite at line 100 since Y+1)
+        vdp.vram[sat_base + 1] = 50; // X
+        vdp.vram[sat_base + 2] = 0; // Pattern 0
+        vdp.vram[sat_base + 3] = 8; // Color index 8 (medium red), no early clock
+
+        // Terminate sprite list
+        vdp.vram[sat_base + 4] = 0xD0;
+
+        // Set pattern 0 with a solid row at row 0 (all bits set)
+        vdp.vram[0] = 0xFF; // Row 0: all 8 pixels set
+
+        // Render scanline 100
+        vdp.render_scanline(100);
+
+        // Check that pixels 50-57 have the TMS medium red color
+        let expected_color = 0xFFFC5554; // Medium red from TMS palette
+        let line_offset = 100 * 256;
+        for x in 50..58 {
+            assert_eq!(
+                vdp.frame.pixels[line_offset + x],
+                expected_color,
+                "Sprite pixel at x={} should be TMS medium red",
+                x
+            );
+        }
+    }
+
+    #[test]
+    fn test_tms_sprite_overflow_4_limit() {
+        let mut vdp = Vdp::new();
+
+        // TMS Graphics I mode
+        vdp.registers[0] = 0x00;
+        vdp.registers[1] = 0x40; // Display enabled
+        vdp.registers[5] = 0x7E; // SAT at 0x3F00
+        vdp.registers[6] = 0x00;
+
+        let sat_base: usize = 0x3F00;
+
+        // Create 5 sprites on same line (TMS has 4 per scanline limit)
+        for i in 0..5u8 {
+            vdp.vram[sat_base + i as usize * 4] = 99; // Y
+            vdp.vram[sat_base + i as usize * 4 + 1] = 10 + i * 10; // X
+            vdp.vram[sat_base + i as usize * 4 + 2] = 0; // Pattern
+            vdp.vram[sat_base + i as usize * 4 + 3] = 2; // Color (green)
+        }
+        // Terminate
+        vdp.vram[sat_base + 5 * 4] = 0xD0;
+
+        // Set pattern 0 with solid pixels
+        vdp.vram[0] = 0xFF;
+
+        vdp.render_scanline(100);
+
+        // 5th sprite should trigger overflow
+        assert!(vdp.sprite_overflow);
     }
 }
