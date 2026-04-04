@@ -77,13 +77,8 @@ not available in CI or in headless `cargo test` runs.  They can be run manually 
 ## NES
 
 ### Medium
-- [ ] **Sprite 0 hit timing**: Fix trigger to fire at `hit_x + 1` (not `hit_x + 2`), and restrict the detection window to dots 1–256 (not 2–257). Per hardware, dot 1 = pixel x=0, so the hit fires at dot = x + 1. The current one-dot offset causes incorrect sprite 0 hit timing for games that use it to split the screen (e.g. Bee 52 HUD). Reference: Mesen2 `NesPpu.cpp GetPixelColor()`, NESdev wiki PPU sprite evaluation — `crates/systems/nes/src/ppu.rs`
-- [ ] **Odd-frame cycle skip NTSC-only gate**: The skip at pre-render scanline dot 339 must only apply when `TimingMode::Ntsc`. The PAL PPU (2C07) never performs this skip; every PAL frame is exactly 312 × 341 dots. Without the guard, PAL games lose one dot per frame, causing cumulative CPU/PPU drift. Reference: NESdev wiki PPU frame timing, NESdev wiki PAL video — `crates/systems/nes/src/ppu.rs`
 - [ ] **OAMDATA ($2004) reads during active rendering**: During visible scanlines (0–239) with rendering enabled, $2004 should return `$FF` on dots 0–64 (secondary OAM clear phase) and dots 257–340 (sprite tile fetch), and the primary OAM Y-byte of the sprite currently being evaluated (`oam[sprite_index * 4]`, where `sprite_index = (dot - 65) / 2`) on dots 65–256. Currently always returns `OAM[OAMADDR]` regardless of rendering state. Games like Bee 52 read $2004 to synchronise with the PPU and time HUD scroll splits; wrong values cause timing loops to fail. Reference: NESdev wiki PPU sprite evaluation, Mesen2 `NesPpu.cpp ReadRam()` — `crates/systems/nes/src/ppu.rs`
 - [ ] **Mid-scanline PPUMASK re-enable re-render**: When PPUMASK transitions from rendering-disabled to rendering-enabled during a visible scanline (0–239), that scanline has already been drawn as backdrop at dot 0 and must be re-rendered with the current scroll and mask values. Needed for HUD scroll splits in Bee 52 and other Codemasters games that disable rendering to change scroll, then re-enable mid-scanline. Proposed approach from PR #632: add a `rerender_scanline: Cell<Option<u16>>` field set in `write_register(1)` when the transition is detected, then re-render in the main loop after each CPU step. Reference: PR #632 investigation, NESdev wiki mid-frame updates — `crates/systems/nes/src/ppu.rs`, `crates/systems/nes/src/lib.rs`
-
-### Low
-- [ ] **ROM DB lookup test — use dynamic entry**: `test_lookup_rom_found` in `rom_db.rs` hardcodes Bee 52's CRC32 (`0xE19C2722`). Replacing the lookup with `ROM_DATABASE[0]` (and asserting all fields match) makes the test database-agnostic and prevents breakage if the Bee 52 entry is ever removed or reordered. — `crates/systems/nes/src/rom_db.rs`
 
 ## SNES
 
@@ -93,3 +88,17 @@ not available in CI or in headless `cargo test` runs.  They can be run manually 
 
 ### Medium
 - [ ] **Multiply/divide hardware timing**: Math unit computes results immediately. Hardware takes 8 cycles (multiply) / 16 cycles (divide). May affect timing-sensitive code. — `crates/systems/snes/src/bus.rs`
+
+## Mega Drive / Genesis
+
+### Medium
+- [ ] **Z80 sound CPU**: Z80 sub-CPU is not emulated. FM/PSG playback relies on 68K writing to YM2612/PSG registers directly, but games that use the Z80 for sound driver won't have audio. — `crates/systems/megadrive/src/bus.rs`
+- [ ] **YM2612 FM synthesis accuracy**: Timer and envelope generator are simplified. LFO, SSG-EG, and DAC mixing not fully accurate. — `crates/systems/megadrive/src/ym2612.rs`
+- [ ] **H-interrupt timing**: HInt counter and timing may not be cycle-accurate for raster effect games. — `crates/systems/megadrive/src/vdp.rs`
+- [ ] **Window plane clipping**: Window plane rendering may have edge cases with complex window configurations. — `crates/systems/megadrive/src/vdp.rs`
+- [ ] **DMA timing**: DMA transfers are instant; real hardware transfers data across multiple scanlines, affecting CPU access timing. — `crates/systems/megadrive/src/vdp.rs`
+
+### Low
+- [ ] **Interlace modes**: Interlaced display modes (reg $0C bits 1-2) not implemented. — `crates/systems/megadrive/src/vdp.rs`
+- [ ] **SRAM save/load persistence**: SRAM is detected but not persisted to disk between sessions. — `crates/systems/megadrive/src/bus.rs`
+- [ ] **Controller input 6-button support**: Only 3-button controller protocol emulated. — `crates/systems/megadrive/src/bus.rs`

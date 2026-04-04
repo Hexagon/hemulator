@@ -1425,7 +1425,7 @@ impl Ppu {
                                 "Sprite 0 hit FOUND at scanline {} x={} (will trigger at dot {})",
                                 y,
                                 x,
-                                x + 2
+                                x + 1
                             )
                         });
                     }
@@ -1448,7 +1448,7 @@ impl Ppu {
                             "Sprite 0 HIT scheduled at scanline {} x={} (dot {})",
                             y,
                             hit_x,
-                            hit_x + 2
+                            hit_x + 1
                         )
                     });
                 }
@@ -1586,13 +1586,14 @@ impl Ppu {
 
         // Cycle-accurate sprite 0 hit: check if we've reached the pending hit position.
         // On real hardware, sprite 0 hit is detected during visible scanline rendering
-        // at approximately dot = X_position + 2 (accounting for PPU pipeline delay).
-        // The hit can only occur during dots 2-257 of visible scanlines (0-239).
-        if scanline < 240 && dot >= 2 && dot <= 257 {
+        // at dot = X_position + 1 (dot 1 = pixel x=0, so hit fires at dot = x + 1).
+        // The hit can only occur during dots 1-256 of visible scanlines (0-239).
+        // Reference: NESdev wiki PPU sprite evaluation, Mesen2 NesPpu.cpp GetPixelColor()
+        if scanline < 240 && dot >= 1 && dot <= 256 {
             if let Some((hit_scanline, hit_x)) = self.sprite_0_hit_pending.get() {
                 // Check if we're on the right scanline and have reached the hit position
-                // Hit triggers at dot = X + 2 (2 cycle pipeline delay)
-                let trigger_dot = hit_x.saturating_add(2);
+                // Hit triggers at dot = X + 1 (dot 1 = pixel x=0)
+                let trigger_dot = hit_x.saturating_add(1);
                 if scanline == hit_scanline && dot >= trigger_dot && !self.sprite_0_hit.get() {
                     log(LogCategory::PPU, LogLevel::Info, || {
                         format!(
@@ -1665,7 +1666,13 @@ impl Ppu {
         // the pre-render scanline, not the start of the next frame).
         // Reference: https://www.nesdev.org/wiki/PPU_frame_timing
         // "For odd frames, the cycle at the end of the scanline is skipped"
-        if scanline == pre_render_scanline && dot == 339 && self.odd_frame.get() {
+        // NOTE: The PAL PPU (2C07) never performs this skip; every PAL frame is
+        // exactly 312 × 341 dots. This guard is NTSC-only.
+        if scanline == pre_render_scanline
+            && dot == 339
+            && self.odd_frame.get()
+            && self.timing_mode == TimingMode::Ntsc
+        {
             let rendering_enabled = (self.mask & 0x18) != 0;
             if rendering_enabled {
                 next_dot = 341; // Force end-of-scanline wrap
@@ -4672,5 +4679,143 @@ mod tests {
             !ppu.is_in_vblank_region(),
             "Scanline 311 should not be in VBlank region (PAL)"
         );
+    }
+
+    #[test]
+    fn test_sprite_0_hit_cycle_accurate_timing() {
+        // Verify that sprite 0 hit fires at exactly dot = x + 1, not at dot x or dot x + 2.
+        // Reference: NESdev wiki PPU sprite evaluation — dot 1 = pixel x=0, so
+        // the hit fires at dot = x + 1.
+        let ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
+        ppu.clear_first_frame_lock();
+
+        // Simulate a pending sprite 0 hit at scanline 10, x=20
+        // → trigger_dot = 20 + 1 = 21
+        ppu.sprite_0_hit_pending.set(Some((10, 20)));
+
+        // Position at (10, 20) — one dot BEFORE the trigger dot 21
+        ppu.scanline.set(10);
+        ppu.dot.set(20);
+        ppu.tick(); // processes at (10,20); 20 < 21 → no hit; advances to (10,21)
+        assert_eq!(ppu.dot.get(), 21);
+        assert!(
+            !ppu.sprite_0_hit.get(),
+            "Sprite 0 hit must NOT fire at dot 20 (one dot before trigger dot 21)"
+        );
+
+        // Position is now (10, 21) — exactly at trigger dot
+        ppu.tick(); // processes at (10,21); 21 >= 21 → HIT; advances to (10,22)
+        assert_eq!(ppu.dot.get(), 22);
+        assert!(
+            ppu.sprite_0_hit.get(),
+            "Sprite 0 hit must fire at dot 21 (= x + 1 = 20 + 1)"
+        );
+    }
+
+    #[test]
+    fn test_odd_frame_skip_ntsc_only() {
+        // NTSC: On an odd frame with rendering enabled, dot 340 of the pre-render
+        // scanline (261) is skipped — the PPU jumps directly from dot 339 to (0,0).
+        // PAL: The 2C07 PPU never skips a dot; every PAL frame is exactly 312×341
+        // dots regardless of the odd_frame flag.
+
+        // --- NTSC: skip must happen ---
+        {
+            let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
+            ppu.clear_first_frame_lock();
+            ppu.mask = 0x18; // Rendering enabled
+            ppu.odd_frame.set(true);
+
+            // Position at pre-render scanline 261, dot 339
+            ppu.scanline.set(261);
+            ppu.dot.set(339);
+            ppu.tick(); // odd + NTSC + rendering → dot 340 skipped; wraps to (0, 0)
+            assert_eq!(
+                ppu.scanline.get(),
+                0,
+                "NTSC odd frame: should skip dot 340 and wrap to scanline 0"
+            );
+            assert_eq!(
+                ppu.dot.get(),
+                0,
+                "NTSC odd frame: should skip dot 340 and start at dot 0"
+            );
+        }
+
+        // --- NTSC: even frame — no skip ---
+        {
+            let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
+            ppu.clear_first_frame_lock();
+            ppu.mask = 0x18; // Rendering enabled
+            ppu.odd_frame.set(false);
+
+            ppu.scanline.set(261);
+            ppu.dot.set(339);
+            ppu.tick(); // even frame → no skip; advances to dot 340
+            assert_eq!(
+                ppu.scanline.get(),
+                261,
+                "NTSC even frame: must NOT skip, stay on scanline 261"
+            );
+            assert_eq!(
+                ppu.dot.get(),
+                340,
+                "NTSC even frame: must advance normally to dot 340"
+            );
+        }
+
+        // --- NTSC: odd frame but rendering disabled — no skip ---
+        {
+            let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
+            ppu.clear_first_frame_lock();
+            ppu.mask = 0x00; // Rendering disabled
+            ppu.odd_frame.set(true);
+
+            ppu.scanline.set(261);
+            ppu.dot.set(339);
+            ppu.tick(); // rendering disabled → no skip; advances to dot 340
+            assert_eq!(
+                ppu.scanline.get(),
+                261,
+                "NTSC odd frame with rendering off: must NOT skip"
+            );
+            assert_eq!(
+                ppu.dot.get(),
+                340,
+                "NTSC odd frame with rendering off: must advance to dot 340"
+            );
+        }
+
+        // --- PAL: odd frame with rendering enabled — skip must NOT happen ---
+        {
+            let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Pal);
+            ppu.clear_first_frame_lock();
+            ppu.mask = 0x18; // Rendering enabled
+            ppu.odd_frame.set(true);
+
+            // Pre-render scanline for PAL is 311
+            ppu.scanline.set(311);
+            ppu.dot.set(339);
+            ppu.tick(); // PAL → no skip; must advance normally to dot 340
+            assert_eq!(
+                ppu.scanline.get(),
+                311,
+                "PAL odd frame: must NOT skip, stay on scanline 311"
+            );
+            assert_eq!(
+                ppu.dot.get(),
+                340,
+                "PAL odd frame: must advance normally to dot 340 (no skip)"
+            );
+
+            // Continuing: dot 340 → end-of-scanline → (0, 0) on PAL too
+            ppu.tick(); // advances dot 340 → wraps to (0, 0)
+            assert_eq!(
+                ppu.scanline.get(),
+                0,
+                "PAL: end-of-frame wraps to scanline 0"
+            );
+            assert_eq!(ppu.dot.get(), 0, "PAL: end-of-frame wraps to dot 0");
+        }
     }
 }

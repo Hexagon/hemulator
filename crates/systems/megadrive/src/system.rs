@@ -177,6 +177,7 @@ impl System for MegaDriveSystem {
                 }
 
                 let pc_before = self.cpu.pc;
+
                 self.cpu.step();
 
                 // Trace instructions
@@ -207,7 +208,6 @@ impl System for MegaDriveSystem {
             }
         }
 
-        // Get frame from VDP
         let frame = self.cpu.memory.vdp.borrow().get_frame().clone();
 
         Ok(frame)
