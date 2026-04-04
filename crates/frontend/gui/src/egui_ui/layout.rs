@@ -6,7 +6,7 @@ use super::property_pane::PropertyPane;
 use super::status_bar::StatusBarWidget;
 use super::tabs::TabManager;
 use crate::settings::ScalingMode;
-use egui::{CentralPanel, Context, TopBottomPanel};
+use egui::{CentralPanel, Context, Panel};
 use egui_dock::{DockArea, Style};
 
 /// Main egui application state
@@ -42,7 +42,7 @@ impl EguiApp {
         height: usize,
     ) {
         // Convert ARGB to RGBA for egui
-        // The egui_sdl2_gl shader already handles sRGB round-trip correctly:
+        // The egui_glow shader handles sRGB round-trip correctly:
         // texture sRGB → linear_from_srgba → linear → GL_FRAMEBUFFER_SRGB → sRGB
         // So we just upload the raw sRGB values directly
         let rgba_pixels: Vec<u8> = pixels
@@ -83,6 +83,9 @@ impl EguiApp {
     }
 
     /// Render the UI
+    #[allow(deprecated)] // Panel::show() is deprecated in egui 0.34 in favour of show_inside(),
+                         // but show_inside() requires &mut Ui rather than &Context, which
+                         // requires a larger refactor of the rendering pipeline.
     pub fn ui(&mut self, ctx: &Context, scaling_mode: ScalingMode) {
         let fg_color = egui::Color32::from_rgb(224, 224, 224);
         let white_color = egui::Color32::from_rgb(255, 255, 255);
@@ -91,7 +94,7 @@ impl EguiApp {
         let main_bg_color = egui::Color32::from_rgb(0, 0, 0);
 
         // Set brighter text color globally
-        let mut style = (*ctx.style()).clone();
+        let mut style = (*ctx.global_style()).clone();
         style.visuals.override_text_color = Some(fg_color);
 
         // Also brighten weak text color
@@ -104,10 +107,10 @@ impl EguiApp {
         style.visuals.widgets.inactive.fg_stroke.color = fg_color;
         style.visuals.widgets.hovered.fg_stroke.color = white_color;
         style.visuals.widgets.active.fg_stroke.color = white_color;
-        ctx.set_style(style);
+        ctx.set_global_style(style);
 
         // Top menu bar
-        TopBottomPanel::top("menu_bar")
+        Panel::top("menu_bar")
             .frame(egui::Frame::new().fill(panel_bg))
             .show(ctx, |ui| {
                 self.menu_bar.ui(ui);
@@ -116,7 +119,7 @@ impl EguiApp {
         // Bottom status bar
         // Update status bar with current FPS from property pane
         self.status_bar.set_fps(self.property_pane.fps);
-        TopBottomPanel::bottom("status_bar")
+        Panel::bottom("status_bar")
             .frame(egui::Frame::new().fill(dock_fill_color))
             .show(ctx, |ui| {
                 self.status_bar.ui(ui);
@@ -124,9 +127,9 @@ impl EguiApp {
 
         // Inspector dock at bottom (if visible)
         if self.dock_layout.inspector_visible {
-            TopBottomPanel::bottom("inspector_dock")
-                .default_height(250.0)
-                .min_height(100.0)
+            Panel::bottom("inspector_dock")
+                .default_size(250.0)
+                .min_size(100.0)
                 .resizable(true)
                 .frame(egui::Frame::new().fill(dock_fill_color))
                 .show(ctx, |ui| {
@@ -145,10 +148,10 @@ impl EguiApp {
 
         // Property pane as a dockable right panel (only shown if any section visible)
         if self.property_pane.any_section_visible() {
-            egui::SidePanel::right("property_dock")
-                .default_width(300.0)
-                .min_width(200.0)
-                .max_width(500.0)
+            Panel::right("property_dock")
+                .default_size(300.0)
+                .min_size(200.0)
+                .max_size(500.0)
                 .resizable(true)
                 .frame(egui::Frame::new().fill(dock_fill_color))
                 .show(ctx, |ui| {

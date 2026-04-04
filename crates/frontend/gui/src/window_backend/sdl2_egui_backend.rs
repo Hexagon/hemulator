@@ -1,24 +1,377 @@
-//! SDL2 backend with egui integration using egui-sdl2-gl
+//! SDL2 backend with egui integration using egui_glow
+//!
+//! This module handles:
+//! - Window creation and OpenGL context management via SDL2
+//! - SDL2 event → egui `RawInput` conversion without `transmute`;
+//!   any `unsafe` is limited to OpenGL loader/context setup
+//! - egui output rendering via `egui_glow::Painter` (egui 0.34 types natively)
+//! - Clipboard integration via SDL2's clipboard API
+//! - Cursor integration via SDL2's system cursor API
 
 use crate::window_backend::{Key, WindowBackend};
-use egui_sdl2_gl::{painter::Painter, EguiStateHandler, ShaderVersion};
+use egui_glow::glow;
 use sdl2::controller::GameController;
 use sdl2::joystick::Joystick;
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
+use std::sync::Arc;
+// ─── Egui input state ────────────────────────────────────────────────────────
+
+/// Accumulates SDL2 events into an egui `RawInput` ready for `begin_pass`.
+struct EguiInputState {
+    raw_input: egui::RawInput,
+    pointer_pos: egui::Pos2,
+    modifiers: egui::Modifiers,
+    pixels_per_point: f32,
+}
+
+impl EguiInputState {
+    fn new(screen_rect: egui::Rect, pixels_per_point: f32) -> Self {
+        let mut raw_input = egui::RawInput {
+            screen_rect: Some(screen_rect),
+            ..Default::default()
+        };
+        raw_input
+            .viewports
+            .entry(egui::ViewportId::ROOT)
+            .or_default()
+            .native_pixels_per_point = Some(pixels_per_point);
+
+        Self {
+            raw_input,
+            pointer_pos: egui::Pos2::ZERO,
+            modifiers: egui::Modifiers::default(),
+            pixels_per_point,
+        }
+    }
+
+    /// Drain and return the accumulated `RawInput`, resetting state for next frame.
+    fn take(&mut self) -> egui::RawInput {
+        self.raw_input.take()
+    }
+
+    /// Process a single SDL2 event, updating modifiers, pointer position and
+    /// accumulating egui events.
+    fn process_event(&mut self, window: &sdl2::video::Window, event: &sdl2::event::Event) {
+        use sdl2::event::{Event, WindowEvent};
+
+        // Only process events for our window
+        if let Some(id) = event.get_window_id() {
+            if id != window.id() {
+                return;
+            }
+        }
+
+        let ppp = self.pixels_per_point;
+
+        match event {
+            // Window resize → update screen_rect
+            Event::Window {
+                win_event: WindowEvent::Resized(w, h) | WindowEvent::SizeChanged(w, h),
+                ..
+            } => {
+                let rect = egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(*w as f32 / ppp, *h as f32 / ppp),
+                );
+                self.raw_input.screen_rect = Some(rect);
+                self.raw_input
+                    .viewports
+                    .entry(egui::ViewportId::ROOT)
+                    .or_default()
+                    .native_pixels_per_point = Some(ppp);
+            }
+
+            // Mouse button press/release – sync pointer_pos from the event
+            // coordinates before reporting the click so egui always receives the
+            // correct position even when no prior MouseMotion was delivered
+            // (e.g., the very first click after launch, or after a pointer warp).
+            Event::MouseButtonDown {
+                mouse_btn, x, y, ..
+            } => {
+                self.pointer_pos = egui::pos2(*x as f32 / ppp, *y as f32 / ppp);
+                self.raw_input
+                    .events
+                    .push(egui::Event::PointerMoved(self.pointer_pos));
+                if let Some(button) = sdl_mouse_button(*mouse_btn) {
+                    self.raw_input.events.push(egui::Event::PointerButton {
+                        pos: self.pointer_pos,
+                        button,
+                        pressed: true,
+                        modifiers: self.modifiers,
+                    });
+                }
+            }
+            Event::MouseButtonUp {
+                mouse_btn, x, y, ..
+            } => {
+                self.pointer_pos = egui::pos2(*x as f32 / ppp, *y as f32 / ppp);
+                self.raw_input
+                    .events
+                    .push(egui::Event::PointerMoved(self.pointer_pos));
+                if let Some(button) = sdl_mouse_button(*mouse_btn) {
+                    self.raw_input.events.push(egui::Event::PointerButton {
+                        pos: self.pointer_pos,
+                        button,
+                        pressed: false,
+                        modifiers: self.modifiers,
+                    });
+                }
+            }
+
+            // Mouse motion
+            Event::MouseMotion { x, y, .. } => {
+                self.pointer_pos = egui::pos2(*x as f32 / ppp, *y as f32 / ppp);
+                self.raw_input
+                    .events
+                    .push(egui::Event::PointerMoved(self.pointer_pos));
+            }
+
+            // Scroll wheel – `phase: TouchPhase::Move` is the standard default for
+            // non-trackpad devices.  Invert the delta when SDL reports a flipped
+            // (natural-scroll) device so the direction matches user expectation.
+            Event::MouseWheel {
+                x, y, direction, ..
+            } => {
+                use sdl2::mouse::MouseWheelDirection;
+                let sign = if *direction == MouseWheelDirection::Flipped {
+                    -1.0_f32
+                } else {
+                    1.0_f32
+                };
+                let delta = egui::vec2(*x as f32 * 8.0 * sign, *y as f32 * 8.0 * sign);
+                self.raw_input.events.push(egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta,
+                    phase: egui::TouchPhase::Move,
+                    modifiers: self.modifiers,
+                });
+            }
+
+            // Key press/release
+            Event::KeyDown {
+                keycode,
+                keymod,
+                repeat,
+                ..
+            } => {
+                self.modifiers = sdl_modifiers(*keymod);
+                if let Some(key_code) = keycode {
+                    if let Some(key) = translate_virtual_key_code(*key_code) {
+                        self.raw_input.events.push(egui::Event::Key {
+                            key,
+                            physical_key: None,
+                            pressed: true,
+                            repeat: *repeat,
+                            modifiers: self.modifiers,
+                        });
+                    }
+
+                    // Ctrl+C/X/V shortcuts
+                    if self.modifiers.command {
+                        use sdl2::keyboard::Keycode;
+                        match *key_code {
+                            Keycode::C => self.raw_input.events.push(egui::Event::Copy),
+                            Keycode::X => self.raw_input.events.push(egui::Event::Cut),
+                            Keycode::V => {
+                                if let Ok(text) = window.subsystem().clipboard().clipboard_text() {
+                                    self.raw_input.events.push(egui::Event::Paste(text));
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            Event::KeyUp {
+                keycode,
+                keymod,
+                repeat,
+                ..
+            } => {
+                self.modifiers = sdl_modifiers(*keymod);
+                if let Some(key_code) = keycode {
+                    if let Some(key) = translate_virtual_key_code(*key_code) {
+                        self.raw_input.events.push(egui::Event::Key {
+                            key,
+                            physical_key: None,
+                            pressed: false,
+                            repeat: *repeat,
+                            modifiers: self.modifiers,
+                        });
+                    }
+                }
+            }
+
+            // Text input (separate from key events to handle IME correctly)
+            Event::TextInput { text, .. } => {
+                // Skip text produced by Ctrl+key shortcuts so they aren't inserted
+                if !self.modifiers.ctrl && !self.modifiers.mac_cmd {
+                    self.raw_input.events.push(egui::Event::Text(text.clone()));
+                }
+            }
+
+            _ => {}
+        }
+    }
+}
+
+// ─── SDL2 → egui helpers ─────────────────────────────────────────────────────
+
+fn sdl_mouse_button(btn: sdl2::mouse::MouseButton) -> Option<egui::PointerButton> {
+    use sdl2::mouse::MouseButton;
+    match btn {
+        MouseButton::Left => Some(egui::PointerButton::Primary),
+        MouseButton::Middle => Some(egui::PointerButton::Middle),
+        MouseButton::Right => Some(egui::PointerButton::Secondary),
+        _ => None,
+    }
+}
+
+fn sdl_modifiers(keymod: sdl2::keyboard::Mod) -> egui::Modifiers {
+    use sdl2::keyboard::Mod;
+    let alt = keymod.contains(Mod::LALTMOD) || keymod.contains(Mod::RALTMOD);
+    let ctrl = keymod.contains(Mod::LCTRLMOD) || keymod.contains(Mod::RCTRLMOD);
+    let shift = keymod.contains(Mod::LSHIFTMOD) || keymod.contains(Mod::RSHIFTMOD);
+    let mac_cmd = keymod.contains(Mod::LGUIMOD) || keymod.contains(Mod::RGUIMOD);
+    egui::Modifiers {
+        alt,
+        ctrl,
+        shift,
+        mac_cmd,
+        command: ctrl || mac_cmd,
+    }
+}
+
+fn translate_virtual_key_code(key: sdl2::keyboard::Keycode) -> Option<egui::Key> {
+    use sdl2::keyboard::Keycode;
+    Some(match key {
+        Keycode::Left => egui::Key::ArrowLeft,
+        Keycode::Up => egui::Key::ArrowUp,
+        Keycode::Right => egui::Key::ArrowRight,
+        Keycode::Down => egui::Key::ArrowDown,
+
+        Keycode::Escape => egui::Key::Escape,
+        Keycode::Tab => egui::Key::Tab,
+        Keycode::Backspace => egui::Key::Backspace,
+        Keycode::Space => egui::Key::Space,
+        Keycode::Return | Keycode::KpEnter => egui::Key::Enter,
+        Keycode::Insert => egui::Key::Insert,
+        Keycode::Home => egui::Key::Home,
+        Keycode::Delete => egui::Key::Delete,
+        Keycode::End => egui::Key::End,
+        Keycode::PageDown => egui::Key::PageDown,
+        Keycode::PageUp => egui::Key::PageUp,
+
+        Keycode::F1 => egui::Key::F1,
+        Keycode::F2 => egui::Key::F2,
+        Keycode::F3 => egui::Key::F3,
+        Keycode::F4 => egui::Key::F4,
+        Keycode::F5 => egui::Key::F5,
+        Keycode::F6 => egui::Key::F6,
+        Keycode::F7 => egui::Key::F7,
+        Keycode::F8 => egui::Key::F8,
+        Keycode::F9 => egui::Key::F9,
+        Keycode::F10 => egui::Key::F10,
+        Keycode::F11 => egui::Key::F11,
+        Keycode::F12 => egui::Key::F12,
+        Keycode::F13 => egui::Key::F13,
+        Keycode::F14 => egui::Key::F14,
+        Keycode::F15 => egui::Key::F15,
+        Keycode::F16 => egui::Key::F16,
+        Keycode::F17 => egui::Key::F17,
+        Keycode::F18 => egui::Key::F18,
+        Keycode::F19 => egui::Key::F19,
+        Keycode::F20 => egui::Key::F20,
+
+        Keycode::Kp0 | Keycode::Num0 => egui::Key::Num0,
+        Keycode::Kp1 | Keycode::Num1 => egui::Key::Num1,
+        Keycode::Kp2 | Keycode::Num2 => egui::Key::Num2,
+        Keycode::Kp3 | Keycode::Num3 => egui::Key::Num3,
+        Keycode::Kp4 | Keycode::Num4 => egui::Key::Num4,
+        Keycode::Kp5 | Keycode::Num5 => egui::Key::Num5,
+        Keycode::Kp6 | Keycode::Num6 => egui::Key::Num6,
+        Keycode::Kp7 | Keycode::Num7 => egui::Key::Num7,
+        Keycode::Kp8 | Keycode::Num8 => egui::Key::Num8,
+        Keycode::Kp9 | Keycode::Num9 => egui::Key::Num9,
+
+        Keycode::A => egui::Key::A,
+        Keycode::B => egui::Key::B,
+        Keycode::C => egui::Key::C,
+        Keycode::D => egui::Key::D,
+        Keycode::E => egui::Key::E,
+        Keycode::F => egui::Key::F,
+        Keycode::G => egui::Key::G,
+        Keycode::H => egui::Key::H,
+        Keycode::I => egui::Key::I,
+        Keycode::J => egui::Key::J,
+        Keycode::K => egui::Key::K,
+        Keycode::L => egui::Key::L,
+        Keycode::M => egui::Key::M,
+        Keycode::N => egui::Key::N,
+        Keycode::O => egui::Key::O,
+        Keycode::P => egui::Key::P,
+        Keycode::Q => egui::Key::Q,
+        Keycode::R => egui::Key::R,
+        Keycode::S => egui::Key::S,
+        Keycode::T => egui::Key::T,
+        Keycode::U => egui::Key::U,
+        Keycode::V => egui::Key::V,
+        Keycode::W => egui::Key::W,
+        Keycode::X => egui::Key::X,
+        Keycode::Y => egui::Key::Y,
+        Keycode::Z => egui::Key::Z,
+
+        _ => return None,
+    })
+}
+
+/// Translate an `egui::CursorIcon` to the nearest available SDL2 system cursor.
+fn translate_cursor(cursor_icon: egui::CursorIcon) -> sdl2::mouse::SystemCursor {
+    use egui::CursorIcon;
+    use sdl2::mouse::SystemCursor;
+    match cursor_icon {
+        CursorIcon::Crosshair => SystemCursor::Crosshair,
+        CursorIcon::Default => SystemCursor::Arrow,
+        CursorIcon::Grab | CursorIcon::PointingHand => SystemCursor::Hand,
+        CursorIcon::Grabbing | CursorIcon::Move | CursorIcon::AllScroll => SystemCursor::SizeAll,
+        CursorIcon::ResizeEast | CursorIcon::ResizeWest | CursorIcon::ResizeHorizontal => {
+            SystemCursor::SizeWE
+        }
+        CursorIcon::ResizeNorth | CursorIcon::ResizeSouth | CursorIcon::ResizeVertical => {
+            SystemCursor::SizeNS
+        }
+        CursorIcon::ResizeNeSw | CursorIcon::ResizeNorthEast | CursorIcon::ResizeSouthWest => {
+            SystemCursor::SizeNESW
+        }
+        CursorIcon::ResizeNwSe | CursorIcon::ResizeNorthWest | CursorIcon::ResizeSouthEast => {
+            SystemCursor::SizeNWSE
+        }
+        CursorIcon::Text | CursorIcon::VerticalText => SystemCursor::IBeam,
+        CursorIcon::NotAllowed | CursorIcon::NoDrop => SystemCursor::No,
+        CursorIcon::Wait | CursorIcon::Progress => SystemCursor::Wait,
+        _ => SystemCursor::Arrow,
+    }
+}
+
+// ─── Backend struct ───────────────────────────────────────────────────────────
 
 pub struct Sdl2EguiBackend {
     #[allow(dead_code)]
     sdl_context: sdl2::Sdl,
     window: sdl2::video::Window,
     _gl_context: sdl2::video::GLContext,
-    painter: Painter,
-    egui_state: EguiStateHandler,
+    painter: egui_glow::Painter,
+    egui_input: EguiInputState,
     egui_ctx: egui::Context,
     event_pump: sdl2::EventPump,
     _game_controller_subsystem: sdl2::GameControllerSubsystem,
     _joystick_subsystem: sdl2::JoystickSubsystem,
+
+    // Active system cursor (kept alive so SDL2 keeps using it)
+    active_cursor: Option<sdl2::mouse::Cursor>,
+    active_cursor_icon: sdl2::mouse::SystemCursor,
 
     // State tracking
     keys_down: std::collections::HashSet<Key>,
@@ -48,7 +401,7 @@ impl Sdl2EguiBackend {
         let sdl_context = sdl2::init()?;
         let video_subsystem = sdl_context.video()?;
 
-        // Set up OpenGL attributes for egui
+        // Set up OpenGL attributes for egui_glow
         let gl_attr = video_subsystem.gl_attr();
         gl_attr.set_context_profile(sdl2::video::GLProfile::Core);
         gl_attr.set_context_version(3, 2);
@@ -70,9 +423,30 @@ impl Sdl2EguiBackend {
         // Enable vsync
         video_subsystem.gl_set_swap_interval(sdl2::video::SwapInterval::VSync)?;
 
-        // Initialize painter and egui state
-        let painter = Painter::new(&window, 1.0, ShaderVersion::Default);
-        let egui_state = EguiStateHandler::new(&painter);
+        // Build glow context and egui_glow painter
+        let gl = Arc::new(unsafe {
+            glow::Context::from_loader_function(|s| {
+                video_subsystem.gl_get_proc_address(s) as *const _
+            })
+        });
+        let painter = egui_glow::Painter::new(Arc::clone(&gl), "", None, false)
+            .map_err(|e| format!("Failed to create egui_glow painter: {e}"))?;
+
+        let pixels_per_point = {
+            let (ddpi, _, _) = video_subsystem.display_dpi(0).unwrap_or((96.0, 96.0, 96.0));
+            (ddpi / 96.0).max(1.0)
+        };
+
+        let (drawable_w, drawable_h) = window.drawable_size();
+        let screen_rect = egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(
+                drawable_w as f32 / pixels_per_point,
+                drawable_h as f32 / pixels_per_point,
+            ),
+        );
+
+        let egui_input = EguiInputState::new(screen_rect, pixels_per_point);
         let egui_ctx = egui::Context::default();
 
         let event_pump = sdl_context.event_pump()?;
@@ -142,11 +516,13 @@ impl Sdl2EguiBackend {
             window,
             _gl_context: gl_context,
             painter,
-            egui_state,
+            egui_input,
             egui_ctx,
             event_pump,
             _game_controller_subsystem: game_controller_subsystem,
             _joystick_subsystem: joystick_subsystem,
+            active_cursor: sdl2::mouse::Cursor::from_system(sdl2::mouse::SystemCursor::Arrow).ok(),
+            active_cursor_icon: sdl2::mouse::SystemCursor::Arrow,
             keys_down: std::collections::HashSet::new(),
             keys_pressed: std::collections::HashSet::new(),
             sdl2_scancodes_pressed: Vec::new(),
@@ -161,21 +537,20 @@ impl Sdl2EguiBackend {
         })
     }
 
-    /// Get SDL2 video subsystem (for GL context access)
-    pub fn video_subsystem(&self) -> sdl2::VideoSubsystem {
-        self.sdl_context
-            .video()
-            .expect("Video subsystem should be available")
-    }
-
-    /// Get OpenGL context for renderer initialization
-    /// Returns a new glow::Context for use with renderers
+    /// Get an OpenGL context backed by the same SDL2 GL entry points as the
+    /// painter.  Each call creates a new `glow::Context` value from the SDL2
+    /// GL proc-address loader; the underlying function pointers are shared with
+    /// the painter's context, so the returned context is usable for rendering
+    /// into the same window.
     pub fn gl_context(&self) -> Option<glow::Context> {
-        // Create a new glow context from SDL2 GL functions
-        // glow::Context internally uses Rc for the function pointers, so this is cheap
+        // Create a new context sharing the same SDL2 GL entry points.
+        // glow::Context is Send+Sync, so cloning via the loader is safe here.
         unsafe {
             let gl = glow::Context::from_loader_function(|s| {
-                self.video_subsystem().gl_get_proc_address(s) as *const _
+                self.sdl_context
+                    .video()
+                    .expect("Video subsystem should be available")
+                    .gl_get_proc_address(s) as *const _
             });
             Some(gl)
         }
@@ -188,7 +563,7 @@ impl Sdl2EguiBackend {
 
     /// Begin an egui frame
     pub fn begin_frame(&mut self) {
-        let raw_input = self.egui_state.input.take();
+        let raw_input = self.egui_input.take();
         self.egui_ctx.begin_pass(raw_input);
     }
 
@@ -202,19 +577,46 @@ impl Sdl2EguiBackend {
             viewport_output: _,
         } = self.egui_ctx.end_pass();
 
-        // Handle URL opening requests from egui (e.g., hyperlink clicks)
-        for command in platform_output.commands {
-            if let egui::OutputCommand::OpenUrl(open_url) = command {
-                if let Err(e) = open::that(&open_url.url) {
-                    eprintln!("Failed to open URL {}: {}", open_url.url, e);
+        // Handle platform output: URL opening, clipboard copy, cursor updates.
+        for command in &platform_output.commands {
+            match command {
+                egui::OutputCommand::OpenUrl(open_url) => {
+                    if let Err(e) = open::that(&open_url.url) {
+                        eprintln!("Failed to open URL {}: {}", open_url.url, e);
+                    }
                 }
+                egui::OutputCommand::CopyText(text) => {
+                    if !text.is_empty() {
+                        if let Ok(video) = self.sdl_context.video() {
+                            if video.clipboard().set_clipboard_text(text).is_err() {
+                                eprintln!("Warning: failed to set clipboard text");
+                            }
+                        }
+                    }
+                }
+                _ => {}
             }
         }
 
-        // Paint
+        // Update cursor
+        let desired = translate_cursor(platform_output.cursor_icon);
+        if desired != self.active_cursor_icon {
+            self.active_cursor = sdl2::mouse::Cursor::from_system(desired).ok();
+            self.active_cursor_icon = desired;
+            if let Some(cursor) = &self.active_cursor {
+                cursor.set();
+            }
+        }
+
+        // Paint using egui_glow – accepts egui 0.34 types natively, no transmutes.
         let clipped_primitives = self.egui_ctx.tessellate(shapes, pixels_per_point);
-        self.painter
-            .paint_jobs(None, textures_delta, clipped_primitives);
+        let (drawable_w, drawable_h) = self.window.drawable_size();
+        self.painter.paint_and_update_textures(
+            [drawable_w, drawable_h],
+            pixels_per_point,
+            &clipped_primitives,
+            &textures_delta,
+        );
 
         self.window.gl_swap_window();
     }
@@ -230,9 +632,8 @@ impl Sdl2EguiBackend {
         let events: Vec<_> = self.event_pump.poll_iter().collect();
 
         for event in events {
-            // Process event with egui state handler
-            self.egui_state
-                .process_input(&self.window, event.clone(), &mut self.painter);
+            // Forward to egui input state
+            self.egui_input.process_event(&self.window, &event);
 
             // Also process for emulator controls
             match event {
