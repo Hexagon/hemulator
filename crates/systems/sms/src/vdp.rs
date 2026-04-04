@@ -71,6 +71,9 @@ pub struct Vdp {
     // (before any set_scanline call) at the sentinel value 262 does not falsely
     // trigger an interrupt before VBlank has actually been reached.
     in_vblank: bool,
+
+    // H-counter latch value (latched by TH pin transition on controller port 2)
+    h_counter_latch: u8,
 }
 
 impl Vdp {
@@ -97,6 +100,7 @@ impl Vdp {
             scanline: 262, // Start at end of frame so first set_scanline(0) wraps around
             is_pal: false,
             in_vblank: false,
+            h_counter_latch: 0,
         }
     }
 
@@ -123,6 +127,7 @@ impl Vdp {
             scanline: 262,
             is_pal: false,
             in_vblank: false,
+            h_counter_latch: 0,
         }
     }
 
@@ -361,29 +366,74 @@ impl Vdp {
 
     /// Read vertical counter
     pub fn read_vcounter(&self) -> u8 {
-        // The SMS V-counter does not directly expose the raw scanline number.
-        // NTSC (262 lines): scanlines 0-218 (0x00-0xDA) map 1:1; scanlines 219-261
-        //   jump to 0xD5-0xFF (subtract 6 from the scanline number).
-        // PAL  (313 lines): scanlines 0-242 (0x00-0xF2) map 1:1; scanlines 243-312
-        //   jump to 0xBA-0xFF (subtract 57 from the scanline number).
+        // The SMS V-counter mapping depends on both region and display height.
+        // The V-counter counts up linearly through the active display and into
+        // the blanking area, then "jumps" to skip some values:
+        //
+        // NTSC 192-line: 0x00..=0xDA, then 0xD5..=0xFF (jump at 219)
+        // NTSC 224-line: 0x00..=0xEA, then 0xE5..=0xFF (jump at 235)
+        // NTSC 240-line: 0x00..=0xFF, then 0x00..=0x05 (no jump, wraps)
+        // PAL  192-line: 0x00..=0xF2, then 0xBA..=0xFF (jump at 243)
+        // PAL  224-line: 0x00..=0xFF, then 0x00..=0x02, then 0xCA..=0xFF (jump at ~259)
+        // PAL  240-line: 0x00..=0xFF, then 0x00..=0x0A, then 0xD2..=0xFF (jump at ~267)
+        let display_height = self.get_display_height();
         let vcounter = if self.is_pal {
-            if self.scanline <= 0xF2 {
-                self.scanline as u8
-            } else {
-                self.scanline.wrapping_sub(57) as u8
+            match display_height {
+                224 => {
+                    if self.scanline <= 0xFF {
+                        self.scanline as u8
+                    } else if self.scanline <= 0x102 {
+                        (self.scanline - 0x100) as u8
+                    } else {
+                        (self.scanline - 0x39) as u8 // 0xCA..0xFF
+                    }
+                }
+                240 => {
+                    if self.scanline <= 0xFF {
+                        self.scanline as u8
+                    } else if self.scanline <= 0x10A {
+                        (self.scanline - 0x100) as u8
+                    } else {
+                        (self.scanline - 0x39) as u8 // 0xD2..0xFF
+                    }
+                }
+                _ => {
+                    // 192-line PAL
+                    if self.scanline <= 0xF2 {
+                        self.scanline as u8
+                    } else {
+                        self.scanline.wrapping_sub(57) as u8
+                    }
+                }
             }
         } else {
             // NTSC
-            if self.scanline <= 0xDA {
-                self.scanline as u8
-            } else {
-                self.scanline.wrapping_sub(6) as u8
+            match display_height {
+                224 => {
+                    if self.scanline <= 0xEA {
+                        self.scanline as u8
+                    } else {
+                        self.scanline.wrapping_sub(6) as u8 // 0xE5..0xFF
+                    }
+                }
+                240 => {
+                    // 240-line NTSC: no jump, just wraps at 262
+                    (self.scanline % 256) as u8
+                }
+                _ => {
+                    // 192-line NTSC
+                    if self.scanline <= 0xDA {
+                        self.scanline as u8
+                    } else {
+                        self.scanline.wrapping_sub(6) as u8
+                    }
+                }
             }
         };
         log(LogCategory::PPU, LogLevel::Debug, || {
             format!(
-                "SMS VDP: V-counter read = ${:02X} (scanline={})",
-                vcounter, self.scanline
+                "SMS VDP: V-counter read = ${:02X} (scanline={}, height={})",
+                vcounter, self.scanline, display_height
             )
         });
         vcounter
@@ -391,13 +441,36 @@ impl Vdp {
 
     /// Read horizontal counter.
     ///
-    /// The real SMS H-counter is latched via the TH pin and returns a value
-    /// from 0x00-0x93 (NTSC) representing the horizontal position divided by
-    /// 2.  Few games rely on precise H-counter reads; we return 0x00 as a
-    /// safe stub for maximum compatibility.
+    /// The SMS H-counter is latched by a TH-pin transition on controller
+    /// port 2. Reads return the most recently latched value. The counter
+    /// represents the horizontal pixel position divided by 2, ranging from
+    /// 0x00 to 0x93 during active display and continuing through HBlank.
     pub fn read_hcounter(&self) -> u8 {
-        // TODO: Implement proper H-counter latching for TH-pin triggered reads
-        0x00
+        self.h_counter_latch
+    }
+
+    /// Latch the current H-counter value.
+    ///
+    /// Called when the TH pin on controller port 2 transitions high-to-low,
+    /// or can be called with the current cycle position within the scanline
+    /// to provide a reasonable H-counter value.
+    pub fn latch_h_counter(&mut self, cycle_in_scanline: u32) {
+        // The SMS H-counter counts from 0x00 to 0x93 during the visible portion
+        // of the scanline (256 pixels / 2 = 128 values = 0x00-0x7F) and continues
+        // through HBlank (0x80-0x93, then 0xE9-0xFF wrapping around).
+        // Total dots per line: 342 NTSC, mapped to ~228 cycles.
+        // We approximate: visible area is ~171 dots (0-170), blanking after.
+        let cycles_per_line = 228u32; // NTSC: ~228 Z80 cycles per scanline
+        let clamped = cycle_in_scanline.min(cycles_per_line - 1);
+        // Map cycle position to H-counter value (0x00-0x93 visible, 0xE9-0xFF blanking)
+        let dot = (clamped * 342) / cycles_per_line;
+        self.h_counter_latch = if dot < 256 {
+            (dot / 2) as u8 // Active display: 0x00-0x7F
+        } else if dot < 296 {
+            (0x80 + (dot - 256) / 2) as u8 // Right border + HSync: 0x80-0x93
+        } else {
+            (0xE9 + (dot - 296) / 2) as u8 // Left border: 0xE9-0xFF
+        };
     }
 
     /// Step VDP by one scanline
@@ -666,17 +739,16 @@ impl Vdp {
         // Per SMS Power VDP documentation: the counter is loaded from R10
         // during VBlank.  On each active-display scanline it is decremented.
         // When it reaches -1 (wraps to 0xFF), a line interrupt is asserted
-        // (if enabled) and the counter is reloaded from R10.
+        // and the counter is reloaded from R10.
+        // The pending flag is ALWAYS set on counter underflow, regardless of
+        // whether IE1 (register 0 bit 4) is set.  The enable bit only gates
+        // whether /INT is actually asserted (checked in irq_line_active()).
         if line < display_height {
             self.line_counter = self.line_counter.wrapping_sub(1);
             if self.line_counter == 0xFF {
                 // Counter underflowed → reload from R10 and latch line interrupt
                 self.line_counter = self.registers[10];
-
-                // Trigger line interrupt if enabled (bit 4 of register 0)
-                if (self.registers[0] & 0x10) != 0 {
-                    self.line_interrupt_pending = true;
-                }
+                self.line_interrupt_pending = true;
             }
         }
 
@@ -740,7 +812,22 @@ impl Vdp {
 
     /// Render Mode 4 (SMS native) background for a scanline
     fn render_mode4_background(&mut self, line: u8, line_offset: usize) {
-        let name_table_addr = ((self.registers[2] as u16) & 0x0E) << 10;
+        let display_height = self.get_display_height();
+
+        // Name table address depends on display height mode.
+        // 192-line: Register 2 bits 3-1 → base = (R2 & 0x0E) << 10
+        // 224/240-line: Only bit 2 of Register 2 is used → base = (R2 & 0x0C) << 10
+        //   (bit 1 is forced to 1 on SMS2, and the name table needs 2KB for 32 rows)
+        let name_table_addr = if display_height > 192 {
+            ((self.registers[2] as u16) & 0x0C) << 10
+        } else {
+            ((self.registers[2] as u16) & 0x0E) << 10
+        };
+
+        // Vertical scroll wrap height:
+        // 192-line mode: 28 rows × 8 pixels = 224
+        // 224/240-line mode: 32 rows × 8 pixels = 256
+        let v_scroll_wrap: u16 = if display_height > 192 { 256 } else { 224 };
 
         // Get scroll values
         // Register 0 bit 6: Horizontal scroll inhibit for top 2 tile rows (lines 0-15)
@@ -765,8 +852,7 @@ impl Vdp {
                 let y = line as u16;
                 (y >> 3, y & 7)
             } else {
-                // Vertical scroll wraps at 224 (28 rows * 8 pixels) in 192-line mode
-                let y = ((line as u16) + (scroll_y as u16)) % 224;
+                let y = ((line as u16) + (scroll_y as u16)) % v_scroll_wrap;
                 (y >> 3, y & 7)
             };
 
@@ -1473,6 +1559,7 @@ impl Renderer for Vdp {
         // in_vblank starts false: the startup sentinel (262) must not be treated as VBlank
         // so that early R1 writes don't fire a spurious retroactive interrupt.
         self.in_vblank = false;
+        self.h_counter_latch = 0;
         self.clear(0xFF000000);
     }
 

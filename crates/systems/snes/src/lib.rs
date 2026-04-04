@@ -145,7 +145,6 @@ pub struct CartridgeInfo {
 /// SNES system implementation
 pub struct SnesSystem {
     cpu: SnesCpu,
-    frame_cycles: u32,
     current_cycles: u32,
     /// Total CPU cycles executed since reset
     total_cycles: u64,
@@ -184,7 +183,6 @@ pub struct SnesSystem {
 // Internal (IO) cycles that don't touch the bus are accounted for as 6 mc each.
 // WRAM refresh steals 40 mc per scanline at H≈538.
 const SNES_MASTER_CYCLES_PER_SCANLINE: u32 = 1364;
-const SNES_MASTER_CYCLES_PER_FRAME: u32 = 1364 * 262; // 357,368
 const SNES_HBLANK_MASTER_CYCLES: u32 = 268; // ~66 dots × 4 mc
 
 impl SnesSystem {
@@ -196,7 +194,6 @@ impl SnesSystem {
         bus.enable_spc700();
         Self {
             cpu: SnesCpu::new(bus),
-            frame_cycles: SNES_MASTER_CYCLES_PER_FRAME,
             current_cycles: 0,
             total_cycles: 0,
             renderer: Box::new(SoftwareSnesPpuRenderer::new()),
@@ -469,8 +466,13 @@ impl System for SnesSystem {
             // Enter HBlank for the remainder of the scanline
             self.cpu.bus_mut().ppu_mut().set_hblank(true);
 
-            // Execute HDMA during H-blank
-            let _hdma_cycles = self.cpu.bus_mut().do_hdma();
+            // Execute HDMA during H-blank (cycles are stolen from CPU)
+            let hdma_cycles = self.cpu.bus_mut().do_hdma();
+            if hdma_cycles > 0 {
+                self.current_cycles += hdma_cycles;
+                self.total_cycles += hdma_cycles as u64;
+                self.cpu.bus_mut().tick_cycles(hdma_cycles);
+            }
 
             // Complete the scanline (HBlank portion)
             while self.current_cycles < scanline_target {
@@ -576,50 +578,97 @@ impl System for SnesSystem {
             });
         }
 
-        // Execute remaining VBlank scanlines (225-261)
-        while self.current_cycles < self.frame_cycles {
-            // Check if DMA is halting the CPU
-            if self.cpu.bus().has_pending_dma() {
-                let remaining = self.frame_cycles.saturating_sub(self.current_cycles);
-                let dma_mc = self.cpu.bus().consume_dma_cycles(remaining.min(64));
-                if dma_mc == 0 {
-                    break;
-                }
-                self.current_cycles += dma_mc;
-                self.total_cycles += dma_mc as u64;
-                self.cpu.bus_mut().tick_cycles(dma_mc);
+        // Execute VBlank scanlines (225-261) with per-scanline tracking
+        // VBlank scanlines still need WRAM refresh, H/V timer IRQ, and proper
+        // cycle accounting — without this, timing-sensitive tests fail.
+        const TOTAL_SCANLINES: u32 = 262;
+        for scanline in VBLANK_START_SCANLINE..TOTAL_SCANLINES {
+            let scanline_start = scanline * SNES_MASTER_CYCLES_PER_SCANLINE;
+            let scanline_target = scanline_start + SNES_MASTER_CYCLES_PER_SCANLINE;
 
-                if self.cpu.bus_mut().ppu_mut().take_nmi_pending() {
+            self.cpu.bus_mut().reset_wram_refresh();
+
+            while self.current_cycles < scanline_target {
+                // Check if DMA is halting the CPU
+                if self.cpu.bus().has_pending_dma() {
+                    let remaining = scanline_target.saturating_sub(self.current_cycles);
+                    if remaining == 0 {
+                        break;
+                    }
+                    let dma_mc = self.cpu.bus().consume_dma_cycles(remaining);
+                    if dma_mc == 0 {
+                        break;
+                    }
+                    self.current_cycles += dma_mc;
+                    self.total_cycles += dma_mc as u64;
+                    self.cpu.bus_mut().tick_cycles(dma_mc);
+
+                    // WRAM refresh during DMA
+                    let scanline_mc = self.current_cycles - scanline_start;
+                    let wram_steal = self.cpu.bus().check_wram_refresh(scanline_mc);
+                    if wram_steal > 0 {
+                        self.current_cycles += wram_steal;
+                        self.total_cycles += wram_steal as u64;
+                        self.cpu.bus_mut().tick_cycles(wram_steal);
+                    }
+
+                    if self.cpu.bus_mut().ppu_mut().take_nmi_pending() {
+                        self.cpu.cpu.trigger_nmi();
+                    }
+                    continue;
+                }
+
+                let pc_before = ((self.cpu.cpu.pbr as u32) << 16) | (self.cpu.cpu.pc as u32);
+                self.cpu.bus_mut().set_last_cpu_pc(pc_before);
+                let cpu_cycles = self.cpu.step();
+                let master_cycles = self.cpu.bus().take_master_cycles(cpu_cycles);
+                self.current_cycles += master_cycles;
+                self.total_cycles += master_cycles as u64;
+                self.cpu.bus_mut().tick_cycles(master_cycles);
+
+                // WRAM refresh: 40 mc stolen at H≈538 once per scanline
+                let scanline_mc = self.current_cycles - scanline_start;
+                let wram_steal = self.cpu.bus().check_wram_refresh(scanline_mc);
+                if wram_steal > 0 {
+                    self.current_cycles += wram_steal;
+                    self.total_cycles += wram_steal as u64;
+                    self.cpu.bus_mut().tick_cycles(wram_steal);
+                }
+
+                // Update PPU H/V counters
+                let scanline_mc = self.current_cycles - scanline_start;
+                let dot = ((scanline_mc * 340) / SNES_MASTER_CYCLES_PER_SCANLINE).min(339);
+                self.cpu
+                    .bus_mut()
+                    .ppu_mut()
+                    .update_counters(scanline as u16, dot as u16);
+
+                // Check for H/V timer IRQ
+                if self.cpu.bus().check_hv_timer_irq(scanline, dot) {
+                    self.cpu.bus().trigger_hv_irq();
                     log(LogCategory::Interrupts, LogLevel::Debug, || {
-                        "SNES: NMI triggered during DMA".to_string()
+                        format!(
+                            "SNES: H/V Timer IRQ at scanline {} dot {} (mode {}) [VBlank]",
+                            scanline,
+                            dot,
+                            self.cpu.bus().get_hv_irq_mode()
+                        )
                     });
+                    self.cpu.cpu.trigger_irq();
+                }
+
+                // Record instruction if tracing is enabled (skip WAI idle cycles)
+                if self.instruction_tracer.is_enabled() && !self.cpu.cpu.waiting_for_interrupt {
+                    if let Some(instr) = self.disassemble_instruction(pc_before) {
+                        let cpu_state = self.get_cpu_state();
+                        self.instruction_tracer.trace(instr, cpu_state);
+                    }
+                }
+
+                // Check for NMI requests during VBlank
+                if self.cpu.bus_mut().ppu_mut().take_nmi_pending() {
                     self.cpu.cpu.trigger_nmi();
                 }
-                continue;
-            }
-
-            let pc_before = ((self.cpu.cpu.pbr as u32) << 16) | (self.cpu.cpu.pc as u32);
-            self.cpu.bus_mut().set_last_cpu_pc(pc_before);
-            let cpu_cycles = self.cpu.step();
-            let master_cycles = self.cpu.bus().take_master_cycles(cpu_cycles);
-            self.current_cycles += master_cycles;
-            self.total_cycles += master_cycles as u64;
-            self.cpu.bus_mut().tick_cycles(master_cycles);
-
-            // Record instruction if tracing is enabled (skip WAI idle cycles)
-            if self.instruction_tracer.is_enabled() && !self.cpu.cpu.waiting_for_interrupt {
-                if let Some(instr) = self.disassemble_instruction(pc_before) {
-                    let cpu_state = self.get_cpu_state();
-                    self.instruction_tracer.trace(instr, cpu_state);
-                }
-            }
-
-            // Check for additional NMI requests during VBlank
-            if self.cpu.bus_mut().ppu_mut().take_nmi_pending() {
-                log(LogCategory::Interrupts, LogLevel::Debug, || {
-                    "SNES: Additional NMI triggered during VBlank".to_string()
-                });
-                self.cpu.cpu.trigger_nmi();
             }
         }
 

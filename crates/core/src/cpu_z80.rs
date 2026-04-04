@@ -10,10 +10,15 @@ use crate::cpu_8080_common;
 // Z80 Flag bits
 const FLAG_S: u8 = 0b10000000; // Sign
 const FLAG_Z: u8 = 0b01000000; // Zero
+const FLAG_Y: u8 = 0b00100000; // Undocumented bit 5 (copy of result bit 5)
 const FLAG_H: u8 = 0b00010000; // Half Carry
+const FLAG_X: u8 = 0b00001000; // Undocumented bit 3 (copy of result bit 3)
 const FLAG_P: u8 = 0b00000100; // Parity/Overflow
 const FLAG_N: u8 = 0b00000010; // Subtract (BCD)
 const FLAG_C: u8 = 0b00000001; // Carry
+
+// Mask for undocumented flag bits 3 and 5
+const FLAG_XY: u8 = FLAG_X | FLAG_Y;
 
 /// Memory interface trait for the Z80 CPU
 pub trait MemoryZ80 {
@@ -308,12 +313,14 @@ impl<M: MemoryZ80> CpuZ80<M> {
         self.set_flag(0x80, (val & 0x80) != 0); // Sign
         self.set_flag(0x40, val == 0); // Zero
         self.set_flag(0x04, val.count_ones().is_multiple_of(2)); // Parity
+        self.f = (self.f & !FLAG_XY) | (val & FLAG_XY); // Undocumented bits 3,5 from result
     }
 
     // Update S and Z flags only (used for arithmetic where P/V = overflow, already set)
     fn update_flags_sz(&mut self, val: u8) {
         self.set_flag(0x80, (val & 0x80) != 0); // Sign
         self.set_flag(0x40, val == 0); // Zero
+        self.f = (self.f & !FLAG_XY) | (val & FLAG_XY); // Undocumented bits 3,5 from result
     }
 
     // Arithmetic operations with flag updates
@@ -385,6 +392,8 @@ impl<M: MemoryZ80> CpuZ80<M> {
 
         self.set_flag(0x02, true);
         self.update_flags_sz(result as u8); // S and Z only; P/V = overflow (already set above)
+                                            // CP is special: undocumented flags come from the OPERAND, not the result
+        self.f = (self.f & !FLAG_XY) | (val & FLAG_XY);
     }
 
     fn inc(&mut self, val: u8) -> u8 {
@@ -658,6 +667,7 @@ impl<M: MemoryZ80> CpuZ80<M> {
                 self.set_flag(0x02, false); // N = 0
                 self.set_flag(0x10, false); // H = 0
                 self.set_flag(0x01, carry); // C = old bit 7
+                self.f = (self.f & !FLAG_XY) | (self.a & FLAG_XY);
                 4
             }
             0x0F => {
@@ -667,6 +677,7 @@ impl<M: MemoryZ80> CpuZ80<M> {
                 self.set_flag(0x02, false); // N = 0
                 self.set_flag(0x10, false); // H = 0
                 self.set_flag(0x01, carry); // C = old bit 0
+                self.f = (self.f & !FLAG_XY) | (self.a & FLAG_XY);
                 4
             }
             0x17 => {
@@ -677,6 +688,7 @@ impl<M: MemoryZ80> CpuZ80<M> {
                 self.set_flag(0x02, false); // N = 0
                 self.set_flag(0x10, false); // H = 0
                 self.set_flag(0x01, new_carry);
+                self.f = (self.f & !FLAG_XY) | (self.a & FLAG_XY);
                 4
             }
             0x1F => {
@@ -687,6 +699,7 @@ impl<M: MemoryZ80> CpuZ80<M> {
                 self.set_flag(0x02, false); // N = 0
                 self.set_flag(0x10, false); // H = 0
                 self.set_flag(0x01, new_carry);
+                self.f = (self.f & !FLAG_XY) | (self.a & FLAG_XY);
                 4
             }
 
@@ -698,6 +711,7 @@ impl<M: MemoryZ80> CpuZ80<M> {
                 self.set_flag(0x02, false); // N = 0
                 self.set_flag(0x10, ((hl & 0x0FFF) + (bc & 0x0FFF)) > 0x0FFF); // H
                 self.set_flag(0x01, (hl as u32 + bc as u32) > 0xFFFF); // C
+                self.f = (self.f & !FLAG_XY) | (((result >> 8) as u8) & FLAG_XY);
                 self.set_hl(result);
                 11
             }
@@ -708,6 +722,7 @@ impl<M: MemoryZ80> CpuZ80<M> {
                 self.set_flag(0x02, false);
                 self.set_flag(0x10, ((hl & 0x0FFF) + (de & 0x0FFF)) > 0x0FFF);
                 self.set_flag(0x01, (hl as u32 + de as u32) > 0xFFFF);
+                self.f = (self.f & !FLAG_XY) | (((result >> 8) as u8) & FLAG_XY);
                 self.set_hl(result);
                 11
             }
@@ -717,6 +732,7 @@ impl<M: MemoryZ80> CpuZ80<M> {
                 self.set_flag(0x02, false);
                 self.set_flag(0x10, ((hl & 0x0FFF) + (hl & 0x0FFF)) > 0x0FFF);
                 self.set_flag(0x01, (hl as u32 + hl as u32) > 0xFFFF);
+                self.f = (self.f & !FLAG_XY) | (((result >> 8) as u8) & FLAG_XY);
                 self.set_hl(result);
                 11
             }
@@ -727,46 +743,44 @@ impl<M: MemoryZ80> CpuZ80<M> {
                 self.set_flag(0x02, false);
                 self.set_flag(0x10, ((hl & 0x0FFF) + (sp & 0x0FFF)) > 0x0FFF);
                 self.set_flag(0x01, (hl as u32 + sp as u32) > 0xFFFF);
+                self.f = (self.f & !FLAG_XY) | (((result >> 8) as u8) & FLAG_XY);
                 self.set_hl(result);
                 11
             }
 
             // DAA (Decimal Adjust Accumulator)
             0x27 => {
-                // Based on the Z80 DAA algorithm:
-                // If N flag is clear (after ADD/ADC):
-                //   If lower nibble > 9 or H flag set, add 0x06
-                //   If result > 0x99 or C flag set, add 0x60 and set C
-                // If N flag is set (after SUB/SBC):
-                //   If lower nibble > 9 or H flag set, subtract 0x06
-                //   If result > 0x99 or C flag set, subtract 0x60 and set C
+                // DAA algorithm per Z80 documentation:
+                // Uses the current value of A, and the N, H, C flags to
+                // correct the result of a previous BCD add/subtract.
                 let mut correction: u8 = 0;
-                let mut carry = self.get_flag(0x01);
+                let mut carry = self.get_flag(FLAG_C);
+                let n = self.get_flag(FLAG_N);
+                let h = self.get_flag(FLAG_H);
+                let a = self.a;
 
-                if (self.a & 0x0F) > 0x09 || self.get_flag(0x10) {
+                if h || (!n && (a & 0x0F) > 0x09) {
                     correction |= 0x06;
                 }
 
-                if self.a > 0x99 || carry {
+                if carry || (!n && a > 0x99) {
                     correction |= 0x60;
                     carry = true;
                 }
 
-                if self.get_flag(0x02) {
-                    // After subtraction
-                    let half = self.get_flag(0x10) && (self.a & 0x0F) < 0x06;
-                    self.a = self.a.wrapping_sub(correction);
-                    self.set_flag(0x10, half);
+                if n {
+                    self.a = a.wrapping_sub(correction);
+                    self.set_flag(FLAG_H, h && (a & 0x0F) < 0x06);
                 } else {
-                    // After addition
-                    self.set_flag(0x10, (self.a & 0x0F) > 0x09);
-                    self.a = self.a.wrapping_add(correction);
+                    self.a = a.wrapping_add(correction);
+                    self.set_flag(FLAG_H, (a & 0x0F) > 0x09);
                 }
 
-                self.set_flag(0x80, (self.a & 0x80) != 0); // S
-                self.set_flag(0x40, self.a == 0); // Z
-                self.set_flag(0x04, self.a.count_ones().is_multiple_of(2)); // P
-                self.set_flag(0x01, carry); // C
+                self.set_flag(FLAG_S, (self.a & 0x80) != 0);
+                self.set_flag(FLAG_Z, self.a == 0);
+                self.set_flag(FLAG_P, self.a.count_ones().is_multiple_of(2));
+                self.set_flag(FLAG_C, carry);
+                self.f = (self.f & !FLAG_XY) | (self.a & FLAG_XY);
                 4
             }
 
@@ -775,6 +789,7 @@ impl<M: MemoryZ80> CpuZ80<M> {
                 self.a = !self.a;
                 self.set_flag(0x02, true); // N = 1
                 self.set_flag(0x10, true); // H = 1
+                self.f = (self.f & !FLAG_XY) | (self.a & FLAG_XY);
                 4
             }
 
@@ -783,6 +798,7 @@ impl<M: MemoryZ80> CpuZ80<M> {
                 self.set_flag(0x01, true); // C = 1
                 self.set_flag(0x02, false); // N = 0
                 self.set_flag(0x10, false); // H = 0
+                self.f = (self.f & !FLAG_XY) | (self.a & FLAG_XY);
                 4
             }
 
@@ -792,6 +808,7 @@ impl<M: MemoryZ80> CpuZ80<M> {
                 self.set_flag(0x10, old_carry); // H = old C
                 self.set_flag(0x01, !old_carry); // C = ~C
                 self.set_flag(0x02, false); // N = 0
+                self.f = (self.f & !FLAG_XY) | (self.a & FLAG_XY);
                 4
             }
 
@@ -1213,12 +1230,15 @@ impl<M: MemoryZ80> CpuZ80<M> {
             self.set_flag(FLAG_P, bit_val == 0); // P/V mirrors Z for BIT
             self.set_flag(FLAG_N, false);
             self.set_flag(FLAG_H, true);
-
             if reg == 6 {
+                // BIT b,(HL): undocumented flags from high byte of address
+                self.f = (self.f & !FLAG_XY) | (((self.hl() >> 8) as u8) & FLAG_XY);
                 12
             } else {
+                // BIT b,r: undocumented flags from the tested value
+                self.f = (self.f & !FLAG_XY) | (val & FLAG_XY);
                 8
-            } // (HL) takes longer
+            }
         }
         // RES b,r (0x80-0xBF)
         else if opcode < 0xC0 {
@@ -1362,6 +1382,7 @@ impl<M: MemoryZ80> CpuZ80<M> {
         self.set_flag(FLAG_S, (val & 0x80) != 0);
         self.set_flag(FLAG_Z, val == 0);
         self.set_flag(FLAG_P, self.parity(val));
+        self.f = (self.f & !FLAG_XY) | (val & FLAG_XY);
     }
 
     // Calculate parity (even parity = true)
@@ -1604,6 +1625,7 @@ impl<M: MemoryZ80> CpuZ80<M> {
                 self.set_flag(FLAG_H, false);
                 self.set_flag(FLAG_P, self.iff2); // P/V = IFF2
                 self.set_flag(FLAG_N, false);
+                self.f = (self.f & !FLAG_XY) | (self.a & FLAG_XY);
                 9
             }
 
@@ -1621,6 +1643,7 @@ impl<M: MemoryZ80> CpuZ80<M> {
                 self.set_flag(FLAG_H, false);
                 self.set_flag(FLAG_P, self.iff2); // P/V = IFF2
                 self.set_flag(FLAG_N, false);
+                self.f = (self.f & !FLAG_XY) | (self.a & FLAG_XY);
                 9
             }
 
@@ -1631,9 +1654,12 @@ impl<M: MemoryZ80> CpuZ80<M> {
                 let low_a = self.a & 0x0F;
                 self.a = (self.a & 0xF0) | (val & 0x0F);
                 self.memory.write(hl, (val >> 4) | (low_a << 4));
-                self.set_sz_flags(self.a);
+                self.set_flag(FLAG_S, (self.a & 0x80) != 0);
+                self.set_flag(FLAG_Z, self.a == 0);
+                self.set_flag(FLAG_P, self.parity(self.a));
                 self.set_flag(FLAG_N, false);
                 self.set_flag(FLAG_H, false);
+                self.f = (self.f & !FLAG_XY) | (self.a & FLAG_XY);
                 18
             }
 
@@ -1644,9 +1670,12 @@ impl<M: MemoryZ80> CpuZ80<M> {
                 let low_a = self.a & 0x0F;
                 self.a = (self.a & 0xF0) | (val >> 4);
                 self.memory.write(hl, (val << 4) | low_a);
-                self.set_sz_flags(self.a);
+                self.set_flag(FLAG_S, (self.a & 0x80) != 0);
+                self.set_flag(FLAG_Z, self.a == 0);
+                self.set_flag(FLAG_P, self.parity(self.a));
                 self.set_flag(FLAG_N, false);
                 self.set_flag(FLAG_H, false);
+                self.f = (self.f & !FLAG_XY) | (self.a & FLAG_XY);
                 18
             }
 
@@ -1663,6 +1692,10 @@ impl<M: MemoryZ80> CpuZ80<M> {
                 self.set_flag(FLAG_P, bc != 0);
                 self.set_flag(FLAG_N, false);
                 self.set_flag(FLAG_H, false);
+                // Undocumented: bit 1 (Y/5) = bit 1 of (A + val), bit 3 (X/3) = bit 3 of (A + val)
+                let n = self.a.wrapping_add(val);
+                self.set_flag(FLAG_Y, (n & 0x02) != 0); // bit 1 -> flag bit 5
+                self.set_flag(FLAG_X, (n & 0x08) != 0); // bit 3 -> flag bit 3
                 16
             }
 
@@ -1677,6 +1710,11 @@ impl<M: MemoryZ80> CpuZ80<M> {
                 let bc = self.bc().wrapping_sub(1);
                 self.set_bc(bc);
                 self.set_flag(FLAG_P, bc != 0);
+                // Undocumented: bits 3,5 from (A - val - H), where H is the half-carry
+                let h = if self.get_flag(FLAG_H) { 1u8 } else { 0 };
+                let n = self.a.wrapping_sub(val).wrapping_sub(h);
+                self.set_flag(FLAG_Y, (n & 0x02) != 0); // bit 1 -> flag bit 5
+                self.set_flag(FLAG_X, (n & 0x08) != 0); // bit 3 -> flag bit 3
                 16
             }
 
@@ -1717,6 +1755,9 @@ impl<M: MemoryZ80> CpuZ80<M> {
                 self.set_flag(FLAG_P, bc != 0);
                 self.set_flag(FLAG_N, false);
                 self.set_flag(FLAG_H, false);
+                let n = self.a.wrapping_add(val);
+                self.set_flag(FLAG_Y, (n & 0x02) != 0);
+                self.set_flag(FLAG_X, (n & 0x08) != 0);
                 16
             }
 
@@ -1731,6 +1772,10 @@ impl<M: MemoryZ80> CpuZ80<M> {
                 let bc = self.bc().wrapping_sub(1);
                 self.set_bc(bc);
                 self.set_flag(FLAG_P, bc != 0);
+                let h = if self.get_flag(FLAG_H) { 1u8 } else { 0 };
+                let n = self.a.wrapping_sub(val).wrapping_sub(h);
+                self.set_flag(FLAG_Y, (n & 0x02) != 0);
+                self.set_flag(FLAG_X, (n & 0x08) != 0);
                 16
             }
 
@@ -1771,6 +1816,9 @@ impl<M: MemoryZ80> CpuZ80<M> {
                 self.set_flag(FLAG_P, false);
                 self.set_flag(FLAG_N, false);
                 self.set_flag(FLAG_H, false);
+                let n = self.a.wrapping_add(val);
+                self.set_flag(FLAG_Y, (n & 0x02) != 0);
+                self.set_flag(FLAG_X, (n & 0x08) != 0);
                 if bc != 0 {
                     self.pc = self.pc.wrapping_sub(2);
                     21
@@ -1790,6 +1838,10 @@ impl<M: MemoryZ80> CpuZ80<M> {
                 let bc = self.bc().wrapping_sub(1);
                 self.set_bc(bc);
                 self.set_flag(FLAG_P, bc != 0);
+                let h = if self.get_flag(FLAG_H) { 1u8 } else { 0 };
+                let n = self.a.wrapping_sub(val).wrapping_sub(h);
+                self.set_flag(FLAG_Y, (n & 0x02) != 0);
+                self.set_flag(FLAG_X, (n & 0x08) != 0);
                 let z = self.get_flag(FLAG_Z);
                 if bc != 0 && !z {
                     self.pc = self.pc.wrapping_sub(2);
@@ -1846,6 +1898,9 @@ impl<M: MemoryZ80> CpuZ80<M> {
                 self.set_flag(FLAG_P, false);
                 self.set_flag(FLAG_N, false);
                 self.set_flag(FLAG_H, false);
+                let n = self.a.wrapping_add(val);
+                self.set_flag(FLAG_Y, (n & 0x02) != 0);
+                self.set_flag(FLAG_X, (n & 0x08) != 0);
                 if bc != 0 {
                     self.pc = self.pc.wrapping_sub(2);
                     21
@@ -1865,6 +1920,10 @@ impl<M: MemoryZ80> CpuZ80<M> {
                 let bc = self.bc().wrapping_sub(1);
                 self.set_bc(bc);
                 self.set_flag(FLAG_P, bc != 0);
+                let h = if self.get_flag(FLAG_H) { 1u8 } else { 0 };
+                let n = self.a.wrapping_sub(val).wrapping_sub(h);
+                self.set_flag(FLAG_Y, (n & 0x02) != 0);
+                self.set_flag(FLAG_X, (n & 0x08) != 0);
                 let z = self.get_flag(FLAG_Z);
                 if bc != 0 && !z {
                     self.pc = self.pc.wrapping_sub(2);
@@ -1979,6 +2038,7 @@ impl<M: MemoryZ80> CpuZ80<M> {
         self.set_flag(FLAG_P, ((hl ^ val) & (hl ^ result) & 0x8000) != 0);
         self.set_flag(FLAG_N, true);
         self.set_flag(FLAG_C, (hl as u32) < (val as u32) + (carry as u32));
+        self.f = (self.f & !FLAG_XY) | (((result >> 8) as u8) & FLAG_XY);
 
         self.set_hl(result);
     }
@@ -2001,6 +2061,7 @@ impl<M: MemoryZ80> CpuZ80<M> {
             FLAG_C,
             ((hl as u32) + (val as u32) + (carry as u32)) > 0xFFFF,
         );
+        self.f = (self.f & !FLAG_XY) | (((result >> 8) as u8) & FLAG_XY);
 
         self.set_hl(result);
     }
@@ -2779,8 +2840,12 @@ impl<M: MemoryZ80> CpuZ80<M> {
         else if opcode < 0x80 {
             let bit_val = (val >> bit) & 1;
             self.set_flag(FLAG_Z, bit_val == 0);
+            self.set_flag(FLAG_S, bit == 7 && bit_val != 0);
+            self.set_flag(FLAG_P, bit_val == 0);
             self.set_flag(FLAG_N, false);
             self.set_flag(FLAG_H, true);
+            // Undocumented: bits 3,5 come from high byte of address
+            self.f = (self.f & !FLAG_XY) | (((addr >> 8) as u8) & FLAG_XY);
             return 20;
         }
         // RES b,(IX+d) (0x80-0xBF)
@@ -2822,8 +2887,12 @@ impl<M: MemoryZ80> CpuZ80<M> {
         else if opcode < 0x80 {
             let bit_val = (val >> bit) & 1;
             self.set_flag(FLAG_Z, bit_val == 0);
+            self.set_flag(FLAG_S, bit == 7 && bit_val != 0);
+            self.set_flag(FLAG_P, bit_val == 0);
             self.set_flag(FLAG_N, false);
             self.set_flag(FLAG_H, true);
+            // Undocumented: bits 3,5 come from high byte of address
+            self.f = (self.f & !FLAG_XY) | (((addr >> 8) as u8) & FLAG_XY);
             return 20;
         }
         // RES b,(IY+d) (0x80-0xBF)
@@ -2845,6 +2914,7 @@ impl<M: MemoryZ80> CpuZ80<M> {
         self.set_flag(FLAG_N, false);
         self.set_flag(FLAG_H, ((a & 0x0FFF) + (b & 0x0FFF)) > 0x0FFF);
         self.set_flag(FLAG_C, (a as u32 + b as u32) > 0xFFFF);
+        self.f = (self.f & !FLAG_XY) | (((result >> 8) as u8) & FLAG_XY);
         result
     }
 }

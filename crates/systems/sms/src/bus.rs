@@ -335,6 +335,11 @@ pub struct SmsMemory {
     /// Memory control register (port $3E)
     memory_control: u8,
 
+    /// I/O port control register (port $3F) — controls TH/TR pin direction and output.
+    /// Bits: TH_B_dir(7) TH_A_dir(6) TR_B_dir(5) TR_A_dir(4) TH_B_out(3) TH_A_out(2) TR_B_out(1) TR_A_out(0)
+    /// Direction: 0 = input (reads from controller), 1 = output (drives from this register).
+    io_control: u8,
+
     /// True if this bus is for a Game Gear system
     is_game_gear: bool,
 
@@ -390,6 +395,7 @@ impl SmsMemory {
             controller_1: 0xFF,
             controller_2: 0xFF,
             memory_control: 0x08, // Bit 3 set → BIOS disabled by default
+            io_control: 0xFF,     // All pins input, all outputs high
             is_game_gear: false,
             gg_start_button: 0x80, // Not pressed (active low)
         }
@@ -516,6 +522,12 @@ impl SmsMemory {
     }
     pub fn set_memory_control(&mut self, value: u8) {
         self.memory_control = value;
+    }
+    pub fn get_io_control(&self) -> u8 {
+        self.io_control
+    }
+    pub fn set_io_control(&mut self, value: u8) {
+        self.io_control = value;
     }
 
     /// Set the Game Gear Start button state (bit 7: 0 = pressed, 0x80 = not pressed).
@@ -1102,9 +1114,44 @@ impl MemoryZ80 for SmsMemory {
             // 0xC0-0xFF: Controller ports
             p if (0xC0..=0xFF).contains(&p) => {
                 if p & 0x01 == 0 {
+                    // Port $DC: P1 buttons + P2 Up/Down
                     self.controller_1
                 } else {
-                    self.controller_2
+                    // Port $DD: P2 Left/Right/TL/TR + Reset + TH pins
+                    // Bits 0-3: P2 Left, Right, Button1, Button2
+                    // Bit 4: RESET button (active low, always 1 = not pressed)
+                    // Bit 5: unused (always 1)
+                    // Bit 6: TH pin A (depends on io_control direction/output)
+                    // Bit 7: TH pin B (depends on io_control direction/output)
+                    let mut val = self.controller_2 | 0x30; // Bits 4,5 always high
+
+                    // TH pin A (bit 6): if direction bit 6 of io_control is set (output),
+                    // use the output value from bit 2; otherwise input = high (1).
+                    if (self.io_control & 0x40) != 0 {
+                        // TH_A is output — use bit 2 of io_control
+                        if (self.io_control & 0x04) != 0 {
+                            val |= 0x40;
+                        } else {
+                            val &= !0x40;
+                        }
+                    } else {
+                        val |= 0x40; // Input mode: TH reads high
+                    }
+
+                    // TH pin B (bit 7): if direction bit 7 of io_control is set (output),
+                    // use the output value from bit 3; otherwise input = high (1).
+                    if (self.io_control & 0x80) != 0 {
+                        // TH_B is output — use bit 3 of io_control
+                        if (self.io_control & 0x08) != 0 {
+                            val |= 0x80;
+                        } else {
+                            val &= !0x80;
+                        }
+                    } else {
+                        val |= 0x80; // Input mode: TH reads high
+                    }
+
+                    val
                 }
             }
             _ => 0xFF,
@@ -1119,12 +1166,17 @@ impl MemoryZ80 for SmsMemory {
 
     fn io_write(&mut self, port: u8, val: u8) {
         match port {
-            // 0x00-0x3F: Memory control registers
-            0x3E => {
-                self.memory_control = val;
-            }
-            0x3F => {
-                // I/O port control (nationalization adapter) – not yet implemented.
+            // 0x00-0x3F: Memory/IO control registers
+            // SMS uses partial address decoding: even ports in this range → memory control,
+            // odd ports → I/O port control.  Games typically use $3E/$3F explicitly.
+            p if p <= 0x3F => {
+                if p & 0x01 == 0 {
+                    // Even port ($3E mirror): Memory control register
+                    self.memory_control = val;
+                } else {
+                    // Odd port ($3F mirror): I/O port control (TH/TR direction + output)
+                    self.io_control = val;
+                }
             }
             // 0x40-0x7F: PSG write
             p if (0x40..=0x7F).contains(&p) => {
