@@ -662,7 +662,15 @@ pub struct Dsp {
     echo_delay: u8,
     /// FIR filter coefficients (8 taps)
     fir_coeff: [i8; 8],
-    /// Reference to APU RAM (for BRR sample access)
+    /// Echo ring buffer byte offset within the echo buffer (advances 4 bytes per sample)
+    echo_pos: usize,
+    /// FIR filter history buffer – left channel (ring of 8 samples)
+    fir_buf_left: [i16; 8],
+    /// FIR filter history buffer – right channel (ring of 8 samples)
+    fir_buf_right: [i16; 8],
+    /// Current write index in the FIR history ring (0-7)
+    fir_pos: usize,
+    /// Reference to APU RAM (for BRR sample access and echo buffer writes)
     ///
     /// # Safety
     /// This pointer is set once during Spc700Memory::new() and points to the RAM
@@ -670,7 +678,7 @@ pub struct Dsp {
     /// Since Spc700Memory is never moved after creation (it's stored in CpuSpc700),
     /// the pointer remains valid for the lifetime of the DSP.
     /// All dereferencing is done through checked unsafe blocks.
-    ram: Option<*const [u8; 0x10000]>,
+    ram: Option<*mut [u8; 0x10000]>,
 }
 
 impl Dsp {
@@ -703,17 +711,21 @@ impl Dsp {
             echo_addr: 0,
             echo_delay: 0,
             fir_coeff: [0; 8],
+            echo_pos: 0,
+            fir_buf_left: [0; 8],
+            fir_buf_right: [0; 8],
+            fir_pos: 0,
             ram: None,
         }
     }
 
-    /// Set reference to APU RAM for BRR sample access
+    /// Set reference to APU RAM for BRR sample access and echo buffer writes
     ///
     /// # Safety
     /// The caller must ensure that the pointer remains valid for the lifetime of the DSP.
     /// In practice, this is called once during Spc700Memory::new() with a pointer to
     /// the RAM Box owned by the same Spc700Memory struct.
-    pub fn set_ram(&mut self, ram: *const [u8; 0x10000]) {
+    pub fn set_ram(&mut self, ram: *mut [u8; 0x10000]) {
         self.ram = Some(ram);
     }
 
@@ -920,10 +932,12 @@ impl Dsp {
             return (0, 0);
         }
 
-        // Get RAM reference for BRR decoding
         // SAFETY: Pointer is valid because it points to RAM owned by the parent Spc700Memory
-        let ram = if let Some(ram_ptr) = self.ram {
-            unsafe { ram_ptr.as_ref() }
+        let ram_ptr = self.ram;
+
+        // Get read-only RAM reference for BRR decoding
+        let ram = if let Some(ptr) = ram_ptr {
+            unsafe { ptr.as_ref() }
         } else {
             None
         };
@@ -955,19 +969,106 @@ impl Dsp {
             }
         }
 
-        // Mix all voices
+        // Mix all voices; also accumulate the echo input (voices with EON bit set)
         let mut left = 0i32;
         let mut right = 0i32;
+        let mut echo_left = 0i32;
+        let mut echo_right = 0i32;
 
-        for voice in &self.voices {
+        for (i, voice) in self.voices.iter().enumerate() {
             let (l, r) = voice.output();
             left += l as i32;
             right += r as i32;
+            if self.echo_enable & (1 << i) != 0 {
+                echo_left += l as i32;
+                echo_right += r as i32;
+            }
         }
 
         // Apply master volume (8-bit signed * 16-bit >> 7 = 16-bit)
         left = (left * self.master_volume_left as i32) >> 7;
         right = (right * self.master_volume_right as i32) >> 7;
+
+        // ── Echo / FIR processing ───────────────────────────────────────────────
+        // Reference: https://problemkaputt.de/fullsnes.htm#snesapudspecho
+        //
+        // Echo buffer is in SPC700 RAM at address ESA*256.  EDL gives buffer
+        // length in 2048-byte blocks (minimum 1 block).  Each stereo entry is
+        // 4 bytes: 2-byte LE left sample followed by 2-byte LE right sample.
+        // A FIR filter with 8 taps is applied to the echo history before mixing.
+
+        if let Some(ptr) = ram_ptr {
+            // SAFETY: ptr is valid for the lifetime of the DSP; we hold the only
+            // reference here (no other code aliases it within this function).
+            let ram_mut = unsafe { &mut *ptr };
+
+            let buf_base = (self.echo_addr as usize) << 8; // ESA * 256
+            // EDL=0 is treated as 1 block (2048 bytes) by hardware
+            let buf_len = (self.echo_delay as usize).max(1) * 2048;
+
+            let pos_addr = buf_base + self.echo_pos;
+            // Guard against an echo buffer that would run off the end of RAM
+            if pos_addr + 3 < 0x10000 {
+                // STEP 1 – Read old echo sample from ring buffer
+                let echo_in_l =
+                    i16::from_le_bytes([ram_mut[pos_addr], ram_mut[pos_addr + 1]]);
+                let echo_in_r =
+                    i16::from_le_bytes([ram_mut[pos_addr + 2], ram_mut[pos_addr + 3]]);
+
+                // STEP 2 – Push samples into the FIR history ring and compute FIR output
+                self.fir_buf_left[self.fir_pos] = echo_in_l;
+                self.fir_buf_right[self.fir_pos] = echo_in_r;
+
+                let mut fir_l = 0i32;
+                let mut fir_r = 0i32;
+                for tap in 0..8usize {
+                    // tap 0 = newest sample (current fir_pos), tap 7 = oldest
+                    let h = self.fir_pos.wrapping_sub(tap) & 7;
+                    fir_l += self.fir_buf_left[h] as i32 * self.fir_coeff[tap] as i32;
+                    fir_r += self.fir_buf_right[h] as i32 * self.fir_coeff[tap] as i32;
+                }
+                // FIR coefficients are 7-bit fixed-point
+                fir_l = (fir_l >> 7).clamp(-32768, 32767);
+                fir_r = (fir_r >> 7).clamp(-32768, 32767);
+
+                // Advance FIR ring position
+                self.fir_pos = (self.fir_pos + 1) & 7;
+
+                // STEP 3 – Mix echo output into main output
+                // EVC (echo volume) is 8-bit signed; result is scaled by 1/128
+                left = (left + ((fir_l * self.echo_volume_left as i32) >> 7))
+                    .clamp(-32768, 32767);
+                right = (right + ((fir_r * self.echo_volume_right as i32) >> 7))
+                    .clamp(-32768, 32767);
+
+                // STEP 4 – Write new echo sample to ring buffer
+                // FLG bit 5 = echo write disable; skip write when that bit is set
+                if self.flags & 0x20 == 0 {
+                    // Echo input = echo-enabled voice mix (scaled by master volume)
+                    //            + previous FIR output scaled by EFB feedback
+                    let echo_in_scaled_l = (echo_left * self.master_volume_left as i32) >> 7;
+                    let echo_in_scaled_r = (echo_right * self.master_volume_right as i32) >> 7;
+                    let new_echo_l = (echo_in_scaled_l
+                        + ((fir_l * self.echo_feedback as i32) >> 7))
+                        .clamp(-32768, 32767) as i16;
+                    let new_echo_r = (echo_in_scaled_r
+                        + ((fir_r * self.echo_feedback as i32) >> 7))
+                        .clamp(-32768, 32767) as i16;
+
+                    // Hardware clears bit 0 of echo writes
+                    let bytes_l = (new_echo_l & !1i16).to_le_bytes();
+                    let bytes_r = (new_echo_r & !1i16).to_le_bytes();
+                    ram_mut[pos_addr] = bytes_l[0];
+                    ram_mut[pos_addr + 1] = bytes_l[1];
+                    ram_mut[pos_addr + 2] = bytes_r[0];
+                    ram_mut[pos_addr + 3] = bytes_r[1];
+                }
+
+                // STEP 5 – Advance echo ring position, wrapping at buffer length
+                self.echo_pos = (self.echo_pos + 4) % buf_len;
+            }
+        }
+        // ────────────────────────────────────────────────────────────────────────
 
         // Clamp to 16-bit range
         let left = left.clamp(-32768, 32767) as i16;
@@ -997,6 +1098,10 @@ impl Dsp {
         self.echo_addr = 0;
         self.echo_delay = 0;
         self.fir_coeff = [0; 8];
+        self.echo_pos = 0;
+        self.fir_buf_left = [0; 8];
+        self.fir_buf_right = [0; 8];
+        self.fir_pos = 0;
     }
 }
 
@@ -1067,7 +1172,7 @@ mod tests {
             ram[i] = 0;
         }
 
-        dsp.set_ram(&*ram as *const [u8; 0x10000]);
+        dsp.set_ram(&mut *ram as *mut [u8; 0x10000]);
 
         // Set source to 0
         dsp.write_register(0x04, 0x00);

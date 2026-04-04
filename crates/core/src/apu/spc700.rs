@@ -33,12 +33,12 @@
 //! - **Linear interpolation** between DSP output samples (32kHz -> audio output rate)
 //! - Voice mixing to stereo output
 //! - ENDX register (voice ended flags)
+//! - **Echo / reverb FIR filter** with 8-tap FIR, echo ring buffer in SPC700 RAM, per-voice EON enable, EFB feedback
 //! - **Actual audio output working with high quality!**
 //!
 //! ❌ **NOT Yet Implemented:**
-//! - Echo/reverb FIR filter
-//! - Noise generator
-//! - Pitch modulation
+//! - Noise generator (NON register)
+//! - Pitch modulation (PMON register)
 //!
 //! **Result:** Games can now play audio with high quality! BRR samples are decoded from RAM,
 //! interpolated with hardware-accurate Gaussian filtering, processed through ADSR envelopes,
@@ -175,8 +175,8 @@ impl Spc700Memory {
             dsp: Dsp::new(),
             dsp_addr: 0,
         };
-        // Give DSP access to RAM for BRR sample fetching
-        mem.dsp.set_ram(&*mem.ram as *const [u8; 0x10000]);
+        // Give DSP access to RAM for BRR sample fetching and echo buffer writes
+        mem.dsp.set_ram(&mut *mem.ram as *mut [u8; 0x10000]);
         mem
     }
 

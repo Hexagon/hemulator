@@ -87,9 +87,6 @@ not available in CI or in headless `cargo test` runs.  They can be run manually 
 
 ## SNES
 
-### High
-- [ ] **DSP echo/reverb FIR filter not implemented**: The SPC700 DSP echo buffer and 8-tap FIR reverb filter are not emulated. Many games rely on reverb for audio quality (e.g., Donkey Kong Country series). — `crates/systems/snes/src/`
-- [ ] **SuperFX coprocessor incomplete**: Only ~20% of SuperFX opcodes implemented. Star Fox, Yoshi's Island, Doom etc. will not work. — `crates/systems/snes/src/coprocessors/superfx.rs`
-
 ### Medium
-- [ ] **Multiply/divide hardware timing**: Math unit computes results immediately. Hardware takes 8 cycles (multiply) / 16 cycles (divide). May affect timing-sensitive code. — `crates/systems/snes/src/bus.rs`
+- [ ] **Noise generator and pitch modulation not implemented**: DSP register storage for NON (noise enable) and PMON (pitch modulation) exists but neither feature drives voice output. Noise voices produce silence; pitch modulation has no effect. — `crates/core/src/apu/dsp.rs`
+
