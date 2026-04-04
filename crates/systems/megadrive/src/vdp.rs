@@ -285,8 +285,8 @@ impl Vdp {
                 }
             }
             AccessTarget::Cram => {
-                let cram_addr = addr & 0x7F;
-                if cram_addr < CRAM_SIZE - 1 {
+                let cram_addr = addr & 0x7E; // Word-align for CRAM
+                if cram_addr + 1 < CRAM_SIZE {
                     self.cram[cram_addr] = (val >> 8) as u8;
                     self.cram[cram_addr + 1] = val as u8;
                 }

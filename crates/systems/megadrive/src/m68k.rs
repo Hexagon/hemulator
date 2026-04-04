@@ -143,7 +143,6 @@ impl<M: Memory68k> M68k<M> {
         }
 
         let opcode = self.prefetch;
-        let _pc_before = self.pc;
         self.pc = self.pc.wrapping_add(2) & 0x00FF_FFFF;
 
         let cycles = self.execute(opcode);
@@ -278,6 +277,7 @@ impl<M: Memory68k> M68k<M> {
         // Read vector
         let vector_addr = VEC_AUTO_INT_BASE + ((level as u32 - 1) * 4);
         let new_pc = self.memory.read_long(vector_addr);
+
         if new_pc == 0 {
             // Spurious interrupt
             self.pc = self.memory.read_long(VEC_SPURIOUS_INT);
@@ -1529,10 +1529,19 @@ impl<M: Memory68k> M68k<M> {
             let mut cycles = 8u32;
 
             if predec {
-                // Pre-decrement: registers are in reverse order (A7..A0, D7..D0)
-                for i in (0..16).rev() {
-                    if mask & (1 << (15 - i)) != 0 {
-                        let val = if i < 8 { self.d[i] } else { self.a[i - 8] };
+                // Pre-decrement: registers stored in reverse order (A7..A0, D7..D0)
+                // In predecrement mode, the mask bits are reversed in the instruction encoding:
+                //   bit 0 = A7, bit 1 = A6, ..., bit 7 = A0, bit 8 = D7, ..., bit 15 = D0
+                // The CPU processes registers from highest (A7) to lowest (D0), decrementing
+                // address before each store. We iterate mask bits 0..15 (A7..D0 order).
+                for i in 0..16 {
+                    let reg_idx = 15 - i;
+                    if mask & (1 << i) != 0 {
+                        let val = if reg_idx < 8 {
+                            self.d[reg_idx]
+                        } else {
+                            self.a[reg_idx - 8]
+                        };
 
                         if size == Size::Long {
                             addr = addr.wrapping_sub(4) & 0x00FF_FFFF;

@@ -99,3 +99,17 @@ not available in CI or in headless `cargo test` runs.  They can be run manually 
 
 ### Medium
 - [ ] **Multiply/divide hardware timing**: Math unit computes results immediately. Hardware takes 8 cycles (multiply) / 16 cycles (divide). May affect timing-sensitive code. — `crates/systems/snes/src/bus.rs`
+
+## Mega Drive / Genesis
+
+### Medium
+- [ ] **Z80 sound CPU**: Z80 sub-CPU is not emulated. FM/PSG playback relies on 68K writing to YM2612/PSG registers directly, but games that use the Z80 for sound driver won't have audio. — `crates/systems/megadrive/src/bus.rs`
+- [ ] **YM2612 FM synthesis accuracy**: Timer and envelope generator are simplified. LFO, SSG-EG, and DAC mixing not fully accurate. — `crates/systems/megadrive/src/ym2612.rs`
+- [ ] **H-interrupt timing**: HInt counter and timing may not be cycle-accurate for raster effect games. — `crates/systems/megadrive/src/vdp.rs`
+- [ ] **Window plane clipping**: Window plane rendering may have edge cases with complex window configurations. — `crates/systems/megadrive/src/vdp.rs`
+- [ ] **DMA timing**: DMA transfers are instant; real hardware transfers data across multiple scanlines, affecting CPU access timing. — `crates/systems/megadrive/src/vdp.rs`
+
+### Low
+- [ ] **Interlace modes**: Interlaced display modes (reg $0C bits 1-2) not implemented. — `crates/systems/megadrive/src/vdp.rs`
+- [ ] **SRAM save/load persistence**: SRAM is detected but not persisted to disk between sessions. — `crates/systems/megadrive/src/bus.rs`
+- [ ] **Controller input 6-button support**: Only 3-button controller protocol emulated. — `crates/systems/megadrive/src/bus.rs`
