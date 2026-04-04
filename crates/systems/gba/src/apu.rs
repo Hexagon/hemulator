@@ -48,11 +48,12 @@ use emu_core::apu::{Envelope, LengthCounter, NoiseChannel, PulseChannel, SweepUn
 /// GBA CPU clock frequency
 const CPU_CLOCK: f64 = 16_777_216.0;
 
-/// Target audio sample rate in Hz
-const SAMPLE_RATE: f64 = 44_100.0;
+/// GBA internal audio sample rate (DAC rate from SOUNDBIAS default).
+/// The hardware mixes and outputs at this rate; we resample to 44,100 Hz.
+const INTERNAL_SAMPLE_RATE: f64 = 32_768.0;
 
-/// CPU cycles per output sample
-const CYCLES_PER_SAMPLE: f64 = CPU_CLOCK / SAMPLE_RATE;
+/// CPU cycles per internal sample (2^24 / 2^15 = 512 exactly)
+const CYCLES_PER_SAMPLE: f64 = CPU_CLOCK / INTERNAL_SAMPLE_RATE;
 
 /// CPU cycles per frame sequencer step (512 Hz)
 const CYCLES_PER_FRAME_STEP: u32 = 32_768;
@@ -205,6 +206,9 @@ pub struct GbaApu {
     // ---- Master Enable ----
     power_on: bool,
 
+    // ---- SOUNDBIAS ----
+    soundbias: u16,
+
     // ---- Sample Generation State ----
     cycle_accum: f64,
     last_pulse1: i16,
@@ -257,9 +261,10 @@ impl GbaApu {
             fifo_a: SoundFifo::new(),
             fifo_b: SoundFifo::new(),
 
-            psg_volume: 2, // 100% by default
-            fifo_a_full_volume: true,
-            fifo_b_full_volume: true,
+            // Hardware defaults: PSG is silent until game initializes
+            psg_volume: 0, // 25% (hardware default)
+            fifo_a_full_volume: false,
+            fifo_b_full_volume: false,
             fifo_a_right: false,
             fifo_a_left: false,
             fifo_a_timer: false,
@@ -267,16 +272,18 @@ impl GbaApu {
             fifo_b_left: false,
             fifo_b_timer: false,
 
-            psg_left_volume: 7,
-            psg_right_volume: 7,
-            psg_panning: 0xFF,
+            psg_left_volume: 0,
+            psg_right_volume: 0,
+            psg_panning: 0x00,
 
             frame_sequencer_cycles: 0,
             frame_sequencer_step: 0,
 
             psg_prescaler: 0,
 
-            power_on: true,
+            power_on: false, // Sound is off until game writes SOUNDCNT_X
+
+            soundbias: 0x0200, // Default SOUNDBIAS = 0x200
 
             cycle_accum: 0.0,
             last_pulse1: 0,
@@ -413,8 +420,8 @@ impl GbaApu {
     // Real-time Sample Generation
     // =========================================================================
 
-    /// Advance the APU by `cpu_cycles` CPU cycles, generating output samples
-    /// into the internal buffer at 44,100 Hz.
+    /// Advance the APU by `cpu_cycles` CPU cycles, generating internal
+    /// samples at the GBA hardware rate (32,768 Hz).
     ///
     /// Call this during step_frame AFTER timer ticks and FIFO pops so that
     /// mix_channels reads the current FIFO sample at the right time.
@@ -432,24 +439,47 @@ impl GbaApu {
         }
     }
 
-    /// Drain buffered stereo samples, returning them and clearing the buffer.
+    /// Drain buffered stereo samples, resampling from 32,768 Hz to 44,100 Hz.
     ///
     /// Returns interleaved L, R, L, R, ... i16 samples at 44,100 Hz.
-    /// Excess samples beyond `target_stereo_count` are preserved for the next
-    /// drain call, preventing audio drift and clicks between frames.
+    /// Uses linear interpolation for smooth upsampling.
     pub fn drain_samples(&mut self, target_stereo_count: usize) -> Vec<i16> {
-        if self.sample_buffer.len() >= target_stereo_count {
-            // We have enough: return exactly the requested count,
-            // keep the excess for next frame
-            let remainder = self.sample_buffer.split_off(target_stereo_count);
-            std::mem::replace(&mut self.sample_buffer, remainder)
-        } else {
-            // Not enough: take all accumulated samples and pad
-            let mut samples = std::mem::take(&mut self.sample_buffer);
-            self.sample_buffer = Vec::with_capacity(1600);
-            samples.resize(target_stereo_count, 0);
-            samples
+        let target_mono = target_stereo_count / 2;
+        let internal_mono = self.sample_buffer.len() / 2;
+
+        if internal_mono < 2 || target_mono == 0 {
+            self.sample_buffer.clear();
+            return vec![0; target_stereo_count];
         }
+
+        // Linear interpolation resampler: map target_mono output samples
+        // across internal_mono input samples.
+        let step = (internal_mono - 1) as f64 / (target_mono - 1).max(1) as f64;
+        let mut output = Vec::with_capacity(target_stereo_count);
+        let mut pos = 0.0f64;
+
+        for _ in 0..target_mono {
+            let idx = pos as usize;
+            let frac = (pos - idx as f64) as f32;
+
+            let i0 = idx.min(internal_mono - 1);
+            let i1 = (idx + 1).min(internal_mono - 1);
+
+            // Left channel
+            let l0 = self.sample_buffer[i0 * 2] as f32;
+            let l1 = self.sample_buffer[i1 * 2] as f32;
+            output.push((l0 + (l1 - l0) * frac) as i16);
+
+            // Right channel
+            let r0 = self.sample_buffer[i0 * 2 + 1] as f32;
+            let r1 = self.sample_buffer[i1 * 2 + 1] as f32;
+            output.push((r0 + (r1 - r0) * frac) as i16);
+
+            pos += step;
+        }
+
+        self.sample_buffer.clear();
+        output
     }
 
     /// Mix all channels into a stereo sample pair.
@@ -509,14 +539,17 @@ impl GbaApu {
         }
 
         // Channel 4: Noise
-        // Noise output is unipolar (0 or envelope). Make bipolar.
+        // Noise output: envelope volume when LFSR bit 0 is 0, else silent.
+        // Center around zero for proper AC-coupled output.
         if self.noise.enabled && (!self.noise_length.is_enabled() || self.noise_length.is_active())
         {
-            let sample = if self.noise.is_silenced() {
-                -((self.noise.envelope as i32) << 10)
+            let raw = if self.noise.is_silenced() {
+                0i32
             } else {
                 (self.noise.envelope as i32) << 10
             };
+            // Center unipolar 0..15360 to bipolar -7680..+7680
+            let sample = raw - ((self.noise.envelope as i32) << 9);
             if pan & (1 << 7) != 0 {
                 psg_left += sample;
             }
@@ -574,7 +607,7 @@ impl GbaApu {
             right += fifo_b_scaled;
         }
 
-        // DC-blocking filter only (removes DC offset, preserves signal).
+        // DC-blocking filter (removes DC offset, preserves signal).
         let left_out = dc_block(left as f32, &mut self.dc_prev_in_l, &mut self.dc_prev_out_l);
         let right_out = dc_block(
             right as f32,
@@ -593,8 +626,15 @@ impl GbaApu {
     ///
     /// `addr` is the full I/O address (e.g. 0x04000060).
     pub fn write_register(&mut self, addr: u32, val: u8) {
-        // Master enable gate: when power is off, only SOUNDCNT_X (0x084) is writable
-        if !self.power_on && addr != 0x04000084 && addr != 0x04000085 {
+        // Master enable gate: when power is off, only SOUNDCNT_X (0x084-0x085)
+        // and SOUNDBIAS (0x088-0x089) are writable. All other sound registers
+        // are write-protected per GBATEK.
+        if !self.power_on
+            && addr != 0x04000084
+            && addr != 0x04000085
+            && addr != 0x04000088
+            && addr != 0x04000089
+        {
             return;
         }
 
@@ -722,6 +762,7 @@ impl GbaApu {
                 if trigger && self.wave_dac_enabled {
                     self.wave.enabled = true;
                     self.wave.set_timer(gba_wave_timer(self.wave_frequency));
+                    self.wave.reset_timer();
                     self.wave.reset_position();
                     if self.wave_length.value() == 0 {
                         self.wave_length.load_gb(0, 256);
@@ -808,8 +849,12 @@ impl GbaApu {
             0x04000085 => {} // High byte unused
 
             // ---- SOUNDBIAS (0x088-0x089) ----
-            // Just stored in I/O, no special handling needed
-            0x04000088 | 0x04000089 => {}
+            0x04000088 => {
+                self.soundbias = (self.soundbias & 0xFF00) | val as u16;
+            }
+            0x04000089 => {
+                self.soundbias = (self.soundbias & 0x00FF) | ((val as u16) << 8);
+            }
 
             // ---- Wave RAM (0x090-0x09F) ----
             0x04000090..=0x0400009F => {
@@ -1016,12 +1061,22 @@ impl GbaApu {
                 let ch2 = if self.pulse2.enabled { 0x02 } else { 0x00 };
                 let ch3 = if self.wave.enabled { 0x04 } else { 0x00 };
                 let ch4 = if self.noise.enabled { 0x08 } else { 0x00 };
-                power | ch1 | ch2 | ch3 | ch4 | 0x70
+                power | ch1 | ch2 | ch3 | ch4
             }
             0x04000085 => 0,
 
             // SOUNDBIAS
-            0x04000088 | 0x04000089 => 0, // Will read from I/O array
+            0x04000088 | 0x04000089 => {
+                // SOUNDBIAS is stored in the I/O array, not in APU state.
+                // Return 0 here; the bus io_read will fall through to io array.
+                // However, since io_read dispatches sound register reads to us,
+                // we need to handle this specially. We store soundbias internally.
+                if addr == 0x04000088 {
+                    self.soundbias as u8
+                } else {
+                    (self.soundbias >> 8) as u8
+                }
+            }
 
             // Wave RAM
             0x04000090..=0x0400009F => {
@@ -1063,6 +1118,16 @@ impl GbaApu {
         self.pulse2_frequency = 0;
         self.wave_frequency = 0;
         self.wave_dac_enabled = false;
+        // Clear cached PSG outputs so stale values don't bleed into mix
+        self.last_pulse1 = 0;
+        self.last_pulse2 = 0;
+        self.last_wave = 0;
+        // Reset DC blocking filter state to avoid transient clicks
+        self.dc_prev_in_l = 0.0;
+        self.dc_prev_out_l = 0.0;
+        self.dc_prev_in_r = 0.0;
+        self.dc_prev_out_r = 0.0;
+        self.psg_prescaler = 0;
         // Note: FIFOs and DMA sound settings are NOT cleared by power off
     }
 }
@@ -1139,10 +1204,10 @@ mod tests {
     #[test]
     fn test_apu_creation() {
         let apu = GbaApu::new();
-        assert!(apu.power_on);
-        assert_eq!(apu.psg_left_volume, 7);
-        assert_eq!(apu.psg_right_volume, 7);
-        assert_eq!(apu.psg_panning, 0xFF);
+        assert!(!apu.power_on);
+        assert_eq!(apu.psg_left_volume, 0);
+        assert_eq!(apu.psg_right_volume, 0);
+        assert_eq!(apu.psg_panning, 0x00);
     }
 
     #[test]
@@ -1230,6 +1295,9 @@ mod tests {
     #[test]
     fn test_master_enable() {
         let mut apu = GbaApu::new();
+        assert!(!apu.power_on); // Sound starts OFF on real hardware
+                                // Enable master sound
+        apu.write_register(0x04000084, 0x80);
         assert!(apu.power_on);
         // Write 0 to SOUNDCNT_X to disable
         apu.write_register(0x04000084, 0x00);
@@ -1245,6 +1313,8 @@ mod tests {
     #[test]
     fn test_soundcnt_h_write() {
         let mut apu = GbaApu::new();
+        // Enable master sound first (required for register writes)
+        apu.write_register(0x04000084, 0x80);
         // SOUNDCNT_H low byte: PSG volume + FIFO volume
         apu.write_register(0x04000082, 0x0D); // psg=01 (50%), fifo_a=100%, fifo_b=100%
         assert_eq!(apu.psg_volume, 1);

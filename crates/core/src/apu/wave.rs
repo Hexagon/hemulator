@@ -80,6 +80,11 @@ impl WaveChannel {
         self.timer_reload = t & 0x0FFF;
     }
 
+    /// Reset the timer to reload value (used on channel trigger)
+    pub fn reset_timer(&mut self) {
+        self.timer = self.timer_reload;
+    }
+
     /// Write a byte to wave RAM (Game Boy format: 2 samples per byte)
     pub fn write_wave_ram_byte(&mut self, offset: usize, value: u8) {
         if offset < 16 {

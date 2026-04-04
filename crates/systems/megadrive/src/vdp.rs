@@ -90,6 +90,8 @@ pub struct Vdp {
     hint_pending: bool,
     /// VInt pending
     vint_pending: bool,
+    /// PAL region
+    pub region_pal: bool,
 }
 
 impl Vdp {
@@ -117,6 +119,7 @@ impl Vdp {
             hint_counter: 0,
             hint_pending: false,
             vint_pending: false,
+            region_pal: false,
         }
     }
 
@@ -143,6 +146,10 @@ impl Vdp {
         self.vint_pending = false;
         self.frame = Frame::new(320, 224);
         self.shadow_buf = vec![1; 320];
+        // Set PAL status bit if in PAL region
+        if self.region_pal {
+            self.status |= STATUS_PAL;
+        }
     }
 
     // ── Register Access ─────────────────────────────────────────
@@ -170,9 +177,12 @@ impl Vdp {
 
             // Decode access target from code
             self.access_target = match self.control_code & 0x0F {
-                0x01 => AccessTarget::Vram,  // VRAM read/write
-                0x03 => AccessTarget::Cram,  // CRAM read/write
-                0x05 => AccessTarget::Vsram, // VSRAM read/write
+                0x00 => AccessTarget::Vram,  // VRAM read
+                0x01 => AccessTarget::Vram,  // VRAM write
+                0x03 => AccessTarget::Cram,  // CRAM write
+                0x04 => AccessTarget::Vsram, // VSRAM read
+                0x05 => AccessTarget::Vsram, // VSRAM write
+                0x08 => AccessTarget::Cram,  // CRAM read
                 _ => self.access_target,
             };
 
@@ -266,9 +276,12 @@ impl Vdp {
 
         match self.access_target {
             AccessTarget::Vram => {
-                if addr < VRAM_SIZE - 1 {
-                    self.vram[addr] = (val >> 8) as u8;
-                    self.vram[addr + 1] = val as u8;
+                // VRAM word writes: byte at addr, byte at addr^1
+                // On real hardware, the second byte address has bit 0 XOR'd
+                let a = addr & 0xFFFE; // Word-align
+                if a < VRAM_SIZE - 1 {
+                    self.vram[a] = (val >> 8) as u8;
+                    self.vram[a | 1] = val as u8;
                 }
             }
             AccessTarget::Cram => {
@@ -297,8 +310,10 @@ impl Vdp {
 
         let val = match self.access_target {
             AccessTarget::Vram => {
-                if addr < VRAM_SIZE - 1 {
-                    ((self.vram[addr] as u16) << 8) | self.vram[addr + 1] as u16
+                // VRAM reads are word-aligned
+                let a = addr & 0xFFFE;
+                if a < VRAM_SIZE - 1 {
+                    ((self.vram[a] as u16) << 8) | self.vram[a | 1] as u16
                 } else {
                     0
                 }
@@ -371,19 +386,20 @@ impl Vdp {
             self.dma_length as u32
         };
 
-        // First word write
-        let addr = self.control_address as usize;
-        if addr < VRAM_SIZE - 1 {
-            self.vram[addr] = (fill_val >> 8) as u8;
-            self.vram[addr + 1] = fill_val as u8;
+        // First word write (same as regular VRAM word write)
+        let a = self.control_address as usize & 0xFFFE;
+        if a < VRAM_SIZE - 1 {
+            self.vram[a] = (fill_val >> 8) as u8;
+            self.vram[a | 1] = fill_val as u8;
         }
         self.control_address = self.control_address.wrapping_add(self.auto_inc);
 
         // Remaining fills (byte only, using high byte)
+        // On real hardware, DMA fill byte writes use address ^ 1
         for _ in 1..count {
             let a = self.control_address as usize;
-            if a < VRAM_SIZE {
-                self.vram[a] = fill_byte;
+            if (a ^ 1) < VRAM_SIZE {
+                self.vram[a ^ 1] = fill_byte;
             }
             self.control_address = self.control_address.wrapping_add(self.auto_inc);
         }
@@ -407,7 +423,7 @@ impl Vdp {
                 self.vram[dst] = self.vram[src];
             }
             src = (src + 1) & 0xFFFF;
-            dst = (dst + 1) & 0xFFFF;
+            dst = (dst.wrapping_add(self.auto_inc as usize)) & 0xFFFF;
         }
 
         self.dma_source = src as u32;
@@ -596,6 +612,18 @@ impl Vdp {
                             0xFF000000 | (r.min(255) << 16) | (g.min(255) << 8) | b.min(255);
                     }
                     _ => {} // Normal: no change
+                }
+            }
+        }
+
+        // 9. Column 0 left blanking (reg $00 bit 5)
+        // When set, replaces leftmost 8 pixels with backdrop color to hide scroll artifacts
+        if self.regs[0] & 0x20 != 0 {
+            let start = y * width as usize;
+            for x in 0..8.min(width as usize) {
+                let idx = start + x;
+                if idx < self.frame.pixels.len() {
+                    self.frame.pixels[idx] = bg_color;
                 }
             }
         }

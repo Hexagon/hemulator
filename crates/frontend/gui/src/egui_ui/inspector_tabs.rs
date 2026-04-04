@@ -132,7 +132,7 @@ pub fn get_tabs_for_system(system_type: Option<&SystemType>) -> Vec<InspectorTab
                     InspectorTab::GbaBgLayers,
                 ]);
             }
-            SystemType::SMS => {
+            SystemType::SMS | SystemType::GameGear => {
                 tabs.push(InspectorTab::Cartridge); // Unified cartridge tab instead of Mounts
                 tabs.extend_from_slice(&[InspectorTab::SmsTiles, InspectorTab::SmsPalettes]);
             }

@@ -280,34 +280,19 @@ impl GbSystem {
         self.cpu.memory.set_buttons(state);
     }
 
-    /// Get audio samples from the APU
-    /// Generates samples based on accumulated CPU cycles
+    /// Get audio samples from the APU.
+    ///
+    /// Clocks the APU for accumulated CPU cycles (generating internal
+    /// samples at 65,536 Hz), then resamples to 44,100 Hz via linear
+    /// interpolation and returns `count` stereo sample pairs.
     pub fn get_audio_samples(&mut self, count: usize) -> Vec<i16> {
-        // Calculate cycles needed for requested sample count
-        // Sample rate: 44100 Hz, CPU clock: 4.194304 MHz
-        // Cycles per sample: 4194304 / 44100 ≈ 95.1
-        const SAMPLE_RATE: f64 = 44100.0;
-        const CPU_CLOCK: f64 = 4194304.0;
-        let cycles_needed = ((count as f64) * (CPU_CLOCK / SAMPLE_RATE)).ceil() as u32;
+        // Clock the APU with all accumulated cycles
+        let cycles = self.audio_cycles_accumulated;
+        self.audio_cycles_accumulated = 0;
+        self.cpu.memory.apu.generate_samples_stereo(cycles);
 
-        // Use accumulated cycles from actual emulation
-        let cycles_to_use = self.audio_cycles_accumulated.min(cycles_needed);
-
-        let samples = self.cpu.memory.apu.generate_samples_stereo(cycles_to_use);
-
-        // Subtract used cycles
-        self.audio_cycles_accumulated = self.audio_cycles_accumulated.saturating_sub(cycles_to_use);
-
-        // Pad with silence if we don't have enough samples
-        let mut result = samples;
-        let target_len = count * 2;
-        while result.len() < target_len {
-            result.push(0);
-        }
-
-        // Truncate if we have too many
-        result.truncate(target_len);
-        result
+        // Resample from 65,536 Hz internal buffer to 44,100 Hz output
+        self.cpu.memory.apu.drain_samples(count * 2)
     }
 
     pub fn set_audio_channel_mask(&mut self, mask: [bool; 4]) {
