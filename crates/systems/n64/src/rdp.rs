@@ -456,6 +456,45 @@ impl Rdp {
         );
     }
 
+    /// Draw a textured triangle with Z-buffer, sampling from TMEM tile.
+    /// Texture coordinates (s0,t0) etc. are in texel-space fixed-point.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_triangle_textured_zbuf(
+        &mut self,
+        x0: i32,
+        y0: i32,
+        z0: u16,
+        s0: f32,
+        t0: f32,
+        x1: i32,
+        y1: i32,
+        z1: u16,
+        s1: f32,
+        t1: f32,
+        x2: i32,
+        y2: i32,
+        z2: u16,
+        s2: f32,
+        t2: f32,
+        tile: usize,
+    ) {
+        let tile_idx = tile.min(7);
+        // Copy tile descriptor and TMEM slice to stack so the closure
+        // does not borrow `self`, avoiding the borrow-checker conflict with
+        // `self.renderer`.
+        let td = self.tiles[tile_idx];
+        let tmem_copy: [u8; 4096] = self.tmem;
+        let scissor = self.scissor;
+
+        let sampler = |s: f32, t: f32| -> u32 {
+            Self::sample_texture_static(&td, &tmem_copy, s.max(0.0) as u32, t.max(0.0) as u32)
+        };
+
+        self.renderer.draw_triangle_textured_zbuffer(
+            x0, y0, z0, s0, t0, x1, y1, z1, s1, t1, x2, y2, z2, s2, t2, &sampler, &scissor,
+        );
+    }
+
     /// Get the current framebuffer
     pub fn get_frame(&self) -> &Frame {
         self.renderer.get_frame()
@@ -792,8 +831,12 @@ impl Rdp {
         if tile >= 8 {
             return 0xFFFF00FF; // Return magenta for invalid tile (debugging)
         }
+        Self::sample_texture_static(&self.tiles[tile], &self.tmem, s, t)
+    }
 
-        let tile_desc = &self.tiles[tile];
+    /// Sample a texel using a tile descriptor and TMEM buffer (no `&self` needed).
+    /// This allows usage inside closures that also need `&mut self.renderer`.
+    fn sample_texture_static(tile_desc: &TileDescriptor, tmem: &[u8; 4096], s: u32, t: u32) -> u32 {
         let format = tile_desc.format;
         let size = tile_desc.size;
         let tmem_addr = (tile_desc.tmem_addr * 8) as usize;
@@ -830,15 +873,15 @@ impl Rdp {
         let addr = tmem_addr + texel_offset;
 
         // Sample based on format and size
-        if addr >= self.tmem.len() {
+        if addr >= tmem.len() {
             return 0xFFFF00FF; // Magenta for out of bounds
         }
 
         match (format, size) {
             // RGBA 16-bit (5-5-5-1)
             (0, 2) => {
-                if addr + 1 < self.tmem.len() {
-                    let texel = u16::from_be_bytes([self.tmem[addr], self.tmem[addr + 1]]);
+                if addr + 1 < tmem.len() {
+                    let texel = u16::from_be_bytes([tmem[addr], tmem[addr + 1]]);
                     let r = ((texel >> 11) & 0x1F) as u32;
                     let g = ((texel >> 6) & 0x1F) as u32;
                     let b = ((texel >> 1) & 0x1F) as u32;
@@ -855,13 +898,8 @@ impl Rdp {
             }
             // RGBA 32-bit (8-8-8-8)
             (0, 3) => {
-                if addr + 3 < self.tmem.len() {
-                    u32::from_be_bytes([
-                        self.tmem[addr],
-                        self.tmem[addr + 1],
-                        self.tmem[addr + 2],
-                        self.tmem[addr + 3],
-                    ])
+                if addr + 3 < tmem.len() {
+                    u32::from_be_bytes([tmem[addr], tmem[addr + 1], tmem[addr + 2], tmem[addr + 3]])
                 } else {
                     0xFFFF00FF
                 }
@@ -869,10 +907,10 @@ impl Rdp {
             // YUV 16-bit (format=1, size=2) - Used for video textures
             // Stored as interleaved YUYV: 8-bit Y, 8-bit U/V alternating
             (1, 2) => {
-                if addr + 1 < self.tmem.len() {
+                if addr + 1 < tmem.len() {
                     // YUV stored as pairs in memory: (Y0 U0)(Y1 V0)
                     // Both pixels (Y0 and Y1) share the same U0/V0 chroma.
-                    let texel = u16::from_be_bytes([self.tmem[addr], self.tmem[addr + 1]]);
+                    let texel = u16::from_be_bytes([tmem[addr], tmem[addr + 1]]);
                     let y = ((texel >> 8) & 0xFF) as i32;
                     let uv = (texel & 0xFF) as i32;
 
@@ -882,9 +920,8 @@ impl Rdp {
                     let (u, v) = if s & 1 == 0 {
                         // Even position - this byte is U, get V from next texel if available
                         let u_val = uv - 128;
-                        let v_val = if addr + 3 < self.tmem.len() {
-                            let next_texel =
-                                u16::from_be_bytes([self.tmem[addr + 2], self.tmem[addr + 3]]);
+                        let v_val = if addr + 3 < tmem.len() {
+                            let next_texel = u16::from_be_bytes([tmem[addr + 2], tmem[addr + 3]]);
                             ((next_texel & 0xFF) as i32) - 128
                         } else {
                             // Fallback: reuse U as V when next texel is out of bounds
@@ -895,8 +932,7 @@ impl Rdp {
                         // Odd position - this byte is V, get U from previous texel if available
                         let v_val = uv - 128;
                         let u_val = if addr >= 2 {
-                            let prev_texel =
-                                u16::from_be_bytes([self.tmem[addr - 2], self.tmem[addr - 1]]);
+                            let prev_texel = u16::from_be_bytes([tmem[addr - 2], tmem[addr - 1]]);
                             ((prev_texel & 0xFF) as i32) - 128
                         } else {
                             // Fallback: reuse V as U when previous texel is not available
@@ -921,14 +957,13 @@ impl Rdp {
             // CI (Color Index) 8-bit (format=2, size=1)
             (2, 1) => {
                 // Color index format - lookup in palette
-                let index = self.tmem[addr] as usize;
+                let index = tmem[addr] as usize;
                 // Palette is stored in upper half of TMEM (0x800-0xFFF)
                 let palette_offset = 0x800 + (tile_desc.palette as usize * 16 * 2);
                 let color_addr = palette_offset + (index * 2);
 
-                if color_addr + 1 < self.tmem.len() {
-                    let texel =
-                        u16::from_be_bytes([self.tmem[color_addr], self.tmem[color_addr + 1]]);
+                if color_addr + 1 < tmem.len() {
+                    let texel = u16::from_be_bytes([tmem[color_addr], tmem[color_addr + 1]]);
                     let r = ((texel >> 11) & 0x1F) as u32;
                     let g = ((texel >> 6) & 0x1F) as u32;
                     let b = ((texel >> 1) & 0x1F) as u32;
@@ -945,7 +980,7 @@ impl Rdp {
             // CI (Color Index) 4-bit (format=2, size=0)
             (2, 0) => {
                 // 4-bit color index - two texels per byte
-                let byte = self.tmem[addr];
+                let byte = tmem[addr];
                 let index = if s & 1 == 0 {
                     (byte >> 4) & 0x0F // High nibble
                 } else {
@@ -955,9 +990,8 @@ impl Rdp {
                 let palette_offset = 0x800 + (tile_desc.palette as usize * 16 * 2);
                 let color_addr = palette_offset + (index * 2);
 
-                if color_addr + 1 < self.tmem.len() {
-                    let texel =
-                        u16::from_be_bytes([self.tmem[color_addr], self.tmem[color_addr + 1]]);
+                if color_addr + 1 < tmem.len() {
+                    let texel = u16::from_be_bytes([tmem[color_addr], tmem[color_addr + 1]]);
                     let r = ((texel >> 11) & 0x1F) as u32;
                     let g = ((texel >> 6) & 0x1F) as u32;
                     let b = ((texel >> 1) & 0x1F) as u32;
@@ -973,8 +1007,8 @@ impl Rdp {
             }
             // IA (Intensity + Alpha) 16-bit (format=3, size=2)
             (3, 2) => {
-                if addr + 1 < self.tmem.len() {
-                    let texel = u16::from_be_bytes([self.tmem[addr], self.tmem[addr + 1]]);
+                if addr + 1 < tmem.len() {
+                    let texel = u16::from_be_bytes([tmem[addr], tmem[addr + 1]]);
                     let intensity = ((texel >> 8) & 0xFF) as u32;
                     let alpha = (texel & 0xFF) as u32;
                     (alpha << 24) | (intensity << 16) | (intensity << 8) | intensity
@@ -984,7 +1018,7 @@ impl Rdp {
             }
             // IA (Intensity + Alpha) 8-bit (format=3, size=1)
             (3, 1) => {
-                let texel = self.tmem[addr];
+                let texel = tmem[addr];
                 let intensity = ((texel >> 4) & 0x0F) as u32;
                 let alpha = (texel & 0x0F) as u32;
                 let i8 = (intensity * 255 / 15) & 0xFF;
@@ -993,7 +1027,7 @@ impl Rdp {
             }
             // IA (Intensity + Alpha) 4-bit (format=3, size=0)
             (3, 0) => {
-                let byte = self.tmem[addr];
+                let byte = tmem[addr];
                 let texel = if s & 1 == 0 {
                     (byte >> 4) & 0x0F
                 } else {
@@ -1007,12 +1041,12 @@ impl Rdp {
             }
             // I (Intensity) 8-bit (format=4, size=1)
             (4, 1) => {
-                let intensity = self.tmem[addr] as u32;
+                let intensity = tmem[addr] as u32;
                 0xFF000000 | (intensity << 16) | (intensity << 8) | intensity
             }
             // I (Intensity) 4-bit (format=4, size=0)
             (4, 0) => {
-                let byte = self.tmem[addr];
+                let byte = tmem[addr];
                 let nibble = if s & 1 == 0 {
                     (byte >> 4) & 0x0F
                 } else {

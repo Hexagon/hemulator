@@ -1337,16 +1337,21 @@ impl RspHle {
                 // word1: scaleS(16) | scaleT(16) - texture coordinate scaling
                 let _level = (word0 >> 11) & 0x07;
                 let _tile = (word0 >> 8) & 0x07;
-                let _on = (word0 >> 1) & 0x7F; // Non-zero = texture on
+                let on = (word0 >> 1) & 0x7F; // Non-zero = texture on
                 let _scale_s = (word1 >> 16) & 0xFFFF;
                 let _scale_t = word1 & 0xFFFF;
 
-                // For HLE, we could update geometry mode or pass to RDP
-                // For now, log and continue
-                log(LogCategory::Stubs, LogLevel::Debug, || {
+                // Update geometry mode texture enable flag
+                if on != 0 {
+                    self.geometry_mode |= G_TEXTURE_ENABLE;
+                } else {
+                    self.geometry_mode &= !G_TEXTURE_ENABLE;
+                }
+
+                log(LogCategory::PPU, LogLevel::Debug, || {
                     format!(
                         "N64 RSP HLE: G_TEXTURE - tile={}, on={}, scaleS=0x{:04X}, scaleT=0x{:04X}",
-                        _tile, _on, _scale_s, _scale_t
+                        _tile, on, _scale_s, _scale_t
                     )
                 });
                 true
@@ -1674,9 +1679,26 @@ impl RspHle {
         let z1_u16 = z1.clamp(0, 0xFFFF) as u16;
         let z2_u16 = z2.clamp(0, 0xFFFF) as u16;
 
-        rdp.draw_triangle_shaded_zbuffer(
-            x0, y0, z0_u16, c0, x1, y1, z1_u16, c1, x2, y2, z2_u16, c2,
-        );
+        // Check if texturing is enabled — use textured draw path when active
+        let textures_enabled = self.geometry_mode & G_TEXTURE_ENABLE != 0;
+        if textures_enabled {
+            // Convert vertex texture coordinates from S.10.5 fixed-point to float texel coords
+            let s0_f = vert0.tex[0] as f32 / 32.0;
+            let t0_f = vert0.tex[1] as f32 / 32.0;
+            let s1_f = vert1.tex[0] as f32 / 32.0;
+            let t1_f = vert1.tex[1] as f32 / 32.0;
+            let s2_f = vert2.tex[0] as f32 / 32.0;
+            let t2_f = vert2.tex[1] as f32 / 32.0;
+
+            rdp.draw_triangle_textured_zbuf(
+                x0, y0, z0_u16, s0_f, t0_f, x1, y1, z1_u16, s1_f, t1_f, x2, y2, z2_u16, s2_f, t2_f,
+                0, // tile 0
+            );
+        } else {
+            rdp.draw_triangle_shaded_zbuffer(
+                x0, y0, z0_u16, c0, x1, y1, z1_u16, c1, x2, y2, z2_u16, c2,
+            );
+        }
     }
 
     /// Read 32-bit big-endian value from buffer
