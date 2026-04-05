@@ -22,7 +22,7 @@ not available in CI or in headless `cargo test` runs.  They can be run manually 
 
 ### High
 - [ ] **RDP Blend/Combine pipeline**: `SET_OTHER_MODES` values are stored in both the RDP (`rdp.rs`) and RSP HLE (`rsp_hle.rs`) but are never consumed by the rendering pipeline. Applying cycle type, texture filtering, and alpha-blending modes would significantly improve visual accuracy. — `crates/systems/n64/src/rdp.rs`, `crates/systems/n64/src/rdp_renderer_opengl.rs`
-- [ ] **RDP textured triangle rendering**: Texture coordinates from RSP vertex data are loaded but not used in triangle rasterization. Passing UV coordinates through the rendering pipeline would enable textured 3D geometry. — `crates/systems/n64/src/rdp.rs`, `crates/systems/n64/src/rsp_hle.rs`
+- [x] **RDP textured triangle rendering**: ~~Texture coordinates from RSP vertex data are loaded but not used in triangle rasterization.~~ Implemented textured triangle rendering via `draw_triangle_textured_zbuf` with UV coordinate passthrough from RSP HLE when G_TEXTURE_ENABLE is active. — `crates/systems/n64/src/rdp.rs`, `crates/systems/n64/src/rsp_hle.rs`
 
 ### Medium
 - [x] **RSP ADPCM decode**: ~~The ADPCM command (0x01) currently writes silence.~~ Implemented VADPCM decoder with 2nd-order IIR prediction, 4-bit nibble decoding, and proper scale shifting. — `crates/systems/n64/src/rsp_hle.rs`

@@ -564,7 +564,7 @@ impl RspHle {
                         src += 1;
 
                         // Decode 16 samples from 8 bytes (two 4-bit nibbles each)
-                        for byte_idx in 0..8 {
+                        for _byte_idx in 0..8 {
                             if samples_written >= num_samples || src >= 4096 {
                                 break;
                             }
@@ -599,7 +599,6 @@ impl RspHle {
                                 prev1 = sample;
                                 samples_written += 1;
                             }
-                            let _ = byte_idx;
                         }
                     }
 
@@ -1540,7 +1539,7 @@ impl RspHle {
             + self.modelview_matrix[6] * ny
             + self.modelview_matrix[10] * nz;
 
-        // Normalise
+        // Normalize
         let len = (tnx * tnx + tny * tny + tnz * tnz).sqrt();
         let (tnx, tny, tnz) = if len > 0.0001 {
             (tnx / len, tny / len, tnz / len)
