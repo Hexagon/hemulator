@@ -1756,14 +1756,14 @@ impl<M: MemoryMips> CpuMips<M> {
                 let a = f32::from_bits(self.fpr[fs] as u32);
                 let b = f32::from_bits(self.fpr[ft] as u32);
                 match funct {
-                    0x00 => self.fpr[fd] = (a + b).to_bits() as u64,    // ADD.S
-                    0x01 => self.fpr[fd] = (a - b).to_bits() as u64,    // SUB.S
-                    0x02 => self.fpr[fd] = (a * b).to_bits() as u64,    // MUL.S
-                    0x03 => self.fpr[fd] = (a / b).to_bits() as u64,    // DIV.S
-                    0x04 => self.fpr[fd] = a.sqrt().to_bits() as u64,   // SQRT.S
-                    0x05 => self.fpr[fd] = a.abs().to_bits() as u64,    // ABS.S
-                    0x06 => self.fpr[fd] = self.fpr[fs],                // MOV.S
-                    0x07 => self.fpr[fd] = (-a).to_bits() as u64,       // NEG.S
+                    0x00 => self.fpr[fd] = (a + b).to_bits() as u64, // ADD.S
+                    0x01 => self.fpr[fd] = (a - b).to_bits() as u64, // SUB.S
+                    0x02 => self.fpr[fd] = (a * b).to_bits() as u64, // MUL.S
+                    0x03 => self.fpr[fd] = (a / b).to_bits() as u64, // DIV.S
+                    0x04 => self.fpr[fd] = a.sqrt().to_bits() as u64, // SQRT.S
+                    0x05 => self.fpr[fd] = a.abs().to_bits() as u64, // ABS.S
+                    0x06 => self.fpr[fd] = self.fpr[fs],             // MOV.S
+                    0x07 => self.fpr[fd] = (-a).to_bits() as u64,    // NEG.S
                     0x09 => {
                         // TRUNC.L.S - Truncate to Long
                         self.fpr[fd] = (a as i64) as u64;
@@ -1788,17 +1788,17 @@ impl<M: MemoryMips> CpuMips<M> {
                         // C.cond.S - Compare Single
                         let cond = funct & 0x0F;
                         let result = match cond {
-                            0x00 => false,     // C.F
-                            0x01 => a.is_nan() || b.is_nan(), // C.UN
-                            0x02 => a == b,    // C.EQ
+                            0x00 => false,                              // C.F
+                            0x01 => a.is_nan() || b.is_nan(),           // C.UN
+                            0x02 => a == b,                             // C.EQ
                             0x03 => a == b || a.is_nan() || b.is_nan(), // C.UEQ
-                            0x04 => a < b,     // C.OLT
-                            0x05 => a < b || a.is_nan() || b.is_nan(), // C.ULT
-                            0x06 => a <= b,    // C.OLE
+                            0x04 => a < b,                              // C.OLT
+                            0x05 => a < b || a.is_nan() || b.is_nan(),  // C.ULT
+                            0x06 => a <= b,                             // C.OLE
                             0x07 => a <= b || a.is_nan() || b.is_nan(), // C.ULE
-                            0x0A => a == b,    // C.SEQ
-                            0x0C => a < b,     // C.LT
-                            0x0E => a <= b,    // C.LE
+                            0x0A => a == b,                             // C.SEQ
+                            0x0C => a < b,                              // C.LT
+                            0x0E => a <= b,                             // C.LE
                             _ => false,
                         };
                         if result {
@@ -1816,14 +1816,14 @@ impl<M: MemoryMips> CpuMips<M> {
                 let a = f64::from_bits(self.fpr[fs]);
                 let b = f64::from_bits(self.fpr[ft]);
                 match funct {
-                    0x00 => self.fpr[fd] = (a + b).to_bits(),    // ADD.D
-                    0x01 => self.fpr[fd] = (a - b).to_bits(),    // SUB.D
-                    0x02 => self.fpr[fd] = (a * b).to_bits(),    // MUL.D
-                    0x03 => self.fpr[fd] = (a / b).to_bits(),    // DIV.D
-                    0x04 => self.fpr[fd] = a.sqrt().to_bits(),   // SQRT.D
-                    0x05 => self.fpr[fd] = a.abs().to_bits(),    // ABS.D
-                    0x06 => self.fpr[fd] = self.fpr[fs],         // MOV.D
-                    0x07 => self.fpr[fd] = (-a).to_bits(),       // NEG.D
+                    0x00 => self.fpr[fd] = (a + b).to_bits(),  // ADD.D
+                    0x01 => self.fpr[fd] = (a - b).to_bits(),  // SUB.D
+                    0x02 => self.fpr[fd] = (a * b).to_bits(),  // MUL.D
+                    0x03 => self.fpr[fd] = (a / b).to_bits(),  // DIV.D
+                    0x04 => self.fpr[fd] = a.sqrt().to_bits(), // SQRT.D
+                    0x05 => self.fpr[fd] = a.abs().to_bits(),  // ABS.D
+                    0x06 => self.fpr[fd] = self.fpr[fs],       // MOV.D
+                    0x07 => self.fpr[fd] = (-a).to_bits(),     // NEG.D
                     0x09 => {
                         // TRUNC.L.D
                         self.fpr[fd] = (a as i64) as u64;

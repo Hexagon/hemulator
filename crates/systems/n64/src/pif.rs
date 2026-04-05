@@ -389,7 +389,7 @@ impl Pif {
             0x0000001F_F9FB0DAA => 0x78, // CIC-6103 (Banjo-Kazooie, etc.)
             0x0000001F_F9FBD860 => 0x91, // CIC-6105 (Zelda OoT, etc.)
             0x0000001F_F9FBD4E4 => 0x85, // CIC-6106 (F-Zero X, etc.)
-            _ => 0x3F,                    // Default to CIC-6102 seed
+            _ => 0x3F,                   // Default to CIC-6102 seed
         }
     }
 

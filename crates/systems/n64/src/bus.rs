@@ -1178,8 +1178,10 @@ impl MemoryMips for N64Bus {
                         const PIF_RAM_OFFSET: u32 = 0x7C0;
                         for i in 0..64 {
                             if dram_addr + i < self.rdram.len() {
-                                self.pif
-                                    .write_ram(PIF_RAM_OFFSET + i as u32, self.rdram[dram_addr + i]);
+                                self.pif.write_ram(
+                                    PIF_RAM_OFFSET + i as u32,
+                                    self.rdram[dram_addr + i],
+                                );
                             }
                         }
                         // Process PIF commands (controller/EEPROM)
