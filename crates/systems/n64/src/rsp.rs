@@ -89,9 +89,8 @@ pub struct Rsp {
     /// 4KB IMEM (Instruction Memory)
     imem: [u8; 4096],
 
-    /// Program counter (not yet used - for future microcode execution)
-    #[allow(dead_code)]
-    pc: u32,
+    /// Program counter
+    pub pc: u32,
 
     /// RSP registers
     sp_mem_addr: u32,

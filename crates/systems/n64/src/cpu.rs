@@ -40,35 +40,40 @@ impl N64Cpu {
         self.cpu.reset();
 
         // Check if we have a commercial ROM loaded with an entry point
-        // We need to access the bus through our wrapper methods
-        if let Some(entry_point) = self.bus().get_entry_point() {
+        if let Some(_entry_point) = self.bus().get_entry_point() {
             log(LogCategory::CPU, LogLevel::Info, || {
                 format!(
-                    "N64 CPU: Commercial ROM detected, initializing CP0 and jumping to entry point 0x{:016X}",
-                    entry_point
+                    "N64 CPU: Commercial ROM detected, starting IPL3 from DMEM (entry point 0x{:016X} stored for IPL3)",
+                    _entry_point
                 )
             });
 
-            // Initialize CP0 registers for commercial ROM boot
-            // These values are set by the real IPL3 bootloader
+            // Initialize CP0 registers for boot
+            // These values represent the state after PIF ROM (IPL1/IPL2) execution
             self.cpu.cp0[12] = CP0_STATUS_COMMERCIAL_BOOT;
             self.cpu.cp0[16] = CP0_CONFIG_COMMERCIAL_BOOT;
 
-            // Initialize GPRs that are expected by commercial ROMs
-            // Based on real N64 IPL3 boot sequence
-            self.cpu.gpr[11] = 0xFFFFFFFF_A4000040; // $t3 = cart domain 1 config address
-            self.cpu.gpr[20] = 0x0000000000000001; // $s4 = 1
-            self.cpu.gpr[22] = 0x000000000000003F; // $s6 = 0x3F
-            self.cpu.gpr[29] = 0xFFFFFFFF_A4001FF0; // $sp = stack pointer (end of RDRAM - 0x10)
-            self.cpu.gpr[31] = 0xFFFFFFFF_A4001550; // $ra = return address placeholder
+            // Set PC to start of IPL3 code in SP DMEM
+            // IPL3 is loaded from ROM[0x40..0x1000] into DMEM[0x40..0x1000]
+            // IPL3 will: init RDRAM, DMA ROM to RDRAM, verify CRC, set up
+            // registers, and jump to the game's entry point
+            self.cpu.pc = 0xFFFF_FFFF_A400_0040;
 
-            // Set PC to entry point (typically 0x80000400 or game-specific address)
-            self.cpu.pc = entry_point;
+            // Set SP to end of DMEM (IPL3 uses DMEM for its stack)
+            self.cpu.gpr[29] = 0xFFFF_FFFF_A400_1FF0; // $sp
+
+            // Set registers that PIF boot ROM (IPL1/IPL2) normally initializes
+            // before jumping to IPL3. These values are based on CIC-NUS-6102
+            // register state documented in N64 homebrew references.
+            let cic_seed = self.cpu.memory.get_cic_seed();
+            self.cpu.gpr[20] = 1; // $s4
+            self.cpu.gpr[22] = cic_seed as u64; // $s6 = CIC seed
+            self.cpu.gpr[23] = 1; // $s7
 
             log(LogCategory::CPU, LogLevel::Info, || {
                 format!(
-                    "N64 CPU: Initialized CP0 and GPRs, PC now at 0x{:016X}",
-                    self.cpu.pc
+                    "N64 CPU: IPL3 boot, PC=0x{:016X}, SP=0x{:016X}",
+                    self.cpu.pc, self.cpu.gpr[29]
                 )
             });
         } else {

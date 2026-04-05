@@ -73,6 +73,8 @@ pub struct N64Bus {
     pi_cart_addr: u32,
     /// SI DMA address
     si_dram_addr: u32,
+    /// CIC seed (detected from ROM header, used for IPL3 register init)
+    cic_seed: u8,
 }
 
 impl N64Bus {
@@ -100,6 +102,7 @@ impl N64Bus {
             pi_dram_addr: 0,
             pi_cart_addr: 0,
             si_dram_addr: 0,
+            cic_seed: 0,
         };
 
         // Initialize PIF ROM
@@ -140,9 +143,30 @@ impl N64Bus {
         });
         self.configure_save_type(save_type);
 
-        // Perform IPL3 boot sequence - copy ROM to RDRAM and get entry point
+        // Get ROM data and extract entry point
         let rom_data = cart.read_range(0, cart.size());
-        let entry_point = self.pif.perform_ipl3_boot(&mut self.rdram, &rom_data);
+        let entry_point = crate::pif::Pif::extract_entry_point(&rom_data);
+
+        // Copy first 0x1000 bytes of ROM (header + IPL3) into SP DMEM
+        // On real hardware, PIF copies this to DMEM before starting IPL3.
+        // IPL3 boot code runs from DMEM[0x40..] and handles the ROM→RDRAM
+        // copy via PI DMA, proper register init, and jump to entry point.
+        let dmem_size = 0x1000.min(rom_data.len());
+        for (i, &byte) in rom_data.iter().enumerate().take(dmem_size) {
+            self.rsp.write_dmem(i as u32, byte);
+        }
+
+        // Detect CIC type and set up PIF RAM with the seed
+        let cic_seed = crate::pif::Pif::detect_cic_seed(&rom_data);
+        self.cic_seed = cic_seed;
+        self.pif.setup_boot(cic_seed);
+
+        log(LogCategory::Bus, LogLevel::Info, || {
+            format!(
+                "N64 Bus: IPL3 boot setup complete, entry_point=0x{:08X}, CIC seed=0x{:02X}",
+                entry_point, cic_seed
+            )
+        });
 
         log(LogCategory::Bus, LogLevel::Info, || {
             format!(
@@ -255,6 +279,10 @@ impl N64Bus {
     /// Get the entry point from the loaded cartridge (for CPU initialization)
     pub fn get_entry_point(&self) -> Option<u64> {
         self.entry_point
+    }
+
+    pub fn get_cic_seed(&self) -> u8 {
+        self.cic_seed
     }
 
     // -----------------------------------------------------------------------
@@ -477,6 +505,12 @@ impl N64Bus {
         &self.rsp
     }
 
+    /// Get current RSP status register value (for diagnostics)
+    #[allow(dead_code)]
+    pub fn rsp_status(&self) -> u32 {
+        self.rsp.read_register(0x10) // SP_STATUS
+    }
+
     #[allow(dead_code)] // Reserved for future use
     pub fn rsp_mut(&mut self) -> &mut Rsp {
         &mut self.rsp
@@ -533,7 +567,15 @@ impl N64Bus {
     pub fn process_rdp_display_list(&mut self) {
         if self.rdp.needs_processing() {
             self.rdp.process_display_list(&self.rdram);
+            // Signal DP interrupt so games know rendering is complete
+            self.mi.set_interrupt(super::mi::MI_INTR_DP);
         }
+    }
+
+    /// Sync RDP framebuffer to RDRAM once per display frame.
+    /// This is deferred from individual RSP/RDP operations for performance.
+    pub fn sync_rdp_framebuffer(&mut self) {
+        self.rdp.write_framebuffer_to_rdram(&mut self.rdram);
     }
 
     /// Read the framebuffer from RDRAM using VI registers
@@ -825,6 +867,8 @@ impl MemoryMips for N64Bus {
                 let b3 = self.rsp.read_imem(offset + 3) as u32;
                 (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
             }
+            // SP PC register (0x04080000)
+            0x0408_0000..=0x0408_0003 => self.rsp.pc,
             // Cartridge SRAM / FlashRAM (0x08000000 - 0x0FFFFFFF, cartridge domain 2)
             0x0800_0000..=0x0FFF_FFFF => {
                 let offset = (phys_addr - 0x0800_0000) as usize;
@@ -945,6 +989,28 @@ impl MemoryMips for N64Bus {
                 self.rdram[offset + 1] = bytes[1];
                 self.rdram[offset + 2] = bytes[2];
                 self.rdram[offset + 3] = bytes[3];
+            }
+            // SP DMEM (0x04000000 - 0x04000FFF)
+            0x0400_0000..=0x0400_0FFF => {
+                let offset = phys_addr & 0xFFF;
+                let bytes = val.to_be_bytes();
+                self.rsp.write_dmem(offset, bytes[0]);
+                self.rsp.write_dmem(offset + 1, bytes[1]);
+                self.rsp.write_dmem(offset + 2, bytes[2]);
+                self.rsp.write_dmem(offset + 3, bytes[3]);
+            }
+            // SP IMEM (0x04001000 - 0x04001FFF)
+            0x0400_1000..=0x0400_1FFF => {
+                let offset = phys_addr & 0xFFF;
+                let bytes = val.to_be_bytes();
+                self.rsp.write_imem(offset, bytes[0]);
+                self.rsp.write_imem(offset + 1, bytes[1]);
+                self.rsp.write_imem(offset + 2, bytes[2]);
+                self.rsp.write_imem(offset + 3, bytes[3]);
+            }
+            // SP PC register (0x04080000)
+            0x0408_0000..=0x0408_0003 => {
+                self.rsp.pc = val & 0xFFF;
             }
             // RSP registers (0x04040000 - 0x0404001F)
             0x0404_0000..=0x0404_001F => {
@@ -1088,14 +1154,14 @@ impl MemoryMips for N64Bus {
                     }
                     0x04 => {
                         // SI_PIF_ADDR_RD64B - DMA: PIF -> RDRAM
+                        // Copies 64 bytes of PIF RAM (0x1FC007C0-0x1FC007FF) to RDRAM
                         let dram_addr = self.si_dram_addr as usize;
-                        log(LogCategory::Bus, LogLevel::Debug, || {
-                            format!("N64 SI: DMA PIF -> RDRAM 0x{:08X}", dram_addr)
-                        });
-                        // Copy 64 bytes from PIF RAM to RDRAM
+                        // PIF RAM is 64 bytes at offset 0x7C0 in PIF address space
+                        const PIF_RAM_OFFSET: u32 = 0x7C0;
                         for i in 0..64 {
                             if dram_addr + i < self.rdram.len() {
-                                self.rdram[dram_addr + i] = self.pif.read_ram(i as u32);
+                                self.rdram[dram_addr + i] =
+                                    self.pif.read_ram(PIF_RAM_OFFSET + i as u32);
                             }
                         }
                         // Trigger SI interrupt
@@ -1103,14 +1169,17 @@ impl MemoryMips for N64Bus {
                     }
                     0x10 => {
                         // SI_PIF_ADDR_WR64B - DMA: RDRAM -> PIF
+                        // Copies 64 bytes from RDRAM to PIF RAM (0x1FC007C0-0x1FC007FF)
                         let dram_addr = self.si_dram_addr as usize;
                         log(LogCategory::Bus, LogLevel::Debug, || {
                             format!("N64 SI: DMA RDRAM 0x{:08X} -> PIF", dram_addr)
                         });
-                        // Copy 64 bytes from RDRAM to PIF RAM
+                        // PIF RAM is 64 bytes at offset 0x7C0 in PIF address space
+                        const PIF_RAM_OFFSET: u32 = 0x7C0;
                         for i in 0..64 {
                             if dram_addr + i < self.rdram.len() {
-                                self.pif.write_ram(i as u32, self.rdram[dram_addr + i]);
+                                self.pif
+                                    .write_ram(PIF_RAM_OFFSET + i as u32, self.rdram[dram_addr + i]);
                             }
                         }
                         // Process PIF commands (controller/EEPROM)
@@ -1128,24 +1197,6 @@ impl MemoryMips for N64Bus {
             // RDRAM config registers (0x03F00000 - 0x03FFFFFF)
             0x03F0_0000..=0x03FF_FFFF => {
                 // RDRAM config writes accepted but ignored
-            }
-            // SP DMEM (0x04000000 - 0x04000FFF)
-            0x0400_0000..=0x0400_0FFF => {
-                let offset = phys_addr & 0xFFF;
-                let bytes = val.to_be_bytes();
-                self.rsp.write_dmem(offset, bytes[0]);
-                self.rsp.write_dmem(offset + 1, bytes[1]);
-                self.rsp.write_dmem(offset + 2, bytes[2]);
-                self.rsp.write_dmem(offset + 3, bytes[3]);
-            }
-            // SP IMEM (0x04001000 - 0x04001FFF)
-            0x0400_1000..=0x0400_1FFF => {
-                let offset = phys_addr & 0xFFF;
-                let bytes = val.to_be_bytes();
-                self.rsp.write_imem(offset, bytes[0]);
-                self.rsp.write_imem(offset + 1, bytes[1]);
-                self.rsp.write_imem(offset + 2, bytes[2]);
-                self.rsp.write_imem(offset + 3, bytes[3]);
             }
             // Cartridge SRAM / FlashRAM (0x08000000 - 0x0FFFFFFF)
             0x0800_0000..=0x0FFF_FFFF => {

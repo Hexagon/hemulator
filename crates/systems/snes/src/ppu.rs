@@ -3368,25 +3368,26 @@ impl Ppu {
 
                 // Handle screen over modes
                 let (tile_x, tile_y) = match screen_over {
-                    0 => {
-                        // Wrap around (default)
+                    0 | 1 => {
+                        // Wrap around (repeat entire playing field)
                         ((tx & 0x3FF) / 8, (ty & 0x3FF) / 8)
                     }
-                    1 => {
-                        // Transparent outside (use backdrop color)
-                        if !(0..1024).contains(&tx) || !(0..1024).contains(&ty) {
-                            continue; // Skip this pixel, will use backdrop
-                        }
-                        (tx / 8, ty / 8)
-                    }
-                    _ => {
-                        // Tile 0 outside (modes 2 and 3)
+                    2 => {
+                        // Character 0 fill outside playing field
                         if !(0..1024).contains(&tx) || !(0..1024).contains(&ty) {
                             (0, 0)
                         } else {
                             (tx / 8, ty / 8)
                         }
                     }
+                    3 => {
+                        // Transparent outside (backdrop color)
+                        if !(0..1024).contains(&tx) || !(0..1024).contains(&ty) {
+                            continue;
+                        }
+                        (tx / 8, ty / 8)
+                    }
+                    _ => unreachable!(),
                 };
 
                 let pixel_x = tx & 7;
@@ -3504,20 +3505,21 @@ impl Ppu {
                 let ty = ((c * x_offset) + (d * y_offset) + (center_y << 8)) >> 8;
 
                 let (tile_x, tile_y) = match screen_over {
-                    0 => ((tx & 0x3FF) / 8, (ty & 0x3FF) / 8),
-                    1 => {
-                        if !(0..1024).contains(&tx) || !(0..1024).contains(&ty) {
-                            continue;
-                        }
-                        (tx / 8, ty / 8)
-                    }
-                    _ => {
+                    0 | 1 => ((tx & 0x3FF) / 8, (ty & 0x3FF) / 8),
+                    2 => {
                         if !(0..1024).contains(&tx) || !(0..1024).contains(&ty) {
                             (0, 0)
                         } else {
                             (tx / 8, ty / 8)
                         }
                     }
+                    3 => {
+                        if !(0..1024).contains(&tx) || !(0..1024).contains(&ty) {
+                            continue;
+                        }
+                        (tx / 8, ty / 8)
+                    }
+                    _ => unreachable!(),
                 };
 
                 let pixel_x = tx & 7;
@@ -3947,17 +3949,9 @@ impl Ppu {
             };
 
             // Y coordinate: sprites appear 1 scanline later than their Y value
-            // Values >= 224 (screen height) wrap to negative for top-of-screen display
-            // This allows large sprites near the bottom to wrap around and appear at the top
-            let y: i16 = {
-                let y_plus_one = y_raw.wrapping_add(1) as u16;
-                if y_plus_one >= 224 {
-                    // Wrap: treat as negative (y - 256)
-                    y_plus_one as i16 - 256
-                } else {
-                    y_plus_one as i16
-                }
-            };
+            // Uses u8 wrapping to correctly handle sprites that span the 256-boundary
+            // (e.g., a sprite at Y=200 with height 64 renders at scanlines 201-223 AND 0-8)
+            let y_origin: u8 = y_raw.wrapping_add(1);
 
             // Get sprite size
             let (width, height) = if is_large { large_size } else { small_size };
@@ -3976,8 +3970,8 @@ impl Ppu {
             if sprites_considered <= 3 {
                 log(LogCategory::PPU, LogLevel::Debug, || {
                     format!(
-                        "OBJ {}: x={}, y={}, tile={:02X}, attr={:02X}, priority={}, size={}x{}, nameselect={}, palette={}",
-                        sprite_index, x, y, tile, attr, sprite_priority, width, height, nameselect, palette
+                        "OBJ {}: x={}, y_origin={}, tile={:02X}, attr={:02X}, priority={}, size={}x{}, nameselect={}, palette={}",
+                        sprite_index, x, y_origin, tile, attr, sprite_priority, width, height, nameselect, palette
                     )
                 });
             }
@@ -3989,29 +3983,34 @@ impl Ppu {
             }
 
             // Skip offscreen sprites (basic culling)
-            // X can be -256 to 255, Y can be negative too (wrapping)
-            if x >= 256 || y >= 224 || x + width as i16 <= 0 || y + height as i16 <= 0 {
+            // X culling: sprite entirely off left or right
+            // Y culling: sprite entirely in the invisible region (scanlines 224-255)
+            // A sprite is off-screen vertically if all its scanlines are >= 224:
+            //   y_origin >= 224 AND y_origin + height <= 256 (no wrap to visible area)
+            let y_off_screen = y_origin >= 224 && (y_origin as u16 + height as u16) <= 256;
+            if x >= 256 || x + width as i16 <= 0 || y_off_screen {
                 sprites_offscreen += 1;
                 continue;
             }
 
             // Check scanline limits for this sprite
-            // Calculate which scanlines this sprite occupies
-            let start_y = y.max(0) as usize;
-            let end_y = (y + height as i16).min(224) as usize;
+            // Use u8 wrapping to correctly iterate visible scanlines
             let tiles_wide = (width / 8) as u8;
 
             // Check if rendering this sprite would exceed scanline limits
             let mut can_render = true;
             let mut range_over_triggered = false;
             let mut time_over_triggered = false;
-            for scanline in start_y..end_y {
+            for offset in 0..height {
+                let scanline = y_origin.wrapping_add(offset as u8) as usize;
+                if scanline >= 224 {
+                    continue; // Not a visible scanline
+                }
                 if sprites_per_scanline[scanline] >= 32 {
                     can_render = false;
                     range_over_triggered = true;
                     break;
                 }
-                // Each row of the sprite adds tiles_wide to the scanline
                 if tiles_per_scanline[scanline] + tiles_wide > 34 {
                     can_render = false;
                     time_over_triggered = true;
@@ -4032,9 +4031,12 @@ impl Ppu {
             }
 
             // Update scanline counters
-            for scanline in start_y..end_y {
-                sprites_per_scanline[scanline] += 1;
-                tiles_per_scanline[scanline] += tiles_wide;
+            for offset in 0..height {
+                let scanline = y_origin.wrapping_add(offset as u8) as usize;
+                if scanline < 224 {
+                    sprites_per_scanline[scanline] += 1;
+                    tiles_per_scanline[scanline] += tiles_wide;
+                }
             }
 
             sprites_rendered += 1;
@@ -4045,7 +4047,7 @@ impl Ppu {
                 priority_buffer,
                 layer_buffer,
                 x,
-                y,
+                y_origin,
                 tile,
                 obj_base,
                 nameselect,
@@ -4090,7 +4092,7 @@ impl Ppu {
         priority_buffer: &mut [u8],
         layer_buffer: &mut [u8],
         x: i16,
-        y: i16,
+        y_origin: u8,
         tile: u8,
         obj_base: usize,
         nameselect: bool,
@@ -4165,41 +4167,27 @@ impl Ppu {
                         let actual_px = if flip_x { 7 - px } else { px };
                         let actual_py = if flip_y { 7 - py } else { py };
 
-                        // Screen position
+                        // Screen X position (signed, can be negative or >= 256)
                         let screen_x = x + (tx * 8) as i16 + px as i16;
-                        let screen_y_raw = y + (ty * 8) as i16 + py as i16;
 
-                        // Wrap Y at 256 boundary (sprites wrap vertically in hardware)
-                        let screen_y = if screen_y_raw >= 256 {
-                            screen_y_raw - 256
-                        } else {
-                            screen_y_raw
-                        };
-
-                        // Bounds check with horizontal wrapping
-                        // SNES sprites wrap horizontally: X values 256-511 appear on left side
-                        let wrapped_x = if screen_x < 0 {
-                            // Negative values wrap from the right
-                            (screen_x + 256) as usize
-                        } else if screen_x >= 256 {
-                            // Values >= 256 wrap to the left
-                            (screen_x - 256) as usize
-                        } else {
-                            screen_x as usize
-                        };
-
-                        // Validate wrapped_x is in valid range
-                        if wrapped_x >= 256 {
+                        // Clip X: SNES sprites do NOT wrap horizontally on screen
+                        if !(0..256).contains(&screen_x) {
                             continue;
                         }
+                        let screen_x = screen_x as usize;
 
-                        // Y doesn't wrap (only 0-223 valid)
-                        if !(0..224).contains(&screen_y) {
+                        // Screen Y position using u8 wrapping (hardware-accurate)
+                        // Sprites at OAM Y=200 with height 64 correctly render at
+                        // scanlines 201-223 (bottom) AND wrap to 0-8 (top)
+                        let screen_y = y_origin.wrapping_add((ty * 8 + py) as u8) as usize;
+
+                        // Only draw on visible scanlines (0-223)
+                        if screen_y >= 224 {
                             continue;
                         }
 
                         // Skip scanlines where OBJ layer is disabled (per-scanline HDMA)
-                        if self.render_scanline_enables[screen_y as usize] & 0x10 == 0 {
+                        if self.render_scanline_enables[screen_y] & 0x10 == 0 {
                             continue;
                         }
 
@@ -4232,8 +4220,7 @@ impl Ppu {
                         }
 
                         // Check window masking for sprites (layer 4)
-                        // Use wrapped_x for window check
-                        if self.is_pixel_masked_by_window(wrapped_x, 4) {
+                        if self.is_pixel_masked_by_window(screen_x, 4) {
                             continue;
                         }
 
@@ -4242,8 +4229,7 @@ impl Ppu {
                         let color = self.get_color(cgram_index);
 
                         // Draw pixel if it has equal or higher priority (later layers paint on top)
-                        // Use wrapped_x for frame buffer access
-                        let frame_offset = screen_y as usize * frame.width as usize + wrapped_x;
+                        let frame_offset = screen_y * frame.width as usize + screen_x;
                         if frame_offset < frame.pixels.len()
                             && render_priority >= priority_buffer[frame_offset]
                         {
@@ -4517,10 +4503,12 @@ impl Ppu {
                 {
                     let main_pixel = frame.pixels[i];
 
+                    let sub_is_backdrop = use_subscreen && sub_layer_buffer[i] == LAYER_BACKDROP;
+
                     let blend_color = if use_subscreen {
                         // Hardware behavior: when subscreen pixel is
                         // backdrop (transparent), use fixed color instead
-                        if sub_layer_buffer[i] == LAYER_BACKDROP {
+                        if sub_is_backdrop {
                             fixed_color
                         } else {
                             sub_frame.pixels[i]
@@ -4535,7 +4523,9 @@ impl Ppu {
                         self.add_colors(main_pixel, blend_color)
                     };
 
-                    frame.pixels[i] = if half_math {
+                    // Half math is NOT applied when subscreen mode is active
+                    // but the sub pixel was backdrop (hardware behavior)
+                    frame.pixels[i] = if half_math && !sub_is_backdrop {
                         self.halve_color(result)
                     } else {
                         result

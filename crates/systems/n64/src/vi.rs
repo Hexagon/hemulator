@@ -88,7 +88,7 @@ impl VideoInterface {
             h_sync: 0x0C15,    // NTSC horizontal sync
             leap: 0x0C150C15,
             h_start: 0x006C02EC, // NTSC horizontal start/end
-            v_start: 0x002502FF, // NTSC vertical start/end
+            v_start: 0x00230203, // NTSC vertical start/end (35-515, height=240)
             v_burst: 0x000E0204,
             x_scale: 0x0200, // 1:1 scale
             y_scale: 0x0400, // 1:1 scale
@@ -135,7 +135,9 @@ impl VideoInterface {
 
         match offset {
             VI_STATUS => self.status = value,
-            VI_ORIGIN => self.origin = value & 0x00FFFFFF, // 24-bit address
+            VI_ORIGIN => {
+                self.origin = value & 0x00FFFFFF; // 24-bit address
+            }
             VI_WIDTH => self.width = value & 0xFFF,
             VI_INTR => {
                 self.intr = value & 0x3FF;

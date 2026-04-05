@@ -75,6 +75,9 @@ pub struct OpenGLRdpRenderer {
 
     // Z-buffer state
     zbuffer_enabled: bool,
+
+    /// Whether the GPU framebuffer has been modified since the last read_pixels
+    dirty: bool,
 }
 
 impl OpenGLRdpRenderer {
@@ -209,6 +212,7 @@ impl OpenGLRdpRenderer {
                 dynamic_texture_width: 0,
                 dynamic_texture_height: 0,
                 zbuffer_enabled: false,
+                dirty: false,
             })
         }
     }
@@ -359,6 +363,15 @@ impl RdpRenderer for OpenGLRdpRenderer {
         &self.framebuffer
     }
 
+    fn sync_framebuffer(&mut self) {
+        if self.dirty {
+            unsafe {
+                self.read_pixels();
+            }
+            self.dirty = false;
+        }
+    }
+
     fn get_frame_mut(&mut self) -> &mut Frame {
         &mut self.framebuffer
     }
@@ -372,7 +385,8 @@ impl RdpRenderer for OpenGLRdpRenderer {
             self.gl
                 .clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
 
-            self.read_pixels();
+            self.dirty = true;
+            self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
         }
     }
 
@@ -445,7 +459,8 @@ impl RdpRenderer for OpenGLRdpRenderer {
             self.gl.draw_arrays(glow::TRIANGLES, 0, 6);
 
             self.gl.disable(glow::SCISSOR_TEST);
-            self.read_pixels();
+            self.dirty = true;
+            self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
         }
     }
 
@@ -528,7 +543,8 @@ impl RdpRenderer for OpenGLRdpRenderer {
             self.gl.draw_arrays(glow::TRIANGLES, 0, 3);
 
             self.gl.disable(glow::SCISSOR_TEST);
-            self.read_pixels();
+            self.dirty = true;
+            self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
         }
     }
 
@@ -614,7 +630,8 @@ impl RdpRenderer for OpenGLRdpRenderer {
 
             self.gl.disable(glow::DEPTH_TEST);
             self.gl.disable(glow::SCISSOR_TEST);
-            self.read_pixels();
+            self.dirty = true;
+            self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
         }
     }
 
@@ -691,7 +708,8 @@ impl RdpRenderer for OpenGLRdpRenderer {
             self.gl.draw_arrays(glow::TRIANGLES, 0, 3);
 
             self.gl.disable(glow::SCISSOR_TEST);
-            self.read_pixels();
+            self.dirty = true;
+            self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
         }
     }
 
@@ -792,7 +810,8 @@ impl RdpRenderer for OpenGLRdpRenderer {
 
             self.gl.disable(glow::DEPTH_TEST);
             self.gl.disable(glow::SCISSOR_TEST);
-            self.read_pixels();
+            self.dirty = true;
+            self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
         }
     }
 
@@ -899,7 +918,8 @@ impl RdpRenderer for OpenGLRdpRenderer {
             self.gl.draw_arrays(glow::TRIANGLES, 0, 3);
 
             self.gl.disable(glow::SCISSOR_TEST);
-            self.read_pixels();
+            self.dirty = true;
+            self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
         }
     }
 
@@ -1029,7 +1049,8 @@ impl RdpRenderer for OpenGLRdpRenderer {
 
             self.gl.disable(glow::DEPTH_TEST);
             self.gl.disable(glow::SCISSOR_TEST);
-            self.read_pixels();
+            self.dirty = true;
+            self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
         }
     }
 
@@ -1037,6 +1058,7 @@ impl RdpRenderer for OpenGLRdpRenderer {
         unsafe {
             self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.fbo));
             self.gl.clear(glow::DEPTH_BUFFER_BIT);
+            self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
         }
     }
 

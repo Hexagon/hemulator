@@ -157,6 +157,13 @@ pub struct Rdp {
     /// Z-buffer image address in RDRAM
     z_image_addr: u32,
 
+    /// Color image (framebuffer) address in RDRAM, set by SET_COLOR_IMAGE
+    color_image_addr: u32,
+    /// Color image width (pixels), set by SET_COLOR_IMAGE
+    color_image_width: u32,
+    /// Color image pixel format size (2=16-bit, 3=32-bit), set by SET_COLOR_IMAGE
+    color_image_size: u8,
+
     /// Other mode settings (64-bit value from SET_OTHER_MODES)
     /// Controls cycle type, alpha blend, Z-buffer, texture filtering, etc.
     othermode: u64,
@@ -226,7 +233,10 @@ impl Rdp {
             fog_color: 0xFF000000,   // Black
             combine_mode: 0,         // No combine mode
             z_image_addr: 0,
-            othermode: 0, // Default other modes
+            color_image_addr: 0,
+            color_image_width: 320,
+            color_image_size: 2, // Default 16-bit
+            othermode: 0,        // Default other modes
             dpc_start: 0,
             dpc_end: 0,
             dpc_current: 0,
@@ -294,6 +304,9 @@ impl Rdp {
         self.fog_color = 0xFF000000;
         self.combine_mode = 0;
         self.z_image_addr = 0;
+        self.color_image_addr = 0;
+        self.color_image_width = 320;
+        self.color_image_size = 2;
         self.dpc_start = 0;
         self.dpc_end = 0;
         self.dpc_current = 0;
@@ -309,6 +322,11 @@ impl Rdp {
     #[allow(dead_code)] // Used in tests and reserved for future display list commands
     pub fn set_fill_color(&mut self, color: u32) {
         self.fill_color = color;
+    }
+
+    /// Set othermode (64-bit combined value from RSP HLE)
+    pub fn set_othermode(&mut self, othermode: u64) {
+        self.othermode = othermode;
     }
 
     /// Clear the framebuffer with the current fill color
@@ -443,6 +461,98 @@ impl Rdp {
         self.renderer.get_frame()
     }
 
+    /// Sync GPU framebuffer to CPU-side buffer (only needed for GPU-backed renderers).
+    pub fn sync_framebuffer(&mut self) {
+        self.renderer.sync_framebuffer();
+    }
+
+    /// Get the color image address set by SET_COLOR_IMAGE
+    #[allow(dead_code)]
+    pub fn get_color_image_addr(&self) -> u32 {
+        self.color_image_addr
+    }
+
+    /// Get the color image address (diagnostic accessor)
+    #[allow(dead_code)]
+    pub fn color_image_address(&self) -> u32 {
+        self.color_image_addr
+    }
+
+    /// Get the color image width (diagnostic accessor)
+    #[allow(dead_code)]
+    pub fn color_image_width_val(&self) -> u32 {
+        self.color_image_width
+    }
+
+    /// Get the color image size (pixel format: 2=16-bit, 3=32-bit)
+    #[allow(dead_code)]
+    pub fn get_color_image_size(&self) -> u8 {
+        self.color_image_size
+    }
+
+    /// Write the RDP internal framebuffer to RDRAM at the color_image_addr.
+    /// This bridges the gap between the RDP renderer and VI's RDRAM readback.
+    pub fn write_framebuffer_to_rdram(&mut self, rdram: &mut [u8]) {
+        if self.color_image_addr == 0 {
+            return;
+        }
+
+        // Ensure GPU framebuffer is synced to CPU before reading pixels
+        self.renderer.sync_framebuffer();
+
+        let frame = self.renderer.get_frame();
+        let origin = self.color_image_addr as usize;
+        let width = frame.width as usize;
+        let height = frame.height as usize;
+
+        match self.color_image_size {
+            2 => {
+                // 16-bit RGBA5551
+                let fb_size = width * height * 2;
+                if origin + fb_size > rdram.len() {
+                    return;
+                }
+                for y in 0..height {
+                    for x in 0..width {
+                        let pixel = frame.pixels[y * width + x];
+                        // Convert ARGB8888 → N64 RGBA5551 (big-endian)
+                        let r = ((pixel >> 19) & 0x1F) as u16;
+                        let g = ((pixel >> 11) & 0x1F) as u16;
+                        let b = ((pixel >> 3) & 0x1F) as u16;
+                        let a = if (pixel >> 24) > 0 { 1u16 } else { 0 };
+                        let rgba5551 = (r << 11) | (g << 6) | (b << 1) | a;
+                        let offset = origin + (y * width + x) * 2;
+                        rdram[offset] = (rgba5551 >> 8) as u8;
+                        rdram[offset + 1] = (rgba5551 & 0xFF) as u8;
+                    }
+                }
+            }
+            3 => {
+                // 32-bit RGBA8888
+                let fb_size = width * height * 4;
+                if origin + fb_size > rdram.len() {
+                    return;
+                }
+                for y in 0..height {
+                    for x in 0..width {
+                        let pixel = frame.pixels[y * width + x];
+                        // Convert ARGB8888 → RGBA8888 big-endian
+                        let r = ((pixel >> 16) & 0xFF) as u8;
+                        let g = ((pixel >> 8) & 0xFF) as u8;
+                        let b = (pixel & 0xFF) as u8;
+                        let a = ((pixel >> 24) & 0xFF) as u8;
+                        let offset = origin + (y * width + x) * 4;
+                        rdram[offset] = r;
+                        rdram[offset + 1] = g;
+                        rdram[offset + 2] = b;
+                        rdram[offset + 3] = a;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// Read from RDP register
     pub fn read_register(&self, offset: u32) -> u32 {
         match offset {
@@ -561,6 +671,27 @@ impl Rdp {
             // Extract command ID from top 6 bits of first word
             let cmd_id = (cmd_word0 >> 24) & 0x3F;
 
+            // Read word2/word3 for multi-word commands (TEXTURE_RECTANGLE)
+            let cmd_size = Self::rdp_command_size(cmd_id);
+            let (cmd_word2, cmd_word3) = if cmd_size > 8 && addr + 15 < rdram.len() {
+                (
+                    u32::from_be_bytes([
+                        rdram[addr + 8],
+                        rdram[addr + 9],
+                        rdram[addr + 10],
+                        rdram[addr + 11],
+                    ]),
+                    u32::from_be_bytes([
+                        rdram[addr + 12],
+                        rdram[addr + 13],
+                        rdram[addr + 14],
+                        rdram[addr + 15],
+                    ]),
+                )
+            } else {
+                (0, 0)
+            };
+
             log(LogCategory::PPU, LogLevel::Trace, || {
                 format!(
                     "N64 RDP: Command 0x{:02X} at 0x{:08X}: word0=0x{:08X} word1=0x{:08X}",
@@ -569,7 +700,7 @@ impl Rdp {
             });
 
             // Execute command
-            self.execute_rdp_command(cmd_id, cmd_word0, cmd_word1, rdram);
+            self.execute_rdp_command(cmd_id, cmd_word0, cmd_word1, cmd_word2, cmd_word3, rdram);
 
             // Increment performance counters
             self.dpc_clock = self.dpc_clock.wrapping_add(10);
@@ -581,7 +712,7 @@ impl Rdp {
             executed_commands = executed_commands.wrapping_add(1);
 
             // Advance by command size (most are 8 bytes, some are larger)
-            addr += Self::rdp_command_size(cmd_id);
+            addr += cmd_size;
         }
 
         // Buffer busy counter: increments by number of commands actually executed
@@ -915,7 +1046,18 @@ impl Rdp {
     }
 
     /// Execute a single RDP command
-    pub fn execute_rdp_command(&mut self, cmd_id: u32, word0: u32, word1: u32, rdram: &[u8]) {
+    ///
+    /// For most commands, only word0/word1 are used. For TEXTURE_RECTANGLE (0x24/0x25),
+    /// word2/word3 contain texture coordinates (S, T, DSDX, DTDY).
+    pub fn execute_rdp_command(
+        &mut self,
+        cmd_id: u32,
+        word0: u32,
+        word1: u32,
+        word2: u32,
+        word3: u32,
+        rdram: &[u8],
+    ) {
         match cmd_id {
             // Triangle commands (0x08-0x0F)
             // Note: Real N64 triangle commands have complex formats with edge coefficients
@@ -1110,18 +1252,46 @@ impl Rdp {
                 let width = xh.saturating_sub(xl);
                 let height = yh.saturating_sub(yl);
 
+                // Convert fill_color from N64 format to ARGB8888 based on color image size
+                let argb_color = match self.color_image_size {
+                    2 => {
+                        // 16-bit mode: fill_color has two RGBA5551 pixels packed.
+                        // Use upper 16 bits as the fill pixel.
+                        let pixel = (self.fill_color >> 16) as u16;
+                        let r = ((pixel >> 11) & 0x1F) as u32;
+                        let g = ((pixel >> 6) & 0x1F) as u32;
+                        let b = ((pixel >> 1) & 0x1F) as u32;
+                        let r8 = (r << 3) | (r >> 2);
+                        let g8 = (g << 3) | (g >> 2);
+                        let b8 = (b << 3) | (b >> 2);
+                        0xFF000000 | (r8 << 16) | (g8 << 8) | b8
+                    }
+                    3 => {
+                        // 32-bit mode: fill_color is RGBA8888, convert to ARGB8888
+                        let r = (self.fill_color >> 24) & 0xFF;
+                        let g = (self.fill_color >> 16) & 0xFF;
+                        let b = (self.fill_color >> 8) & 0xFF;
+                        let a = self.fill_color & 0xFF;
+                        (a << 24) | (r << 16) | (g << 8) | b
+                    }
+                    _ => self.fill_color, // Fallback: use as-is
+                };
+
                 log(LogCategory::PPU, LogLevel::Info, || {
                     format!(
                         "N64 RDP: FILL_RECTANGLE x={}-{} y={}-{} ({}x{}) color=0x{:08X}",
-                        xl, xh, yl, yh, width, height, self.fill_color
+                        xl, xh, yl, yh, width, height, argb_color
                     )
                 });
 
-                self.fill_rect(xl, yl, width, height);
+                self.renderer
+                    .fill_rect(xl, yl, width, height, argb_color, &self.scissor);
             }
             // SET_FILL_COLOR (0x37)
             0x37 => {
-                // word1 contains the fill color (RGBA)
+                // word1 contains the raw fill color in N64 format:
+                // 16-bit mode: two RGBA5551 pixels packed into 32 bits
+                // 32-bit mode: one RGBA8888 pixel
                 self.fill_color = word1;
                 log(LogCategory::PPU, LogLevel::Info, || {
                     format!("N64 RDP: SET_FILL_COLOR = 0x{:08X}", word1)
@@ -1146,26 +1316,39 @@ impl Rdp {
             // TEXTURE_RECTANGLE (0x24)
             0x24 => {
                 // Texture rectangle command - renders a textured rectangle
-                // word0: cmd | XH(12) | YH(12)
-                // word1: tile(3) | XL(12) | YL(12)
-                // Followed by another 64-bit word with texture coordinates:
-                // word2: S(16) | T(16)
-                // word3: DSDX(16) | DTDY(16)
-                let xh = ((word0 >> 12) & 0xFFF) / 4;
-                let yh = (word0 & 0xFFF) / 4;
-                let xl = ((word1 >> 12) & 0xFFF) / 4;
-                let yl = (word1 & 0xFFF) / 4;
+                // word0: cmd | XH(12) | YH(12)  (lower-right corner in 10.2 fixed point)
+                // word1: tile(3) | XL(12) | YL(12)  (upper-left corner in 10.2 fixed point)
+                // word2: S(16) | T(16)  - texture start coords in S.10.5 fixed point
+                // word3: DSDX(16) | DTDY(16)  - texture increments in S.10.5 fixed point
+                let xh = ((word0 >> 12) & 0xFFF) as i32;
+                let yh = (word0 & 0xFFF) as i32;
+                let xl = ((word1 >> 12) & 0xFFF) as i32;
+                let yl = (word1 & 0xFFF) as i32;
                 let tile = ((word1 >> 24) & 0x07) as usize;
 
-                log(LogCategory::Stubs, LogLevel::Debug, || {
+                // Texture coordinates in S.10.5 fixed point
+                let s_start = ((word2 >> 16) & 0xFFFF) as i16 as i32;
+                let t_start = (word2 & 0xFFFF) as i16 as i32;
+                let dsdx = ((word3 >> 16) & 0xFFFF) as i16 as i32;
+                let dtdy = (word3 & 0xFFFF) as i16 as i32;
+
+                // Convert 10.2 fixed point coords to pixels
+                let px_xl = xl / 4;
+                let px_yl = yl / 4;
+                let px_xh = xh / 4;
+                let px_yh = yh / 4;
+
+                log(LogCategory::PPU, LogLevel::Debug, || {
                     format!(
-                        "N64 RDP: TEXTURE_RECTANGLE - rendering textured rect (xl={}, yl={}, xh={}, yh={}, tile={})",
-                        xl, yl, xh, yh, tile
+                        "N64 RDP: TEXTURE_RECTANGLE - rect ({},{})..({},{}) tile={} s={} t={} dsdx={} dtdy={}",
+                        px_xl, px_yl, px_xh, px_yh, tile, s_start, t_start, dsdx, dtdy
                     )
                 });
 
-                let width = xh.saturating_sub(xl);
-                let height = yh.saturating_sub(yl);
+                let width = (px_xh - px_xl).max(0) as u32;
+                let height = (px_yh - px_yl).max(0) as u32;
+                let xl = px_xl.max(0) as u32;
+                let yl = px_yl.max(0) as u32;
 
                 // Check if tile has valid texture data in TMEM
                 let has_texture = if tile < 8 {
@@ -1175,25 +1358,26 @@ impl Rdp {
                     false
                 };
 
-                // Render textured rectangle if texture data is available
+                // Render textured rectangle using actual texture coordinates
                 if has_texture && width > 0 && height > 0 {
+                    let mut t = t_start;
                     for y in 0..height {
+                        let mut s = s_start;
                         for x in 0..width {
                             let px = xl + x;
                             let py = yl + y;
 
                             if px < self.width && py < self.height {
-                                // Calculate texture coordinates (simple mapping)
-                                let s = ((x * 64) / width.max(1)) & 0x3F; // Map to 0-63
-                                let t = ((y * 64) / height.max(1)) & 0x3F;
+                                // S.10.5 fixed point: >> 5 to get integer part
+                                let tex_s = ((s >> 5) & 0x3FF) as u32;
+                                let tex_t = ((t >> 5) & 0x3FF) as u32;
 
-                                // Sample texture
-                                let color = self.sample_texture(tile, s, t);
-
-                                // Draw pixel using renderer
+                                let color = self.sample_texture(tile, tex_s, tex_t);
                                 self.renderer.set_pixel(px, py, color);
                             }
+                            s = s.wrapping_add(dsdx);
                         }
+                        t = t.wrapping_add(dtdy);
                     }
                 } else {
                     // Fallback to solid fill if texture is not available
@@ -1202,29 +1386,39 @@ impl Rdp {
             }
             // TEXTURE_RECTANGLE_FLIP (0x25)
             0x25 => {
-                // Flipped texture rectangle - same as 0x24 but with S/T swapped
+                // Flipped texture rectangle - same as 0x24 but S increments along Y, T along X
                 // word0: cmd | XH(12) | YH(12)
                 // word1: tile(3) | XL(12) | YL(12)
-                // Followed by another 64-bit word with texture coordinates:
-                // word2: S(16) | T(16)
-                // word3: DSDX(16) | DTDY(16)
-                let xh = ((word0 >> 12) & 0xFFF) / 4;
-                let yh = (word0 & 0xFFF) / 4;
-                let xl = ((word1 >> 12) & 0xFFF) / 4;
-                let yl = (word1 & 0xFFF) / 4;
+                // word2: S(16) | T(16)  - texture start coords in S.10.5 fixed point
+                // word3: DSDX(16) | DTDY(16)  - texture increments in S.10.5 fixed point
+                let xh = ((word0 >> 12) & 0xFFF) as i32;
+                let yh = (word0 & 0xFFF) as i32;
+                let xl = ((word1 >> 12) & 0xFFF) as i32;
+                let yl = (word1 & 0xFFF) as i32;
                 let tile = ((word1 >> 24) & 0x07) as usize;
 
-                log(LogCategory::Stubs, LogLevel::Debug, || {
+                let s_start = ((word2 >> 16) & 0xFFFF) as i16 as i32;
+                let t_start = (word2 & 0xFFFF) as i16 as i32;
+                let dsdx = ((word3 >> 16) & 0xFFFF) as i16 as i32;
+                let dtdy = (word3 & 0xFFFF) as i16 as i32;
+
+                let px_xl = xl / 4;
+                let px_yl = yl / 4;
+                let px_xh = xh / 4;
+                let px_yh = yh / 4;
+
+                log(LogCategory::PPU, LogLevel::Debug, || {
                     format!(
-                        "N64 RDP: TEXTURE_RECTANGLE_FLIP - rendering flipped textured rect (xl={}, yl={}, xh={}, yh={}, tile={})",
-                        xl, yl, xh, yh, tile
+                        "N64 RDP: TEXTURE_RECTANGLE_FLIP - rect ({},{})..({},{}) tile={} s={} t={} dsdx={} dtdy={}",
+                        px_xl, px_yl, px_xh, px_yh, tile, s_start, t_start, dsdx, dtdy
                     )
                 });
 
-                let width = xh.saturating_sub(xl);
-                let height = yh.saturating_sub(yl);
+                let width = (px_xh - px_xl).max(0) as u32;
+                let height = (px_yh - px_yl).max(0) as u32;
+                let xl = px_xl.max(0) as u32;
+                let yl = px_yl.max(0) as u32;
 
-                // Check if tile has valid texture data in TMEM
                 let has_texture = if tile < 8 {
                     let tmem_addr = self.tiles[tile].tmem_addr as usize;
                     tmem_addr < self.tmem.len() && self.tmem[tmem_addr] != 0
@@ -1232,28 +1426,27 @@ impl Rdp {
                     false
                 };
 
-                // Render flipped textured rectangle if texture data is available
+                // Flipped: S increments along Y axis, T increments along X axis
                 if has_texture && width > 0 && height > 0 {
+                    let mut s = s_start;
                     for y in 0..height {
+                        let mut t = t_start;
                         for x in 0..width {
                             let px = xl + x;
                             let py = yl + y;
 
                             if px < self.width && py < self.height {
-                                // Calculate texture coordinates (flipped: S/T swapped)
-                                let s = ((y * 64) / height.max(1)) & 0x3F; // Map to 0-63 (from Y)
-                                let t = ((x * 64) / width.max(1)) & 0x3F; // Map to 0-63 (from X)
+                                let tex_s = ((s >> 5) & 0x3FF) as u32;
+                                let tex_t = ((t >> 5) & 0x3FF) as u32;
 
-                                // Sample texture
-                                let color = self.sample_texture(tile, s, t);
-
-                                // Draw pixel using renderer
+                                let color = self.sample_texture(tile, tex_s, tex_t);
                                 self.renderer.set_pixel(px, py, color);
                             }
+                            t = t.wrapping_add(dtdy);
                         }
+                        s = s.wrapping_add(dsdx);
                     }
                 } else {
-                    // Fallback to solid fill if texture is not available
                     self.fill_rect(xl, yl, width, height);
                 }
             }
@@ -1474,7 +1667,19 @@ impl Rdp {
             0x3F => {
                 // word0: bits 21-19 = format, bits 18-17 = size, bits 11-0 = width-1
                 // word1: DRAM address of color buffer
-                // For now, we ignore this and use our internal framebuffer
+                let _format = (word0 >> 19) & 0x07;
+                let size = ((word0 >> 17) & 0x03) as u8;
+                let width = (word0 & 0x0FFF) + 1;
+                let addr = word1 & 0x00FFFFFF;
+                self.color_image_addr = addr;
+                self.color_image_width = width;
+                self.color_image_size = size;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!(
+                        "N64 RDP: SET_COLOR_IMAGE addr=0x{:08X} width={} size={}",
+                        addr, width, size
+                    )
+                });
             }
             // SYNC_PIPE (0x27), SYNC_TILE (0x28), SYNC_LOAD (0x26)
             0x26..=0x28 => {
@@ -1771,15 +1976,16 @@ mod tests {
         rdram[0..4].copy_from_slice(&0x37000000u32.to_be_bytes());
         rdram[4..8].copy_from_slice(&0xFF0000FFu32.to_be_bytes());
 
-        // TEXTURE_RECTANGLE (0x24) - stub implementation fills with solid color
+        // TEXTURE_RECTANGLE (0x24) - 16 bytes total
         // Coordinates: (50,50) to (100,100)
         let tex_rect_cmd: u32 = (0x24 << 24) | ((100 * 4) << 12) | (100 * 4);
         let tex_rect_data: u32 = ((50 * 4) << 12) | (50 * 4); // tile=0, coords
         rdram[8..12].copy_from_slice(&tex_rect_cmd.to_be_bytes());
         rdram[12..16].copy_from_slice(&tex_rect_data.to_be_bytes());
+        // word2 (S|T) and word3 (DSDX|DTDY) at bytes 16-23 are 0 (no texture data)
 
         rdp.write_register(0x00, 0);
-        rdp.write_register(0x04, 16);
+        rdp.write_register(0x04, 24); // 8 (SET_FILL_COLOR) + 16 (TEXTURE_RECTANGLE)
         rdp.process_display_list(&rdram);
 
         // Verify the rectangle was filled (stub implementation)

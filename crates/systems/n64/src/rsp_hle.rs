@@ -721,14 +721,38 @@ impl RspHle {
 
             let cmd_id = (word0 >> 24) & 0xFF;
 
-            // Process F3DEX command
-            let should_continue = self.execute_f3dex_command(cmd_id, word0, word1, rdram, rdp);
+            // TEXTURE_RECTANGLE (0xE4/0xE5) is a 3-entry compound command in F3DEX2:
+            // Entry 1 (0xE4): rect coords + tile
+            // Entry 2: 0x00000000 | S.10.5 | T.10.5
+            // Entry 3: 0x00000000 | DSDX.10.5 | DTDY.10.5
+            let extra_stride = if (cmd_id == 0xE4 || cmd_id == 0xE5) && addr + 23 < rdram.len() {
+                let w2 = u32::from_be_bytes([
+                    rdram[addr + 12],
+                    rdram[addr + 13],
+                    rdram[addr + 14],
+                    rdram[addr + 15],
+                ]);
+                let w3 = u32::from_be_bytes([
+                    rdram[addr + 20],
+                    rdram[addr + 21],
+                    rdram[addr + 22],
+                    rdram[addr + 23],
+                ]);
+                // Forward to RDP with texture coordinate data
+                let rdp_cmd_id = cmd_id & 0x3F;
+                rdp.execute_rdp_command(rdp_cmd_id, word0, word1, w2, w3, rdram);
+                16 // skip the 2 extra 8-byte entries
+            } else {
+                // Process F3DEX command normally
+                let should_continue = self.execute_f3dex_command(cmd_id, word0, word1, rdram, rdp);
 
-            if !should_continue {
-                break; // G_ENDDL or branch command
-            }
+                if !should_continue {
+                    break; // G_ENDDL or branch command
+                }
+                0
+            };
 
-            addr += 8;
+            addr += 8 + extra_stride;
             commands_processed += 1;
         }
     }
@@ -802,10 +826,12 @@ impl RspHle {
             }
             // G_VTX (0x01) - Load vertices
             0x01 => {
-                // word0: cmd_id | vn (vertex count, bits 20-11) | v0 (buffer index, bits 16-1)
+                // F3DEX2 format:
+                // word0: cmd_id(8) | numv(8, bits 19:12) | (vbidx + numv)(7, bits 7:1)
                 // word1: vertex data address in RDRAM
                 let vertex_count = ((word0 >> 12) & 0xFF) as usize;
-                let buffer_index = ((word0 >> 1) & 0x7F) as usize;
+                let vbidx_plus_n = ((word0 >> 1) & 0x7F) as usize;
+                let buffer_index = vbidx_plus_n.saturating_sub(vertex_count);
                 let vertex_addr = self.resolve_segment_addr(word1);
 
                 // Load vertices from RDRAM into vertex buffer
@@ -1189,6 +1215,10 @@ impl RspHle {
                 // Clear the bits in the range, then set new bits
                 self.othermode_l = (self.othermode_l & !mask) | (data & mask);
 
+                // Forward combined othermode to RDP as SET_OTHER_MODES
+                let combined = ((self.othermode_h as u64) << 32) | (self.othermode_l as u64);
+                rdp.set_othermode(combined);
+
                 log(LogCategory::PPU, LogLevel::Debug, || {
                     format!(
                         "RSP HLE: G_SETOTHERMODE_L - shift={}, len={}, data=0x{:08X}, result=0x{:08X}",
@@ -1215,6 +1245,10 @@ impl RspHle {
 
                 // Clear the bits in the range, then set new bits
                 self.othermode_h = (self.othermode_h & !mask) | (data & mask);
+
+                // Forward combined othermode to RDP as SET_OTHER_MODES
+                let combined = ((self.othermode_h as u64) << 32) | (self.othermode_l as u64);
+                rdp.set_othermode(combined);
 
                 log(LogCategory::PPU, LogLevel::Debug, || {
                     format!(
@@ -1314,7 +1348,7 @@ impl RspHle {
 
                 // Call RDP's execute_command directly with the command data
                 // Pass rdram for texture loading and other DRAM-dependent commands
-                rdp.execute_rdp_command(rdp_cmd_id, word0, word1, rdram);
+                rdp.execute_rdp_command(rdp_cmd_id, word0, word1, 0, 0, rdram);
                 true
             }
             // Unknown/unsupported command - skip it
