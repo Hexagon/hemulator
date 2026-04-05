@@ -3373,19 +3373,21 @@ impl Ppu {
                         ((tx & 0x3FF) / 8, (ty & 0x3FF) / 8)
                     }
                     2 => {
-                        // Character 0 fill outside playing field
+                        // Transparent outside playing field (palette forced to 0)
+                        // Reference: bsnes mode7.cpp - repeatMode7==2 sets palette=0
+                        if !(0..1024).contains(&tx) || !(0..1024).contains(&ty) {
+                            continue;
+                        }
+                        (tx / 8, ty / 8)
+                    }
+                    3 => {
+                        // Tile 0 fill outside playing field
+                        // Reference: bsnes mode7.cpp - repeatMode7==3 sets tile=0
                         if !(0..1024).contains(&tx) || !(0..1024).contains(&ty) {
                             (0, 0)
                         } else {
                             (tx / 8, ty / 8)
                         }
-                    }
-                    3 => {
-                        // Transparent outside (backdrop color)
-                        if !(0..1024).contains(&tx) || !(0..1024).contains(&ty) {
-                            continue;
-                        }
-                        (tx / 8, ty / 8)
                     }
                     _ => unreachable!(),
                 };
@@ -3507,17 +3509,19 @@ impl Ppu {
                 let (tile_x, tile_y) = match screen_over {
                     0 | 1 => ((tx & 0x3FF) / 8, (ty & 0x3FF) / 8),
                     2 => {
+                        // Transparent outside (palette forced to 0)
+                        if !(0..1024).contains(&tx) || !(0..1024).contains(&ty) {
+                            continue;
+                        }
+                        (tx / 8, ty / 8)
+                    }
+                    3 => {
+                        // Tile 0 fill outside
                         if !(0..1024).contains(&tx) || !(0..1024).contains(&ty) {
                             (0, 0)
                         } else {
                             (tx / 8, ty / 8)
                         }
-                    }
-                    3 => {
-                        if !(0..1024).contains(&tx) || !(0..1024).contains(&ty) {
-                            continue;
-                        }
-                        (tx / 8, ty / 8)
                     }
                     _ => unreachable!(),
                 };
