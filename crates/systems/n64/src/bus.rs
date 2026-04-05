@@ -788,19 +788,19 @@ impl MemoryMips for N64Bus {
             0x0460_0000..=0x046F_FFFF => {
                 let offset = phys_addr & 0xFF;
                 match offset {
-                    0x00 => 0,    // PI_DRAM_ADDR - DRAM address for DMA
-                    0x04 => 0,    // PI_CART_ADDR - Cart address for DMA
-                    0x08 => 0,    // PI_RD_LEN - Read DMA length
-                    0x0C => 0,    // PI_WR_LEN - Write DMA length
-                    0x10 => 0x00, // PI_STATUS - 0 means ready (no DMA in progress)
-                    0x14 => 0xFF, // PI_BSD_DOM1_LAT - Domain 1 latency
-                    0x18 => 0xFF, // PI_BSD_DOM1_PWD - Domain 1 pulse width
-                    0x1C => 0x0F, // PI_BSD_DOM1_PGS - Domain 1 page size
-                    0x20 => 0x03, // PI_BSD_DOM1_RLS - Domain 1 release
-                    0x24 => 0xFF, // PI_BSD_DOM2_LAT - Domain 2 latency
-                    0x28 => 0xFF, // PI_BSD_DOM2_PWD - Domain 2 pulse width
-                    0x2C => 0x0F, // PI_BSD_DOM2_PGS - Domain 2 page size
-                    0x30 => 0x03, // PI_BSD_DOM2_RLS - Domain 2 release
+                    0x00 => self.pi_dram_addr, // PI_DRAM_ADDR - DRAM address for DMA
+                    0x04 => self.pi_cart_addr, // PI_CART_ADDR - Cart address for DMA
+                    0x08 => 0,                 // PI_RD_LEN - Read DMA length (returns 0 when idle)
+                    0x0C => 0,                 // PI_WR_LEN - Write DMA length (returns 0 when idle)
+                    0x10 => 0x00,              // PI_STATUS - 0 means ready (no DMA in progress)
+                    0x14 => 0xFF,              // PI_BSD_DOM1_LAT - Domain 1 latency
+                    0x18 => 0xFF,              // PI_BSD_DOM1_PWD - Domain 1 pulse width
+                    0x1C => 0x0F,              // PI_BSD_DOM1_PGS - Domain 1 page size
+                    0x20 => 0x03,              // PI_BSD_DOM1_RLS - Domain 1 release
+                    0x24 => 0xFF,              // PI_BSD_DOM2_LAT - Domain 2 latency
+                    0x28 => 0xFF,              // PI_BSD_DOM2_PWD - Domain 2 pulse width
+                    0x2C => 0x0F,              // PI_BSD_DOM2_PGS - Domain 2 page size
+                    0x30 => 0x03,              // PI_BSD_DOM2_RLS - Domain 2 release
                     _ => 0,
                 }
             }
@@ -1320,5 +1320,39 @@ impl MemoryMips for N64Bus {
         });
 
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use emu_core::cpu_mips_r4300i::MemoryMips;
+
+    #[test]
+    #[ignore] // Requires OpenGL context
+    fn test_pi_dram_addr_readback() {
+        let gl = unsafe { glow::Context::from_loader_function(|_s| std::ptr::null()) };
+        let mut bus = N64Bus::new(gl).unwrap();
+
+        // Write PI_DRAM_ADDR via KSEG1 mapping
+        bus.write_word(0xA460_0000, 0x0012_3456);
+
+        // Read it back
+        let val = bus.read_word(0xA460_0000);
+        assert_eq!(val, 0x0012_3456 & 0x00FF_FFFF);
+    }
+
+    #[test]
+    #[ignore] // Requires OpenGL context
+    fn test_pi_cart_addr_readback() {
+        let gl = unsafe { glow::Context::from_loader_function(|_s| std::ptr::null()) };
+        let mut bus = N64Bus::new(gl).unwrap();
+
+        // Write PI_CART_ADDR via KSEG1 mapping
+        bus.write_word(0xA460_0004, 0x1000_0100);
+
+        // Read it back
+        let val = bus.read_word(0xA460_0004);
+        assert_eq!(val, 0x1000_0100);
     }
 }
