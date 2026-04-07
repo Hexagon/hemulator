@@ -65,6 +65,10 @@ pub trait RdpRenderer: Send {
     /// Get the current framebuffer
     fn get_frame(&self) -> &Frame;
 
+    /// Sync GPU framebuffer to CPU (no-op for software renderers).
+    /// Must be called before `get_frame()` on GPU-backed renderers.
+    fn sync_framebuffer(&mut self) {}
+
     /// Get mutable access to the framebuffer
     #[allow(dead_code)]
     fn get_frame_mut(&mut self) -> &mut Frame;

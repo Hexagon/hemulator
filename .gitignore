@@ -27,6 +27,18 @@ config.json
 *.COM
 temp.img
 
+# ROM files (do not commit copyrighted game ROMs)
+*.z64
+*.n64
+*.v64
+*.nes
+*.sfc
+*.smc
+*.gba
+*.gb
+*.gbc
+*.nds
+
 # Debugging files
 *trace.txt
 *.err

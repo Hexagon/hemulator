@@ -937,7 +937,7 @@ impl SuperFx {
 
                 let result32 = (a as u32).wrapping_sub(b as u32).wrapping_sub(carry as u32);
                 let result = result32 as u16;
-                self.flags_cy = a >= b.wrapping_add(carry); // carry = no borrow
+                self.flags_cy = (a as u32) >= (b as u32) + (carry as u32); // carry = no borrow
                 self.flags_ov = ((a ^ b) & (a ^ result) & 0x8000) != 0;
                 self.update_zs(result);
                 if alt == 3 {
@@ -1150,7 +1150,7 @@ impl SuperFx {
                         let yy = self.fetch_byte(pc_base) as u16;
                         let addr = yy << 1;
                         self.last_ram_addr = addr;
-                        let val = self.regs[self.sreg];
+                        let val = self.regs[n];
                         self.write_ram_word(addr, val);
                         self.regs[15] = self.regs[15].wrapping_add(2);
                         cycles = 2;
@@ -1310,7 +1310,7 @@ impl SuperFx {
                         let yy = self.fetch_byte(pc_base) as u16;
                         let addr = yy << 1;
                         self.last_ram_addr = addr;
-                        let val = self.regs[self.sreg];
+                        let val = self.regs[n];
                         self.write_ram_word(addr, val);
                         self.regs[15] = self.regs[15].wrapping_add(2);
                         cycles = 2;
@@ -1321,7 +1321,7 @@ impl SuperFx {
                         let hi = self.fetch_byte(pc_base + 1);
                         let addr = u16::from_le_bytes([lo, hi]);
                         self.last_ram_addr = addr;
-                        let val = self.regs[self.sreg];
+                        let val = self.regs[n];
                         self.write_ram_word(addr, val);
                         self.regs[15] = self.regs[15].wrapping_add(3);
                         cycles = 3;

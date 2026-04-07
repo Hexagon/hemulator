@@ -139,28 +139,31 @@ impl BrrDecoder {
     /// - `filter`: Filter type (0-3)
     fn decode_nibble(&mut self, nibble: i8, shift: u8, filter: u8) -> i16 {
         // Convert 4-bit signed to extended value
-        let mut sample = (nibble as i32) << shift;
-        sample >>= 1; // Hardware quirk: right shift by 1 after left shift
+        // Hardware-accurate: shift >= 13 produces clamped output
+        // Reference: blargg's SPC_DSP.cpp (public domain)
+        let mut sample = ((nibble as i32) << shift) >> 1;
+        if shift >= 13 {
+            sample = (sample >> 25) << 11; // Positive nibbles → 0, negative → -2048
+        }
 
         // Apply filter based on previous samples
-        // Reference: https://problemkaputt.de/fullsnes.htm#snesapudspbrrsamples
+        // Uses (-p) >> n form for correct negative rounding per hardware
+        // Reference: blargg's SPC_DSP.cpp (public domain)
+        let p1 = self.prev1 as i32;
+        let p2 = (self.prev2 as i32) >> 1; // Pre-shift prev2 by 1 per hardware
         sample += match filter {
             0 => 0, // Direct (no filter)
             1 => {
-                // Linear filter: prev1 * 15/16
-                (self.prev1 as i32) - ((self.prev1 as i32) >> 4)
+                // s += p1 + ((-p1) >> 4)
+                p1 + ((-p1) >> 4)
             }
             2 => {
-                // Quadratic filter 1: prev1 * 61/32 - prev2 * 15/16
-                let a = ((self.prev1 as i32) << 1) - ((self.prev1 as i32 * 3) >> 5);
-                let b = ((self.prev2 as i32) >> 1) - ((self.prev2 as i32) >> 5);
-                a - b
+                // s += 2*p1 + ((-3*p1) >> 5) - p2 + (p2 >> 4)
+                2 * p1 + ((-3 * p1) >> 5) - p2 + (p2 >> 4)
             }
             3 => {
-                // Quadratic filter 2: prev1 * 115/64 - prev2 * 13/16
-                let a = ((self.prev1 as i32) << 1) - ((self.prev1 as i32 * 13) >> 6);
-                let b = ((self.prev2 as i32) >> 1) - ((self.prev2 as i32 * 3) >> 4);
-                a - b
+                // s += 2*p1 + ((-13*p1) >> 6) + 3*p2 + ((-3*p2) >> 4)
+                2 * p1 + ((-13 * p1) >> 6) + 3 * p2 + ((-3 * p2) >> 4)
             }
             _ => 0, // Invalid filter (shouldn't happen)
         };
@@ -303,25 +306,18 @@ impl Envelope {
             match self.mode {
                 EnvelopeMode::Attack => {
                     // Attack: linear increase
+                    // Rate 15 (rate value 31): add 1024 per tick (fast but not instant)
+                    // All other rates: add 32 per tick
+                    // Reference: bsnes DSP envelope
+                    let rate_value = attack_rate * 2 + 1;
                     self.rate_counter = self.rate_counter.wrapping_add(1);
-                    let rate = if attack_rate == 15 {
-                        // Maximum rate: update every clock
-                        1
-                    } else {
-                        RATE_TABLE[attack_rate * 2 + 1]
-                    };
+                    let rate = RATE_TABLE[rate_value];
 
                     if self.rate_counter >= rate {
                         self.rate_counter = 0;
 
-                        if attack_rate == 15 {
-                            // Instant attack
-                            self.level = 0x7FF;
-                        } else if self.level < 0x7E0 {
-                            self.level += 32;
-                        } else {
-                            self.level = 0x7FF;
-                        }
+                        let step = if rate_value == 31 { 1024 } else { 32 };
+                        self.level = self.level.saturating_add(step).min(0x7FF);
 
                         if self.level >= 0x7FF {
                             self.level = 0x7FF;
@@ -372,19 +368,13 @@ impl Envelope {
                     }
                 }
                 EnvelopeMode::Release => {
-                    // Release: exponential decrease to zero
-                    if self.level > 0 {
-                        self.rate_counter = self.rate_counter.wrapping_add(1);
-                        // Release uses fixed rate of 31 (fastest exponential)
-                        let rate = RATE_TABLE[31];
-
-                        if self.rate_counter >= rate {
-                            self.rate_counter = 0;
-
-                            // Exponential decay
-                            let step = ((self.level - 1) >> 8) + 1;
-                            self.level = self.level.saturating_sub(step);
-                        }
+                    // Release: LINEAR decrease by 8 every clock (not exponential)
+                    // This runs unconditionally every clock, no rate counter
+                    // Reference: bsnes DSP - v.envelope -= 8
+                    if self.level >= 8 {
+                        self.level -= 8;
+                    } else {
+                        self.level = 0;
                     }
                 }
             }
@@ -601,11 +591,16 @@ impl Voice {
         let g2 = GAUSSIAN_TABLE[256 + frac] as i32; // Weight for t+1
         let g3 = GAUSSIAN_TABLE[frac] as i32; // Weight for t+2
 
-        // Apply Gaussian filter: weighted sum of 4 samples
-        // Coefficients are 12-bit values, sum should be normalized
-        let result = (s0 * g0 + s1 * g1 + s2 * g2 + s3 * g3) >> 11;
+        // Hardware-accurate Gaussian filter: each product is shifted individually,
+        // then clipped to i16 after 3 terms, then 4th term added and clipped again
+        // Reference: bsnes DSP gaussianInterpolate()
+        let mut output = (s0 * g0) >> 11;
+        output += (s1 * g1) >> 11;
+        output += (s2 * g2) >> 11;
+        output = (output as i16) as i32; // Clip to 16-bit after first 3 terms
+        output += (s3 * g3) >> 11;
 
-        result.clamp(-32768, 32767) as i16
+        output.clamp(-32768, 32767) as i16
     }
 
     /// Get voice output after applying envelope and volume

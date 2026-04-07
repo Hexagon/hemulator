@@ -22,10 +22,15 @@ not available in CI or in headless `cargo test` runs.  They can be run manually 
 
 ### High
 - [ ] **RDP Blend/Combine pipeline**: `SET_OTHER_MODES` values are stored in both the RDP (`rdp.rs`) and RSP HLE (`rsp_hle.rs`) but are never consumed by the rendering pipeline. Applying cycle type, texture filtering, and alpha-blending modes would significantly improve visual accuracy. — `crates/systems/n64/src/rdp.rs`, `crates/systems/n64/src/rdp_renderer_opengl.rs`
+- [x] **RDP textured triangle rendering**: ~~Texture coordinates from RSP vertex data are loaded but not used in triangle rasterization.~~ Implemented textured triangle rendering via `draw_triangle_textured_zbuf` with UV coordinate passthrough from RSP HLE when G_TEXTURE_ENABLE is active. — `crates/systems/n64/src/rdp.rs`, `crates/systems/n64/src/rsp_hle.rs`
 
 ### Medium
-- [ ] **RSP ADPCM decode**: The ADPCM command (0x01) currently writes silence. A proper VADPCM decoder would significantly improve audio quality for games that use ADPCM-compressed audio. — `crates/systems/n64/src/rsp_hle.rs`
-- [ ] **RSP Audio RESAMPLE command**: The RESAMPLE command (0x03) is currently a no-op. A proper resample algorithm would improve audio accuracy. — `crates/systems/n64/src/rsp_hle.rs`
+- [x] **RSP ADPCM decode**: ~~The ADPCM command (0x01) currently writes silence.~~ Implemented VADPCM decoder with 2nd-order IIR prediction, 4-bit nibble decoding, and proper scale shifting. — `crates/systems/n64/src/rsp_hle.rs`
+- [x] **RSP Audio RESAMPLE command**: ~~The RESAMPLE command (0x03) is currently a no-op.~~ Implemented linear interpolation resampling with 16-bit fixed-point pitch control. — `crates/systems/n64/src/rsp_hle.rs`
+- [x] **RSP HLE Lighting**: ~~Lights were loaded but not applied to vertex colors.~~ Implemented directional lighting with normal transformation, ambient light accumulation, and per-vertex color calculation. — `crates/systems/n64/src/rsp_hle.rs`
+- [x] **RSP HLE Back-face culling**: ~~Geometry mode G_CULL_FRONT/G_CULL_BACK flags were not enforced.~~ Implemented screen-space cross product culling for both front and back facing triangles. — `crates/systems/n64/src/rsp_hle.rs`
+- [x] **RSP Audio ENVMIXER**: ~~ENVMIXER (0x0D) was a no-op.~~ Implemented envelope-controlled mixing that adds source samples to left/right channels with saturation. — `crates/systems/n64/src/rsp_hle.rs`
+- [x] **PI register readback**: ~~PI_DRAM_ADDR and PI_CART_ADDR reads returned hardcoded 0.~~ Now return the stored values written by game code. — `crates/systems/n64/src/bus.rs`
 - [ ] **RSP F3DEX fog / clipping commands**: Several less-common F3DEX commands still log as stubs: `G_SETPRIMDEPTH`, `G_TEXTURE` (texture coordinate scaling not forwarded to RDP), `G_LOAD_UCODE` (microcode reload). — `crates/systems/n64/src/rsp_hle.rs`
 - [ ] **RDP performance counters**: `DPC_CLOCK`, `DPC_BUFBUSY`, `DPC_PIPEBUSY`, and `DPC_TMEM` registers return hardcoded 0. Some games wait for these to reach expected values. — `crates/systems/n64/src/rdp.rs`
 - [ ] **CPU overflow traps**: Signed arithmetic instructions (`ADD`, `ADDI`, `SUB`) should raise an overflow exception on overflow, but currently use wrapping arithmetic. Most commercial software does not rely on this, but some may. — `crates/core/src/cpu_mips_r4300i/`
