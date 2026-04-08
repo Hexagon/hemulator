@@ -123,7 +123,9 @@ pub struct RspHle {
     dl_stack: Vec<u32>,
 
     /// Temporary storage for G_RDPHALF_1 data
-    /// Used for 2-word RDP commands split across display list entries
+    /// Used for 2-word RDP commands split across display list entries.
+    /// G_RDPHALF_1 stores the first word here; G_RDPHALF_2 reads it to construct
+    /// the complete RDP command and forward it to the RDP.
     rdp_half: u32,
 
     /// Primitive depth values set by G_SETPRIMDEPTH

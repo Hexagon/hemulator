@@ -242,8 +242,6 @@ fn detect_save_type(id: &[u8; 4]) -> SaveType {
         "NMUE" | "NMUJ" | "NMUP" => SaveType::Eeprom16K,
         // Tarzan
         "NTAE" | "NTAP" => SaveType::Eeprom16K,
-        // Pokémon Puzzle Challenge (GB Color, referenced here as N64 spinoff)
-        "NPZJ" => SaveType::Eeprom16K,
 
         // --- EEPROM 4 Kbit (512 bytes) ---
         // Super Mario 64 (all regions)
