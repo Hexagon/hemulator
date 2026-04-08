@@ -18,7 +18,7 @@ not available in CI or in headless `cargo test` runs.  They can be run manually 
 ## N64
 
 ### Critical
-- [ ] **Save type detection for unlisted games**: Only common retail titles are in the save-type database. Unknown games silently receive `SaveType::None`. Consider implementing a checksum-based database fallback (e.g. using the ipl3 CRC or the CIC seed) so that unlisted games still get a sensible default. — `crates/systems/n64/src/cartridge.rs`
+- [ ] **Save type detection for unlisted games**: The save-type database has been expanded with ~80 additional titles covering common N64 games. Unknown games silently receive `SaveType::None`. Consider implementing a checksum-based database fallback (e.g. using the ipl3 CRC or the CIC seed) so that unlisted games still get a sensible default. — `crates/systems/n64/src/cartridge.rs`
 
 ### High
 - [ ] **RDP Blend/Combine pipeline**: `SET_OTHER_MODES` values are stored in both the RDP (`rdp.rs`) and RSP HLE (`rsp_hle.rs`) but are never consumed by the rendering pipeline. Applying cycle type, texture filtering, and alpha-blending modes would significantly improve visual accuracy. — `crates/systems/n64/src/rdp.rs`, `crates/systems/n64/src/rdp_renderer_opengl.rs`
@@ -31,12 +31,12 @@ not available in CI or in headless `cargo test` runs.  They can be run manually 
 - [x] **RSP HLE Back-face culling**: ~~Geometry mode G_CULL_FRONT/G_CULL_BACK flags were not enforced.~~ Implemented screen-space cross product culling for both front and back facing triangles. — `crates/systems/n64/src/rsp_hle.rs`
 - [x] **RSP Audio ENVMIXER**: ~~ENVMIXER (0x0D) was a no-op.~~ Implemented envelope-controlled mixing that adds source samples to left/right channels with saturation. — `crates/systems/n64/src/rsp_hle.rs`
 - [x] **PI register readback**: ~~PI_DRAM_ADDR and PI_CART_ADDR reads returned hardcoded 0.~~ Now return the stored values written by game code. — `crates/systems/n64/src/bus.rs`
-- [ ] **RSP F3DEX fog / clipping commands**: Several less-common F3DEX commands still log as stubs: `G_SETPRIMDEPTH`, `G_TEXTURE` (texture coordinate scaling not forwarded to RDP), `G_LOAD_UCODE` (microcode reload). — `crates/systems/n64/src/rsp_hle.rs`
+- [x] **RSP F3DEX fog / clipping commands**: Implemented `G_MODIFYVTX` (vertex attribute modification: RGBA, ST, XY, Z), `G_RDPHALF_2` (now forwards the combined 2-word RDP command via stored `rdp_half`), and `G_SETPRIMDEPTH` (stores z/dz in `prim_depth_z`/`prim_depth_dz`). `G_LOAD_UCODE` and fog commands remain stubs. — `crates/systems/n64/src/rsp_hle.rs`
 - [ ] **RDP performance counters**: `DPC_CLOCK`, `DPC_BUFBUSY`, `DPC_PIPEBUSY`, and `DPC_TMEM` registers return hardcoded 0. Some games wait for these to reach expected values. — `crates/systems/n64/src/rdp.rs`
-- [ ] **CPU overflow traps**: Signed arithmetic instructions (`ADD`, `ADDI`, `SUB`) should raise an overflow exception on overflow, but currently use wrapping arithmetic. Most commercial software does not rely on this, but some may. — `crates/core/src/cpu_mips_r4300i/`
+- [x] **CPU overflow traps**: Signed arithmetic instructions (`ADD`, `ADDI`, `SUB`, `DADD`, `DADDI`, `DSUB`) now raise IntegerOverflow exception (code 12) on overflow, per MIPS III spec. — `crates/core/src/cpu_mips_r4300i.rs`
 
 ### Low
-- [ ] **Memory alignment validation**: Load/store instructions that require alignment (LH/SH = 2 B, LW/SW = 4 B, LD/SD = 8 B) do not raise `AddressError` exceptions on misaligned access. — `crates/core/src/cpu_mips_r4300i/`
+- [x] **Memory alignment validation**: Load/store instructions now raise `AddressError` exceptions (AdEL=4 on load, AdES=5 on store) on misaligned access. `CP0_BADVADDR` is set to the faulting address. (LH/SH = 2 B, LW/SW = 4 B, LD/SD = 8 B). — `crates/core/src/cpu_mips_r4300i.rs`
 - [ ] **Full cache coherency**: The TLB/cache is direct-mapped only; cache invalidation and dirty-line write-back are not emulated. — `crates/systems/n64/src/bus.rs`
 
 ## Game & Watch
