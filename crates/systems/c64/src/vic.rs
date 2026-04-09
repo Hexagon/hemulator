@@ -222,11 +222,11 @@ impl Vic {
     /// Render one visible line (0–199)
     fn render_line(&mut self, visible_y: u32) {
         let den = self.regs[0x11] & 0x10 != 0;
+        let border = PALETTE[(self.regs[0x20] & 0x0F) as usize];
+        let offset = (visible_y * VISIBLE_WIDTH) as usize;
 
         if !den {
             // Display not enabled - render border color
-            let border = PALETTE[(self.regs[0x20] & 0x0F) as usize];
-            let offset = (visible_y * VISIBLE_WIDTH) as usize;
             for x in 0..VISIBLE_WIDTH as usize {
                 if offset + x < self.frame.pixels.len() {
                     self.frame.pixels[offset + x] = border;
@@ -239,32 +239,57 @@ impl Vic {
         let ecm = self.regs[0x11] & 0x40 != 0; // Extended color mode
         let mcm = self.regs[0x16] & 0x10 != 0; // Multicolor mode
 
-        // TODO: Apply XSCROLL ($D016 bits 0-2) and YSCROLL ($D011 bits 0-2)
-        // to shift the display output
+        // XSCROLL ($D016 bits 0-2): shifts display right by 0–7 pixels.
+        // YSCROLL ($D011 bits 0-2): shifts the character row start (default 3).
+        let xscroll = (self.regs[0x16] & 0x07) as usize;
+        let yscroll = (self.regs[0x11] & 0x07) as i32;
+
+        // Effective Y for character row / pixel-row calculations.
+        // With YSCROLL=3 (default): effective_y = visible_y (no change).
+        let effective_y = ((visible_y as i32) + 3 - yscroll).max(0) as u32;
+
+        // Fill the leftmost xscroll pixels with border color.
+        for x in 0..xscroll {
+            let idx = offset + x;
+            if idx < self.frame.pixels.len() {
+                self.frame.pixels[idx] = border;
+            }
+        }
+
+        // Foreground-pixel mask for the current line (used by sprite priority and
+        // sprite-background collision detection). A pixel is "foreground" when it is
+        // set by a character or bitmap waveform (not the background color).
+        let mut fg_mask = [false; VISIBLE_WIDTH as usize];
 
         if bmm {
             if mcm {
-                self.render_multicolor_bitmap(visible_y);
+                self.render_multicolor_bitmap(visible_y, effective_y, xscroll, &mut fg_mask);
             } else {
-                self.render_standard_bitmap(visible_y);
+                self.render_standard_bitmap(visible_y, effective_y, xscroll, &mut fg_mask);
             }
         } else if ecm {
-            self.render_ecm(visible_y);
+            self.render_ecm(visible_y, effective_y, xscroll, &mut fg_mask);
         } else if mcm {
-            self.render_multicolor_text(visible_y);
+            self.render_multicolor_text(visible_y, effective_y, xscroll, &mut fg_mask);
         } else {
-            self.render_standard_text(visible_y);
+            self.render_standard_text(visible_y, effective_y, xscroll, &mut fg_mask);
         }
 
-        // Render sprites on top
-        self.render_sprites(visible_y);
+        // Render sprites on top (with priority and collision detection)
+        self.render_sprites(visible_y, &fg_mask);
     }
 
     /// Render standard text mode (40×25 characters, 8×8 pixels each)
-    fn render_standard_text(&mut self, visible_y: u32) {
+    fn render_standard_text(
+        &mut self,
+        visible_y: u32,
+        effective_y: u32,
+        xscroll: usize,
+        fg_mask: &mut [bool; VISIBLE_WIDTH as usize],
+    ) {
         let bg_color = PALETTE[(self.regs[0x21] & 0x0F) as usize];
-        let char_row = (visible_y / 8) as usize;
-        let pixel_row = (visible_y % 8) as usize;
+        let char_row = (effective_y / 8) as usize;
+        let pixel_row = (effective_y % 8) as usize;
         let offset = (visible_y * VISIBLE_WIDTH) as usize;
 
         for col in 0..40usize {
@@ -274,24 +299,36 @@ impl Vic {
             let char_pixels = self.read_char_byte(screen_code as usize, pixel_row);
 
             for bit in 0..8usize {
-                let px = col * 8 + bit;
+                let px = col * 8 + bit + xscroll;
+                if px >= VISIBLE_WIDTH as usize {
+                    continue;
+                }
                 let set = char_pixels & (0x80 >> bit) != 0;
                 let color = if set { fg_color } else { bg_color };
                 let idx = offset + px;
                 if idx < self.frame.pixels.len() {
                     self.frame.pixels[idx] = color;
                 }
+                if set {
+                    fg_mask[px] = true;
+                }
             }
         }
     }
 
     /// Render multicolor text mode
-    fn render_multicolor_text(&mut self, visible_y: u32) {
+    fn render_multicolor_text(
+        &mut self,
+        visible_y: u32,
+        effective_y: u32,
+        xscroll: usize,
+        fg_mask: &mut [bool; VISIBLE_WIDTH as usize],
+    ) {
         let bg0 = PALETTE[(self.regs[0x21] & 0x0F) as usize];
         let bg1 = PALETTE[(self.regs[0x22] & 0x0F) as usize];
         let bg2 = PALETTE[(self.regs[0x23] & 0x0F) as usize];
-        let char_row = (visible_y / 8) as usize;
-        let pixel_row = (visible_y % 8) as usize;
+        let char_row = (effective_y / 8) as usize;
+        let pixel_row = (effective_y % 8) as usize;
         let offset = (visible_y * VISIBLE_WIDTH) as usize;
 
         for col in 0..40usize {
@@ -312,11 +349,19 @@ impl Vic {
                         3 => fg_color,
                         _ => unreachable!(),
                     };
-                    let px = col * 8 + pair * 2;
-                    let idx = offset + px;
-                    if idx + 1 < self.frame.pixels.len() {
-                        self.frame.pixels[idx] = color;
-                        self.frame.pixels[idx + 1] = color;
+                    let is_fg = bits != 0;
+                    for sub in 0..2usize {
+                        let px = col * 8 + pair * 2 + sub + xscroll;
+                        if px >= VISIBLE_WIDTH as usize {
+                            continue;
+                        }
+                        let idx = offset + px;
+                        if idx < self.frame.pixels.len() {
+                            self.frame.pixels[idx] = color;
+                        }
+                        if is_fg {
+                            fg_mask[px] = true;
+                        }
                     }
                 }
             } else {
@@ -324,12 +369,18 @@ impl Vic {
                 let fg_color = PALETTE[(color_byte & 0x0F) as usize];
                 let char_pixels = self.read_char_byte(screen_code as usize, pixel_row);
                 for bit in 0..8usize {
-                    let px = col * 8 + bit;
+                    let px = col * 8 + bit + xscroll;
+                    if px >= VISIBLE_WIDTH as usize {
+                        continue;
+                    }
                     let set = char_pixels & (0x80 >> bit) != 0;
                     let color = if set { fg_color } else { bg0 };
                     let idx = offset + px;
                     if idx < self.frame.pixels.len() {
                         self.frame.pixels[idx] = color;
+                    }
+                    if set {
+                        fg_mask[px] = true;
                     }
                 }
             }
@@ -337,9 +388,15 @@ impl Vic {
     }
 
     /// Render standard bitmap mode (320×200, 2 colors per 8×8 cell)
-    fn render_standard_bitmap(&mut self, visible_y: u32) {
-        let char_row = (visible_y / 8) as usize;
-        let pixel_row = (visible_y % 8) as usize;
+    fn render_standard_bitmap(
+        &mut self,
+        visible_y: u32,
+        effective_y: u32,
+        xscroll: usize,
+        fg_mask: &mut [bool; VISIBLE_WIDTH as usize],
+    ) {
+        let char_row = (effective_y / 8) as usize;
+        let pixel_row = (effective_y % 8) as usize;
         let offset = (visible_y * VISIBLE_WIDTH) as usize;
 
         for col in 0..40usize {
@@ -351,22 +408,34 @@ impl Vic {
             let bitmap_byte = self.read_bitmap_byte(bitmap_addr);
 
             for bit in 0..8usize {
-                let px = col * 8 + bit;
+                let px = col * 8 + bit + xscroll;
+                if px >= VISIBLE_WIDTH as usize {
+                    continue;
+                }
                 let set = bitmap_byte & (0x80 >> bit) != 0;
                 let color = if set { fg_color } else { bg_color };
                 let idx = offset + px;
                 if idx < self.frame.pixels.len() {
                     self.frame.pixels[idx] = color;
                 }
+                if set {
+                    fg_mask[px] = true;
+                }
             }
         }
     }
 
     /// Render multicolor bitmap mode (160×200, 4 colors per 4×8 cell)
-    fn render_multicolor_bitmap(&mut self, visible_y: u32) {
+    fn render_multicolor_bitmap(
+        &mut self,
+        visible_y: u32,
+        effective_y: u32,
+        xscroll: usize,
+        fg_mask: &mut [bool; VISIBLE_WIDTH as usize],
+    ) {
         let bg0 = PALETTE[(self.regs[0x21] & 0x0F) as usize];
-        let char_row = (visible_y / 8) as usize;
-        let pixel_row = (visible_y % 8) as usize;
+        let char_row = (effective_y / 8) as usize;
+        let pixel_row = (effective_y % 8) as usize;
         let offset = (visible_y * VISIBLE_WIDTH) as usize;
 
         for col in 0..40usize {
@@ -389,26 +458,40 @@ impl Vic {
                     3 => c3,
                     _ => unreachable!(),
                 };
-                let px = col * 8 + pair * 2;
-                let idx = offset + px;
-                if idx + 1 < self.frame.pixels.len() {
-                    self.frame.pixels[idx] = color;
-                    self.frame.pixels[idx + 1] = color;
+                let is_fg = bits != 0;
+                for sub in 0..2usize {
+                    let px = col * 8 + pair * 2 + sub + xscroll;
+                    if px >= VISIBLE_WIDTH as usize {
+                        continue;
+                    }
+                    let idx = offset + px;
+                    if idx < self.frame.pixels.len() {
+                        self.frame.pixels[idx] = color;
+                    }
+                    if is_fg {
+                        fg_mask[px] = true;
+                    }
                 }
             }
         }
     }
 
     /// Render Extended Color Mode (ECM)
-    fn render_ecm(&mut self, visible_y: u32) {
+    fn render_ecm(
+        &mut self,
+        visible_y: u32,
+        effective_y: u32,
+        xscroll: usize,
+        fg_mask: &mut [bool; VISIBLE_WIDTH as usize],
+    ) {
         let bg_colors = [
             PALETTE[(self.regs[0x21] & 0x0F) as usize],
             PALETTE[(self.regs[0x22] & 0x0F) as usize],
             PALETTE[(self.regs[0x23] & 0x0F) as usize],
             PALETTE[(self.regs[0x24] & 0x0F) as usize],
         ];
-        let char_row = (visible_y / 8) as usize;
-        let pixel_row = (visible_y % 8) as usize;
+        let char_row = (effective_y / 8) as usize;
+        let pixel_row = (effective_y % 8) as usize;
         let offset = (visible_y * VISIBLE_WIDTH) as usize;
 
         for col in 0..40usize {
@@ -424,21 +507,26 @@ impl Vic {
             let char_pixels = self.read_char_byte(char_code as usize, pixel_row);
 
             for bit in 0..8usize {
-                let px = col * 8 + bit;
+                let px = col * 8 + bit + xscroll;
+                if px >= VISIBLE_WIDTH as usize {
+                    continue;
+                }
                 let set = char_pixels & (0x80 >> bit) != 0;
                 let color = if set { fg_color } else { bg_color };
                 let idx = offset + px;
                 if idx < self.frame.pixels.len() {
                     self.frame.pixels[idx] = color;
                 }
+                if set {
+                    fg_mask[px] = true;
+                }
             }
         }
     }
 
-    /// Render sprites for a visible line
-    fn render_sprites(&mut self, visible_y: u32) {
-        // TODO: Populate sprite_sprite_collision and sprite_bg_collision registers
-        // TODO: Enforce sprite-to-background priority ($D01B)
+    /// Render sprites for a visible line, detecting sprite-background and
+    /// sprite-sprite collisions and enforcing the per-sprite priority bit.
+    fn render_sprites(&mut self, visible_y: u32, fg_mask: &[bool; VISIBLE_WIDTH as usize]) {
         let sprite_enable = self.regs[0x15];
         if sprite_enable == 0 {
             return;
@@ -447,7 +535,13 @@ impl Vic {
         let raster = visible_y + FIRST_VISIBLE_LINE;
         let offset = (visible_y * VISIBLE_WIDTH) as usize;
 
-        // Sprites are drawn in reverse order (sprite 0 has highest priority)
+        // Per-pixel sprite-presence mask for this line (used for sprite-sprite collision).
+        let mut sprite_pixel_mask = [false; VISIBLE_WIDTH as usize];
+
+        // Priority register: bit N set means sprite N renders behind background.
+        let priority_reg = self.regs[0x1B];
+
+        // Sprites are drawn in reverse order (sprite 0 has highest priority / drawn last).
         for sprite in (0..8usize).rev() {
             if sprite_enable & (1 << sprite) == 0 {
                 continue;
@@ -459,6 +553,7 @@ impl Vic {
             let y_expand = self.regs[0x17] & (1 << sprite) != 0;
             let x_expand = self.regs[0x1D] & (1 << sprite) != 0;
             let multicolor = self.regs[0x1C] & (1 << sprite) != 0;
+            let behind_bg = priority_reg & (1 << sprite) != 0;
 
             let sprite_height: u32 = if y_expand { 42 } else { 21 };
 
@@ -510,6 +605,23 @@ impl Vic {
                                 && px < (FIRST_DISPLAY_COL + VISIBLE_WIDTH) as usize
                             {
                                 let screen_px = px - FIRST_DISPLAY_COL as usize;
+
+                                // Sprite-background collision
+                                if fg_mask[screen_px] {
+                                    self.sprite_bg_collision |= 1 << sprite;
+                                }
+
+                                // Sprite-sprite collision
+                                if sprite_pixel_mask[screen_px] {
+                                    self.sprite_sprite_collision |= 1 << sprite;
+                                }
+                                sprite_pixel_mask[screen_px] = true;
+
+                                // Sprite priority: skip if behind background fg pixel
+                                if behind_bg && fg_mask[screen_px] {
+                                    continue;
+                                }
+
                                 let idx = offset + screen_px;
                                 if idx < self.frame.pixels.len() {
                                     self.frame.pixels[idx] = color;
@@ -520,8 +632,21 @@ impl Vic {
                                 if px2 >= FIRST_DISPLAY_COL as usize
                                     && px2 < (FIRST_DISPLAY_COL + VISIBLE_WIDTH) as usize
                                 {
-                                    let screen_px = px2 - FIRST_DISPLAY_COL as usize;
-                                    let idx = offset + screen_px;
+                                    let screen_px2 = px2 - FIRST_DISPLAY_COL as usize;
+
+                                    if fg_mask[screen_px2] {
+                                        self.sprite_bg_collision |= 1 << sprite;
+                                    }
+                                    if sprite_pixel_mask[screen_px2] {
+                                        self.sprite_sprite_collision |= 1 << sprite;
+                                    }
+                                    sprite_pixel_mask[screen_px2] = true;
+
+                                    if behind_bg && fg_mask[screen_px2] {
+                                        continue;
+                                    }
+
+                                    let idx = offset + screen_px2;
                                     if idx < self.frame.pixels.len() {
                                         self.frame.pixels[idx] = color;
                                     }
@@ -546,6 +671,23 @@ impl Vic {
                             && px < (FIRST_DISPLAY_COL + VISIBLE_WIDTH) as usize
                         {
                             let screen_px = px - FIRST_DISPLAY_COL as usize;
+
+                            // Sprite-background collision
+                            if fg_mask[screen_px] {
+                                self.sprite_bg_collision |= 1 << sprite;
+                            }
+
+                            // Sprite-sprite collision
+                            if sprite_pixel_mask[screen_px] {
+                                self.sprite_sprite_collision |= 1 << sprite;
+                            }
+                            sprite_pixel_mask[screen_px] = true;
+
+                            // Sprite priority: skip if behind background fg pixel
+                            if behind_bg && fg_mask[screen_px] {
+                                continue;
+                            }
+
                             let idx = offset + screen_px;
                             if idx < self.frame.pixels.len() {
                                 self.frame.pixels[idx] = sprite_color;
@@ -556,8 +698,21 @@ impl Vic {
                             if px2 >= FIRST_DISPLAY_COL as usize
                                 && px2 < (FIRST_DISPLAY_COL + VISIBLE_WIDTH) as usize
                             {
-                                let screen_px = px2 - FIRST_DISPLAY_COL as usize;
-                                let idx = offset + screen_px;
+                                let screen_px2 = px2 - FIRST_DISPLAY_COL as usize;
+
+                                if fg_mask[screen_px2] {
+                                    self.sprite_bg_collision |= 1 << sprite;
+                                }
+                                if sprite_pixel_mask[screen_px2] {
+                                    self.sprite_sprite_collision |= 1 << sprite;
+                                }
+                                sprite_pixel_mask[screen_px2] = true;
+
+                                if behind_bg && fg_mask[screen_px2] {
+                                    continue;
+                                }
+
+                                let idx = offset + screen_px2;
                                 if idx < self.frame.pixels.len() {
                                     self.frame.pixels[idx] = sprite_color;
                                 }
@@ -566,6 +721,17 @@ impl Vic {
                     }
                 }
             }
+        }
+
+        // If any sprite-background or sprite-sprite collisions occurred this line,
+        // trigger the corresponding VIC-II interrupts if enabled.
+        if self.sprite_bg_collision != 0 && self.regs[0x1A] & 0x02 != 0 {
+            self.regs[0x19] |= 0x02 | 0x80;
+            self.irq_line = true;
+        }
+        if self.sprite_sprite_collision != 0 && self.regs[0x1A] & 0x04 != 0 {
+            self.regs[0x19] |= 0x04 | 0x80;
+            self.irq_line = true;
         }
     }
 

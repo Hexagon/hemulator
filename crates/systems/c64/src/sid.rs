@@ -266,18 +266,22 @@ pub struct Sid {
     buffer: Vec<i16>,
     /// Fractional cycle accumulator for sample generation
     cycle_acc: u32,
-    /// Filter cutoff frequency (11-bit)
+    /// Filter cutoff frequency (11-bit, 0–2047)
     filter_cutoff: u16,
-    /// Filter resonance (4-bit)
+    /// Filter resonance (4-bit, 0–15)
     filter_resonance: u8,
     /// Filter routing bitmask (bits 0-2: voice 1-3 routed through filter)
     filter_route: u8,
-    /// Filter mode (bits 4-6 of $D418): LP, BP, HP
+    /// Filter mode (bits 4-6 of $D418): LP=bit4, BP=bit5, HP=bit6
     filter_mode: u8,
     /// Master volume (0–15)
     master_volume: u8,
     /// Voice 3 disconnect from output (bit 7 of $D418)
     voice3_off: bool,
+    /// State-variable filter state: low-pass accumulator
+    filter_low: f32,
+    /// State-variable filter state: band-pass accumulator
+    filter_band: f32,
 }
 
 impl Sid {
@@ -293,6 +297,8 @@ impl Sid {
             filter_mode: 0,
             master_volume: 0,
             voice3_off: false,
+            filter_low: 0.0,
+            filter_band: 0.0,
         }
     }
 
@@ -309,6 +315,8 @@ impl Sid {
         self.filter_mode = 0;
         self.master_volume = 0;
         self.voice3_off = false;
+        self.filter_low = 0.0;
+        self.filter_band = 0.0;
     }
 
     /// Read SID register (most are write-only)
@@ -432,9 +440,10 @@ impl Sid {
         }
     }
 
-    /// Mix voices and generate one audio sample
-    fn generate_sample(&self) -> i16 {
-        let mut mix: i32 = 0;
+    /// Mix voices and generate one audio sample, applying the multimode filter
+    fn generate_sample(&mut self) -> i16 {
+        let mut filtered: i32 = 0;
+        let mut direct: i32 = 0;
 
         for i in 0..3usize {
             // Skip voice 3 if disconnected
@@ -452,22 +461,68 @@ impl Sid {
 
             let raw = self.voices[i].output(ring_src) as i32;
             let env = self.voices[i].envelope as i32;
-            mix += (raw * env) / 256;
+            let mixed = (raw * env) / 256;
+
+            // Route to filter or direct output
+            if self.filter_route & (1 << i) != 0 {
+                filtered += mixed;
+            } else {
+                direct += mixed;
+            }
         }
 
-        // TODO: Apply multimode filter (LP/BP/HP) based on filter_cutoff,
-        // filter_resonance, filter_route, and filter_mode registers
+        // Apply state-variable filter to the filtered signal.
+        // Maps filter_cutoff (0–2047) to a frequency range of ~30–12000 Hz.
+        // f = 2 * sin(pi * fc / sample_rate); approximated as 2*pi*fc/sr for small angles.
+        let fc_hz = 30.0_f32 * (filter_cutoff_to_hz(self.filter_cutoff));
+        let f = (2.0 * std::f32::consts::PI * fc_hz / SAMPLE_RATE as f32).min(1.0);
+        // Resonance: Q = 0.5 to 4.0 (feedback coefficient = 1/Q)
+        let q_inv = 1.0 / (0.5 + self.filter_resonance as f32 * 0.234);
 
-        // Apply master volume (0–15)
-        mix = (mix * self.master_volume as i32) / 15;
+        let input = filtered as f32 / 256.0;
+        self.filter_low += f * self.filter_band;
+        let high = input - self.filter_low - q_inv * self.filter_band;
+        self.filter_band += f * high;
 
-        mix.clamp(-32768, 32767) as i16
+        // Select filter output(s) based on filter_mode bits:
+        // bit 4 = LP, bit 5 = BP, bit 6 = HP
+        let filter_out = if self.filter_mode == 0 {
+            // No filter mode active: pass through unfiltered
+            filtered as f32 / 256.0
+        } else {
+            let mut out = 0.0_f32;
+            if self.filter_mode & 0x01 != 0 {
+                out += self.filter_low;
+            }
+            if self.filter_mode & 0x02 != 0 {
+                out += self.filter_band;
+            }
+            if self.filter_mode & 0x04 != 0 {
+                out += high;
+            }
+            out
+        };
+
+        // Combine filtered and direct output, apply master volume
+        let total = (filter_out + direct as f32 / 256.0) * self.master_volume as f32 / 15.0;
+
+        (total * 127.0).clamp(-32768.0, 32767.0) as i16
     }
 
     /// Drain all buffered audio samples
     pub fn drain_samples(&mut self) -> Vec<i16> {
         std::mem::take(&mut self.buffer)
     }
+}
+
+/// Map an 11-bit SID filter cutoff value (0–2047) to a frequency multiplier.
+/// The SID 6581 filter cutoff ranges from approximately 30 Hz to 12 kHz.
+/// We use an exponential curve to match the hardware characteristic.
+fn filter_cutoff_to_hz(cutoff: u16) -> f32 {
+    // Exponential: 30 Hz at cutoff=0, 12000 Hz at cutoff=2047
+    // ratio = 12000/30 = 400, log2(400) ≈ 8.64
+    let t = cutoff as f32 / 2047.0;
+    2.0_f32.powf(t * 8.64)
 }
 
 impl Default for Sid {

@@ -482,6 +482,10 @@ impl System for C64System {
         }
     }
 
+    fn debugger(&self) -> Option<&dyn emu_core::debug::Debugger> {
+        Some(self)
+    }
+
     fn get_total_cycles(&self) -> u64 {
         self.total_cycles
     }
