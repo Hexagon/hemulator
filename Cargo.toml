@@ -17,6 +17,7 @@ members = [
   "crates/systems/ps1",
   "crates/systems/gameandwatch",
   "crates/systems/megadrive",
+  "crates/systems/c64",
   "crates/frontend/gui",
 ]
 

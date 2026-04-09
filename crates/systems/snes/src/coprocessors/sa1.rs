@@ -460,12 +460,18 @@ impl Sa1 {
             0x2251 => self.ma = (self.ma & 0xFF00) | (value as u16), // MAL
             0x2252 => {
                 self.ma = (self.ma & 0x00FF) | ((value as u16) << 8); // MAH
-                self.execute_arithmetic(); // Trigger arithmetic operation
+                                                                      // Division triggers on MAH write
+                if self.mcnt & 0x03 == 0x01 {
+                    self.execute_arithmetic();
+                }
             }
             0x2253 => self.mb = (self.mb & 0xFF00) | (value as u16), // MBL
             0x2254 => {
                 self.mb = (self.mb & 0x00FF) | ((value as u16) << 8); // MBH
-                self.execute_arithmetic(); // Trigger arithmetic operation
+                                                                      // Multiplication and cumulative sum trigger on MBH write
+                if self.mcnt & 0x03 != 0x01 {
+                    self.execute_arithmetic();
+                }
             }
 
             // === Variable-Length Bit Processing ===
@@ -642,9 +648,9 @@ impl Sa1 {
         }
 
         // Check write protection area
-        // BWPA bits 0-3 define protected area size: 1024 * 2^(AAAA+1)
-        let area_code = (self.bwpa & 0x0F) as usize;
-        let protected_size = 1024 * (1 << (area_code + 1));
+        // BWPA bits 0-3 define protected area size: 256 * 2^AAAA
+        let area_code = (self.bwpa & 0x0F) as u32;
+        let protected_size = 256usize << area_code;
         if offset < protected_size {
             log(LogCategory::Bus, LogLevel::Trace, || {
                 format!(
@@ -832,12 +838,12 @@ mod tests {
         let mut sa1 = Sa1::new();
         // Set mode to division
         sa1.write(0x002250, 0x01);
-        // Set dividend = 100
-        sa1.write(0x002251, 100);
-        sa1.write(0x002252, 0);
-        // Set divisor = 7
+        // Set divisor = 7 first (must be set before dividend for division mode)
         sa1.write(0x002253, 7);
         sa1.write(0x002254, 0);
+        // Set dividend = 100 (MAH write triggers division)
+        sa1.write(0x002251, 100);
+        sa1.write(0x002252, 0);
 
         // Read quotient
         let quotient_low = sa1.read(0x002306) as u16;
@@ -858,12 +864,12 @@ mod tests {
         let mut sa1 = Sa1::new();
         // Set mode to division
         sa1.write(0x002250, 0x01);
-        // Set dividend = 100
-        sa1.write(0x002251, 100);
-        sa1.write(0x002252, 0);
-        // Set divisor = 0
+        // Set divisor = 0 first (must be set before dividend for division mode)
         sa1.write(0x002253, 0);
         sa1.write(0x002254, 0);
+        // Set dividend = 100 (MAH write triggers division)
+        sa1.write(0x002251, 100);
+        sa1.write(0x002252, 0);
 
         // Read overflow flag
         let overflow = sa1.read(0x00230B);

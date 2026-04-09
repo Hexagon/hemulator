@@ -356,11 +356,19 @@ impl System for N64System {
 
             // Execute CPU until we reach the cycles for this scanline
             while self.current_cycles < target_cycles {
-                // Capture PC before execution for tracing
                 let pc_before = self.cpu.cpu.pc as u32;
-
                 let cycles = self.cpu.step();
                 self.current_cycles += cycles;
+
+                // Propagate MI interrupts to CPU IP2 after every step.
+                // Bus operations (RSP task, RDP display list) can set MI interrupts
+                // during a CPU write, so we must update IP2 promptly.
+                let pending = self.cpu.bus().mi().get_pending_interrupts();
+                if pending != 0 {
+                    self.cpu.cpu.set_interrupt(2);
+                } else {
+                    self.cpu.cpu.clear_interrupt(2);
+                }
 
                 // Record instruction in tracer if enabled
                 if self.instruction_tracer.is_enabled() {
@@ -369,20 +377,6 @@ impl System for N64System {
                         self.instruction_tracer.trace(instruction, cpu_state);
                     }
                 }
-            }
-
-            // Check for pending interrupts once per scanline (performance optimization)
-            // This is much faster than checking every instruction
-            let bus = self.cpu.bus();
-            let pending = bus.mi().get_pending_interrupts();
-            if pending != 0 {
-                // On real N64, ALL MI interrupts are OR'd and routed to CPU IP2
-                // (interrupt line 2). Individual MI interrupt bits are distinguished
-                // by reading MI_INTR_REG, not by separate CPU interrupt lines.
-                self.cpu.cpu.set_interrupt(2);
-            } else {
-                // Clear IP2 when no MI interrupts are pending
-                self.cpu.cpu.clear_interrupt(2);
             }
 
             // Update VI scanline and check for interrupt
@@ -400,6 +394,10 @@ impl System for N64System {
             }
         }
 
+        // Sync RDP framebuffer to RDRAM once per display frame
+        // This is deferred from individual RSP/RDP operations for performance
+        self.cpu.bus_mut().sync_rdp_framebuffer();
+
         // Get frame from VI framebuffer readback (primary display method)
         // The game renders to RDRAM, and VI reads from RDRAM at VI_ORIGIN
         if let Some(vi_frame) = self.cpu.bus().read_vi_framebuffer() {
@@ -407,6 +405,7 @@ impl System for N64System {
         }
 
         // Fallback: return RDP internal frame (for cases where VI isn't configured yet)
+        self.cpu.bus_mut().rdp_mut().sync_framebuffer();
         let frame = self.cpu.bus().rdp().get_frame().clone();
         Ok(frame)
     }

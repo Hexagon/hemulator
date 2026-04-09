@@ -178,6 +178,40 @@ fn detect_save_type(id: &[u8; 4]) -> SaveType {
         "NDME" | "NDMJ" | "NDMP" => SaveType::Sram,
         // Duke Nukem 64
         "NDNE" => SaveType::Sram,
+        // Command & Conquer 64
+        "NCNE" | "NCNJ" => SaveType::Sram,
+        // Duke Nukem: Zero Hour
+        "NNZE" | "NNZJ" | "NNZP" => SaveType::Sram,
+        // Hexen 64
+        "NHXE" | "NHXJ" | "NHXP" => SaveType::Sram,
+        // Killer Instinct Gold
+        "NKIE" | "NKIJ" => SaveType::Sram,
+        // Mission: Impossible
+        "NMIE" | "NMIP" => SaveType::Sram,
+        // Turok: Rage Wars
+        "NTJE" | "NTJJ" | "NTJP" => SaveType::Sram,
+        // All-Star Baseball 99
+        "NA9E" | "NA9J" => SaveType::Sram,
+        // BattleTanx
+        "NBTE" => SaveType::Sram,
+        // BattleTanx: Global Assault
+        "NB4E" => SaveType::Sram,
+        // Sin and Punishment (Japan only)
+        "NSEJ" => SaveType::Sram,
+        // Indiana Jones and the Infernal Machine
+        "NIJE" => SaveType::Sram,
+        // Clayfighter Sculptor's Cut
+        "NCFE" => SaveType::Sram,
+        // War Gods
+        "NWGE" => SaveType::Sram,
+        // Wetrix
+        "NWTE" | "NWTJ" | "NWTP" => SaveType::Sram,
+        // Rampage 2: Universal Tour
+        "NRGE" | "NRGP" => SaveType::Sram,
+        // FIFA 99
+        "NFIE" | "NFIJ" | "NFIP" => SaveType::Sram,
+        // Star Wars: Episode I Racer
+        "NSTE" | "NSTJ" | "NSTP" => SaveType::Sram,
 
         // --- EEPROM 16 Kbit (2 KB) ---
         // The Legend of Zelda: Ocarina of Time (all regions)
@@ -198,6 +232,16 @@ fn detect_save_type(id: &[u8; 4]) -> SaveType {
         "NHME" => SaveType::Eeprom16K,
         // Ogre Battle 64
         "NOBE" => SaveType::Eeprom16K,
+        // Castlevania: Legacy of Darkness
+        "NCDE" | "NCDJ" | "NCDP" => SaveType::Eeprom16K,
+        // Animal Forest (Doubutsu no Mori) — Japan only N64 release of Animal Crossing
+        "NAFE" | "NAFJ" => SaveType::Eeprom16K,
+        // Hey You, Pikachu!
+        "NHPE" | "NHPJ" => SaveType::Eeprom16K,
+        // Mickey's Speedway USA
+        "NMUE" | "NMUJ" | "NMUP" => SaveType::Eeprom16K,
+        // Tarzan
+        "NTAE" | "NTAP" => SaveType::Eeprom16K,
 
         // --- EEPROM 4 Kbit (512 bytes) ---
         // Super Mario 64 (all regions)
@@ -246,6 +290,74 @@ fn detect_save_type(id: &[u8; 4]) -> SaveType {
         "NTTE" | "NTTJ" => SaveType::Eeprom4K,
         // NHL Breakaway 98
         "NNHE" => SaveType::Eeprom4K,
+        // Body Harvest
+        "NBHE" | "NBHJ" | "NBHP" => SaveType::Eeprom4K,
+        // Bomberman 64
+        "NB6E" | "NB6J" | "NB6P" => SaveType::Eeprom4K,
+        // Bomberman Hero
+        "NBME" | "NBMJ" | "NBMP" => SaveType::Eeprom4K,
+        // Castlevania 64
+        "NCVE" | "NCVJ" | "NCVP" => SaveType::Eeprom4K,
+        // Cruis'n USA
+        "NCRE" | "NCRJ" => SaveType::Eeprom4K,
+        // Cruis'n World
+        "NKRE" | "NKRJ" | "NKREP" => SaveType::Eeprom4K,
+        // Destruction Derby 64
+        "NDDE" | "NDDP" => SaveType::Eeprom4K,
+        // Extreme-G
+        "NXGE" | "NXGJ" | "NXGP" => SaveType::Eeprom4K,
+        // Hybrid Heaven
+        "NHYE" | "NHYJ" | "NHYP" => SaveType::Eeprom4K,
+        // Jet Force Gemini
+        "NJFE" | "NJFJ" | "NJFP" => SaveType::Eeprom4K,
+        // Mischief Makers (Yuke Yuke!! Trouble Makers)
+        "NMFE" | "NMFJ" | "NMFP" => SaveType::Eeprom4K,
+        // Mortal Kombat 4
+        "NM4E" | "NM4P" => SaveType::Eeprom4K,
+        // NBA Courtside
+        "NBCE" | "NBCJ" => SaveType::Eeprom4K,
+        // Rayman 2: The Great Escape
+        "NRYE" | "NRYJ" | "NRYP" => SaveType::Eeprom4K,
+        // San Francisco Rush
+        "NRFE" | "NRFP" => SaveType::Eeprom4K,
+        // Shadow Man
+        "NSHE" | "NSHJ" | "NSHP" => SaveType::Eeprom4K,
+        // Snowboard Kids
+        "NSBE" | "NSBJ" | "NSBP" => SaveType::Eeprom4K,
+        // Snowboard Kids 2
+        "NK2E" | "NK2J" | "NK2P" => SaveType::Eeprom4K,
+        // Spider-Man
+        "NSPE" | "NSPJ" | "NSPP" => SaveType::Eeprom4K,
+        // Star Wars: Rogue Squadron
+        "NRSE" | "NRSJ" | "NRSP" => SaveType::Eeprom4K,
+        // Tonic Trouble
+        "NTOE" | "NTOP" => SaveType::Eeprom4K,
+        // Turok 3: Shadow of Oblivion
+        "NT3E" | "NT3J" | "NT3P" => SaveType::Eeprom4K,
+        // Vigilante 8
+        "NVIE" | "NVIP" => SaveType::Eeprom4K,
+        // WCW/nWo Revenge
+        "NWNE" | "NWNJ" | "NWNP" => SaveType::Eeprom4K,
+        // WCW/nWo World Tour
+        "NWOE" | "NWOJ" => SaveType::Eeprom4K,
+        // WWF No Mercy
+        "NW4E" | "NW4J" | "NW4P" => SaveType::Eeprom4K,
+        // WWF WrestleMania 2000
+        "NW2E" | "NW2J" | "NW2P" => SaveType::Eeprom4K,
+        // WWF War Zone
+        "NWZE" | "NWZJ" | "NWZP" => SaveType::Eeprom4K,
+        // Beetle Adventure Racing
+        "NBVE" | "NBVJ" | "NBVP" => SaveType::Eeprom4K,
+        // Forsaken 64
+        "NFOE" | "NFOJ" | "NFOP" => SaveType::Eeprom4K,
+        // Lode Runner 3D
+        "NLRE" | "NLRJ" | "NLRP" => SaveType::Eeprom4K,
+        // Mortal Kombat Mythologies: Sub-Zero
+        "NMKE" | "NMKJ" => SaveType::Eeprom4K,
+        // Mortal Kombat Trilogy
+        "NMRE" | "NMRJ" => SaveType::Eeprom4K,
+        // San Francisco Rush 2049
+        "NFRE" | "NFRP" => SaveType::Eeprom4K,
 
         // --- FlashRAM (1 Mbit = 128 KB) ---
         // Banjo-Tooie (all regions)
@@ -260,6 +372,10 @@ fn detect_save_type(id: &[u8; 4]) -> SaveType {
         "NPGE" | "NPGJ" | "NPGP" => SaveType::FlashRam,
         // Resident Evil 2
         "NBID" => SaveType::FlashRam,
+        // Tony Hawk's Pro Skater
+        "NQCE" | "NQCJ" | "NQCP" => SaveType::FlashRam,
+        // Tony Hawk's Pro Skater 2
+        "NTHE" | "NTHJ" | "NTHP" => SaveType::FlashRam,
 
         // Unknown game — assume no save
         _ => SaveType::None,
@@ -363,6 +479,27 @@ mod tests {
     }
 
     #[test]
+    fn test_save_type_sram_extended() {
+        let mut data = vec![0u8; 0x1000];
+        data[0..4].copy_from_slice(&N64_ROM_MAGIC);
+
+        // Killer Instinct Gold (SRAM)
+        data[0x38..0x3C].copy_from_slice(b"NKIE");
+        let cart = Cartridge::load(&data).unwrap();
+        assert_eq!(cart.save_type(), SaveType::Sram);
+
+        // Sin and Punishment Japan (SRAM)
+        data[0x38..0x3C].copy_from_slice(b"NSEJ");
+        let cart = Cartridge::load(&data).unwrap();
+        assert_eq!(cart.save_type(), SaveType::Sram);
+
+        // Command & Conquer (SRAM)
+        data[0x38..0x3C].copy_from_slice(b"NCNE");
+        let cart = Cartridge::load(&data).unwrap();
+        assert_eq!(cart.save_type(), SaveType::Sram);
+    }
+
+    #[test]
     fn test_save_type_eeprom16k() {
         let mut data = vec![0u8; 0x1000];
         data[0..4].copy_from_slice(&N64_ROM_MAGIC);
@@ -371,6 +508,27 @@ mod tests {
         data[0x39] = b'Z';
         data[0x3A] = b'L';
         data[0x3B] = b'E';
+        let cart = Cartridge::load(&data).unwrap();
+        assert_eq!(cart.save_type(), SaveType::Eeprom16K);
+    }
+
+    #[test]
+    fn test_save_type_eeprom16k_extended() {
+        let mut data = vec![0u8; 0x1000];
+        data[0..4].copy_from_slice(&N64_ROM_MAGIC);
+
+        // Castlevania: Legacy of Darkness (16K EEPROM)
+        data[0x38..0x3C].copy_from_slice(b"NCDE");
+        let cart = Cartridge::load(&data).unwrap();
+        assert_eq!(cart.save_type(), SaveType::Eeprom16K);
+
+        // Hey You Pikachu (16K EEPROM)
+        data[0x38..0x3C].copy_from_slice(b"NHPE");
+        let cart = Cartridge::load(&data).unwrap();
+        assert_eq!(cart.save_type(), SaveType::Eeprom16K);
+
+        // Mickey's Speedway USA (16K EEPROM)
+        data[0x38..0x3C].copy_from_slice(b"NMUE");
         let cart = Cartridge::load(&data).unwrap();
         assert_eq!(cart.save_type(), SaveType::Eeprom16K);
     }
@@ -386,6 +544,53 @@ mod tests {
         data[0x3B] = b'E';
         let cart = Cartridge::load(&data).unwrap();
         assert_eq!(cart.save_type(), SaveType::Eeprom4K);
+    }
+
+    #[test]
+    fn test_save_type_eeprom4k_extended() {
+        let mut data = vec![0u8; 0x1000];
+        data[0..4].copy_from_slice(&N64_ROM_MAGIC);
+
+        // Jet Force Gemini (4K EEPROM)
+        data[0x38..0x3C].copy_from_slice(b"NJFE");
+        let cart = Cartridge::load(&data).unwrap();
+        assert_eq!(cart.save_type(), SaveType::Eeprom4K);
+
+        // GoldenEye PAL (4K EEPROM)
+        data[0x38..0x3C].copy_from_slice(b"NGEP");
+        let cart = Cartridge::load(&data).unwrap();
+        assert_eq!(cart.save_type(), SaveType::Eeprom4K);
+
+        // Snowboard Kids (4K EEPROM)
+        data[0x38..0x3C].copy_from_slice(b"NSBE");
+        let cart = Cartridge::load(&data).unwrap();
+        assert_eq!(cart.save_type(), SaveType::Eeprom4K);
+
+        // WWF No Mercy (4K EEPROM)
+        data[0x38..0x3C].copy_from_slice(b"NW4E");
+        let cart = Cartridge::load(&data).unwrap();
+        assert_eq!(cart.save_type(), SaveType::Eeprom4K);
+
+        // Bomberman 64 (4K EEPROM)
+        data[0x38..0x3C].copy_from_slice(b"NB6E");
+        let cart = Cartridge::load(&data).unwrap();
+        assert_eq!(cart.save_type(), SaveType::Eeprom4K);
+    }
+
+    #[test]
+    fn test_save_type_flashram_extended() {
+        let mut data = vec![0u8; 0x1000];
+        data[0..4].copy_from_slice(&N64_ROM_MAGIC);
+
+        // Tony Hawk's Pro Skater (FlashRAM)
+        data[0x38..0x3C].copy_from_slice(b"NQCE");
+        let cart = Cartridge::load(&data).unwrap();
+        assert_eq!(cart.save_type(), SaveType::FlashRam);
+
+        // Conker's Bad Fur Day PAL (FlashRAM)
+        data[0x38..0x3C].copy_from_slice(b"NFUP");
+        let cart = Cartridge::load(&data).unwrap();
+        assert_eq!(cart.save_type(), SaveType::FlashRam);
     }
 
     #[test]

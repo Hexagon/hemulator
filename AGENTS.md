@@ -18,6 +18,7 @@
 - **[Game Boy](crates/systems/gb/README.md)**: Game Boy / Game Boy Color
 - **[Atari 2600](crates/systems/atari2600/README.md)**: Atari 2600
 - **[Atari 5200](crates/systems/atari5200/README.md)**: Atari 5200
+- **[C64](crates/systems/c64/README.md)**: Commodore 64
 - **[CHIP-8](crates/systems/chip8/README.md)**: CHIP-8 / Super-CHIP / XO-CHIP / Mega-CHIP
 - **[SMS](crates/systems/sms/README.md)**: Sega Master System
 - **[ColecoVision](crates/systems/colecovision/README.md)**: ColecoVision
@@ -251,6 +252,7 @@ For system-specific implementation details, see each system's README:
 - **[GBA](crates/systems/gba/README.md)** - ARM7TDMI CPU, PPU, saves
 - **[Atari 2600](crates/systems/atari2600/README.md)** - TIA, RIOT, cartridges
 - **[Atari 5200](crates/systems/atari5200/README.md)** - 6502C CPU, ANTIC, GTIA, POKEY
+- **[C64](crates/systems/c64/README.md)** - 6510 CPU, VIC-II, SID, CIA
 - **[CHIP-8](crates/systems/chip8/README.md)** - VM architecture, display modes
 - **[SMS](crates/systems/sms/README.md)** - Z80 CPU, VDP, PSG
 - **[ColecoVision](crates/systems/colecovision/README.md)** - Z80 CPU, TMS9918A VDP, PSG

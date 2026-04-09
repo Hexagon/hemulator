@@ -2825,15 +2825,17 @@ impl<M: MemorySpc700> CpuSpc700<M> {
             }
 
             // DAS - Decimal adjust for subtraction
+            // Hardware-accurate order: high nibble first, then low nibble
+            // (Matches bsnes/higan S-SMP implementation)
             0xBE => {
-                // Adjust low nibble if half-carry is clear or low nibble > 9
-                if !self.get_flag(psw_flags::HALF_CARRY) {
-                    self.a = self.a.wrapping_sub(0x06);
-                }
-                // Adjust high nibble if carry is clear or A > 0x99
+                // Adjust high nibble first if carry is clear
                 if !self.get_flag(psw_flags::CARRY) {
                     self.a = self.a.wrapping_sub(0x60);
                     self.set_carry(false);
+                }
+                // Then adjust low nibble if half-carry is clear
+                if !self.get_flag(psw_flags::HALF_CARRY) {
+                    self.a = self.a.wrapping_sub(0x06);
                 }
                 self.update_nz(self.a);
                 3
@@ -2915,15 +2917,17 @@ impl<M: MemorySpc700> CpuSpc700<M> {
             }
 
             // DAA - Decimal adjust for addition
+            // Hardware-accurate order: high nibble first, then low nibble
+            // (Matches bsnes/higan S-SMP implementation)
             0xDF => {
-                // Adjust low nibble if half-carry is set or low nibble > 9
-                if self.get_flag(psw_flags::HALF_CARRY) || (self.a & 0x0F) > 0x09 {
-                    self.a = self.a.wrapping_add(0x06);
-                }
-                // Adjust high nibble if carry is set or A > 0x99 (before adding 0x60)
+                // Adjust high nibble first if carry is set or A > 0x99
                 if self.get_flag(psw_flags::CARRY) || self.a > 0x99 {
                     self.a = self.a.wrapping_add(0x60);
                     self.set_carry(true);
+                }
+                // Then adjust low nibble if half-carry is set or low nibble > 9
+                if self.get_flag(psw_flags::HALF_CARRY) || (self.a & 0x0F) > 0x09 {
+                    self.a = self.a.wrapping_add(0x06);
                 }
                 self.update_nz(self.a);
                 3

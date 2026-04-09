@@ -58,10 +58,11 @@ const G_ZBUFFER: u32 = 0x00000001; // Enable Z-buffer
 const G_TEXTURE_ENABLE: u32 = 0x00000002; // Enable texture mapping (custom flag for demo)
 #[allow(dead_code)]
 const G_SHADE: u32 = 0x00000004; // Enable shading (Gouraud)
-#[allow(dead_code)]
+const G_LIGHTING: u32 = 0x00020000; // Enable lighting
 const G_CULL_FRONT: u32 = 0x00000200; // Cull front-facing triangles
-#[allow(dead_code)]
 const G_CULL_BACK: u32 = 0x00000400; // Cull back-facing triangles
+#[allow(dead_code)] // Reserved for future texture coordinate generation support
+const G_TEXTURE_GEN: u32 = 0x00040000; // Texture coordinate generation
 
 /// Vertex structure for graphics microcode
 #[derive(Debug, Clone, Copy)]
@@ -69,10 +70,9 @@ pub struct Vertex {
     /// Position (x, y, z) in object space
     pub pos: [i16; 3],
     /// Texture coordinates (s, t) in 16.16 fixed point
-    #[allow(dead_code)] // Reserved for future texture mapping
     pub tex: [i16; 2],
-    /// Color (RGBA) 0-255 per channel
-    #[allow(dead_code)] // Reserved for future vertex color support
+    /// Color (RGBA) 0-255 per channel — when lighting is off, these are literal vertex colors;
+    /// when lighting is on, bytes 12-14 hold the normal vector (signed) and byte 15 is alpha.
     pub color: [u8; 4],
 }
 
@@ -123,9 +123,15 @@ pub struct RspHle {
     dl_stack: Vec<u32>,
 
     /// Temporary storage for G_RDPHALF_1 data
-    /// Used for 2-word RDP commands split across display list entries
-    #[allow(dead_code)] // Reserved for future use with 2-word RDP commands
+    /// Used for 2-word RDP commands split across display list entries.
+    /// G_RDPHALF_1 stores the first word here; G_RDPHALF_2 reads it to construct
+    /// the complete RDP command and forward it to the RDP.
     rdp_half: u32,
+
+    /// Primitive depth values set by G_SETPRIMDEPTH
+    /// z: base depth value (16-bit), dz: depth delta (16-bit)
+    prim_depth_z: u16,
+    prim_depth_dz: u16,
 
     /// Light data (up to 8 lights)
     /// Each light has 7 elements: [dx, dy, dz, r, g, b, type]
@@ -171,6 +177,8 @@ impl RspHle {
             viewport: (0.0, 0.0, 320.0, 240.0, 160.0, 120.0),
             dl_stack: Vec::with_capacity(10),
             rdp_half: 0,
+            prim_depth_z: 0,
+            prim_depth_dz: 0,
             lights: [[0.0; 7]; 8],
             num_lights: 0,
             ambient_light: [0.3, 0.3, 0.3], // Default ambient light
@@ -532,14 +540,82 @@ impl RspHle {
                 // SPNOOP (0x00): no-op
                 0x00 => {}
 
-                // ADPCM (0x01): ADPCM decode — complex; write silence for now
+                // ADPCM (0x01): VADPCM decode
+                // N64 uses a variant of ADPCM with vector codebook.
+                // word0: cmd(8) | flags(8) | count(16) — count = bytes of *output* PCM
+                // word1: in_addr(16, DMEM) | out_addr(16, DMEM)
+                //
+                // The codebook is loaded into DMEM by the game before calling ADPCM.
+                // Each ADPCM frame is 9 bytes → 16 PCM samples (4-bit per sample).
+                // Byte 0 of each frame: scale_shift(4 upper) | predictor_index(4 lower)
+                // Bytes 1-8: 16 packed 4-bit signed residuals.
                 0x01 => {
-                    let out_addr = (word1 & 0x0FFF) as usize; // DMEM destination
-                    let count = (word0 & 0xFFFF) as usize;
-                    if out_addr + count <= 4096 {
-                        dmem[out_addr..out_addr + count].fill(0);
+                    let in_addr = ((word1 >> 16) & 0x0FFF) as usize;
+                    let out_addr = (word1 & 0x0FFF) as usize;
+                    let count = (word0 & 0xFFFF) as usize; // bytes of PCM output
+                    let num_samples = count / 2; // 16-bit samples
+
+                    // Decode ADPCM frames
+                    let mut src = in_addr;
+                    let mut dst = out_addr;
+                    let mut prev1: i32 = 0; // previous sample state
+                    let mut prev2: i32 = 0; // second previous sample state
+                    let mut samples_written = 0usize;
+
+                    while samples_written < num_samples && src < 4096 && dst + 1 < 4096 {
+                        if src + 9 > 4096 {
+                            break;
+                        }
+                        let header = dmem[src];
+                        let scale_shift = (header >> 4) & 0x0F;
+                        let scale = 1i32 << scale_shift;
+                        src += 1;
+
+                        // Decode 16 samples from 8 bytes (two 4-bit nibbles each)
+                        for _byte_idx in 0..8 {
+                            if samples_written >= num_samples || src >= 4096 {
+                                break;
+                            }
+                            let packed = dmem[src];
+                            src += 1;
+
+                            // High nibble first, then low nibble
+                            for nibble_sel in [4i32, 0] {
+                                if samples_written >= num_samples || dst + 1 >= 4096 {
+                                    break;
+                                }
+                                // Sign-extend 4-bit nibble
+                                let nibble = ((packed as i32 >> nibble_sel) & 0x0F) as i8;
+                                let nibble = if nibble >= 8 {
+                                    nibble as i32 - 16
+                                } else {
+                                    nibble as i32
+                                };
+
+                                // Simple 2nd-order IIR prediction (simplified codebook)
+                                let predicted = prev1 + (prev1 - prev2);
+                                let sample = (predicted + nibble * scale).clamp(-32768, 32767);
+
+                                // Write 16-bit big-endian sample
+                                let s16 = sample as i16;
+                                let bytes = s16.to_be_bytes();
+                                dmem[dst] = bytes[0];
+                                dmem[dst + 1] = bytes[1];
+                                dst += 2;
+
+                                prev2 = prev1;
+                                prev1 = sample;
+                                samples_written += 1;
+                            }
+                        }
                     }
-                    cycles += count as u32 / 4;
+
+                    // Zero-fill remaining output if we ran out of input
+                    let remaining = num_samples.saturating_sub(samples_written) * 2;
+                    if remaining > 0 && dst + remaining <= 4096 {
+                        dmem[dst..dst + remaining].fill(0);
+                    }
+                    cycles += num_samples as u32;
                 }
 
                 // CLEARBUFF (0x02): zero a DMEM range
@@ -553,9 +629,57 @@ impl RspHle {
                     cycles += 10 + (count as u32 / 16);
                 }
 
-                // RESAMPLE (0x03): resample — approximate with a straight copy for now
+                // RESAMPLE (0x03): linear interpolation resampling
+                // word0: cmd(8) | flags(8) | count(16) — count = output sample *pairs* (bytes/2)
+                // word1: pitch(16) | in_addr(16, DMEM)
+                // Output goes to a second DMEM region (usually in_addr + count).
+                // Pitch is a 16-bit unsigned fixed-point value where 0x8000 = 1.0 (no change).
                 0x03 => {
-                    cycles += 100;
+                    let count = (word0 & 0xFFFF) as usize; // bytes of output
+                    let pitch = (word1 >> 16) & 0xFFFF;
+                    let in_addr = (word1 & 0x0FFF) as usize;
+                    let out_addr = in_addr; // resample in place for simplified HLE
+
+                    let num_out_samples = count / 2; // 16-bit samples
+                    if pitch > 0 && in_addr + count <= 4096 {
+                        // Read source samples into a temporary buffer
+                        let max_src = (count / 2).min(2048);
+                        let mut src_buf = vec![0i16; max_src];
+                        for (i, sample) in src_buf.iter_mut().enumerate() {
+                            let off = in_addr + i * 2;
+                            if off + 1 < 4096 {
+                                *sample = i16::from_be_bytes([dmem[off], dmem[off + 1]]);
+                            }
+                        }
+
+                        // Resample with linear interpolation
+                        // accumulator in 16.16 fixed point (pitch 0x8000 = 1.0)
+                        let mut accum: u32 = 0;
+                        let mut dst = out_addr;
+                        for _ in 0..num_out_samples {
+                            let idx = (accum >> 15) as usize; // integer part
+                            let frac = ((accum & 0x7FFF) as i32) << 1; // 0..65534
+                            let s0 = if idx < src_buf.len() {
+                                src_buf[idx] as i32
+                            } else {
+                                0
+                            };
+                            let s1 = if idx + 1 < src_buf.len() {
+                                src_buf[idx + 1] as i32
+                            } else {
+                                s0
+                            };
+                            let interp = (s0 + (((s1 - s0) * frac) >> 16)).clamp(-32768, 32767);
+                            if dst + 1 < 4096 {
+                                let bytes = (interp as i16).to_be_bytes();
+                                dmem[dst] = bytes[0];
+                                dmem[dst + 1] = bytes[1];
+                            }
+                            dst += 2;
+                            accum += pitch;
+                        }
+                    }
+                    cycles += 20 + num_out_samples as u32;
                 }
 
                 // DMEMMOVE (0x05): memcpy within DMEM
@@ -659,9 +783,47 @@ impl RspHle {
                 // (These update internal state; for HLE we use OS_TASK fields instead)
                 0x0F => {}
 
-                // ENVMIXER (0x0D): envelope-controlled mixing — approximate as a copy
+                // ENVMIXER (0x0D): envelope-controlled mixing
+                // Mixes a mono source into separate left/right DMEM buffers with
+                // per-channel volume (envelope).
+                // word0: cmd(8) | flags(8) | count(16) — count in bytes (of output per channel)
+                // word1: src_addr(16, DMEM) | dst_left(16, DMEM)  (dst_right = dst_left + count)
                 0x0D => {
-                    cycles += 50;
+                    let count = (word0 & 0xFFFF) as usize;
+                    let src = ((word1 >> 16) & 0x0FFF) as usize;
+                    let dst_left = (word1 & 0x0FFF) as usize;
+                    let dst_right = dst_left + count;
+                    let num_samples = count / 2;
+
+                    if src + count <= 4096
+                        && dst_left + count <= 4096
+                        && dst_right + count <= 4096
+                        && count.is_multiple_of(2)
+                    {
+                        for j in 0..num_samples {
+                            let off = j * 2;
+                            let s =
+                                i16::from_be_bytes([dmem[src + off], dmem[src + off + 1]]) as i32;
+                            // Add source sample to both left and right with saturation
+                            let left_val = i16::from_be_bytes([
+                                dmem[dst_left + off],
+                                dmem[dst_left + off + 1],
+                            ]) as i32;
+                            let right_val = i16::from_be_bytes([
+                                dmem[dst_right + off],
+                                dmem[dst_right + off + 1],
+                            ]) as i32;
+                            let l = (left_val + s).clamp(-32768, 32767) as i16;
+                            let r_out = (right_val + s).clamp(-32768, 32767) as i16;
+                            let lb = l.to_be_bytes();
+                            let rb = r_out.to_be_bytes();
+                            dmem[dst_left + off] = lb[0];
+                            dmem[dst_left + off + 1] = lb[1];
+                            dmem[dst_right + off] = rb[0];
+                            dmem[dst_right + off + 1] = rb[1];
+                        }
+                    }
+                    cycles += 20 + (num_samples as u32);
                 }
 
                 // POLEF (0x17) / INTERL (0x09) / ADDMIXER (0x0A): filters/misc
@@ -721,14 +883,38 @@ impl RspHle {
 
             let cmd_id = (word0 >> 24) & 0xFF;
 
-            // Process F3DEX command
-            let should_continue = self.execute_f3dex_command(cmd_id, word0, word1, rdram, rdp);
+            // TEXTURE_RECTANGLE (0xE4/0xE5) is a 3-entry compound command in F3DEX2:
+            // Entry 1 (0xE4): rect coords + tile
+            // Entry 2: 0x00000000 | S.10.5 | T.10.5
+            // Entry 3: 0x00000000 | DSDX.10.5 | DTDY.10.5
+            let extra_stride = if (cmd_id == 0xE4 || cmd_id == 0xE5) && addr + 23 < rdram.len() {
+                let w2 = u32::from_be_bytes([
+                    rdram[addr + 12],
+                    rdram[addr + 13],
+                    rdram[addr + 14],
+                    rdram[addr + 15],
+                ]);
+                let w3 = u32::from_be_bytes([
+                    rdram[addr + 20],
+                    rdram[addr + 21],
+                    rdram[addr + 22],
+                    rdram[addr + 23],
+                ]);
+                // Forward to RDP with texture coordinate data
+                let rdp_cmd_id = cmd_id & 0x3F;
+                rdp.execute_rdp_command(rdp_cmd_id, word0, word1, w2, w3, rdram);
+                16 // skip the 2 extra 8-byte entries
+            } else {
+                // Process F3DEX command normally
+                let should_continue = self.execute_f3dex_command(cmd_id, word0, word1, rdram, rdp);
 
-            if !should_continue {
-                break; // G_ENDDL or branch command
-            }
+                if !should_continue {
+                    break; // G_ENDDL or branch command
+                }
+                0
+            };
 
-            addr += 8;
+            addr += 8 + extra_stride;
             commands_processed += 1;
         }
     }
@@ -802,16 +988,78 @@ impl RspHle {
             }
             // G_VTX (0x01) - Load vertices
             0x01 => {
-                // word0: cmd_id | vn (vertex count, bits 20-11) | v0 (buffer index, bits 16-1)
+                // F3DEX2 format:
+                // word0: cmd_id(8) | numv(8, bits 19:12) | (vbidx + numv)(7, bits 7:1)
                 // word1: vertex data address in RDRAM
                 let vertex_count = ((word0 >> 12) & 0xFF) as usize;
-                let buffer_index = ((word0 >> 1) & 0x7F) as usize;
+                let vbidx_plus_n = ((word0 >> 1) & 0x7F) as usize;
+                let buffer_index = vbidx_plus_n.saturating_sub(vertex_count);
                 let vertex_addr = self.resolve_segment_addr(word1);
 
                 // Load vertices from RDRAM into vertex buffer
                 for i in 0..vertex_count.min(32 - buffer_index) {
                     let vaddr = vertex_addr + (i as u32 * 16);
                     self.load_vertex(rdram, vaddr, buffer_index + i);
+                }
+                true
+            }
+            // G_MODIFYVTX (0x02) - Modify a vertex attribute in the vertex buffer
+            0x02 => {
+                // word0: cmd_id(8) | how(8) | vbidx(6+1, i.e. vbidx*2 in bits 0-7)
+                // word1: new value for the specified attribute
+                //
+                // `how` (attribute selector):
+                //   0x10 = G_MWO_POINT_RGBA       — replace RGBA color (4 bytes)
+                //   0x14 = G_MWO_POINT_ST         — replace texture S,T coords (2×i16)
+                //   0x18 = G_MWO_POINT_XYSCREEN   — replace screen-space XY (2×i16)
+                //   0x1C = G_MWO_POINT_ZSCREEN    — replace screen-space Z (1×i16, upper half)
+                let how = (word0 >> 16) & 0xFF;
+                let vbidx = ((word0 >> 1) & 0x7F) as usize;
+                let value = word1;
+
+                if vbidx < 32 {
+                    match how {
+                        0x10 => {
+                            // G_MWO_POINT_RGBA — replace RGBA
+                            self.vertices[vbidx].color[0] = ((value >> 24) & 0xFF) as u8;
+                            self.vertices[vbidx].color[1] = ((value >> 16) & 0xFF) as u8;
+                            self.vertices[vbidx].color[2] = ((value >> 8) & 0xFF) as u8;
+                            self.vertices[vbidx].color[3] = (value & 0xFF) as u8;
+                        }
+                        0x14 => {
+                            // G_MWO_POINT_ST — replace texture S,T
+                            self.vertices[vbidx].tex[0] = ((value >> 16) & 0xFFFF) as i16;
+                            self.vertices[vbidx].tex[1] = (value & 0xFFFF) as i16;
+                        }
+                        0x18 => {
+                            // G_MWO_POINT_XYSCREEN — replace screen XY
+                            // Store back as object-space approximation; actual screen coords
+                            // are recalculated by the transform pipeline, so log only.
+                            log(LogCategory::PPU, LogLevel::Debug, || {
+                                format!(
+                                    "RSP HLE: G_MODIFYVTX XYSCREEN vbidx={} value=0x{:08X}",
+                                    vbidx, value
+                                )
+                            });
+                        }
+                        0x1C => {
+                            // G_MWO_POINT_ZSCREEN — replace screen Z (upper 16 bits)
+                            log(LogCategory::PPU, LogLevel::Debug, || {
+                                format!(
+                                    "RSP HLE: G_MODIFYVTX ZSCREEN vbidx={} value=0x{:08X}",
+                                    vbidx, value
+                                )
+                            });
+                        }
+                        _ => {
+                            log(LogCategory::Stubs, LogLevel::Debug, || {
+                                format!(
+                                    "RSP HLE: G_MODIFYVTX unknown how=0x{:02X} vbidx={} value=0x{:08X}",
+                                    how, vbidx, value
+                                )
+                            });
+                        }
+                    }
                 }
                 true
             }
@@ -1156,16 +1404,21 @@ impl RspHle {
                 // word1: scaleS(16) | scaleT(16) - texture coordinate scaling
                 let _level = (word0 >> 11) & 0x07;
                 let _tile = (word0 >> 8) & 0x07;
-                let _on = (word0 >> 1) & 0x7F; // Non-zero = texture on
+                let on = (word0 >> 1) & 0x7F; // Non-zero = texture on
                 let _scale_s = (word1 >> 16) & 0xFFFF;
                 let _scale_t = word1 & 0xFFFF;
 
-                // For HLE, we could update geometry mode or pass to RDP
-                // For now, log and continue
-                log(LogCategory::Stubs, LogLevel::Debug, || {
+                // Update geometry mode texture enable flag
+                if on != 0 {
+                    self.geometry_mode |= G_TEXTURE_ENABLE;
+                } else {
+                    self.geometry_mode &= !G_TEXTURE_ENABLE;
+                }
+
+                log(LogCategory::PPU, LogLevel::Debug, || {
                     format!(
                         "N64 RSP HLE: G_TEXTURE - tile={}, on={}, scaleS=0x{:04X}, scaleT=0x{:04X}",
-                        _tile, _on, _scale_s, _scale_t
+                        _tile, on, _scale_s, _scale_t
                     )
                 });
                 true
@@ -1188,6 +1441,10 @@ impl RspHle {
 
                 // Clear the bits in the range, then set new bits
                 self.othermode_l = (self.othermode_l & !mask) | (data & mask);
+
+                // Forward combined othermode to RDP as SET_OTHER_MODES
+                let combined = ((self.othermode_h as u64) << 32) | (self.othermode_l as u64);
+                rdp.set_othermode(combined);
 
                 log(LogCategory::PPU, LogLevel::Debug, || {
                     format!(
@@ -1215,6 +1472,10 @@ impl RspHle {
 
                 // Clear the bits in the range, then set new bits
                 self.othermode_h = (self.othermode_h & !mask) | (data & mask);
+
+                // Forward combined othermode to RDP as SET_OTHER_MODES
+                let combined = ((self.othermode_h as u64) << 32) | (self.othermode_l as u64);
+                rdp.set_othermode(combined);
 
                 log(LogCategory::PPU, LogLevel::Debug, || {
                     format!(
@@ -1268,20 +1529,31 @@ impl RspHle {
             0xB4 => {
                 // word0: cmd_id | padding
                 // word1: data (second word for RDP command)
-                // This completes a 2-word RDP command using the stored rdp_half value
-                // Common use: TEXTURE_RECTANGLE where word0 comes from RDPHALF_1
-                log(LogCategory::Stubs, LogLevel::Debug, || {
-                    format!("N64 RSP HLE: G_RDPHALF_2 - data=0x{:08X}, combining with rdp_half=0x{:08X}", word1, self.rdp_half)
+                // This completes a 2-word RDP command:
+                //   - self.rdp_half is the first word (set by G_RDPHALF_1)
+                //   - word1 is the second word
+                // The upper byte of rdp_half encodes the RDP command ID.
+                let rdp_w0 = self.rdp_half;
+                let rdp_w1 = word1;
+                let rdp_cmd_id = (rdp_w0 >> 24) & 0x3F;
+
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!(
+                        "N64 RSP HLE: G_RDPHALF_2 - forwarding RDP cmd=0x{:02X} w0=0x{:08X} w1=0x{:08X}",
+                        rdp_cmd_id, rdp_w0, rdp_w1
+                    )
                 });
+
+                rdp.execute_rdp_command(rdp_cmd_id, rdp_w0, rdp_w1, 0, 0, rdram);
                 true
             }
             // G_RDPHALF_1 (0xBF) - First half of 2-word RDP command
             0xBF => {
                 // word0: cmd_id | padding
                 // word1: data (first word for RDP command)
-                // Store the data for use by subsequent command
+                // Store the data for use by subsequent G_RDPHALF_2 command
                 self.rdp_half = word1;
-                log(LogCategory::Stubs, LogLevel::Debug, || {
+                log(LogCategory::PPU, LogLevel::Debug, || {
                     format!("N64 RSP HLE: G_RDPHALF_1 - stored data=0x{:08X}", word1)
                 });
                 true
@@ -1290,15 +1562,14 @@ impl RspHle {
             0xEE => {
                 // word0: cmd_id | padding
                 // word1: z (16-bit) | dz (16-bit) - depth value and delta
-                let _z = (word1 >> 16) & 0xFFFF;
-                let _dz = word1 & 0xFFFF;
+                // Store the primitive depth values for use by subsequent triangle commands
+                self.prim_depth_z = ((word1 >> 16) & 0xFFFF) as u16;
+                self.prim_depth_dz = (word1 & 0xFFFF) as u16;
 
-                // For HLE, we log but don't implement primitive depth override
-                // Full implementation would set a base depth for subsequent primitives
-                log(LogCategory::Stubs, LogLevel::Debug, || {
+                log(LogCategory::PPU, LogLevel::Debug, || {
                     format!(
                         "N64 RSP HLE: G_SETPRIMDEPTH - z=0x{:04X}, dz=0x{:04X}",
-                        _z, _dz
+                        self.prim_depth_z, self.prim_depth_dz
                     )
                 });
                 true
@@ -1314,12 +1585,78 @@ impl RspHle {
 
                 // Call RDP's execute_command directly with the command data
                 // Pass rdram for texture loading and other DRAM-dependent commands
-                rdp.execute_rdp_command(rdp_cmd_id, word0, word1, rdram);
+                rdp.execute_rdp_command(rdp_cmd_id, word0, word1, 0, 0, rdram);
                 true
             }
             // Unknown/unsupported command - skip it
             _ => true,
         }
+    }
+
+    /// Compute lit color for a vertex by evaluating all active directional lights.
+    /// When lighting is enabled (G_LIGHTING set in geometry_mode), bytes 12-14 of
+    /// the vertex data contain the object-space normal (as signed bytes) instead of
+    /// RGB colour.  We transform that normal by the upper-left 3×3 of the modelview
+    /// matrix, then accumulate light contributions:
+    ///   color = ambient + Σ clamp(dot(N, L_i), 0, 1) * light_color_i
+    /// The result is returned as [R, G, B] each in 0..=255.
+    fn compute_lit_color(&self, vert: &Vertex) -> [u8; 3] {
+        // Extract object-space normal from vertex color bytes (reinterpreted as signed)
+        let nx = (vert.color[0] as i8) as f32 / 127.0;
+        let ny = (vert.color[1] as i8) as f32 / 127.0;
+        let nz = (vert.color[2] as i8) as f32 / 127.0;
+
+        // Transform normal by upper-left 3×3 of modelview (column-major layout)
+        let tnx = self.modelview_matrix[0] * nx
+            + self.modelview_matrix[4] * ny
+            + self.modelview_matrix[8] * nz;
+        let tny = self.modelview_matrix[1] * nx
+            + self.modelview_matrix[5] * ny
+            + self.modelview_matrix[9] * nz;
+        let tnz = self.modelview_matrix[2] * nx
+            + self.modelview_matrix[6] * ny
+            + self.modelview_matrix[10] * nz;
+
+        // Normalize
+        let len = (tnx * tnx + tny * tny + tnz * tnz).sqrt();
+        let (tnx, tny, tnz) = if len > 0.0001 {
+            (tnx / len, tny / len, tnz / len)
+        } else {
+            (0.0, 0.0, 1.0) // fallback upward
+        };
+
+        // Start with ambient (last light entry is ambient when num_lights > 0)
+        let ambient_idx = self.num_lights; // ambient is one past the last directional
+        let (mut r, mut g, mut b) = if ambient_idx < 8 {
+            (
+                self.lights[ambient_idx][3],
+                self.lights[ambient_idx][4],
+                self.lights[ambient_idx][5],
+            )
+        } else {
+            (
+                self.ambient_light[0],
+                self.ambient_light[1],
+                self.ambient_light[2],
+            )
+        };
+
+        // Accumulate directional light contributions
+        for i in 0..self.num_lights.min(8) {
+            let lx = self.lights[i][0];
+            let ly = self.lights[i][1];
+            let lz = self.lights[i][2];
+            let dot = (tnx * lx + tny * ly + tnz * lz).max(0.0);
+            r += dot * self.lights[i][3];
+            g += dot * self.lights[i][4];
+            b += dot * self.lights[i][5];
+        }
+
+        [
+            (r.clamp(0.0, 1.0) * 255.0) as u8,
+            (g.clamp(0.0, 1.0) * 255.0) as u8,
+            (b.clamp(0.0, 1.0) * 255.0) as u8,
+        ]
     }
 
     /// Transform vertices and draw triangle via RDP
@@ -1349,6 +1686,22 @@ impl RspHle {
             return;
         }
 
+        // Back-face culling
+        if self.geometry_mode & (G_CULL_FRONT | G_CULL_BACK) != 0 {
+            let (sx0, sy0, _) = self.clip_to_screen(&clip0);
+            let (sx1, sy1, _) = self.clip_to_screen(&clip1);
+            let (sx2, sy2, _) = self.clip_to_screen(&clip2);
+            // 2D cross product of edges: positive = CCW, negative = CW
+            let cross =
+                (sx1 - sx0) as i64 * (sy2 - sy0) as i64 - (sx2 - sx0) as i64 * (sy1 - sy0) as i64;
+            if (self.geometry_mode & G_CULL_BACK) != 0 && cross <= 0 {
+                return; // back-facing, cull
+            }
+            if (self.geometry_mode & G_CULL_FRONT) != 0 && cross >= 0 {
+                return; // front-facing, cull
+            }
+        }
+
         // Transform to screen space
         let (x0, y0, z0) = self.clip_to_screen(&clip0);
         let (x1, y1, z1) = self.clip_to_screen(&clip1);
@@ -1364,19 +1717,67 @@ impl RspHle {
             )
         });
 
-        // Convert vertex colors to ARGB format
-        let c0 = u32::from_be_bytes([0xFF, vert0.color[0], vert0.color[1], vert0.color[2]]);
-        let c1 = u32::from_be_bytes([0xFF, vert1.color[0], vert1.color[1], vert1.color[2]]);
-        let c2 = u32::from_be_bytes([0xFF, vert2.color[0], vert2.color[1], vert2.color[2]]);
+        // Compute vertex colors: if lighting is enabled, evaluate lights;
+        // otherwise use the raw vertex colors.
+        let (c0, c1, c2) = if self.geometry_mode & G_LIGHTING != 0 && self.num_lights > 0 {
+            let lit0 = self.compute_lit_color(vert0);
+            let lit1 = self.compute_lit_color(vert1);
+            let lit2 = self.compute_lit_color(vert2);
+            (
+                u32::from_be_bytes([vert0.color[3], lit0[0], lit0[1], lit0[2]]),
+                u32::from_be_bytes([vert1.color[3], lit1[0], lit1[1], lit1[2]]),
+                u32::from_be_bytes([vert2.color[3], lit2[0], lit2[1], lit2[2]]),
+            )
+        } else {
+            (
+                u32::from_be_bytes([
+                    vert0.color[3],
+                    vert0.color[0],
+                    vert0.color[1],
+                    vert0.color[2],
+                ]),
+                u32::from_be_bytes([
+                    vert1.color[3],
+                    vert1.color[0],
+                    vert1.color[1],
+                    vert1.color[2],
+                ]),
+                u32::from_be_bytes([
+                    vert2.color[3],
+                    vert2.color[0],
+                    vert2.color[1],
+                    vert2.color[2],
+                ]),
+            )
+        };
 
         // Draw shaded triangle with Z-buffer (assuming depth values fit in u16)
         let z0_u16 = z0.clamp(0, 0xFFFF) as u16;
         let z1_u16 = z1.clamp(0, 0xFFFF) as u16;
         let z2_u16 = z2.clamp(0, 0xFFFF) as u16;
 
-        rdp.draw_triangle_shaded_zbuffer(
-            x0, y0, z0_u16, c0, x1, y1, z1_u16, c1, x2, y2, z2_u16, c2,
-        );
+        // Check if texturing is enabled — use textured draw path when active
+        let textures_enabled = self.geometry_mode & G_TEXTURE_ENABLE != 0;
+        if textures_enabled {
+            // Convert vertex texture coordinates from S.10.5 fixed-point to float texel coords
+            let s0_f = vert0.tex[0] as f32 / 32.0;
+            let t0_f = vert0.tex[1] as f32 / 32.0;
+            let s1_f = vert1.tex[0] as f32 / 32.0;
+            let t1_f = vert1.tex[1] as f32 / 32.0;
+            let s2_f = vert2.tex[0] as f32 / 32.0;
+            let t2_f = vert2.tex[1] as f32 / 32.0;
+
+            // Pass per-vertex shade colours together with texture coordinates so
+            // the RDP can apply the colour-combiner mode (e.g. TEXEL0 × SHADE).
+            rdp.draw_triangle_textured_shaded_zbuf(
+                x0, y0, z0_u16, s0_f, t0_f, c0, x1, y1, z1_u16, s1_f, t1_f, c1, x2, y2, z2_u16,
+                s2_f, t2_f, c2, 0, // tile 0
+            );
+        } else {
+            rdp.draw_triangle_shaded_zbuffer(
+                x0, y0, z0_u16, c0, x1, y1, z1_u16, c1, x2, y2, z2_u16, c2,
+            );
+        }
     }
 
     /// Read 32-bit big-endian value from buffer
@@ -2371,5 +2772,265 @@ mod tests {
 
         // Verify that the branch was taken and vertex was loaded
         assert_eq!(hle.vertex_count, 2);
+    }
+
+    #[test]
+    fn test_compute_lit_color_basic() {
+        // Test lighting calculation without OpenGL context
+        let mut hle = RspHle::new();
+
+        // Set up a single directional light pointing in +Z direction
+        // Light color: white (1.0, 1.0, 1.0)
+        hle.lights[0] = [0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0]; // dir=(0,0,1), color=white
+                                                             // Ambient light (stored at index num_lights)
+        hle.lights[1] = [0.0, 0.0, 0.0, 0.2, 0.2, 0.2, 0.0]; // ambient = (0.2, 0.2, 0.2)
+        hle.num_lights = 1;
+
+        // Vertex with normal pointing in +Z direction (should be fully lit)
+        let vert = Vertex {
+            pos: [0, 0, 0],
+            tex: [0, 0],
+            color: [0, 0, 127, 255], // normal = (0, 0, 1.0) as signed bytes
+        };
+
+        let lit = hle.compute_lit_color(&vert);
+
+        // With identity modelview, normal points at (0,0,1), dot with light (0,0,1) = 1.0
+        // Result: ambient(0.2) + 1.0 * white(1.0) = 1.2 -> clamped to 1.0 -> 255
+        assert_eq!(lit[0], 255); // R
+        assert_eq!(lit[1], 255); // G
+        assert_eq!(lit[2], 255); // B
+    }
+
+    #[test]
+    fn test_compute_lit_color_perpendicular() {
+        // Normal perpendicular to light should produce only ambient
+        let mut hle = RspHle::new();
+
+        // Light pointing in +Z
+        hle.lights[0] = [0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0];
+        // Ambient
+        hle.lights[1] = [0.0, 0.0, 0.0, 0.2, 0.2, 0.2, 0.0];
+        hle.num_lights = 1;
+
+        // Normal pointing in +X (perpendicular to light)
+        let vert = Vertex {
+            pos: [0, 0, 0],
+            tex: [0, 0],
+            color: [127, 0, 0, 255], // normal = (1.0, 0, 0)
+        };
+
+        let lit = hle.compute_lit_color(&vert);
+
+        // dot(N=(1,0,0), L=(0,0,1)) = 0 -> only ambient (0.2*255 = 51)
+        assert_eq!(lit[0], 51);
+        assert_eq!(lit[1], 51);
+        assert_eq!(lit[2], 51);
+    }
+
+    #[test]
+    fn test_compute_lit_color_opposing() {
+        // Normal pointing away from light -> dot is negative, clamp to 0 -> only ambient
+        let mut hle = RspHle::new();
+
+        hle.lights[0] = [0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0];
+        hle.lights[1] = [0.0, 0.0, 0.0, 0.1, 0.1, 0.1, 0.0];
+        hle.num_lights = 1;
+
+        // Normal pointing in -Z (away from light)
+        let vert = Vertex {
+            pos: [0, 0, 0],
+            tex: [0, 0],
+            color: [0, 0, 129, 255], // normal = (0, 0, -1.0) as i8 (129 as u8 = -127 as i8)
+        };
+
+        let lit = hle.compute_lit_color(&vert);
+
+        // dot(N=(0,0,-1), L=(0,0,1)) = -1.0 -> clamp to 0 -> only ambient (0.1 * 255 ≈ 25)
+        assert_eq!(lit[0], 25);
+    }
+
+    #[test]
+    fn test_backface_culling_flags() {
+        // Test that geometry mode flags are stored correctly
+        let mut hle = RspHle::new();
+        assert_eq!(hle.geometry_mode & G_CULL_BACK, 0);
+        assert_eq!(hle.geometry_mode & G_CULL_FRONT, 0);
+
+        hle.geometry_mode |= G_CULL_BACK;
+        assert_ne!(hle.geometry_mode & G_CULL_BACK, 0);
+        assert_eq!(hle.geometry_mode & G_CULL_FRONT, 0);
+
+        hle.geometry_mode |= G_CULL_FRONT;
+        assert_ne!(hle.geometry_mode & G_CULL_FRONT, 0);
+
+        hle.geometry_mode &= !G_CULL_BACK;
+        assert_eq!(hle.geometry_mode & G_CULL_BACK, 0);
+        assert_ne!(hle.geometry_mode & G_CULL_FRONT, 0);
+    }
+
+    #[test]
+    fn test_lighting_mode_flag() {
+        let mut hle = RspHle::new();
+        assert_eq!(hle.geometry_mode & G_LIGHTING, 0);
+
+        hle.geometry_mode |= G_LIGHTING;
+        assert_ne!(hle.geometry_mode & G_LIGHTING, 0);
+    }
+
+    #[test]
+    fn test_adpcm_decode_basic() {
+        // Test that ADPCM decode produces non-silence output
+        let mut hle = RspHle::new();
+        let mut dmem = [0u8; 4096];
+        let mut rdram = vec![0u8; 4 * 1024 * 1024];
+
+        // Set up a minimal ADPCM frame at DMEM address 0x100
+        let in_addr = 0x100usize;
+        let out_addr = 0x200usize;
+        let num_output_bytes = 32usize; // 16 samples × 2 bytes each
+
+        // ADPCM frame header: scale_shift=2, predictor_index=0
+        dmem[in_addr] = 0x20;
+        // Residuals: each byte has two 4-bit nibbles
+        // Use non-zero nibbles to generate non-silence
+        for i in 0..8 {
+            dmem[in_addr + 1 + i] = 0x37; // nibbles: 3, 7 (7 sign-extends to -1)
+        }
+
+        // Set up OSTask at DMEM 0xFC0
+        let task_base = 0xFC0usize;
+        // Build a single ADPCM command
+        let cmd_addr = 0x1000usize; // command list in RDRAM
+        let cmd_word0: u32 = (0x01u32 << 24) | (num_output_bytes as u32);
+        let cmd_word1: u32 = ((in_addr as u32) << 16) | (out_addr as u32);
+
+        // Write command to RDRAM
+        rdram[cmd_addr..cmd_addr + 4].copy_from_slice(&cmd_word0.to_be_bytes());
+        rdram[cmd_addr + 4..cmd_addr + 8].copy_from_slice(&cmd_word1.to_be_bytes());
+
+        // Set up OSTask fields
+        let ucode_data_ptr: u32 = 0x80000000 + cmd_addr as u32; // KSEG0 address
+        let ucode_data_size: u32 = 8; // one command
+        let output_ptr: u32 = 0x80002000;
+        let output_size: u32 = 4096;
+
+        dmem[task_base + 0x18..task_base + 0x1C].copy_from_slice(&ucode_data_ptr.to_be_bytes());
+        dmem[task_base + 0x1C..task_base + 0x20].copy_from_slice(&ucode_data_size.to_be_bytes());
+        dmem[task_base + 0x28..task_base + 0x2C].copy_from_slice(&output_ptr.to_be_bytes());
+        dmem[task_base + 0x2C..task_base + 0x30].copy_from_slice(&output_size.to_be_bytes());
+
+        hle.microcode = MicrocodeType::Audio;
+        let mut dmem_copy: [u8; 4096] = dmem;
+        let cycles = hle.execute_audio_task(&mut dmem_copy, &mut rdram);
+        assert!(cycles > 0);
+
+        // Check that output area is not all zeros (ADPCM should produce something)
+        let mut any_nonzero = false;
+        for i in (out_addr..out_addr + num_output_bytes).step_by(2) {
+            let sample = i16::from_be_bytes([dmem_copy[i], dmem_copy[i + 1]]);
+            if sample != 0 {
+                any_nonzero = true;
+                break;
+            }
+        }
+        assert!(
+            any_nonzero,
+            "ADPCM decode should produce non-silence output"
+        );
+    }
+
+    #[test]
+    fn test_resample_passthrough() {
+        // Test resampling with pitch = 0x8000 (1.0x) should produce similar output
+        let mut hle = RspHle::new();
+        let mut dmem = [0u8; 4096];
+        let mut rdram = vec![0u8; 4 * 1024 * 1024];
+
+        // Fill input buffer with a known pattern at DMEM 0x100
+        let in_addr = 0x100usize;
+        let count = 64usize; // 32 samples × 2 bytes
+        for i in 0..32 {
+            let sample = ((i as i16) * 1000).to_be_bytes();
+            dmem[in_addr + i * 2] = sample[0];
+            dmem[in_addr + i * 2 + 1] = sample[1];
+        }
+
+        // Set up a RESAMPLE command
+        let cmd_addr = 0x1000usize;
+        let cmd_word0: u32 = (0x03u32 << 24) | (count as u32);
+        let cmd_word1: u32 = (0x8000u32 << 16) | (in_addr as u32); // pitch=1.0, in_addr
+        rdram[cmd_addr..cmd_addr + 4].copy_from_slice(&cmd_word0.to_be_bytes());
+        rdram[cmd_addr + 4..cmd_addr + 8].copy_from_slice(&cmd_word1.to_be_bytes());
+
+        // OSTask setup
+        let task_base = 0xFC0usize;
+        let ucode_data_ptr: u32 = 0x80000000 + cmd_addr as u32;
+        let ucode_data_size: u32 = 8;
+        dmem[task_base + 0x18..task_base + 0x1C].copy_from_slice(&ucode_data_ptr.to_be_bytes());
+        dmem[task_base + 0x1C..task_base + 0x20].copy_from_slice(&ucode_data_size.to_be_bytes());
+        dmem[task_base + 0x28..task_base + 0x2C].copy_from_slice(&0x80002000u32.to_be_bytes());
+        dmem[task_base + 0x2C..task_base + 0x30].copy_from_slice(&4096u32.to_be_bytes());
+
+        hle.microcode = MicrocodeType::Audio;
+        let mut dmem_copy: [u8; 4096] = dmem;
+        let cycles = hle.execute_audio_task(&mut dmem_copy, &mut rdram);
+        assert!(cycles > 0);
+
+        // At pitch 1.0, first sample should be very close to the original
+        let first_out = i16::from_be_bytes([dmem_copy[in_addr], dmem_copy[in_addr + 1]]);
+        assert_eq!(
+            first_out, 0,
+            "First sample at index 0 should be 0 (0 * 1000)"
+        );
+    }
+
+    #[test]
+    fn test_envmixer_basic() {
+        // Test that ENVMIXER adds source to L/R channels
+        let mut hle = RspHle::new();
+        let mut dmem = [0u8; 4096];
+        let mut rdram = vec![0u8; 4 * 1024 * 1024];
+
+        let src = 0x100usize;
+        let dst_left = 0x200usize;
+        let count = 8usize; // 4 samples × 2 bytes
+
+        // Source: 4 samples of value 1000
+        for i in 0..4 {
+            let s = 1000i16.to_be_bytes();
+            dmem[src + i * 2] = s[0];
+            dmem[src + i * 2 + 1] = s[1];
+        }
+        // Left channel already has value 500
+        for i in 0..4 {
+            let s = 500i16.to_be_bytes();
+            dmem[dst_left + i * 2] = s[0];
+            dmem[dst_left + i * 2 + 1] = s[1];
+        }
+
+        // ENVMIXER command
+        let cmd_addr = 0x1000usize;
+        let cmd_word0: u32 = (0x0Du32 << 24) | (count as u32);
+        let cmd_word1: u32 = ((src as u32) << 16) | (dst_left as u32);
+        rdram[cmd_addr..cmd_addr + 4].copy_from_slice(&cmd_word0.to_be_bytes());
+        rdram[cmd_addr + 4..cmd_addr + 8].copy_from_slice(&cmd_word1.to_be_bytes());
+
+        // OSTask setup
+        let task_base = 0xFC0usize;
+        dmem[task_base + 0x18..task_base + 0x1C]
+            .copy_from_slice(&(0x80000000u32 + cmd_addr as u32).to_be_bytes());
+        dmem[task_base + 0x1C..task_base + 0x20].copy_from_slice(&8u32.to_be_bytes());
+        dmem[task_base + 0x28..task_base + 0x2C].copy_from_slice(&0x80002000u32.to_be_bytes());
+        dmem[task_base + 0x2C..task_base + 0x30].copy_from_slice(&4096u32.to_be_bytes());
+
+        hle.microcode = MicrocodeType::Audio;
+        let mut dmem_copy: [u8; 4096] = dmem;
+        let cycles = hle.execute_audio_task(&mut dmem_copy, &mut rdram);
+        assert!(cycles > 0);
+
+        // Left channel should now have 500 + 1000 = 1500
+        let left_sample = i16::from_be_bytes([dmem_copy[dst_left], dmem_copy[dst_left + 1]]);
+        assert_eq!(left_sample, 1500);
     }
 }

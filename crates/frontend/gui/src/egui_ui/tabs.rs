@@ -4217,6 +4217,7 @@ impl TabManager {
                 };
 
                 let palette_num = (tile_attr & 0x07) as usize;
+                let tile_vram_bank = (tile_attr >> 3) & 0x01;
                 let flip_x = (tile_attr & 0x20) != 0;
                 let flip_y = (tile_attr & 0x40) != 0;
 
@@ -4233,8 +4234,11 @@ impl TabManager {
                         continue;
                     }
 
-                    let byte1 = data.vram_bank0[row_addr];
-                    let byte2 = data.vram_bank0[row_addr + 1];
+                    let (byte1, byte2) = if data.is_cgb_mode && tile_vram_bank == 1 {
+                        (data.vram_bank1[row_addr], data.vram_bank1[row_addr + 1])
+                    } else {
+                        (data.vram_bank0[row_addr], data.vram_bank0[row_addr + 1])
+                    };
 
                     for px in 0..8 {
                         let actual_px = if flip_x { 7 - px } else { px };

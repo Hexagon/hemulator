@@ -251,7 +251,7 @@ impl Dsp1 {
                 let result = if value == 0 {
                     0x7FFF // Maximum positive value on divide by zero
                 } else {
-                    ((0x10000i32) / (value as i32)) as i16
+                    ((0x10000i32) / (value as i32)).clamp(-32768, 32767) as i16
                 };
                 self.write_s16(0, result);
             }

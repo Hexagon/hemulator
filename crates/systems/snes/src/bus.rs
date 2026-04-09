@@ -312,10 +312,10 @@ impl SnesBus {
             0x00..=0x3F => match offset {
                 0x0000..=0x1FFF => 8,  // WRAM mirror - slow
                 0x2000..=0x20FF => 6,  // Unused - fast
-                0x2100..=0x21FF => 8,  // PPU registers - slow
-                0x2200..=0x3FFF => 8,  // Unused/expansion - slow
+                0x2100..=0x21FF => 6,  // PPU registers - fast (3.58 MHz)
+                0x2200..=0x3FFF => 6,  // Unused/expansion - fast (3.58 MHz)
                 0x4000..=0x41FF => 12, // Joypad/internal - xslow
-                0x4200..=0x5FFF => 8,  // CPU I/O, DMA - slow
+                0x4200..=0x5FFF => 6,  // CPU I/O, DMA - fast (3.58 MHz)
                 0x6000..=0x7FFF => 8,  // Expansion RAM - slow
                 0x8000..=0xFFFF => 8,  // SlowROM (banks $00-$3F always slow)
             },
@@ -327,10 +327,10 @@ impl SnesBus {
             0x80..=0xBF => match offset {
                 0x0000..=0x1FFF => 8,  // WRAM mirror - slow
                 0x2000..=0x20FF => 6,  // Unused - fast
-                0x2100..=0x21FF => 8,  // PPU registers - slow
-                0x2200..=0x3FFF => 8,  // Unused/expansion - slow
+                0x2100..=0x21FF => 6,  // PPU registers - fast (3.58 MHz)
+                0x2200..=0x3FFF => 6,  // Unused/expansion - fast (3.58 MHz)
                 0x4000..=0x41FF => 12, // Joypad/internal - xslow
-                0x4200..=0x5FFF => 8,  // CPU I/O, DMA - slow
+                0x4200..=0x5FFF => 6,  // CPU I/O, DMA - fast (3.58 MHz)
                 0x6000..=0x7FFF => 8,  // Expansion RAM - slow
                 0x8000..=0xFFFF => {
                     // FastROM: 6 mc when MEMSEL bit 0 is set, otherwise 8 mc
@@ -859,9 +859,10 @@ impl SnesBus {
             if (self.hdma_enable & (1 << ch)) != 0 {
                 let dma = self.dma_channels[ch];
 
-                // Initialize HDMA state from registers
-                self.hdma_state[ch].table_addr =
-                    (dma.hdma_table as u32) | ((dma.hdma_bank as u32) << 16);
+                // Initialize HDMA table address from $43x2-$43x4 (a_addr)
+                // NOT from $43x8-$43x9 (those are internal mirrors updated during HDMA)
+                // Reference: bsnes hdmaInitialize() uses channel.sourceAddress
+                self.hdma_state[ch].table_addr = dma.a_addr;
                 self.hdma_state[ch].line_counter = 0;
                 self.hdma_state[ch].repeat = false;
                 self.hdma_state[ch].active = true;
@@ -1093,8 +1094,10 @@ impl Memory65c816 for SnesBus {
                     // $4200 - NMITIMEN - Interrupt Enable and Joypad Request
                     0x4200 => {
                         // Bit 7: NMI enable
-                        // Other bits: H/V timer interrupt enable, auto-joypad read enable
+                        // Bits 5-4: H/V timer IRQ enable mode
+                        // Bit 0: Auto-joypad read enable
                         let v = (if self.ppu.nmi_enable { 0x80 } else { 0x00 })
+                            | ((self.hv_irq_mode & 0x03) << 4)
                             | (if self.auto_joypad_enable { 0x01 } else { 0x00 });
                         self.open_bus.set(v);
                         v
@@ -1235,14 +1238,16 @@ impl Memory65c816 for SnesBus {
                     0x4016 => {
                         // Bit 0: Serial data for controller 1
                         // Bits 1-7: Open bus (typically 0)
+                        // Button order: B, Y, Select, Start, Up, Down, Left, Right, A, X, L, R
+                        // B is at bit 15 (MSB), read MSB first per hardware serial protocol
                         let v = if self.controller_strobe {
-                            // While strobed, return bit 0 of the current state
-                            (self.controller_state[0] & 1) as u8
+                            // While strobed, return current button B state (bit 15)
+                            ((self.controller_state[0] >> 15) & 1) as u8
                         } else {
-                            // Shift out the latched state
+                            // Shift out the latched state, MSB first
                             let cur = self.controller_shift[0].get();
-                            let bit = (cur & 1) as u8;
-                            self.controller_shift[0].set(cur >> 1);
+                            let bit = ((cur >> 15) & 1) as u8;
+                            self.controller_shift[0].set(cur << 1);
                             bit
                         };
                         self.open_bus.set(v);
@@ -1252,12 +1257,13 @@ impl Memory65c816 for SnesBus {
                     0x4017 => {
                         // Bit 0: Serial data for controller 2
                         // Bits 1-4: Not used (0x1E if nothing connected)
+                        // Button order: B, Y, Select, Start, Up, Down, Left, Right, A, X, L, R
                         let v = if self.controller_strobe {
-                            (self.controller_state[1] & 1) as u8
+                            ((self.controller_state[1] >> 15) & 1) as u8
                         } else {
                             let cur = self.controller_shift[1].get();
-                            let bit = (cur & 1) as u8;
-                            self.controller_shift[1].set(cur >> 1);
+                            let bit = ((cur >> 15) & 1) as u8;
+                            self.controller_shift[1].set(cur << 1);
                             bit
                         };
                         self.open_bus.set(v);
@@ -1309,7 +1315,7 @@ impl Memory65c816 for SnesBus {
                     0x4300..=0x437F => {
                         let ch = ((offset - 0x4300) >> 4) as usize & 7;
                         let reg = (offset & 0x0F) as usize;
-                        match reg {
+                        let v = match reg {
                             0x0 => self.dma_channels[ch].control,
                             0x1 => self.dma_channels[ch].b_addr,
                             0x2 => (self.dma_channels[ch].a_addr & 0xFF) as u8,
@@ -1322,7 +1328,9 @@ impl Memory65c816 for SnesBus {
                             0x9 => ((self.dma_channels[ch].hdma_table >> 8) & 0xFF) as u8,
                             0xA => self.dma_channels[ch].hdma_line,
                             _ => 0xFF, // Open bus for unused registers
-                        }
+                        };
+                        self.open_bus.set(v);
+                        v
                     }
                     // Other hardware registers
                     0x2000..=0x5FFF => {
@@ -1870,11 +1878,11 @@ mod tests {
         bus.write(0x4016, 1);
         bus.write(0x4016, 0);
 
-        // Read bits serially (SNES sends LSB first)
+        // Read bits serially (SNES sends MSB first: B, Y, Select, Start, ...)
         let mut bits_read = 0u16;
         for i in 0..16 {
             let bit = bus.read(0x4016) & 1;
-            bits_read |= (bit as u16) << i;
+            bits_read |= (bit as u16) << (15 - i);
         }
 
         assert_eq!(bits_read, 0x0080); // Should match the A button state
@@ -1887,17 +1895,17 @@ mod tests {
         // Set controller state
         bus.set_controller(0, 0x1234);
 
-        // Strobe on - should read current bit 0
+        // Strobe on - should read current button B (bit 15)
         bus.write(0x4016, 1);
         let bit_strobed = bus.read(0x4016) & 1;
-        assert_eq!(bit_strobed, 0); // bit 0 of 0x1234 is 0
+        assert_eq!(bit_strobed, 0); // bit 15 of 0x1234 is 0
 
         // Strobe off - latch and shift
         bus.write(0x4016, 0);
 
-        // Read first bit
+        // Read first bit (bit 15 = MSB)
         let bit0 = bus.read(0x4016) & 1;
-        assert_eq!(bit0, 0); // LSB of 0x1234
+        assert_eq!(bit0, 0); // MSB of 0x1234 is 0
     }
 
     #[test]
@@ -1921,12 +1929,12 @@ mod tests {
         bus.write(0x4016, 1);
         bus.write(0x4016, 0);
 
-        // Read first bits from both controllers
+        // Read first bits from both controllers (MSB first = bit 15)
         let bit1_0 = bus.read(0x4016) & 1;
         let bit2_0 = bus.read(0x4017) & 1;
 
-        assert_eq!(bit1_0, 0); // LSB of 0xAAAA
-        assert_eq!(bit2_0, 1); // LSB of 0x5555
+        assert_eq!(bit1_0, 1); // MSB of 0xAAAA is 1
+        assert_eq!(bit2_0, 0); // MSB of 0x5555 is 0
     }
 
     #[test]
@@ -2098,9 +2106,9 @@ mod tests {
         // Configure HDMA channel 0
         bus.write(0x4300, 0x00); // Mode 0, direct
         bus.write(0x4301, 0x00); // B-bus: $2100 (INIDISP - brightness)
-        bus.write(0x4307, 0x7E); // HDMA bank
-        bus.write(0x4308, 0x00); // HDMA table address low
-        bus.write(0x4309, 0x10); // HDMA table address high ($7E1000)
+        bus.write(0x4302, 0x00); // HDMA table address low ($43x2)
+        bus.write(0x4303, 0x10); // HDMA table address high ($43x3)
+        bus.write(0x4304, 0x7E); // HDMA table bank ($43x4)
 
         // Set up a simple HDMA table in WRAM
         // Format: [line_count, data, line_count, data, ..., 0]
@@ -2126,9 +2134,9 @@ mod tests {
         // Configure HDMA channel 0 for brightness control
         bus.write(0x4300, 0x00); // Mode 0: 1 byte transfer, direct
         bus.write(0x4301, 0x00); // B-bus: $2100 (INIDISP)
-        bus.write(0x4307, 0x7E); // HDMA bank
-        bus.write(0x4308, 0x00); // HDMA table low
-        bus.write(0x4309, 0x20); // HDMA table high ($7E2000)
+        bus.write(0x4302, 0x00); // HDMA table address low ($43x2)
+        bus.write(0x4303, 0x20); // HDMA table address high ($43x3)
+        bus.write(0x4304, 0x7E); // HDMA table bank ($43x4)
 
         // Set up HDMA table: 2 scanlines of 0x0F brightness, then terminate
         bus.wram[0x2000] = 0x02; // 2 scanlines
@@ -2165,9 +2173,9 @@ mod tests {
         // Configure HDMA
         bus.write(0x4300, 0x00); // Mode 0
         bus.write(0x4301, 0x00); // $2100
-        bus.write(0x4307, 0x7E);
-        bus.write(0x4308, 0x00);
-        bus.write(0x4309, 0x30);
+        bus.write(0x4302, 0x00); // Table address low
+        bus.write(0x4303, 0x30); // Table address high
+        bus.write(0x4304, 0x7E); // Table bank
 
         // HDMA table with repeat flag set (0x80 | line_count)
         bus.wram[0x3000] = 0x83; // Repeat for 3 scanlines
@@ -2243,9 +2251,9 @@ mod tests {
         // Configure HDMA: Mode 2 (2 bytes to 1 register)
         bus.write(0x4300, 0x02); // Mode 2, direct
         bus.write(0x4301, 0x18); // B-bus: $2118
-        bus.write(0x4307, 0x7E); // HDMA bank
-        bus.write(0x4308, 0x00); // HDMA table address
-        bus.write(0x4309, 0x30);
+        bus.write(0x4302, 0x00); // Table address low
+        bus.write(0x4303, 0x30); // Table address high
+        bus.write(0x4304, 0x7E); // Table bank
 
         // HDMA table: 1 scanline, 2 bytes
         bus.wram[0x3000] = 0x01; // 1 scanline
@@ -2270,9 +2278,9 @@ mod tests {
         // Configure HDMA: Mode 4 (4 bytes to 4 registers)
         bus.write(0x4300, 0x04); // Mode 4, direct
         bus.write(0x4301, 0x18); // B-bus: $2118-$211B
-        bus.write(0x4307, 0x7E); // HDMA bank
-        bus.write(0x4308, 0x00); // HDMA table address
-        bus.write(0x4309, 0x30);
+        bus.write(0x4302, 0x00); // Table address low
+        bus.write(0x4303, 0x30); // Table address high
+        bus.write(0x4304, 0x7E); // Table bank
 
         // HDMA table: 1 scanline, 4 bytes
         bus.wram[0x3000] = 0x01; // 1 scanline
