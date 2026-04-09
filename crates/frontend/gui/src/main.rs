@@ -104,6 +104,7 @@ enum EmulatorSystem {
     GameAndWatch(Box<emu_gameandwatch::GameAndWatchSystem>),
     Atari5200(Box<emu_atari5200::Atari5200System>),
     MegaDrive(Box<emu_megadrive::MegaDriveSystem>),
+    C64(Box<emu_c64::C64System>),
 }
 
 #[allow(dead_code)]
@@ -155,6 +156,9 @@ impl EmulatorSystem {
             EmulatorSystem::MegaDrive(sys) => sys
                 .step_frame()
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::C64(sys) => sys
+                .step_frame()
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         }
     }
 
@@ -175,6 +179,7 @@ impl EmulatorSystem {
             EmulatorSystem::GameAndWatch(sys) => sys.reset(),
             EmulatorSystem::Atari5200(sys) => sys.reset(),
             EmulatorSystem::MegaDrive(sys) => sys.reset(),
+            EmulatorSystem::C64(sys) => sys.reset(),
         }
     }
 
@@ -195,6 +200,7 @@ impl EmulatorSystem {
             EmulatorSystem::GameAndWatch(sys) => sys.debugger(),
             EmulatorSystem::Atari5200(sys) => sys.debugger(),
             EmulatorSystem::MegaDrive(sys) => sys.debugger(),
+            EmulatorSystem::C64(_) => None,
         }
     }
 
@@ -215,6 +221,7 @@ impl EmulatorSystem {
             EmulatorSystem::GameAndWatch(sys) => sys.get_total_cycles(),
             EmulatorSystem::Atari5200(sys) => sys.get_total_cycles(),
             EmulatorSystem::MegaDrive(sys) => sys.get_total_cycles(),
+            EmulatorSystem::C64(sys) => sys.get_total_cycles(),
         }
     }
 
@@ -270,6 +277,9 @@ impl EmulatorSystem {
             EmulatorSystem::MegaDrive(sys) => sys
                 .mount(mount_point_id, data)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::C64(sys) => sys
+                .mount(mount_point_id, data)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         }
     }
 
@@ -291,6 +301,7 @@ impl EmulatorSystem {
             EmulatorSystem::GameAndWatch(sys) => sys.mount_points(),
             EmulatorSystem::Atari5200(sys) => sys.mount_points(),
             EmulatorSystem::MegaDrive(sys) => sys.mount_points(),
+            EmulatorSystem::C64(sys) => sys.mount_points(),
         }
     }
 
@@ -342,6 +353,9 @@ impl EmulatorSystem {
             EmulatorSystem::MegaDrive(sys) => sys
                 .unmount(mount_point_id)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::C64(sys) => sys
+                .unmount(mount_point_id)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         }
     }
 
@@ -363,6 +377,7 @@ impl EmulatorSystem {
             EmulatorSystem::GameAndWatch(sys) => sys.is_mounted(mount_point_id),
             EmulatorSystem::Atari5200(sys) => sys.is_mounted(mount_point_id),
             EmulatorSystem::MegaDrive(sys) => sys.is_mounted(mount_point_id),
+            EmulatorSystem::C64(sys) => sys.is_mounted(mount_point_id),
         }
     }
 
@@ -394,6 +409,7 @@ impl EmulatorSystem {
             EmulatorSystem::GameAndWatch(sys) => sys.supports_save_states(),
             EmulatorSystem::Atari5200(sys) => sys.supports_save_states(),
             EmulatorSystem::MegaDrive(sys) => sys.supports_save_states(),
+            EmulatorSystem::C64(_) => true,
         }
     }
 
@@ -414,6 +430,7 @@ impl EmulatorSystem {
             EmulatorSystem::GameAndWatch(sys) => sys.save_state(),
             EmulatorSystem::Atari5200(sys) => sys.save_state(),
             EmulatorSystem::MegaDrive(sys) => sys.save_state(),
+            EmulatorSystem::C64(sys) => sys.save_state(),
         }
     }
 
@@ -434,6 +451,7 @@ impl EmulatorSystem {
             EmulatorSystem::GameAndWatch(sys) => sys.load_state(state),
             EmulatorSystem::Atari5200(sys) => sys.load_state(state),
             EmulatorSystem::MegaDrive(sys) => sys.load_state(state),
+            EmulatorSystem::C64(sys) => sys.load_state(state),
         }
     }
 
@@ -614,6 +632,28 @@ impl EmulatorSystem {
                     sys.set_controller_2(md_state);
                 }
             }
+            EmulatorSystem::C64(sys) => {
+                // C64 joystick: GUI bits -> C64 joystick bits
+                // GUI: 0=A(fire), 1=B, 2=Select, 3=Start, 4=Up, 5=Down, 6=Left, 7=Right
+                // C64: 0=up, 1=down, 2=left, 3=right, 4=fire
+                let mut joy: u8 = 0;
+                if state & 0x10 != 0 {
+                    joy |= 0x01;
+                } // Up
+                if state & 0x20 != 0 {
+                    joy |= 0x02;
+                } // Down
+                if state & 0x40 != 0 {
+                    joy |= 0x04;
+                } // Left
+                if state & 0x80 != 0 {
+                    joy |= 0x08;
+                } // Right
+                if state & 0x01 != 0 {
+                    joy |= 0x10;
+                } // A -> Fire
+                sys.set_controller(port, joy);
+            }
         }
     }
 
@@ -726,6 +766,7 @@ impl EmulatorSystem {
             EmulatorSystem::GameAndWatch(sys) => Some(sys.cpu.pc as u32),
             EmulatorSystem::Atari5200(_) => None,
             EmulatorSystem::MegaDrive(_) => None,
+            EmulatorSystem::C64(sys) => Some(sys.cpu.pc as u32),
         }
     }
 
@@ -747,6 +788,7 @@ impl EmulatorSystem {
             EmulatorSystem::GameAndWatch(_) => Some(0.033), // SM510 (32.768 kHz)
             EmulatorSystem::Atari5200(_) => Some(1.79), // Atari 5200 6502C (1.79 MHz)
             EmulatorSystem::MegaDrive(_) => Some(7.67), // M68000 (7.67 MHz NTSC)
+            EmulatorSystem::C64(_) => Some(0.985),    // MOS 6510 (0.985 MHz PAL)
         }
     }
 
@@ -775,6 +817,7 @@ impl EmulatorSystem {
             EmulatorSystem::GameAndWatch(_) => emu_nes::RuntimeStats::default(),
             EmulatorSystem::Atari5200(_) => emu_nes::RuntimeStats::default(),
             EmulatorSystem::MegaDrive(_) => emu_nes::RuntimeStats::default(),
+            EmulatorSystem::C64(_) => emu_nes::RuntimeStats::default(),
         }
     }
 
@@ -795,6 +838,7 @@ impl EmulatorSystem {
             EmulatorSystem::GameAndWatch(_) => emu_core::apu::TimingMode::Ntsc,
             EmulatorSystem::Atari5200(_) => emu_core::apu::TimingMode::Ntsc,
             EmulatorSystem::MegaDrive(_) => emu_core::apu::TimingMode::Ntsc,
+            EmulatorSystem::C64(_) => emu_core::apu::TimingMode::Pal,
         }
     }
 
@@ -840,6 +884,7 @@ impl EmulatorSystem {
             EmulatorSystem::GameAndWatch(sys) => sys.generate_audio_samples(count),
             EmulatorSystem::Atari5200(sys) => sys.get_audio_samples(count),
             EmulatorSystem::MegaDrive(sys) => sys.get_audio_samples(count),
+            EmulatorSystem::C64(sys) => sys.get_audio_samples(count),
         }
     }
 
@@ -866,6 +911,7 @@ impl EmulatorSystem {
             EmulatorSystem::GameAndWatch(_) => (160, 120), // LCD segment grid
             EmulatorSystem::Atari5200(_) => (320, 192),    // ANTIC standard resolution
             EmulatorSystem::MegaDrive(_) => (320, 224),    // Mega Drive standard resolution
+            EmulatorSystem::C64(_) => (320, 200),          // VIC-II standard resolution
         }
     }
 
@@ -892,6 +938,7 @@ impl EmulatorSystem {
             EmulatorSystem::GameAndWatch(_) => "gameandwatch",
             EmulatorSystem::Atari5200(_) => "atari5200",
             EmulatorSystem::MegaDrive(_) => "megadrive",
+            EmulatorSystem::C64(_) => "c64",
         }
     }
 
@@ -919,6 +966,7 @@ impl EmulatorSystem {
             EmulatorSystem::GameAndWatch(_) => SystemType::GameAndWatch,
             EmulatorSystem::Atari5200(_) => SystemType::Atari5200,
             EmulatorSystem::MegaDrive(_) => SystemType::MegaDrive,
+            EmulatorSystem::C64(_) => SystemType::C64,
         }
     }
 
@@ -987,6 +1035,7 @@ impl EmulatorSystem {
             EmulatorSystem::GameAndWatch(_) => "Software".to_string(),
             EmulatorSystem::Atari5200(_) => "Software".to_string(),
             EmulatorSystem::MegaDrive(_) => "Software".to_string(),
+            EmulatorSystem::C64(_) => "Software".to_string(),
         }
     }
 
@@ -1025,6 +1074,7 @@ impl EmulatorSystem {
             EmulatorSystem::GameAndWatch(_) => vec!["Software".to_string()],
             EmulatorSystem::Atari5200(_) => vec!["Software".to_string()],
             EmulatorSystem::MegaDrive(_) => vec!["Software".to_string()],
+            EmulatorSystem::C64(_) => vec!["Software".to_string()],
         }
     }
 
@@ -1047,6 +1097,7 @@ impl EmulatorSystem {
             EmulatorSystem::GameAndWatch(_) => None,
             EmulatorSystem::Atari5200(sys) => sys.check_breakpoint(),
             EmulatorSystem::MegaDrive(sys) => sys.check_breakpoint(),
+            EmulatorSystem::C64(sys) => sys.check_breakpoint(),
         }
     }
 
@@ -1068,6 +1119,7 @@ impl EmulatorSystem {
             EmulatorSystem::GameAndWatch(_) => Vec::new(),
             EmulatorSystem::Atari5200(sys) => sys.get_breakpoint_manager().get_all(),
             EmulatorSystem::MegaDrive(sys) => sys.get_breakpoint_manager().get_all(),
+            EmulatorSystem::C64(sys) => sys.get_breakpoint_manager().get_all(),
         }
     }
 
@@ -1089,6 +1141,7 @@ impl EmulatorSystem {
             EmulatorSystem::GameAndWatch(_) => None,
             EmulatorSystem::Atari5200(sys) => Some(sys.get_instruction_tracer()),
             EmulatorSystem::MegaDrive(sys) => Some(sys.get_instruction_tracer()),
+            EmulatorSystem::C64(sys) => Some(sys.get_instruction_tracer()),
         }
     }
 
@@ -1112,6 +1165,7 @@ impl EmulatorSystem {
             EmulatorSystem::GameAndWatch(_) => None,
             EmulatorSystem::Atari5200(sys) => Some(sys.get_instruction_tracer_mut()),
             EmulatorSystem::MegaDrive(sys) => Some(sys.get_instruction_tracer_mut()),
+            EmulatorSystem::C64(sys) => Some(sys.get_instruction_tracer_mut()),
         }
     }
 }
@@ -2243,6 +2297,10 @@ fn create_megadrive_system(_settings: &Settings) -> emu_megadrive::MegaDriveSyst
     emu_megadrive::MegaDriveSystem::new()
 }
 
+fn create_c64_system(_settings: &Settings) -> emu_c64::C64System {
+    emu_c64::C64System::new()
+}
+
 /// Helper function to load BIOS from CLI argument or auto-search in ROM directory
 /// Returns (bios_data, bios_path) if found, None otherwise
 fn load_bios(
@@ -2471,6 +2529,12 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
                     s.get_instruction_tracer_mut().set_max_history(limit);
                 }
             }
+            EmulatorSystem::C64(s) => {
+                s.set_instruction_tracing(true);
+                if let Some(limit) = cli_args.trace_limit {
+                    s.get_instruction_tracer_mut().set_max_history(limit);
+                }
+            }
         }
     }
 
@@ -2492,6 +2556,7 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
             EmulatorSystem::GameAndWatch(_) => {} // Game & Watch breakpoints not yet implemented
             EmulatorSystem::Atari5200(s) => s.add_breakpoint(addr),
             EmulatorSystem::MegaDrive(s) => s.add_breakpoint(addr),
+            EmulatorSystem::C64(s) => s.add_breakpoint(addr),
         }
     }
 
@@ -2513,6 +2578,7 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
             EmulatorSystem::GameAndWatch(_) => {}
             EmulatorSystem::Atari5200(s) => s.add_read_breakpoint(addr),
             EmulatorSystem::MegaDrive(s) => s.add_read_breakpoint(addr),
+            EmulatorSystem::C64(s) => s.add_read_breakpoint(addr),
         }
     }
 
@@ -2534,6 +2600,7 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
             EmulatorSystem::GameAndWatch(_) => {}
             EmulatorSystem::Atari5200(s) => s.add_write_breakpoint(addr),
             EmulatorSystem::MegaDrive(s) => s.add_write_breakpoint(addr),
+            EmulatorSystem::C64(s) => s.add_write_breakpoint(addr),
         }
     }
 }
@@ -3142,6 +3209,34 @@ fn main() {
                     }
                 }
             }
+            "c64" | "commodore64" => {
+                sys = EmulatorSystem::C64(Box::new(create_c64_system(&settings)));
+                rom_loaded = true;
+                status_message = "Clean C64 system started".to_string();
+                println!("Started clean C64 system");
+
+                if let Some(ref p) = rom_path {
+                    if !p.to_lowercase().ends_with(".hemu") {
+                        match std::fs::read(p) {
+                            Ok(data) => {
+                                rom_hash = Some(GameSaves::rom_hash(&data));
+                                if let EmulatorSystem::C64(c64_sys) = &mut sys {
+                                    if let Err(e) = c64_sys.mount("cartridge", &data) {
+                                        eprintln!("Failed to load C64 ROM: {}", e);
+                                        status_message = format!("Error: {}", e);
+                                        rom_hash = None;
+                                    } else {
+                                        status_message = "C64 ROM loaded".to_string();
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to read file: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
             "pc" => {
                 sys = EmulatorSystem::PC(Box::new(emu_pc::PcSystem::new()));
                 rom_loaded = true; // Mark system as loaded even without ROM
@@ -3597,6 +3692,22 @@ fn main() {
                             } else {
                                 rom_loaded = true;
                                 sys = EmulatorSystem::MegaDrive(Box::new(md_sys));
+                                runtime_state.set_mount("cartridge".to_string(), p.clone());
+                                if let Err(e) = settings.save() {
+                                    eprintln!("Warning: Failed to save settings: {}", e);
+                                }
+                            }
+                        }
+                        Ok(SystemType::C64) => {
+                            rom_hash = Some(GameSaves::rom_hash(&data));
+                            let mut c64_sys = create_c64_system(&settings);
+                            if let Err(e) = c64_sys.mount("cartridge", &data) {
+                                eprintln!("Failed to load C64 ROM: {}", e);
+                                status_message = format!("Error: {}", e);
+                                rom_hash = None;
+                            } else {
+                                rom_loaded = true;
+                                sys = EmulatorSystem::C64(Box::new(c64_sys));
                                 runtime_state.set_mount("cartridge".to_string(), p.clone());
                                 if let Err(e) = settings.save() {
                                     eprintln!("Warning: Failed to save settings: {}", e);
@@ -4758,6 +4869,7 @@ fn main() {
                 }
                 EmulatorSystem::Atari5200(_) => SystemDebugInfo::new("Atari 5200".to_string()),
                 EmulatorSystem::MegaDrive(_) => SystemDebugInfo::new("Mega Drive".to_string()),
+                EmulatorSystem::C64(_) => SystemDebugInfo::new("C64".to_string()),
             };
             egui_app.tab_manager.update_debug_info(debug_info);
 
@@ -4815,6 +4927,7 @@ fn main() {
                 }
                 EmulatorSystem::Atari5200(_) => None,
                 EmulatorSystem::MegaDrive(_) => None,
+                EmulatorSystem::C64(_) => None,
             };
 
             if let Some(enhanced_state) = enhanced_state_opt {
@@ -4839,6 +4952,7 @@ fn main() {
                     EmulatorSystem::GameAndWatch(s) => Some(s.as_ref()),
                     EmulatorSystem::Atari5200(_) => None,
                     EmulatorSystem::MegaDrive(_) => None,
+                    EmulatorSystem::C64(_) => None,
                 };
 
                 if let Some(debugger) = debugger {
@@ -5280,6 +5394,17 @@ fn main() {
                                 "Mega Drive",
                                 &mut rom_loaded,
                                 "Created new Mega Drive system",
+                                &runtime_state,
+                            );
+                        }
+                        "C64" => {
+                            sys = EmulatorSystem::C64(Box::new(create_c64_system(&settings)));
+                            configure_system_ui(
+                                &mut egui_app,
+                                &sys,
+                                "C64",
+                                &mut rom_loaded,
+                                "Created new C64 system",
                                 &runtime_state,
                             );
                         }
@@ -5732,6 +5857,45 @@ fn main() {
                                             egui_app
                                                 .status_bar
                                                 .set_message("Mega Drive ROM loaded".to_string());
+                                            let _ = sys.resolution();
+                                            if let Some(ref hash) = rom_hash {
+                                                _game_saves = GameSaves::load(hash);
+                                            }
+                                        }
+                                    }
+                                    Ok(SystemType::C64) => {
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        let mut c64_sys = create_c64_system(&settings);
+                                        if let Err(e) = c64_sys.mount("cartridge", &data) {
+                                            egui_app
+                                                .status_bar
+                                                .set_message(format!("Error: {}", e));
+                                            rom_hash = None;
+                                        } else {
+                                            rom_loaded = true;
+                                            sys = EmulatorSystem::C64(Box::new(c64_sys));
+                                            egui_app.property_pane.system_name = "C64".to_string();
+                                            egui_app.property_pane.rendering_backend =
+                                                sys.get_current_renderer_name();
+                                            egui_app.property_pane.available_renderers =
+                                                sys.get_available_renderers();
+                                            runtime_state.set_mount(
+                                                "cartridge".to_string(),
+                                                path_str.clone(),
+                                            );
+                                            settings.add_recent_file(path_str.clone());
+                                            if let Err(e) = settings.save() {
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
+                                            }
+                                            egui_app.update_recent_files(
+                                                settings.get_recent_files().to_vec(),
+                                            );
+                                            egui_app
+                                                .status_bar
+                                                .set_message("C64 ROM loaded".to_string());
                                             let _ = sys.resolution();
                                             if let Some(ref hash) = rom_hash {
                                                 _game_saves = GameSaves::load(hash);
@@ -6629,6 +6793,45 @@ fn main() {
                                             egui_app
                                                 .status_bar
                                                 .set_message("Mega Drive ROM loaded".to_string());
+                                            let _ = sys.resolution();
+                                            if let Some(ref hash) = rom_hash {
+                                                _game_saves = GameSaves::load(hash);
+                                            }
+                                        }
+                                    }
+                                    Ok(SystemType::C64) => {
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        let mut c64_sys = create_c64_system(&settings);
+                                        if let Err(e) = c64_sys.mount("cartridge", &data) {
+                                            egui_app
+                                                .status_bar
+                                                .set_message(format!("Error: {}", e));
+                                            rom_hash = None;
+                                        } else {
+                                            rom_loaded = true;
+                                            sys = EmulatorSystem::C64(Box::new(c64_sys));
+                                            egui_app.property_pane.system_name = "C64".to_string();
+                                            egui_app.property_pane.rendering_backend =
+                                                sys.get_current_renderer_name();
+                                            egui_app.property_pane.available_renderers =
+                                                sys.get_available_renderers();
+                                            runtime_state.set_mount(
+                                                "cartridge".to_string(),
+                                                file_path.clone(),
+                                            );
+                                            settings.add_recent_file(file_path.clone());
+                                            if let Err(e) = settings.save() {
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
+                                            }
+                                            egui_app.update_recent_files(
+                                                settings.get_recent_files().to_vec(),
+                                            );
+                                            egui_app
+                                                .status_bar
+                                                .set_message("C64 ROM loaded".to_string());
                                             let _ = sys.resolution();
                                             if let Some(ref hash) = rom_hash {
                                                 _game_saves = GameSaves::load(hash);
@@ -8003,6 +8206,20 @@ fn main() {
                             egui_app
                                 .status_bar
                                 .set_message("Created new Mega Drive system".to_string());
+                        }
+                        "C64" => {
+                            sys = EmulatorSystem::C64(Box::new(create_c64_system(&settings)));
+                            rom_loaded = true;
+                            rom_hash = None;
+                            runtime_state.clear_mounts();
+                            egui_app.property_pane.system_name = "C64".to_string();
+                            egui_app.property_pane.rendering_backend =
+                                sys.get_current_renderer_name();
+                            egui_app.property_pane.available_renderers =
+                                sys.get_available_renderers();
+                            egui_app
+                                .status_bar
+                                .set_message("Created new C64 system".to_string());
                         }
                         "CHIP-8" => {
                             sys = EmulatorSystem::Chip8(Box::new(emu_chip8::Chip8System::new()));
