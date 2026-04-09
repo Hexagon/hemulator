@@ -4990,6 +4990,8 @@ fn main() {
                         scroll_x: nes_data.scroll_x,
                         scroll_y: nes_data.scroll_y,
                         mirroring: nes_data.mirroring,
+                        sprite0_status: nes_data.sprite0_status,
+                        sprite0_config: nes_data.sprite0_config,
                     });
                     egui_app.tab_manager.update_system_tile_data(tile_data);
 
@@ -8447,6 +8449,16 @@ fn main() {
                             egui_app
                                 .status_bar
                                 .set_message("Updated GB audio channels".to_string());
+                        }
+                    }
+                }
+                DebugAction::SetNesPpuConfig(cfg) => {
+                    if rom_loaded {
+                        if let EmulatorSystem::NES(sys) = &mut sys {
+                            sys.set_sprite0_config(cfg);
+                            egui_app
+                                .status_bar
+                                .set_message("Updated NES sprite 0 hit configuration".to_string());
                         }
                     }
                 }

@@ -92,6 +92,10 @@ pub mod ppu_renderer;
 pub mod ppu_renderer_opengl;
 pub mod rom_db;
 
+// Re-export only the inspector-facing PPU types so the GUI doesn't accidentally
+// depend on PPU internals as stable API.
+pub use ppu::{Sprite0Config, Sprite0Status};
+
 use crate::bus::Bus;
 use crate::cartridge::Mirroring;
 use bus::NesBus;
@@ -187,6 +191,10 @@ pub struct TileViewerData {
     pub scroll_y: u8,
     /// Current mirroring mode as string
     pub mirroring: String,
+    /// Current sprite 0 hit status (for the inspector)
+    pub sprite0_status: ppu::Sprite0Status,
+    /// Current sprite 0 configuration (for the inspector)
+    pub sprite0_config: ppu::Sprite0Config,
 }
 
 /// Program counter hotspot tracking for performance analysis.
@@ -353,6 +361,8 @@ impl NesSystem {
                 scroll_x: b.ppu.scroll_x(),
                 scroll_y: b.ppu.scroll_y(),
                 mirroring: mirroring_str,
+                sprite0_status: b.ppu.sprite0_status(),
+                sprite0_config: b.ppu.sprite0_config.clone(),
             }
         } else {
             // Return empty data if no bus is available
@@ -368,7 +378,24 @@ impl NesSystem {
                 scroll_x: 0,
                 scroll_y: 0,
                 mirroring: "Unknown".to_string(),
+                sprite0_status: ppu::Sprite0Status::default(),
+                sprite0_config: ppu::Sprite0Config::default(),
             }
+        }
+    }
+
+    /// Get the current sprite 0 hit configuration.
+    pub fn get_sprite0_config(&self) -> ppu::Sprite0Config {
+        self.cpu
+            .bus()
+            .map(|b| b.ppu.sprite0_config.clone())
+            .unwrap_or_default()
+    }
+
+    /// Update the sprite 0 hit configuration.
+    pub fn set_sprite0_config(&mut self, config: ppu::Sprite0Config) {
+        if let Some(b) = self.cpu.bus_mut() {
+            b.ppu.sprite0_config = config;
         }
     }
 
