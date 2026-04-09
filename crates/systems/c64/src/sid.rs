@@ -484,8 +484,11 @@ impl Sid {
         let high = input - self.filter_low - q_inv * self.filter_band;
         self.filter_band += f * high;
 
-        // Select filter output(s) based on filter_mode bits:
-        // bit 4 = LP, bit 5 = BP, bit 6 = HP
+        // Select filter output(s) based on filter_mode bits.
+        // filter_mode is (D418 >> 4) & 7, so:
+        //   bit 0 = LP output ($D418 bit 4)
+        //   bit 1 = BP output ($D418 bit 5)
+        //   bit 2 = HP output ($D418 bit 6)
         let filter_out = if self.filter_mode == 0 {
             // No filter mode active: pass through unfiltered
             filtered as f32 / 256.0
