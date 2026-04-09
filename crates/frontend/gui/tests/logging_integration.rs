@@ -14,7 +14,7 @@ fn test_logging_n64_rdp_unknown_command() {
     let config = LogConfig::global();
     config.set_level(LogCategory::Stubs, LogLevel::Warn);
 
-    // Create N64 system (requires GL context, so this test is ignored in CI)
+    // Create N64 system (uses software renderer — runs headless in CI)
     let mut n64 = emu_n64::N64System::new_for_test();
 
     // Load a minimal ROM (N64 requires at least 1MB)

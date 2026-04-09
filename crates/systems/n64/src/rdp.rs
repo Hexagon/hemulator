@@ -209,9 +209,11 @@ impl Rdp {
     ///
     /// Delegates to `from_renderer`; accepts any `RdpRenderer` boxed trait object
     /// so both software and hardware (OpenGL) renderers are supported.
-    pub fn with_renderer(renderer: Box<dyn super::rdp_renderer::RdpRenderer>) -> Self {
+    pub fn with_renderer(mut renderer: Box<dyn super::rdp_renderer::RdpRenderer>) -> Self {
         let width = renderer.get_frame().width;
         let height = renderer.get_frame().height;
+        // Initialize framebuffer to black (transparent) for a consistent starting state.
+        renderer.clear(0x00000000);
         Self::from_renderer(renderer, width, height)
     }
 

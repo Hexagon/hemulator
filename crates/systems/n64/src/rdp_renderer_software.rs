@@ -55,11 +55,13 @@ impl SoftwareRdpRenderer {
         if sa == 0x00 {
             return dst;
         }
+        let da = (dst >> 24) & 0xFF;
         let inv = 255 - sa;
+        let a = sa + (da * inv) / 255;
         let r = (((src >> 16) & 0xFF) * sa + ((dst >> 16) & 0xFF) * inv) / 255;
         let g = (((src >> 8) & 0xFF) * sa + ((dst >> 8) & 0xFF) * inv) / 255;
         let b = ((src & 0xFF) * sa + (dst & 0xFF) * inv) / 255;
-        0xFF000000 | (r << 16) | (g << 8) | b
+        (a << 24) | (r << 16) | (g << 8) | b
     }
 
     /// Write one pixel, respecting depth test and blending.
@@ -189,10 +191,16 @@ fn draw_tri(
             };
 
             // Per-scanline interpolated attributes at left and right X
-            let zl = lu16(a.z, c.z, if xa < xb { ta } else { tb });
-            let zr = lu16(near.z, far.z, if xa < xb { tb } else { ta });
-            let cl = lc(a.c, c.c, if xa < xb { ta } else { tb });
-            let cr = lc(near.c, far.c, if xa < xb { tb } else { ta });
+            let (zl, zr) = if xa < xb {
+                (lu16(a.z, c.z, ta), lu16(near.z, far.z, tb))
+            } else {
+                (lu16(near.z, far.z, tb), lu16(a.z, c.z, ta))
+            };
+            let (cl, cr) = if xa < xb {
+                (lc(a.c, c.c, ta), lc(near.c, far.c, tb))
+            } else {
+                (lc(near.c, far.c, tb), lc(a.c, c.c, ta))
+            };
             let (sl, sr) = if xa < xb {
                 (lf(a.s, c.s, ta), lf(near.s, far.s, tb))
             } else {
