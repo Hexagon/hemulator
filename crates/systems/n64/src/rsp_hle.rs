@@ -123,9 +123,15 @@ pub struct RspHle {
     dl_stack: Vec<u32>,
 
     /// Temporary storage for G_RDPHALF_1 data
-    /// Used for 2-word RDP commands split across display list entries
-    #[allow(dead_code)] // Reserved for future use with 2-word RDP commands
+    /// Used for 2-word RDP commands split across display list entries.
+    /// G_RDPHALF_1 stores the first word here; G_RDPHALF_2 reads it to construct
+    /// the complete RDP command and forward it to the RDP.
     rdp_half: u32,
+
+    /// Primitive depth values set by G_SETPRIMDEPTH
+    /// z: base depth value (16-bit), dz: depth delta (16-bit)
+    prim_depth_z: u16,
+    prim_depth_dz: u16,
 
     /// Light data (up to 8 lights)
     /// Each light has 7 elements: [dx, dy, dz, r, g, b, type]
@@ -171,6 +177,8 @@ impl RspHle {
             viewport: (0.0, 0.0, 320.0, 240.0, 160.0, 120.0),
             dl_stack: Vec::with_capacity(10),
             rdp_half: 0,
+            prim_depth_z: 0,
+            prim_depth_dz: 0,
             lights: [[0.0; 7]; 8],
             num_lights: 0,
             ambient_light: [0.3, 0.3, 0.3], // Default ambient light
@@ -995,6 +1003,66 @@ impl RspHle {
                 }
                 true
             }
+            // G_MODIFYVTX (0x02) - Modify a vertex attribute in the vertex buffer
+            0x02 => {
+                // word0: cmd_id(8) | how(8) | vbidx(6+1, i.e. vbidx*2 in bits 0-7)
+                // word1: new value for the specified attribute
+                //
+                // `how` (attribute selector):
+                //   0x10 = G_MWO_POINT_RGBA       — replace RGBA color (4 bytes)
+                //   0x14 = G_MWO_POINT_ST         — replace texture S,T coords (2×i16)
+                //   0x18 = G_MWO_POINT_XYSCREEN   — replace screen-space XY (2×i16)
+                //   0x1C = G_MWO_POINT_ZSCREEN    — replace screen-space Z (1×i16, upper half)
+                let how = (word0 >> 16) & 0xFF;
+                let vbidx = ((word0 >> 1) & 0x7F) as usize;
+                let value = word1;
+
+                if vbidx < 32 {
+                    match how {
+                        0x10 => {
+                            // G_MWO_POINT_RGBA — replace RGBA
+                            self.vertices[vbidx].color[0] = ((value >> 24) & 0xFF) as u8;
+                            self.vertices[vbidx].color[1] = ((value >> 16) & 0xFF) as u8;
+                            self.vertices[vbidx].color[2] = ((value >> 8) & 0xFF) as u8;
+                            self.vertices[vbidx].color[3] = (value & 0xFF) as u8;
+                        }
+                        0x14 => {
+                            // G_MWO_POINT_ST — replace texture S,T
+                            self.vertices[vbidx].tex[0] = ((value >> 16) & 0xFFFF) as i16;
+                            self.vertices[vbidx].tex[1] = (value & 0xFFFF) as i16;
+                        }
+                        0x18 => {
+                            // G_MWO_POINT_XYSCREEN — replace screen XY
+                            // Store back as object-space approximation; actual screen coords
+                            // are recalculated by the transform pipeline, so log only.
+                            log(LogCategory::PPU, LogLevel::Debug, || {
+                                format!(
+                                    "RSP HLE: G_MODIFYVTX XYSCREEN vbidx={} value=0x{:08X}",
+                                    vbidx, value
+                                )
+                            });
+                        }
+                        0x1C => {
+                            // G_MWO_POINT_ZSCREEN — replace screen Z (upper 16 bits)
+                            log(LogCategory::PPU, LogLevel::Debug, || {
+                                format!(
+                                    "RSP HLE: G_MODIFYVTX ZSCREEN vbidx={} value=0x{:08X}",
+                                    vbidx, value
+                                )
+                            });
+                        }
+                        _ => {
+                            log(LogCategory::Stubs, LogLevel::Debug, || {
+                                format!(
+                                    "RSP HLE: G_MODIFYVTX unknown how=0x{:02X} vbidx={} value=0x{:08X}",
+                                    how, vbidx, value
+                                )
+                            });
+                        }
+                    }
+                }
+                true
+            }
             // G_TRI1 (0x04) - Draw single triangle (alternate encoding)
             0x04 => {
                 // Alternative encoding used by some games
@@ -1461,20 +1529,31 @@ impl RspHle {
             0xB4 => {
                 // word0: cmd_id | padding
                 // word1: data (second word for RDP command)
-                // This completes a 2-word RDP command using the stored rdp_half value
-                // Common use: TEXTURE_RECTANGLE where word0 comes from RDPHALF_1
-                log(LogCategory::Stubs, LogLevel::Debug, || {
-                    format!("N64 RSP HLE: G_RDPHALF_2 - data=0x{:08X}, combining with rdp_half=0x{:08X}", word1, self.rdp_half)
+                // This completes a 2-word RDP command:
+                //   - self.rdp_half is the first word (set by G_RDPHALF_1)
+                //   - word1 is the second word
+                // The upper byte of rdp_half encodes the RDP command ID.
+                let rdp_w0 = self.rdp_half;
+                let rdp_w1 = word1;
+                let rdp_cmd_id = (rdp_w0 >> 24) & 0x3F;
+
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!(
+                        "N64 RSP HLE: G_RDPHALF_2 - forwarding RDP cmd=0x{:02X} w0=0x{:08X} w1=0x{:08X}",
+                        rdp_cmd_id, rdp_w0, rdp_w1
+                    )
                 });
+
+                rdp.execute_rdp_command(rdp_cmd_id, rdp_w0, rdp_w1, 0, 0, rdram);
                 true
             }
             // G_RDPHALF_1 (0xBF) - First half of 2-word RDP command
             0xBF => {
                 // word0: cmd_id | padding
                 // word1: data (first word for RDP command)
-                // Store the data for use by subsequent command
+                // Store the data for use by subsequent G_RDPHALF_2 command
                 self.rdp_half = word1;
-                log(LogCategory::Stubs, LogLevel::Debug, || {
+                log(LogCategory::PPU, LogLevel::Debug, || {
                     format!("N64 RSP HLE: G_RDPHALF_1 - stored data=0x{:08X}", word1)
                 });
                 true
@@ -1483,15 +1562,14 @@ impl RspHle {
             0xEE => {
                 // word0: cmd_id | padding
                 // word1: z (16-bit) | dz (16-bit) - depth value and delta
-                let _z = (word1 >> 16) & 0xFFFF;
-                let _dz = word1 & 0xFFFF;
+                // Store the primitive depth values for use by subsequent triangle commands
+                self.prim_depth_z = ((word1 >> 16) & 0xFFFF) as u16;
+                self.prim_depth_dz = (word1 & 0xFFFF) as u16;
 
-                // For HLE, we log but don't implement primitive depth override
-                // Full implementation would set a base depth for subsequent primitives
-                log(LogCategory::Stubs, LogLevel::Debug, || {
+                log(LogCategory::PPU, LogLevel::Debug, || {
                     format!(
                         "N64 RSP HLE: G_SETPRIMDEPTH - z=0x{:04X}, dz=0x{:04X}",
-                        _z, _dz
+                        self.prim_depth_z, self.prim_depth_dz
                     )
                 });
                 true
