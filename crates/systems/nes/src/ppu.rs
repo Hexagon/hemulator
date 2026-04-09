@@ -132,6 +132,60 @@ fn palette_mirror_index(i: usize) -> usize {
     }
 }
 
+/// Configuration for sprite 0 hit detection behaviour.
+///
+/// These options exist to allow manual debugging of games that have sprite 0 hit issues
+/// (e.g. Bee 52, Battletoads). The hardware-accurate defaults are documented below.
+///
+/// Reference: https://www.nesdev.org/wiki/PPU_OAM#Sprite_zero_hits
+#[derive(Debug, Clone, PartialEq)]
+pub struct Sprite0Config {
+    /// Clear sprite 0 hit flag at the start of VBlank (scanline 241, dot 1) in addition
+    /// to the hardware-accurate clear on the pre-render scanline.
+    ///
+    /// Hardware-accurate: **false** (clear only on pre-render scanline).
+    /// Default: **true** — this non-hardware-accurate early clear prevents Battletoads from
+    /// reading a stale hit flag from the previous frame during VBlank.
+    pub vblank_early_clear: bool,
+
+    /// Dot offset added to the computed hit position (x + 1).
+    ///
+    /// Hardware-accurate: **0** (hit fires at dot = x + 1).
+    /// Increase by 1 if the hit fires too early; decrease by 1 if too late.
+    /// Useful for games that are sensitive to the exact PPU cycle of the hit.
+    pub hit_dot_offset: i8,
+
+    /// When true (hardware-accurate), left-column clipping suppresses sprite 0 hits
+    /// in pixels 0–7 if either PPUMASK bit 1 (show_bg_left) or bit 2 (show_sprites_left)
+    /// is clear.  Set to false to disable this suppression for debugging.
+    pub left_col_suppression: bool,
+}
+
+impl Default for Sprite0Config {
+    fn default() -> Self {
+        Self {
+            vblank_early_clear: true,
+            hit_dot_offset: 0,
+            left_col_suppression: true,
+        }
+    }
+}
+
+/// Sprite 0 hit status snapshot — updated each frame for the inspector.
+#[derive(Debug, Clone, Default)]
+pub struct Sprite0Status {
+    /// Whether the hit flag is currently set.
+    pub hit_active: bool,
+    /// Scanline on which the hit last fired (None if not fired this frame yet).
+    pub last_hit_scanline: Option<u16>,
+    /// Dot on which the hit last fired.
+    pub last_hit_dot: Option<u16>,
+    /// Whether there is a pending hit scheduled (position found but not yet fired).
+    pub pending: bool,
+    /// Pending hit position (scanline, x).
+    pub pending_pos: Option<(u16, u16)>,
+}
+
 /// NES PPU (Picture Processing Unit).
 ///
 /// Implements the 2C02 PPU with frame-based rendering.
@@ -219,6 +273,10 @@ pub struct Ppu {
     /// This is set during render_scanline() and the flag is actually set during tick()
     /// when we reach the corresponding dot position (X + 2 to account for PPU pipeline).
     sprite_0_hit_pending: Cell<Option<(u16, u16)>>,
+    /// Configurable sprite 0 hit behaviour — set via the inspector GUI.
+    pub sprite0_config: Sprite0Config,
+    /// Scanline/dot on which sprite 0 hit last fired this frame (for the inspector).
+    sprite_0_hit_fired_at: Cell<Option<(u16, u16)>>,
 }
 
 impl fmt::Debug for Ppu {
@@ -280,6 +338,8 @@ impl Ppu {
             frame_counter: Cell::new(0),
             timing_mode,
             sprite_0_hit_pending: Cell::new(None),
+            sprite0_config: Sprite0Config::default(),
+            sprite_0_hit_fired_at: Cell::new(None),
         }
     }
 
@@ -461,6 +521,21 @@ impl Ppu {
     pub fn clear_sprite_flags(&self) {
         self.sprite_0_hit.set(false);
         self.sprite_overflow.set(false);
+        // Clear all per-frame sprite-0 bookkeeping so both the tick-driven pre-render
+        // reset path and this helper stay consistent, and the inspector starts fresh.
+        self.sprite_0_hit_pending.set(None);
+        self.sprite_0_hit_fired_at.set(None);
+    }
+
+    /// Return a snapshot of the current sprite 0 hit state for the inspector.
+    pub fn sprite0_status(&self) -> Sprite0Status {
+        Sprite0Status {
+            hit_active: self.sprite_0_hit.get(),
+            last_hit_scanline: self.sprite_0_hit_fired_at.get().map(|(sl, _)| sl),
+            last_hit_dot: self.sprite_0_hit_fired_at.get().map(|(_, dot)| dot),
+            pending: self.sprite_0_hit_pending.get().is_some(),
+            pending_pos: self.sprite_0_hit_pending.get(),
+        }
     }
 
     pub fn vblank_flag(&self) -> bool {
@@ -1407,13 +1482,23 @@ impl Ppu {
                     // We store the position instead of setting the flag immediately for cycle-accurate timing.
                     // Conditions: sprite 0, no hit found yet, flag not already set, background opaque at this x,
                     // x < 255 (hit can't occur at rightmost pixel), and not in clipped region.
+                    //
+                    // Left-column suppression (hardware-accurate, configurable):
+                    //   When left_col_suppression is true (default), hits in columns 0-7 are suppressed
+                    //   if either show_bg_left or show_sprites_left is false — matching NESdev wiki.
+                    //   When false, the suppression is skipped (useful for debugging).
+                    let left_col_ok = if self.sprite0_config.left_col_suppression {
+                        show_bg_left && show_sprites_left || x >= 8
+                    } else {
+                        true
+                    };
                     let is_sprite_0_hit_candidate = sprite_idx == 0
                         && sprite_0_hit_x.is_none()
                         && !self.sprite_0_hit.get()
                         && bg_enabled
                         && bg_priority[x]
                         && x < 255
-                        && (show_bg_left && show_sprites_left || x >= 8);
+                        && left_col_ok;
 
                     // Sprite 0 NO HIT logging disabled - too verbose
                     // if sprite_idx == 0 && sprite_0_hit_x.is_none() && !is_sprite_0_hit_candidate { ... }
@@ -1511,9 +1596,15 @@ impl Ppu {
             // Double-clearing here is intentional and safe: the flag is simply guaranteed to be
             // false throughout VBlank, and it will be cleared again on the pre-render scanline
             // for correctness with code that assumes the hardware timing.
-            // NOTE: This is a deviation from strict hardware accuracy for better game compatibility.
-            self.sprite_0_hit.set(false);
-            self.sprite_0_hit_pending.set(None);
+            //
+            // NOTE: Configurable via sprite0_config.vblank_early_clear.  Default: true.
+            //       Set to false (hardware-accurate) if a game fails because it polls the
+            //       sprite 0 hit flag during VBlank and expects it to still be set.
+            if self.sprite0_config.vblank_early_clear {
+                self.sprite_0_hit.set(false);
+                self.sprite_0_hit_pending.set(None);
+                self.sprite_0_hit_fired_at.set(None);
+            }
 
             // If VBlank just started and NMI is enabled, trigger NMI
             if !was_vblank && self.nmi_enabled() {
@@ -1535,8 +1626,9 @@ impl Ppu {
             // Clear sprite flags (this is the ONLY place they're cleared on hardware)
             self.sprite_0_hit.set(false);
             self.sprite_overflow.set(false);
-            // Also clear pending sprite 0 hit for the new frame
+            // Also clear pending sprite 0 hit and the fired-at tracker for the new frame
             self.sprite_0_hit_pending.set(None);
+            self.sprite_0_hit_fired_at.set(None);
 
             log(LogCategory::PPU, LogLevel::Trace, || {
                 "PPU: Pre-render scanline, dot 1: cleared VBlank and sprite flags".to_string()
@@ -1591,9 +1683,14 @@ impl Ppu {
         // Reference: NESdev wiki PPU sprite evaluation, Mesen2 NesPpu.cpp GetPixelColor()
         if scanline < 240 && dot >= 1 && dot <= 256 {
             if let Some((hit_scanline, hit_x)) = self.sprite_0_hit_pending.get() {
-                // Check if we're on the right scanline and have reached the hit position
-                // Hit triggers at dot = X + 1 (dot 1 = pixel x=0)
-                let trigger_dot = hit_x.saturating_add(1);
+                // Check if we're on the right scanline and have reached the hit position.
+                // hit_dot_offset (default 0) lets the user nudge the timing for debugging.
+                let base_trigger = hit_x.saturating_add(1);
+                let trigger_dot = if self.sprite0_config.hit_dot_offset >= 0 {
+                    base_trigger.saturating_add(self.sprite0_config.hit_dot_offset as u16)
+                } else {
+                    base_trigger.saturating_sub((-self.sprite0_config.hit_dot_offset) as u16)
+                };
                 if scanline == hit_scanline && dot >= trigger_dot && !self.sprite_0_hit.get() {
                     log(LogCategory::PPU, LogLevel::Info, || {
                         format!(
@@ -1603,6 +1700,7 @@ impl Ppu {
                     });
                     self.sprite_0_hit.set(true);
                     self.sprite_0_hit_pending.set(None);
+                    self.sprite_0_hit_fired_at.set(Some((scanline, dot)));
                 }
             }
         }
