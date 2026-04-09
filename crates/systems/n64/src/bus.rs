@@ -117,7 +117,7 @@ impl N64Bus {
     /// tests that run in CI without GPU support.
     pub fn new_for_test() -> Self {
         use crate::rdp_renderer_software::SoftwareRdpRenderer;
-        let rdp = Rdp::with_software_renderer(Box::new(SoftwareRdpRenderer::new(320, 240)));
+        let rdp = Rdp::with_renderer(Box::new(SoftwareRdpRenderer::new(320, 240)));
 
         let mut bus = Self {
             rdram: vec![0; 4 * 1024 * 1024],

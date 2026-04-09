@@ -2387,7 +2387,10 @@ mod tests {
         let mut rdram = vec![0u8; 1024];
 
         let addr = 0x100;
-        // N64 matrix format: integer parts at addr + i*2, fractional parts at addr + 32 + i*2
+        // N64 matrix format (64 bytes):
+        //   bytes 0–31:  integer half-words (i16 BE) at addr + i*2  (i = 0..16)
+        //   bytes 32–63: fractional half-words (u16 BE) at addr + 0x20 + i*2
+        // e.g. element 5 (m[1][1]): int at addr+10, frac at addr+42.
         for i in 0..16 {
             let int_val: i16 = if i == 0 || i == 5 || i == 10 || i == 15 {
                 1
@@ -2721,8 +2724,9 @@ mod tests {
         let vdata2: [u8; 16] = [0, 20, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 128, 128, 128, 255];
         rdram[vtx2_data_addr..vtx2_data_addr + 16].copy_from_slice(&vdata2);
 
-        // Load 1 vertex at buffer index 1: vbidx_plus_n = buffer_index + count = 1 + 1 = 2
-        // Bits 7:1 of word0 hold vbidx_plus_n, so encode as (2 << 1)
+        // G_VTX encoding: bits 19:12 = vertex_count (1), bits 7:1 = vbidx_plus_n
+        // vbidx_plus_n = buffer_index + vertex_count = 1 + 1 = 2
+        // → (1 << 12) | (2 << 1)  encodes count=1, destination slot=1
         let vtx2_cmd_word0: u32 = (0x01 << 24) | (1 << 12) | (2 << 1);
         let vtx2_cmd_word1: u32 = vtx2_data_addr as u32;
         rdram[branch_target..branch_target + 4].copy_from_slice(&vtx2_cmd_word0.to_be_bytes());

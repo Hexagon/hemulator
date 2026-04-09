@@ -207,9 +207,9 @@ impl Rdp {
 
     /// Create an RDP backed by an arbitrary renderer implementation.
     ///
-    /// This is the canonical low-level constructor; `new` and the
-    /// `with_software_renderer` helpers both delegate to it.
-    pub fn with_software_renderer(renderer: Box<dyn super::rdp_renderer::RdpRenderer>) -> Self {
+    /// Delegates to `from_renderer`; accepts any `RdpRenderer` boxed trait object
+    /// so both software and hardware (OpenGL) renderers are supported.
+    pub fn with_renderer(renderer: Box<dyn super::rdp_renderer::RdpRenderer>) -> Self {
         let width = renderer.get_frame().width;
         let height = renderer.get_frame().height;
         Self::from_renderer(renderer, width, height)
@@ -274,7 +274,7 @@ impl Rdp {
         use super::rdp_renderer_software::SoftwareRdpRenderer;
         let renderer: Box<dyn super::rdp_renderer::RdpRenderer> =
             Box::new(SoftwareRdpRenderer::new(320, 240));
-        Self::with_software_renderer(renderer)
+        Self::with_renderer(renderer)
     }
 
     /// Create a new RDP with specified resolution using the software renderer.
@@ -283,7 +283,7 @@ impl Rdp {
         use super::rdp_renderer_software::SoftwareRdpRenderer;
         let renderer: Box<dyn super::rdp_renderer::RdpRenderer> =
             Box::new(SoftwareRdpRenderer::new(width, height));
-        Self::with_software_renderer(renderer)
+        Self::with_renderer(renderer)
     }
 
     /// Get the name of the current renderer backend
@@ -1950,10 +1950,12 @@ mod tests {
         // Create a display list with FILL_RECTANGLE command
         // Fill a 100x100 rectangle at (50, 50)
 
-        // SET_FILL_COLOR (0x37) - opaque red in RGBA8888 = 0xFF0000FF
-        // In 32-bit mode: RGBA→ARGB: A=0xFF,R=0xFF,G=0x00,B=0x00 → 0xFFFF0000
+        // SET_FILL_COLOR (0x37) – hardware stores fill color in RGBA8888 order
+        // (bytes: R G B A = 0xFF 0x00 0x00 0xFF → value 0xFF0000FF).
+        // The 32-bit renderer converts RGBA→internal ARGB: (A<<24)|(R<<16)|(G<<8)|B
+        // = (0xFF<<24)|(0xFF<<16)|0 = 0xFFFF0000.
         let set_color_cmd = 0x37000000u32;
-        let color = 0xFF0000FFu32; // RGBA: opaque red
+        let color = 0xFF0000FFu32; // RGBA8888: R=0xFF, G=0x00, B=0x00, A=0xFF
         rdram[0..4].copy_from_slice(&set_color_cmd.to_be_bytes());
         rdram[4..8].copy_from_slice(&color.to_be_bytes());
 
@@ -2045,7 +2047,8 @@ mod tests {
         rdram[0..4].copy_from_slice(&set_scissor_cmd.to_be_bytes());
         rdram[4..8].copy_from_slice(&set_scissor_data.to_be_bytes());
 
-        // SET_FILL_COLOR - opaque red in RGBA8888; 32-bit mode converts to ARGB 0xFFFF0000
+        // SET_FILL_COLOR – RGBA8888 0xFF0000FF (R=255,G=0,B=0,A=255).
+        // 32-bit mode converts to internal ARGB: (A<<24)|(R<<16)|(G<<8)|B = 0xFFFF0000.
         rdram[8..12].copy_from_slice(&0x37000000u32.to_be_bytes());
         rdram[12..16].copy_from_slice(&0xFF0000FFu32.to_be_bytes());
 
