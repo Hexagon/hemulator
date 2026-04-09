@@ -200,11 +200,49 @@ pub trait RdpRenderer: Send {
         scissor: &ScissorBox,
     );
 
+    /// Draw a textured+shaded triangle with Z-buffer (colour-combiner MODULATE).
+    ///
+    /// Each vertex carries both texture coordinates and a shade (RGBA) colour.
+    /// The fragment colour is computed as `texel * shade`, implementing the
+    /// N64 `G_CC_MODULATERGB` combine mode.  Pass `shade = 0xFFFFFFFF` for all
+    /// vertices to fall back to straight texture (DECAL) behaviour.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_triangle_textured_shaded_zbuffer(
+        &mut self,
+        x0: i32,
+        y0: i32,
+        z0: u16,
+        s0: f32,
+        t0: f32,
+        c0: u32,
+        x1: i32,
+        y1: i32,
+        z1: u16,
+        s1: f32,
+        t1: f32,
+        c1: u32,
+        x2: i32,
+        y2: i32,
+        z2: u16,
+        s2: f32,
+        t2: f32,
+        c2: u32,
+        texture: &dyn Fn(f32, f32) -> u32,
+        scissor: &ScissorBox,
+    );
+
     /// Clear the Z-buffer to maximum depth (far plane)
     fn clear_zbuffer(&mut self);
 
     /// Enable or disable Z-buffer testing
     fn set_zbuffer_enabled(&mut self, enabled: bool);
+
+    /// Enable or disable alpha blending for subsequent draw calls.
+    ///
+    /// When `enabled` is `true` the renderer uses standard src-alpha /
+    /// (1 - src-alpha) blending so that partially-transparent texels are
+    /// composited correctly over the existing framebuffer contents.
+    fn set_alpha_blend(&mut self, enabled: bool);
 
     /// Resize the renderer to new dimensions
     #[allow(dead_code)]

@@ -11,7 +11,13 @@ out vec4 vColor;   // Pass color to fragment shader
 out float vDepth;  // Pass depth to fragment shader
 
 void main() {
-    gl_Position = vec4(aPosition, 0.0, 1.0);
+    // Map depth from [0, 1] to NDC z range [-1, 1] so that the GPU depth
+    // buffer test reflects the true scene depth order.  When aDepth is not
+    // bound (non-z-buffer draw paths) it defaults to 0 → ndcZ = -1 (near
+    // plane), which is harmless because depth testing is disabled for those
+    // calls.
+    float ndcZ = aDepth * 2.0 - 1.0;
+    gl_Position = vec4(aPosition, ndcZ, 1.0);
     vColor = aColor;
     vDepth = aDepth;
 }
