@@ -239,6 +239,9 @@ impl Vic {
         let ecm = self.regs[0x11] & 0x40 != 0; // Extended color mode
         let mcm = self.regs[0x16] & 0x10 != 0; // Multicolor mode
 
+        // TODO: Apply XSCROLL ($D016 bits 0-2) and YSCROLL ($D011 bits 0-2)
+        // to shift the display output
+
         if bmm {
             if mcm {
                 self.render_multicolor_bitmap(visible_y);
@@ -434,6 +437,8 @@ impl Vic {
 
     /// Render sprites for a visible line
     fn render_sprites(&mut self, visible_y: u32) {
+        // TODO: Populate sprite_sprite_collision and sprite_bg_collision registers
+        // TODO: Enforce sprite-to-background priority ($D01B)
         let sprite_enable = self.regs[0x15];
         if sprite_enable == 0 {
             return;

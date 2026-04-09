@@ -107,3 +107,22 @@ not available in CI or in headless `cargo test` runs.  They can be run manually 
 - [ ] **Interlace modes**: Interlaced display modes (reg $0C bits 1-2) not implemented. — `crates/systems/megadrive/src/vdp.rs`
 - [ ] **SRAM save/load persistence**: SRAM is detected but not persisted to disk between sessions. — `crates/systems/megadrive/src/bus.rs`
 - [ ] **Controller input 6-button support**: Only 3-button controller protocol emulated. — `crates/systems/megadrive/src/bus.rs`
+
+## Commodore 64
+
+### High
+- [ ] **SID multimode filter**: Filter cutoff, resonance, and routing registers are stored but LP/BP/HP filter is not applied to audio output. Many games/demos rely on filter sweeps for sound. — `crates/systems/c64/src/sid.rs`
+- [ ] **Debugger trait implementation**: The C64 does not implement `emu_core::debug::Debugger`, so the GUI Inspector panels (disassembly, memory view, CPU state) are not available. — `crates/systems/c64/src/system.rs`
+
+### Medium
+- [ ] **Sprite collision detection**: Collision registers ($D01E/$D01F) are readable and cleared on read, but sprite-sprite and sprite-background collisions are never detected during rendering. — `crates/systems/c64/src/vic.rs`
+- [ ] **Smooth scrolling**: X/Y scroll bits in $D011/$D016 are stored but not applied to display output offset. — `crates/systems/c64/src/vic.rs`
+- [ ] **Sprite-to-background priority**: Sprite priority bit (register $D01B) is not enforced during rendering. — `crates/systems/c64/src/vic.rs`
+- [ ] **.d64 disk image support**: 1541 floppy drive emulation not implemented. Only .prg files can be loaded. — `crates/systems/c64/src/bus.rs`
+
+### Low
+- [ ] **NTSC timing mode**: Only PAL timing (63 cycles/line × 312 lines) is implemented. NTSC (65 cycles/line × 263 lines) constants exist but are not selectable. — `crates/systems/c64/src/vic.rs`
+- [ ] **.crt cartridge bank switching**: CRT format files are detected but cartridge banking hardware is not emulated. — `crates/systems/c64/src/bus.rs`
+- [ ] **Border 38/40 column mode**: $D016 CSEL bit for 38-column border not applied. — `crates/systems/c64/src/vic.rs`
+- [ ] **Light pen**: Light pen registers return fixed values; actual pen input not supported. — `crates/systems/c64/src/vic.rs`
+- [ ] **Paddle inputs**: SID paddle registers ($D419/$D41A) return 0. — `crates/systems/c64/src/sid.rs`

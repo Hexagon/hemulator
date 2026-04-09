@@ -455,6 +455,9 @@ impl Sid {
             mix += (raw * env) / 256;
         }
 
+        // TODO: Apply multimode filter (LP/BP/HP) based on filter_cutoff,
+        // filter_resonance, filter_route, and filter_mode registers
+
         // Apply master volume (0–15)
         mix = (mix * self.master_volume as i32) / 15;
 
