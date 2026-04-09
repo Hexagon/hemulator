@@ -1767,9 +1767,11 @@ impl RspHle {
             let s2_f = vert2.tex[0] as f32 / 32.0;
             let t2_f = vert2.tex[1] as f32 / 32.0;
 
-            rdp.draw_triangle_textured_zbuf(
-                x0, y0, z0_u16, s0_f, t0_f, x1, y1, z1_u16, s1_f, t1_f, x2, y2, z2_u16, s2_f, t2_f,
-                0, // tile 0
+            // Pass per-vertex shade colours together with texture coordinates so
+            // the RDP can apply the colour-combiner mode (e.g. TEXEL0 × SHADE).
+            rdp.draw_triangle_textured_shaded_zbuf(
+                x0, y0, z0_u16, s0_f, t0_f, c0, x1, y1, z1_u16, s1_f, t1_f, c1, x2, y2, z2_u16,
+                s2_f, t2_f, c2, 0, // tile 0
             );
         } else {
             rdp.draw_triangle_shaded_zbuffer(

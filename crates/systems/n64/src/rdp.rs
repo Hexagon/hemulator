@@ -327,6 +327,12 @@ impl Rdp {
     /// Set othermode (64-bit combined value from RSP HLE)
     pub fn set_othermode(&mut self, othermode: u64) {
         self.othermode = othermode;
+        // FORCE_BL is bit 14 of othermode_l (lower 32 bits of the combined value).
+        // When set, the game has configured the blender for alpha compositing, so
+        // enable src-alpha / (1-src-alpha) blending in the renderer.
+        let othermode_l = othermode as u32;
+        let force_bl = (othermode_l >> 14) & 0x1 != 0;
+        self.renderer.set_alpha_blend(force_bl);
     }
 
     /// Clear the framebuffer with the current fill color
@@ -458,6 +464,7 @@ impl Rdp {
 
     /// Draw a textured triangle with Z-buffer, sampling from TMEM tile.
     /// Texture coordinates (s0,t0) etc. are in texel-space fixed-point.
+    #[allow(dead_code)]
     #[allow(clippy::too_many_arguments)]
     pub fn draw_triangle_textured_zbuf(
         &mut self,
@@ -493,6 +500,77 @@ impl Rdp {
         self.renderer.draw_triangle_textured_zbuffer(
             x0, y0, z0, s0, t0, x1, y1, z1, s1, t1, x2, y2, z2, s2, t2, &sampler, &scissor,
         );
+    }
+
+    /// Draw a textured triangle with per-vertex shade colours and Z-buffer,
+    /// applying the current colour-combiner mode.
+    ///
+    /// The combine mode is inspected to decide how to blend texel and shade:
+    /// * **MODULATE** (`TEXEL0 × SHADE`): the shader multiplies the texture
+    ///   sample by the interpolated shade colour – the most common lit-texture
+    ///   mode used in N64 games.
+    /// * **All other modes**: shade colours are forced to opaque white so the
+    ///   texture is displayed unmodified (equivalent to DECAL).
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_triangle_textured_shaded_zbuf(
+        &mut self,
+        x0: i32,
+        y0: i32,
+        z0: u16,
+        s0: f32,
+        t0: f32,
+        c0: u32,
+        x1: i32,
+        y1: i32,
+        z1: u16,
+        s1: f32,
+        t1: f32,
+        c1: u32,
+        x2: i32,
+        y2: i32,
+        z2: u16,
+        s2: f32,
+        t2: f32,
+        c2: u32,
+        tile: usize,
+    ) {
+        // Determine the effective shade colours based on the colour-combiner mode.
+        // Only the MODULATE pattern (A=TEXEL0, C=SHADE) uses the per-vertex colour;
+        // everything else falls back to opaque white (no tinting).
+        let (sc0, sc1, sc2) = if Self::combine_mode_is_modulate(self.combine_mode) {
+            (c0, c1, c2)
+        } else {
+            (0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF)
+        };
+
+        let tile_idx = tile.min(7);
+        let td = self.tiles[tile_idx];
+        let tmem_copy: [u8; 4096] = self.tmem;
+        let scissor = self.scissor;
+
+        let sampler = |s: f32, t: f32| -> u32 {
+            Self::sample_texture_static(&td, &tmem_copy, s.max(0.0) as u32, t.max(0.0) as u32)
+        };
+
+        self.renderer.draw_triangle_textured_shaded_zbuffer(
+            x0, y0, z0, s0, t0, sc0, x1, y1, z1, s1, t1, sc1, x2, y2, z2, s2, t2, sc2, &sampler,
+            &scissor,
+        );
+    }
+
+    /// Return `true` when the current colour-combiner mode encodes the
+    /// `TEXEL0 × SHADE` (MODULATE) pattern.
+    ///
+    /// The combine_mode 64-bit word layout (bits relative to MSB = bit 63):
+    /// * `[55:52]` sub_a_rgb0 (A0): colour mux A for cycle 1
+    /// * `[51:47]` mul_rgb0   (C0): colour mux C for cycle 1 (5-bit)
+    ///
+    /// MODULATE is detected when A0 = TEXEL0 (1) **and** C0 = SHADE (11).
+    fn combine_mode_is_modulate(combine_mode: u64) -> bool {
+        let sub_a_rgb0 = (combine_mode >> 52) & 0xF; // A source, 4-bit
+        let mul_rgb0 = (combine_mode >> 47) & 0x1F; // C source, 5-bit
+                                                    // TEXEL0 = 1 for A; SHADE = 11 for C (5-bit mux)
+        sub_a_rgb0 == 1 && mul_rgb0 == 11
     }
 
     /// Get the current framebuffer
