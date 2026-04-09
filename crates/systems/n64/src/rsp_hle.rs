@@ -2039,7 +2039,6 @@ mod tests {
     use super::*;
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rsp_hle_creation() {
         let hle = RspHle::new();
         assert_eq!(hle.microcode, MicrocodeType::Unknown);
@@ -2047,7 +2046,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_microcode_detection() {
         let mut hle = RspHle::new();
         let mut imem = [0u8; 4096];
@@ -2064,7 +2062,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_execute_unknown_task() {
         let mut hle = RspHle::new();
         let dmem = [0u8; 4096];
@@ -2076,7 +2073,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_vertex_loading() {
         let mut hle = RspHle::new();
         let mut rdram = vec![0u8; 4096];
@@ -2113,7 +2109,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_vertex_transform() {
         let hle = RspHle::new();
         let vertex = Vertex {
@@ -2142,7 +2137,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_identity_matrix() {
         let matrix = RspHle::identity_matrix();
 
@@ -2158,7 +2152,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_viewport_transformation() {
         // Test viewport transformation correctness
         let hle = RspHle::new();
@@ -2205,7 +2198,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_f3dex_display_list_parsing() {
         let mut hle = RspHle::new();
         hle.microcode = MicrocodeType::F3DEX;
@@ -2267,7 +2259,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_f3dex_quad_command() {
         let mut hle = RspHle::new();
         hle.microcode = MicrocodeType::F3DEX;
@@ -2327,7 +2318,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_f3dex_geometrymode_command() {
         let mut hle = RspHle::new();
         hle.microcode = MicrocodeType::F3DEX;
@@ -2360,7 +2350,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_matrix_multiplication() {
         // Test identity matrix multiplication
         let identity = RspHle::identity_matrix();
@@ -2375,7 +2364,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_matrix_multiplication_scaling() {
         // Test scaling matrix multiplication
         let scale2 = [
@@ -2394,25 +2382,21 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_load_matrix_from_rdram() {
         let hle = RspHle::new();
         let mut rdram = vec![0u8; 1024];
 
-        // Create an identity matrix in RDRAM (16.16 fixed point format)
-        // Identity: diagonal = 1.0 = 0x00010000 in 16.16 fixed point
-        let identity_fixed: i32 = 0x00010000; // 1.0 in 16.16 fixed point
-        let zero_fixed: i32 = 0x00000000; // 0.0 in 16.16 fixed point
-
         let addr = 0x100;
+        // N64 matrix format: integer parts at addr + i*2, fractional parts at addr + 32 + i*2
         for i in 0..16 {
-            let value = if i == 0 || i == 5 || i == 10 || i == 15 {
-                identity_fixed
+            let int_val: i16 = if i == 0 || i == 5 || i == 10 || i == 15 {
+                1
             } else {
-                zero_fixed
+                0
             };
-            let offset = addr + i * 4;
-            rdram[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
+            let offset = addr + i * 2;
+            rdram[offset..offset + 2].copy_from_slice(&int_val.to_be_bytes());
+            // Fractional parts remain zero (rdram initialized to 0)
         }
 
         let matrix = hle.load_matrix_from_rdram(&rdram, addr as u32);
@@ -2427,7 +2411,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_g_mtx_command() {
         let mut hle = RspHle::new();
         hle.microcode = MicrocodeType::F3DEX;
@@ -2437,26 +2420,23 @@ mod tests {
 
         // Create a scaling matrix in RDRAM (scale by 2.0)
         let addr = 0x200;
-        let scale2_fixed: i32 = 0x00020000; // 2.0 in 16.16 fixed point
-        let zero_fixed: i32 = 0x00000000;
-        let one_fixed: i32 = 0x00010000;
 
+        // N64 matrix format: integer parts at addr + i*2, fractional parts at addr + 32 + i*2
         for i in 0..16 {
-            let value = if i == 0 || i == 5 || i == 10 {
-                scale2_fixed
+            let int_val: i16 = if i == 0 || i == 5 || i == 10 {
+                2
             } else if i == 15 {
-                one_fixed
+                1
             } else {
-                zero_fixed
+                0
             };
-            let offset = addr + i * 4;
-            rdram[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
+            let offset = addr + i * 2;
+            rdram[offset..offset + 2].copy_from_slice(&int_val.to_be_bytes());
         }
+        // Fractional parts remain zero (rdram initialized to 0)
 
         // Create display list with G_MTX command
         let dl_addr = 0x100;
-
-        // G_MTX command (0xDA) - load modelview matrix
         // param: G_MTX_MODELVIEW | G_MTX_LOAD (0x00)
         let mtx_cmd_word0: u32 = 0xDA << 24; // Load modelview (param = 0x00)
         let mtx_cmd_word1: u32 = addr as u32; // Matrix address
@@ -2478,7 +2458,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_g_mtx_projection() {
         let mut hle = RspHle::new();
         hle.microcode = MicrocodeType::F3DEX;
@@ -2488,18 +2467,19 @@ mod tests {
 
         // Create a projection matrix in RDRAM
         let addr = 0x200;
-        let one_fixed: i32 = 0x00010000;
-        let zero_fixed: i32 = 0x00000000;
 
+        // N64 matrix format: integer parts at addr + i*2, fractional parts at addr + 32 + i*2
+        // Identity matrix: diagonal elements = 1
         for i in 0..16 {
-            let value = if i == 0 || i == 5 || i == 10 || i == 15 {
-                one_fixed
+            let int_val: i16 = if i == 0 || i == 5 || i == 10 || i == 15 {
+                1
             } else {
-                zero_fixed
+                0
             };
-            let offset = addr + i * 4;
-            rdram[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
+            let offset = addr + i * 2;
+            rdram[offset..offset + 2].copy_from_slice(&int_val.to_be_bytes());
         }
+        // Fractional parts remain zero (rdram initialized to 0)
 
         let dl_addr = 0x100;
 
@@ -2521,7 +2501,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_g_dl_command() {
         let mut hle = RspHle::new();
         hle.microcode = MicrocodeType::F3DEX;
@@ -2570,7 +2549,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_vertex_transform_with_matrices() {
         let mut hle = RspHle::new();
 
@@ -2603,7 +2581,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_matrix_stack_push_pop() {
         let mut hle = RspHle::new();
         hle.microcode = MicrocodeType::F3DEX;
@@ -2611,39 +2588,36 @@ mod tests {
         let mut rdram = vec![0u8; 2048];
         let mut rdp = Rdp::new_for_test();
 
-        // Create a scaling matrix (scale by 2)
+        // Create a scaling matrix (scale by 2) in N64 format
         let addr1 = 0x200;
-        let scale2_fixed: i32 = 0x00020000; // 2.0 in 16.16 fixed point
-        let one_fixed: i32 = 0x00010000;
-        let zero_fixed: i32 = 0x00000000;
 
+        // N64 matrix format: integer parts at addr + i*2, fractional parts at addr + 32 + i*2
         for i in 0..16 {
-            let value = if i == 0 || i == 5 || i == 10 {
-                scale2_fixed
+            let int_val: i16 = if i == 0 || i == 5 || i == 10 {
+                2
             } else if i == 15 {
-                one_fixed
+                1
             } else {
-                zero_fixed
+                0
             };
-            let offset = addr1 + i * 4;
-            rdram[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
+            rdram[addr1 + i * 2..addr1 + i * 2 + 2].copy_from_slice(&int_val.to_be_bytes());
         }
+        // Fractional parts remain zero
 
-        // Create another matrix (scale by 3)
+        // Create another matrix (scale by 3) in N64 format
         let addr2 = 0x300;
-        let scale3_fixed: i32 = 0x00030000; // 3.0 in 16.16 fixed point
 
         for i in 0..16 {
-            let value = if i == 0 || i == 5 || i == 10 {
-                scale3_fixed
+            let int_val: i16 = if i == 0 || i == 5 || i == 10 {
+                3
             } else if i == 15 {
-                one_fixed
+                1
             } else {
-                zero_fixed
+                0
             };
-            let offset = addr2 + i * 4;
-            rdram[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
+            rdram[addr2 + i * 2..addr2 + i * 2 + 2].copy_from_slice(&int_val.to_be_bytes());
         }
+        // Fractional parts remain zero
 
         let dl_addr = 0x100;
 
@@ -2679,7 +2653,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_g_popmtx_command() {
         let mut hle = RspHle::new();
         hle.microcode = MicrocodeType::F3DEX;
@@ -2721,7 +2694,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_g_branch_z_command() {
         let mut hle = RspHle::new();
         hle.microcode = MicrocodeType::F3DEX;
@@ -2749,8 +2721,9 @@ mod tests {
         let vdata2: [u8; 16] = [0, 20, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 128, 128, 128, 255];
         rdram[vtx2_data_addr..vtx2_data_addr + 16].copy_from_slice(&vdata2);
 
-        // Load 1 vertex at buffer index 1: (1 << 12) for count, (1 << 1) for buffer_index
-        let vtx2_cmd_word0: u32 = (0x01 << 24) | (1 << 12) | (1 << 1);
+        // Load 1 vertex at buffer index 1: vbidx_plus_n = buffer_index + count = 1 + 1 = 2
+        // Bits 7:1 of word0 hold vbidx_plus_n, so encode as (2 << 1)
+        let vtx2_cmd_word0: u32 = (0x01 << 24) | (1 << 12) | (2 << 1);
         let vtx2_cmd_word1: u32 = vtx2_data_addr as u32;
         rdram[branch_target..branch_target + 4].copy_from_slice(&vtx2_cmd_word0.to_be_bytes());
         rdram[branch_target + 4..branch_target + 8].copy_from_slice(&vtx2_cmd_word1.to_be_bytes());

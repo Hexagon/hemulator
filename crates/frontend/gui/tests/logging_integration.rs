@@ -9,7 +9,6 @@ use emu_core::logging::{LogCategory, LogConfig, LogLevel};
 use emu_core::System;
 
 #[test]
-#[ignore] // Requires OpenGL context - N64 now requires GL for initialization
 fn test_logging_n64_rdp_unknown_command() {
     // Enable logging for this test
     let config = LogConfig::global();

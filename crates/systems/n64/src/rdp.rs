@@ -202,12 +202,30 @@ impl Rdp {
             )
         });
 
-        Ok(Self {
+        Ok(Self::from_renderer(renderer, width, height))
+    }
+
+    /// Create an RDP backed by an arbitrary renderer implementation.
+    ///
+    /// This is the canonical low-level constructor; `new` and the
+    /// `with_software_renderer` helpers both delegate to it.
+    pub fn with_software_renderer(renderer: Box<dyn super::rdp_renderer::RdpRenderer>) -> Self {
+        let width = renderer.get_frame().width;
+        let height = renderer.get_frame().height;
+        Self::from_renderer(renderer, width, height)
+    }
+
+    fn from_renderer(
+        renderer: Box<dyn super::rdp_renderer::RdpRenderer>,
+        width: u32,
+        height: u32,
+    ) -> Self {
+        Self {
             renderer,
             width,
             height,
             color_format: ColorFormat::RGBA5551,
-            fill_color: 0xFF000000, // Black with full alpha
+            fill_color: 0xFF000000,
             scissor: ScissorBox {
                 x_min: 0,
                 y_min: 0,
@@ -227,45 +245,45 @@ impl Rdp {
                 t_shift: 0,
             }; 8],
             texture_image_addr: 0,
-            blend_color: 0xFF000000, // Black
-            prim_color: 0xFFFFFFFF,  // White
-            env_color: 0xFF000000,   // Black
-            fog_color: 0xFF000000,   // Black
-            combine_mode: 0,         // No combine mode
+            blend_color: 0xFF000000,
+            prim_color: 0xFFFFFFFF,
+            env_color: 0xFF000000,
+            fog_color: 0xFF000000,
+            combine_mode: 0,
             z_image_addr: 0,
             color_image_addr: 0,
             color_image_width: 320,
-            color_image_size: 2, // Default 16-bit
-            othermode: 0,        // Default other modes
+            color_image_size: 2,
+            othermode: 0,
             dpc_start: 0,
             dpc_end: 0,
             dpc_current: 0,
-            dpc_status: DPC_STATUS_CBUF_READY, // Start ready for commands
+            dpc_status: DPC_STATUS_CBUF_READY,
             dpc_clock: 0,
             dpc_bufbusy: 0,
             dpc_pipebusy: 0,
             dpc_tmem: 0,
-        })
+        }
     }
 
-    /// Create a new RDP for testing (uses a null GL context)
-    /// This is only available in test builds
+    /// Create a new RDP backed by the software renderer (no OpenGL required).
     ///
-    /// NOTE: Tests using this require `#[ignore]` because null GL context will fail
+    /// Used by unit tests running in CI environments without GPU support.
     #[cfg(test)]
     pub fn new_for_test() -> Self {
-        let gl = unsafe { glow::Context::from_loader_function(|_s| std::ptr::null()) };
-        Self::new(gl).expect("Failed to create RDP for test")
+        use super::rdp_renderer_software::SoftwareRdpRenderer;
+        let renderer: Box<dyn super::rdp_renderer::RdpRenderer> =
+            Box::new(SoftwareRdpRenderer::new(320, 240));
+        Self::with_software_renderer(renderer)
     }
 
-    /// Create a new RDP with specified resolution for testing
-    /// This is only available in test builds
-    ///
-    /// NOTE: Tests using this require `#[ignore]` because null GL context will fail
+    /// Create a new RDP with specified resolution using the software renderer.
     #[cfg(test)]
     pub fn with_resolution_for_test(width: u32, height: u32) -> Self {
-        let gl = unsafe { glow::Context::from_loader_function(|_s| std::ptr::null()) };
-        Self::with_resolution(gl, width, height).expect("Failed to create RDP for test")
+        use super::rdp_renderer_software::SoftwareRdpRenderer;
+        let renderer: Box<dyn super::rdp_renderer::RdpRenderer> =
+            Box::new(SoftwareRdpRenderer::new(width, height));
+        Self::with_software_renderer(renderer)
     }
 
     /// Get the name of the current renderer backend
@@ -1815,7 +1833,6 @@ mod tests {
     use super::*;
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_creation() {
         let rdp = Rdp::new_for_test();
         assert_eq!(rdp.width, 320);
@@ -1825,7 +1842,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_custom_resolution() {
         let rdp = Rdp::with_resolution_for_test(640, 480);
         assert_eq!(rdp.width, 640);
@@ -1833,7 +1849,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_clear() {
         let mut rdp = Rdp::new_for_test();
         rdp.set_fill_color(0xFFFF0000); // Red
@@ -1846,7 +1861,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_fill_rect() {
         let mut rdp = Rdp::new_for_test();
         rdp.set_fill_color(0xFF00FF00); // Green
@@ -1865,7 +1879,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_set_pixel() {
         let mut rdp = Rdp::new_for_test();
         rdp.set_pixel(100, 100, 0xFFFFFFFF); // White
@@ -1875,7 +1888,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_reset() {
         let mut rdp = Rdp::new_for_test();
         rdp.set_fill_color(0xFFFF0000);
@@ -1889,7 +1901,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_registers() {
         let mut rdp = Rdp::new_for_test();
 
@@ -1907,7 +1918,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_bounds_checking() {
         let mut rdp = Rdp::new_for_test();
 
@@ -1919,7 +1929,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_get_frame() {
         let mut rdp = Rdp::new_for_test();
         rdp.set_fill_color(0xFF0000FF); // Blue
@@ -1932,17 +1941,19 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_display_list_fill_rect() {
         let mut rdp = Rdp::new_for_test();
+        // Use 32-bit color mode so fill_color is treated as RGBA8888
+        rdp.color_image_size = 3;
         let mut rdram = vec![0u8; 1024];
 
         // Create a display list with FILL_RECTANGLE command
         // Fill a 100x100 rectangle at (50, 50)
 
-        // SET_FILL_COLOR (0x37) - Red color
-        let set_color_cmd = 0x37000000u32; // Command ID in top bits
-        let color = 0xFFFF0000u32; // RGBA red
+        // SET_FILL_COLOR (0x37) - opaque red in RGBA8888 = 0xFF0000FF
+        // In 32-bit mode: RGBA→ARGB: A=0xFF,R=0xFF,G=0x00,B=0x00 → 0xFFFF0000
+        let set_color_cmd = 0x37000000u32;
+        let color = 0xFF0000FFu32; // RGBA: opaque red
         rdram[0..4].copy_from_slice(&set_color_cmd.to_be_bytes());
         rdram[4..8].copy_from_slice(&color.to_be_bytes());
 
@@ -1961,7 +1972,7 @@ mod tests {
         // Process the display list
         rdp.process_display_list(&rdram);
 
-        // Verify the rectangle was filled
+        // Verify the rectangle was filled (expected ARGB = 0xFFFF0000 = opaque red)
         // Check a pixel inside the rectangle (75, 75)
         let idx = (75 * 320 + 75) as usize;
         assert_eq!(rdp.get_frame().pixels[idx], 0xFFFF0000);
@@ -1971,7 +1982,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_display_list_sync_commands() {
         let mut rdp = Rdp::new_for_test();
         let mut rdram = vec![0u8; 64];
@@ -1999,7 +2009,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_needs_processing() {
         let mut rdp = Rdp::new_for_test();
 
@@ -2020,9 +2029,10 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_scissor_command() {
         let mut rdp = Rdp::new_for_test();
+        // Use 32-bit color mode so fill_color 0xFF0000FF → ARGB 0xFFFF0000 (opaque red)
+        rdp.color_image_size = 3;
         let mut rdram = vec![0u8; 64];
 
         // Create a display list with SET_SCISSOR command
@@ -2035,9 +2045,9 @@ mod tests {
         rdram[0..4].copy_from_slice(&set_scissor_cmd.to_be_bytes());
         rdram[4..8].copy_from_slice(&set_scissor_data.to_be_bytes());
 
-        // SET_FILL_COLOR - Red
+        // SET_FILL_COLOR - opaque red in RGBA8888; 32-bit mode converts to ARGB 0xFFFF0000
         rdram[8..12].copy_from_slice(&0x37000000u32.to_be_bytes());
-        rdram[12..16].copy_from_slice(&0xFFFF0000u32.to_be_bytes());
+        rdram[12..16].copy_from_slice(&0xFF0000FFu32.to_be_bytes());
 
         // FILL_RECTANGLE covering (5,5) to (150,150)
         // Should be clipped to scissor bounds (10,10) to (100,100)
@@ -2064,7 +2074,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_triangle_rendering() {
         let mut rdp = Rdp::new_for_test();
 
@@ -2079,7 +2088,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_texture_rectangle_stub() {
         let mut rdp = Rdp::new_for_test();
         let mut rdram = vec![0u8; 64];
@@ -2106,7 +2114,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_set_tile_command() {
         let mut rdp = Rdp::new_for_test();
         let mut rdram = vec![0u8; 64];
@@ -2149,7 +2156,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_set_texture_image() {
         let mut rdp = Rdp::new_for_test();
         let mut rdram = vec![0u8; 64];
@@ -2173,7 +2179,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_tmem_initialized() {
         let rdp = Rdp::new_for_test();
 
@@ -2192,7 +2197,6 @@ mod tests {
     // These high-level tests verify the Z-buffer still works correctly via the RDP API
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_zbuffer_enable_disable() {
         let mut rdp = Rdp::new_for_test();
         // Z-buffer should start disabled
@@ -2207,7 +2211,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_zbuffer_clear() {
         let mut rdp = Rdp::new_for_test();
         rdp.set_zbuffer_enabled(true);
@@ -2218,7 +2221,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_triangle_zbuffer() {
         let mut rdp = Rdp::new_for_test();
         rdp.set_zbuffer_enabled(true);
@@ -2239,7 +2241,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_triangle_zbuffer_occlusion() {
         let mut rdp = Rdp::new_for_test();
         rdp.set_zbuffer_enabled(true);
@@ -2261,7 +2262,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_triangle_shaded() {
         let mut rdp = Rdp::new_for_test();
 
@@ -2285,7 +2285,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_triangle_shaded_zbuffer() {
         let mut rdp = Rdp::new_for_test();
         rdp.set_zbuffer_enabled(true);
@@ -2308,7 +2307,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_color_interpolation() {
         // Test linear color interpolation
         // ARGB format: 0xAARRGGBB
@@ -2338,7 +2336,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_adjust_brightness() {
         // Test brightness adjustment
         let color = 0xFFFF8040; // ARGB: Full alpha, R=255, G=128, B=64
@@ -2369,7 +2366,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_triangle_command_0x08() {
         let mut rdp = Rdp::new_for_test();
         let mut rdram = vec![0u8; 1024];
@@ -2409,7 +2405,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_triangle_command_0x09() {
         let mut rdp = Rdp::new_for_test();
         rdp.set_zbuffer_enabled(true);
@@ -2450,7 +2445,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_triangle_command_0x0c() {
         let mut rdp = Rdp::new_for_test();
         let mut rdram = vec![0u8; 1024];
@@ -2486,7 +2480,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_triangle_command_0x0d() {
         let mut rdp = Rdp::new_for_test();
         rdp.set_zbuffer_enabled(true);
@@ -2524,7 +2517,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_triangle_scissor_clipping() {
         let mut rdp = Rdp::new_for_test();
 
@@ -2553,7 +2545,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_texture_loading_load_tile() {
         let mut rdp = Rdp::new_for_test();
         let mut rdram = vec![0u8; 8192]; // Larger buffer for texture data
@@ -2621,7 +2612,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_texture_loading_load_block() {
         let mut rdp = Rdp::new_for_test();
         let mut rdram = vec![0u8; 16384]; // Larger buffer
@@ -2675,7 +2665,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_texture_sampling() {
         let mut rdp = Rdp::new_for_test();
 
@@ -2732,7 +2721,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_textured_triangle_command_0x0a() {
         let mut rdp = Rdp::new_for_test();
         let mut rdram = vec![0u8; 0x400000];
@@ -2797,7 +2785,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_textured_triangle_zbuffer_command_0x0b() {
         let mut rdp = Rdp::new_for_test();
         rdp.set_zbuffer_enabled(true);
