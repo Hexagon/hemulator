@@ -248,8 +248,11 @@ impl Vic {
         // With YSCROLL=3 (default): effective_y = visible_y (no change).
         let effective_y = ((visible_y as i32) + 3 - yscroll).max(0) as u32;
 
-        // Fill the leftmost xscroll pixels with border color.
-        for x in 0..xscroll {
+        // Pre-fill the entire line with border color.
+        // This ensures the leftmost `xscroll` pixels (before the character display starts)
+        // and the rightmost `xscroll` pixels (where the shifted display exceeds VISIBLE_WIDTH)
+        // both show the border color without stale data from earlier frames.
+        for x in 0..VISIBLE_WIDTH as usize {
             let idx = offset + x;
             if idx < self.frame.pixels.len() {
                 self.frame.pixels[idx] = border;
@@ -535,8 +538,16 @@ impl Vic {
         let raster = visible_y + FIRST_VISIBLE_LINE;
         let offset = (visible_y * VISIBLE_WIDTH) as usize;
 
-        // Per-pixel sprite-presence mask for this line (used for sprite-sprite collision).
-        let mut sprite_pixel_mask = [false; VISIBLE_WIDTH as usize];
+        // Per-pixel sprite presence bitmask for this line.
+        // Each byte stores a bitmask of which sprite numbers have a non-transparent pixel
+        // at that screen position.  When a second sprite writes to the same pixel, both
+        // the current sprite's bit AND the already-present sprite bits are latched into
+        // sprite_sprite_collision, matching real VIC-II behaviour.
+        let mut sprite_pixel_mask = [0u8; VISIBLE_WIDTH as usize];
+
+        // Save the pre-rendering collision state so we can detect 0→1 transitions.
+        let prev_bg_collision = self.sprite_bg_collision;
+        let prev_sprite_collision = self.sprite_sprite_collision;
 
         // Priority register: bit N set means sprite N renders behind background.
         let priority_reg = self.regs[0x1B];
@@ -611,11 +622,12 @@ impl Vic {
                                     self.sprite_bg_collision |= 1 << sprite;
                                 }
 
-                                // Sprite-sprite collision
-                                if sprite_pixel_mask[screen_px] {
-                                    self.sprite_sprite_collision |= 1 << sprite;
+                                // Sprite-sprite collision: latch bits for both sprites
+                                let present = sprite_pixel_mask[screen_px];
+                                if present != 0 {
+                                    self.sprite_sprite_collision |= (1 << sprite) | present;
                                 }
-                                sprite_pixel_mask[screen_px] = true;
+                                sprite_pixel_mask[screen_px] |= 1 << sprite;
 
                                 // Sprite priority: skip if behind background fg pixel
                                 if behind_bg && fg_mask[screen_px] {
@@ -637,10 +649,11 @@ impl Vic {
                                     if fg_mask[screen_px2] {
                                         self.sprite_bg_collision |= 1 << sprite;
                                     }
-                                    if sprite_pixel_mask[screen_px2] {
-                                        self.sprite_sprite_collision |= 1 << sprite;
+                                    let present2 = sprite_pixel_mask[screen_px2];
+                                    if present2 != 0 {
+                                        self.sprite_sprite_collision |= (1 << sprite) | present2;
                                     }
-                                    sprite_pixel_mask[screen_px2] = true;
+                                    sprite_pixel_mask[screen_px2] |= 1 << sprite;
 
                                     if behind_bg && fg_mask[screen_px2] {
                                         continue;
@@ -677,11 +690,12 @@ impl Vic {
                                 self.sprite_bg_collision |= 1 << sprite;
                             }
 
-                            // Sprite-sprite collision
-                            if sprite_pixel_mask[screen_px] {
-                                self.sprite_sprite_collision |= 1 << sprite;
+                            // Sprite-sprite collision: latch bits for both sprites
+                            let present = sprite_pixel_mask[screen_px];
+                            if present != 0 {
+                                self.sprite_sprite_collision |= (1 << sprite) | present;
                             }
-                            sprite_pixel_mask[screen_px] = true;
+                            sprite_pixel_mask[screen_px] |= 1 << sprite;
 
                             // Sprite priority: skip if behind background fg pixel
                             if behind_bg && fg_mask[screen_px] {
@@ -703,10 +717,11 @@ impl Vic {
                                 if fg_mask[screen_px2] {
                                     self.sprite_bg_collision |= 1 << sprite;
                                 }
-                                if sprite_pixel_mask[screen_px2] {
-                                    self.sprite_sprite_collision |= 1 << sprite;
+                                let present2 = sprite_pixel_mask[screen_px2];
+                                if present2 != 0 {
+                                    self.sprite_sprite_collision |= (1 << sprite) | present2;
                                 }
-                                sprite_pixel_mask[screen_px2] = true;
+                                sprite_pixel_mask[screen_px2] |= 1 << sprite;
 
                                 if behind_bg && fg_mask[screen_px2] {
                                     continue;
@@ -723,13 +738,16 @@ impl Vic {
             }
         }
 
-        // If any sprite-background or sprite-sprite collisions occurred this line,
-        // trigger the corresponding VIC-II interrupts if enabled.
-        if self.sprite_bg_collision != 0 && self.regs[0x1A] & 0x02 != 0 {
+        // Trigger collision IRQs only for bits that are *newly* set this line (0→1
+        // transition), preventing an interrupt storm on subsequent lines once the
+        // CPU has acknowledged $D019 without yet reading $D01E/$D01F.
+        let new_bg = self.sprite_bg_collision & !prev_bg_collision;
+        if new_bg != 0 && self.regs[0x1A] & 0x02 != 0 {
             self.regs[0x19] |= 0x02 | 0x80;
             self.irq_line = true;
         }
-        if self.sprite_sprite_collision != 0 && self.regs[0x1A] & 0x04 != 0 {
+        let new_ss = self.sprite_sprite_collision & !prev_sprite_collision;
+        if new_ss != 0 && self.regs[0x1A] & 0x04 != 0 {
             self.regs[0x19] |= 0x04 | 0x80;
             self.irq_line = true;
         }

@@ -19,13 +19,14 @@ impl Debugger for C64System {
         }
 
         let mut result = Vec::with_capacity(length);
-        use emu_core::cpu_6502::Memory6502;
         for i in 0..length {
             let addr = address.wrapping_add(i as u32);
             if addr > 0xFFFF {
                 break;
             }
-            result.push(self.cpu.memory.read(addr as u16));
+            // Use peek() to avoid side effects on I/O registers (e.g. clearing
+            // sprite collision latches $D01E/$D01F when the memory viewer is open).
+            result.push(self.cpu.memory.peek(addr as u16));
         }
 
         Some(result)
