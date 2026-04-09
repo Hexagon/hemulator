@@ -86,11 +86,15 @@ mod cartridge;
 mod cpu;
 mod debugger;
 mod mappers;
-pub mod ppu;
+mod ppu;
 pub mod ppu_renderer;
 #[cfg(feature = "opengl")]
 pub mod ppu_renderer_opengl;
 pub mod rom_db;
+
+// Re-export only the inspector-facing PPU types so the GUI doesn't accidentally
+// depend on PPU internals as stable API.
+pub use ppu::{Sprite0Config, Sprite0Status};
 
 use crate::bus::Bus;
 use crate::cartridge::Mirroring;

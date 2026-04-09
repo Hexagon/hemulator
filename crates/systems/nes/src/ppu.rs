@@ -521,7 +521,9 @@ impl Ppu {
     pub fn clear_sprite_flags(&self) {
         self.sprite_0_hit.set(false);
         self.sprite_overflow.set(false);
-        // Also clear the hit-fired-at tracker so the inspector shows a fresh state.
+        // Clear all per-frame sprite-0 bookkeeping so both the tick-driven pre-render
+        // reset path and this helper stay consistent, and the inspector starts fresh.
+        self.sprite_0_hit_pending.set(None);
         self.sprite_0_hit_fired_at.set(None);
     }
 
@@ -1601,6 +1603,7 @@ impl Ppu {
             if self.sprite0_config.vblank_early_clear {
                 self.sprite_0_hit.set(false);
                 self.sprite_0_hit_pending.set(None);
+                self.sprite_0_hit_fired_at.set(None);
             }
 
             // If VBlank just started and NMI is enabled, trigger NMI
@@ -1623,8 +1626,9 @@ impl Ppu {
             // Clear sprite flags (this is the ONLY place they're cleared on hardware)
             self.sprite_0_hit.set(false);
             self.sprite_overflow.set(false);
-            // Also clear pending sprite 0 hit for the new frame
+            // Also clear pending sprite 0 hit and the fired-at tracker for the new frame
             self.sprite_0_hit_pending.set(None);
+            self.sprite_0_hit_fired_at.set(None);
 
             log(LogCategory::PPU, LogLevel::Trace, || {
                 "PPU: Pre-render scanline, dot 1: cleared VBlank and sprite flags".to_string()

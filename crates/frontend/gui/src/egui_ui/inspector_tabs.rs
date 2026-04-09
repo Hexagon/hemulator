@@ -2208,7 +2208,14 @@ fn render_nes_sprite0_tab(ui: &mut Ui, tab_manager: &mut TabManager) {
                         ui.label(if status.pending {
                             match status.pending_pos {
                                 Some((sl, x)) => {
-                                    format!("scanline {sl}, x={x} (fires at dot {})", x + 1)
+                                    let fire_dot = (x as isize)
+                                        .saturating_add(1)
+                                        .saturating_add(
+                                            tab_manager.nes_sprite0_config.hit_dot_offset
+                                                as isize,
+                                        )
+                                        .max(0);
+                                    format!("scanline {sl}, x={x} (fires at dot {fire_dot})")
                                 }
                                 None => "yes (unknown position)".to_string(),
                             }

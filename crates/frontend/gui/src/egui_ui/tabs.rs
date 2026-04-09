@@ -87,9 +87,9 @@ pub struct NesTileData {
     /// Current mirroring mode
     pub mirroring: String,
     /// Sprite 0 hit status snapshot
-    pub sprite0_status: emu_nes::ppu::Sprite0Status,
+    pub sprite0_status: emu_nes::Sprite0Status,
     /// Sprite 0 hit configuration (read-only snapshot; changes are sent via DebugAction)
-    pub sprite0_config: emu_nes::ppu::Sprite0Config,
+    pub sprite0_config: emu_nes::Sprite0Config,
 }
 
 /// Game Boy tile viewer data
@@ -381,7 +381,7 @@ pub enum DebugAction {
     RemoveBreakpoint(u32, emu_core::breakpoints::BreakpointType), // Remove breakpoint
     SetGbAudioChannels([bool; 4]), // Pulse1, Pulse2, Wave, Noise
     /// Update the NES PPU sprite 0 hit configuration.
-    SetNesPpuConfig(emu_nes::ppu::Sprite0Config),
+    SetNesPpuConfig(emu_nes::Sprite0Config),
 }
 
 pub struct TabManager {
@@ -419,7 +419,7 @@ pub struct TabManager {
     /// Local copy of the NES sprite 0 hit configuration (for the inspector tab).
     /// Updated from the emulator each frame via NesTileData; changes are sent back
     /// via DebugAction::SetNesPpuConfig.
-    pub nes_sprite0_config: emu_nes::ppu::Sprite0Config,
+    pub nes_sprite0_config: emu_nes::Sprite0Config,
 }
 
 impl TabManager {
@@ -451,7 +451,7 @@ impl TabManager {
             breakpoint_type_selected: 0,
             show_breakpoint_panel: false,
             gb_audio_channels: [true, true, true, true],
-            nes_sprite0_config: emu_nes::ppu::Sprite0Config::default(),
+            nes_sprite0_config: emu_nes::Sprite0Config::default(),
         }
     }
 
