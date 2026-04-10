@@ -229,7 +229,6 @@ mod tests {
     use super::*;
 
     #[test]
-    #[ignore] // Requires GL context
     fn test_n64_memory_regions() {
         let system = N64System::new_for_test();
         let regions = system.get_memory_regions();
@@ -257,7 +256,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires GL context
     fn test_n64_cpu_state() {
         let system = N64System::new_for_test();
         let state = system.get_cpu_state();
@@ -318,7 +316,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires GL context
     fn test_n64_read_memory() {
         let system = N64System::new_for_test();
 
@@ -334,7 +331,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires GL context
     fn test_n64_disassemble() {
         let system = N64System::new_for_test();
 
@@ -348,7 +344,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires GL context
     fn test_n64_check_breakpoint() {
         let mut system = N64System::new_for_test();
 

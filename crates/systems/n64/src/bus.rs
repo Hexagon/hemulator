@@ -111,6 +111,39 @@ impl N64Bus {
         Ok(bus)
     }
 
+    /// Create a new N64 bus using the software (CPU-based) renderer.
+    ///
+    /// Does **not** require an OpenGL context, so this is suitable for unit
+    /// tests that run in CI without GPU support.
+    pub fn new_for_test() -> Self {
+        use crate::rdp_renderer_software::SoftwareRdpRenderer;
+        let rdp = Rdp::with_renderer(Box::new(SoftwareRdpRenderer::new(320, 240)));
+
+        let mut bus = Self {
+            rdram: vec![0; 4 * 1024 * 1024],
+            pif: Pif::new(),
+            cartridge: None,
+            cart_save: None,
+            save_is_flashram: false,
+            flashram_mode: FlashRamMode::Read,
+            flashram_erase_offset: 0,
+            flashram_write_offset: 0,
+            rdp,
+            rsp: Rsp::new(),
+            vi: VideoInterface::new(),
+            mi: MipsInterface::new(),
+            ai: AudioInterface::new(),
+            tlb: Tlb::new(),
+            entry_point: None,
+            pi_dram_addr: 0,
+            pi_cart_addr: 0,
+            si_dram_addr: 0,
+            cic_seed: 0,
+        };
+        bus.pif.init_rom();
+        bus
+    }
+
     /// Update controller state (for input handling)
     pub fn set_controller1(&mut self, state: crate::pif::ControllerState) {
         self.pif.set_controller1(state);
