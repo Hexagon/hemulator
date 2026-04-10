@@ -334,6 +334,20 @@ pub struct SmsMemory {
 
     /// Memory control register (port $3E)
     memory_control: u8,
+
+    /// I/O port control register (port $3F) — controls TH/TR pin direction and output.
+    /// Bits: TH_B_dir(7) TR_B_dir(6) TH_A_dir(5) TR_A_dir(4) TH_B_out(3) TR_B_out(2) TH_A_out(1) TR_A_out(0)
+    /// Direction: 0 = input (reads from controller), 1 = output (drives from this register).
+    io_control: u8,
+
+    /// True if this bus is for a Game Gear system
+    is_game_gear: bool,
+
+    /// Game Gear Start button state (active low: bit 7 = 0 when pressed)
+    gg_start_button: u8,
+
+    /// Current cycle position within the scanline (set by system, used for H-counter latching)
+    cycle_in_scanline: u32,
 }
 
 impl SmsMemory {
@@ -384,7 +398,18 @@ impl SmsMemory {
             controller_1: 0xFF,
             controller_2: 0xFF,
             memory_control: 0x08, // Bit 3 set → BIOS disabled by default
+            io_control: 0xFF,     // All pins input, all outputs high
+            is_game_gear: false,
+            gg_start_button: 0x80, // Not pressed (active low)
+            cycle_in_scanline: 0,
         }
+    }
+
+    /// Create a new Game Gear memory bus.
+    pub fn new_game_gear(rom: Vec<u8>, vdp: Rc<RefCell<Vdp>>, psg: Rc<RefCell<SmsPsg>>) -> Self {
+        let mut bus = Self::new(rom, vdp, psg);
+        bus.is_game_gear = true;
+        bus
     }
 
     // -----------------------------------------------------------------------
@@ -501,6 +526,46 @@ impl SmsMemory {
     }
     pub fn set_memory_control(&mut self, value: u8) {
         self.memory_control = value;
+    }
+    pub fn get_io_control(&self) -> u8 {
+        self.io_control
+    }
+    pub fn set_io_control(&mut self, value: u8) {
+        self.io_control = value;
+    }
+
+    /// Update the current cycle position within the scanline (called by system each step).
+    pub fn set_cycle_in_scanline(&mut self, cycle: u32) {
+        self.cycle_in_scanline = cycle;
+    }
+
+    /// Compute effective TH pin levels from an io_control value.
+    /// Returns (th_a_high, th_b_high).
+    fn th_levels(io_control: u8) -> (bool, bool) {
+        // TH_A: direction = bit 5, output = bit 1
+        let th_a = if (io_control & 0x20) != 0 {
+            (io_control & 0x02) != 0
+        } else {
+            true // input mode → reads high
+        };
+        // TH_B: direction = bit 7, output = bit 3
+        let th_b = if (io_control & 0x80) != 0 {
+            (io_control & 0x08) != 0
+        } else {
+            true // input mode → reads high
+        };
+        (th_a, th_b)
+    }
+
+    /// Set the Game Gear Start button state (bit 7: 0 = pressed, 0x80 = not pressed).
+    pub fn set_gg_start_button(&mut self, pressed: bool) {
+        self.gg_start_button = if pressed { 0x00 } else { 0x80 };
+    }
+
+    /// Returns true if this is a Game Gear bus.
+    #[allow(dead_code)]
+    pub fn is_game_gear(&self) -> bool {
+        self.is_game_gear
     }
 
     // -----------------------------------------------------------------------
@@ -634,26 +699,6 @@ impl SmsMemory {
     }
 
     // -----------------------------------------------------------------------
-    // Sega mapper banking (RAM-based at $FFFC-$FFFF)
-    // -----------------------------------------------------------------------
-
-    fn update_sega_banking(&mut self) {
-        // $FFFC → cart RAM control
-        let fffc = self.ram[0x1FFC];
-        self.cart_ram_enabled = (fffc & 0x08) != 0;
-        self.cart_ram_bank = ((fffc >> 2) & 1) as usize;
-        // Allocate cart RAM on first enable (up to 32 KB = 2 × 16 KB)
-        if self.cart_ram_enabled && self.cart_ram.is_empty() {
-            self.cart_ram.resize(0x8000, 0);
-        }
-
-        // $FFFD / $FFFE / $FFFF → page for slots 0 / 1 / 2
-        let nb = self.num_banks.max(1);
-        self.sega_banks[0] = (self.ram[0x1FFD] as usize) % nb;
-        self.sega_banks[1] = (self.ram[0x1FFE] as usize) % nb;
-        self.sega_banks[2] = (self.ram[0x1FFF] as usize) % nb;
-    }
-
     // -----------------------------------------------------------------------
     // ROM read helper (with bounds check)
     // -----------------------------------------------------------------------
@@ -854,8 +899,36 @@ impl SmsMemory {
             0xC000..=0xFFFF => {
                 let ram_addr = (addr & 0x1FFF) as usize;
                 self.ram[ram_addr] = val;
-                if (0x1FFC..=0x1FFF).contains(&ram_addr) {
-                    self.update_sega_banking();
+                // Only the dedicated mapper-register addresses $FFFC-$FFFF trigger
+                // bank updates.  Their RAM mirror at $DFFC-$DFFF shares the same
+                // physical bytes but must NOT update the mapper – the real SMS
+                // hardware mapper decoder only fires on the $FFFC-$FFFF range.
+                //
+                // Each register is updated independently — writing $FFFC must NOT
+                // re-read $FFFD/$FFFE/$FFFF from RAM, because the RAM mirror copies
+                // may have been zeroed by LDIR ($C000-$DFFF clear) without triggering
+                // a mapper update.  Re-reading all banks would reset them to zero.
+                // (Phantasy Star writes $FFFC=$80 after boot RAM clear, which was
+                // resetting slot 1/2 banks to 0 and causing a crash.)
+                let nb = self.num_banks.max(1);
+                match addr {
+                    0xFFFC => {
+                        self.cart_ram_enabled = (val & 0x08) != 0;
+                        self.cart_ram_bank = ((val >> 2) & 1) as usize;
+                        if self.cart_ram_enabled && self.cart_ram.is_empty() {
+                            self.cart_ram.resize(0x8000, 0);
+                        }
+                    }
+                    0xFFFD => {
+                        self.sega_banks[0] = (val as usize) % nb;
+                    }
+                    0xFFFE => {
+                        self.sega_banks[1] = (val as usize) % nb;
+                    }
+                    0xFFFF => {
+                        self.sega_banks[2] = (val as usize) % nb;
+                    }
+                    _ => {}
                 }
             }
             _ => {} // writes to ROM area ignored
@@ -937,8 +1010,26 @@ impl SmsMemory {
             0xC000..=0xFFFF => {
                 let ram_addr = (addr & 0x1FFF) as usize;
                 self.ram[ram_addr] = val;
-                if (0x1FFC..=0x1FFF).contains(&ram_addr) {
-                    self.update_sega_banking();
+                // Same rule as Sega mapper: each register updated independently.
+                let nb = self.num_banks.max(1);
+                match addr {
+                    0xFFFC => {
+                        self.cart_ram_enabled = (val & 0x08) != 0;
+                        self.cart_ram_bank = ((val >> 2) & 1) as usize;
+                        if self.cart_ram_enabled && self.cart_ram.is_empty() {
+                            self.cart_ram.resize(0x8000, 0);
+                        }
+                    }
+                    0xFFFD => {
+                        self.sega_banks[0] = (val as usize) % nb;
+                    }
+                    0xFFFE => {
+                        self.sega_banks[1] = (val as usize) % nb;
+                    }
+                    0xFFFF => {
+                        self.sega_banks[2] = (val as usize) % nb;
+                    }
+                    _ => {}
                 }
             }
             _ => {}
@@ -994,9 +1085,13 @@ impl SmsMemory {
 
 impl MemoryZ80 for SmsMemory {
     fn read(&self, addr: u16) -> u8 {
-        // BIOS overlay always takes priority for first 1 KB.
-        if addr <= 0x03FF && self.is_bios_enabled() {
-            return self.bios.get(addr as usize).copied().unwrap_or(0xFF);
+        // When the BIOS is enabled, it overlays the cartridge ROM for all
+        // addresses within the BIOS ROM's range (0x0000..bios.len()-1). Real
+        // SMS BIOS ROMs are typically 8 KB or larger, so the overlay must not
+        // be artificially limited to 1 KB, or reads beyond 0x03FF would fall
+        // through to the cartridge ROM and corrupt BIOS execution.
+        if self.is_bios_enabled() && (addr as usize) < self.bios.len() {
+            return self.bios[addr as usize];
         }
 
         match self.mapper_type {
@@ -1032,6 +1127,16 @@ impl MemoryZ80 for SmsMemory {
 
     fn io_read(&mut self, port: u8) -> u8 {
         let value = match port {
+            // Game Gear specific: port 0x00 = Start button + region
+            0x00 if self.is_game_gear => {
+                // Bit 7: Start button (0 = pressed, 1 = not pressed)
+                // Bit 6: Njap (0 = Japanese, 1 = overseas/export)
+                // Bit 5: NNTS (0 = NTSC, 1 = PAL) – always NTSC for GG
+                // Bits 4-0: unused, normally 0x1F
+                0x7F | self.gg_start_button
+            }
+            // Game Gear specific: port 0x06 = stereo control (read returns last written)
+            0x06 if self.is_game_gear => 0xFF,
             // 0x40-0x7F: V-counter (even ports) / H-counter (odd ports)
             p if (0x40..=0x7F).contains(&p) => {
                 if p & 0x01 == 0 {
@@ -1053,9 +1158,44 @@ impl MemoryZ80 for SmsMemory {
             // 0xC0-0xFF: Controller ports
             p if (0xC0..=0xFF).contains(&p) => {
                 if p & 0x01 == 0 {
+                    // Port $DC: P1 buttons + P2 Up/Down
                     self.controller_1
                 } else {
-                    self.controller_2
+                    // Port $DD: P2 Left/Right/TL/TR + Reset + TH pins
+                    // Bits 0-3: P2 Left, Right, Button1, Button2
+                    // Bit 4: RESET button (active low, always 1 = not pressed)
+                    // Bit 5: unused (always 1)
+                    // Bit 6: TH pin A (depends on io_control direction/output)
+                    // Bit 7: TH pin B (depends on io_control direction/output)
+                    let mut val = self.controller_2 | 0x30; // Bits 4,5 always high
+
+                    // TH pin A (bit 6): if direction bit 5 of io_control is set (output),
+                    // use the output value from bit 1; otherwise input = high (1).
+                    if (self.io_control & 0x20) != 0 {
+                        // TH_A is output — use bit 1 of io_control
+                        if (self.io_control & 0x02) != 0 {
+                            val |= 0x40;
+                        } else {
+                            val &= !0x40;
+                        }
+                    } else {
+                        val |= 0x40; // Input mode: TH reads high
+                    }
+
+                    // TH pin B (bit 7): if direction bit 7 of io_control is set (output),
+                    // use the output value from bit 3; otherwise input = high (1).
+                    if (self.io_control & 0x80) != 0 {
+                        // TH_B is output — use bit 3 of io_control
+                        if (self.io_control & 0x08) != 0 {
+                            val |= 0x80;
+                        } else {
+                            val &= !0x80;
+                        }
+                    } else {
+                        val |= 0x80; // Input mode: TH reads high
+                    }
+
+                    val
                 }
             }
             _ => 0xFF,
@@ -1070,12 +1210,25 @@ impl MemoryZ80 for SmsMemory {
 
     fn io_write(&mut self, port: u8, val: u8) {
         match port {
-            // 0x00-0x3F: Memory control registers
-            0x3E => {
-                self.memory_control = val;
-            }
-            0x3F => {
-                // I/O port control (nationalization adapter) – not yet implemented.
+            // 0x00-0x3F: Memory/IO control registers
+            // SMS uses partial address decoding: even ports in this range → memory control,
+            // odd ports → I/O port control.  Games typically use $3E/$3F explicitly.
+            p if p <= 0x3F => {
+                if p & 0x01 == 0 {
+                    // Even port ($3E mirror): Memory control register
+                    self.memory_control = val;
+                } else {
+                    // Odd port ($3F mirror): I/O port control (TH/TR direction + output)
+                    // Detect TH high→low transitions to latch the VDP H-counter.
+                    let (old_th_a, old_th_b) = Self::th_levels(self.io_control);
+                    self.io_control = val;
+                    let (new_th_a, new_th_b) = Self::th_levels(val);
+                    if (old_th_a && !new_th_a) || (old_th_b && !new_th_b) {
+                        self.vdp
+                            .borrow_mut()
+                            .latch_h_counter(self.cycle_in_scanline);
+                    }
+                }
             }
             // 0x40-0x7F: PSG write
             p if (0x40..=0x7F).contains(&p) => {
@@ -1164,6 +1317,70 @@ mod tests {
         assert_eq!(mem.read(0x0038), 0xC9);
         // $0400+ should come from bank 3
         assert_eq!(mem.read(0x0400), 0xBB);
+    }
+
+    /// Regression test for the "real BIOS boots Snail Maze instead of cartridge" bug.
+    ///
+    /// The real Sega BIOS initialises/clears work-RAM ($C000-$DFFF) early in its
+    /// boot sequence.  That range includes the physical bytes at $DFFC-$DFFF which
+    /// are the RAM mirrors of the Sega mapper registers at $FFFC-$FFFF.  On real
+    /// hardware the mapper decoder only fires on writes to $FFFC-$FFFF; the
+    /// primary-RAM writes at $DFFC-$DFFF update the RAM byte but do NOT change the
+    /// active bank registers.  Without this fix both address ranges would reset the
+    /// banks to 0 so the header check at $7FF0 mapped to ROM offset $3FF0 (bank 0)
+    /// instead of $7FF0 (bank 1) and "TMR SEGA" was never found.
+    #[test]
+    fn test_sega_primary_ram_write_does_not_update_mapper() {
+        // 128 KB ROM (8 × 16 KB banks).  Place "TMR SEGA" at offset $7FF0 as a
+        // real SMS cartridge would (header in bank 1 at the canonical location).
+        let mut rom = vec![0u8; 0x20000];
+        let header = b"TMR SEGA";
+        rom[0x7FF0..0x7FF8].copy_from_slice(header);
+        // Put a different sentinel at the location the mapper would read if
+        // sega_banks[1] were incorrectly reset to 0 (bank 0, offset $3FF0).
+        rom[0x3FF0] = 0xDE; // NOT 'T', so if we see this the test must fail.
+
+        let mut mem = make_mem(rom);
+        mem.set_mapper_type(MapperType::Sega);
+
+        // Simulate BIOS clearing primary work-RAM $C000-$DFFF to 0x00.
+        // This includes $DFFE which is the primary-RAM byte backing the slot-1
+        // bank register.  It must NOT reset sega_banks[1] from 1 to 0.
+        for addr in 0xC000u16..=0xDFFF {
+            mem.write(addr, 0x00);
+        }
+
+        // After the RAM clear, bank 1 must still be mapped to slot 1 ($4000-$7FFF).
+        // Reading $7FF0 must return the first byte of "TMR SEGA", not $DE.
+        assert_eq!(
+            mem.read(0x7FF0),
+            b'T',
+            "sega_banks[1] was incorrectly reset by a write to the primary-RAM \
+             mirror of the mapper register ($DFFE); header check would fail"
+        );
+    }
+
+    /// Companion test: writes to the dedicated mapper-register range $FFFC-$FFFF
+    /// MUST still update the banks (normal game banker behaviour).
+    #[test]
+    fn test_sega_mapper_register_range_still_updates_banks() {
+        let mut rom = vec![0u8; 0x20000]; // 128 KB
+        for i in 0..8usize {
+            rom[i * 0x4000] = i as u8;
+        }
+        let mut mem = make_mem(rom);
+        mem.set_mapper_type(MapperType::Sega);
+
+        // Default: slot 1 → bank 1
+        assert_eq!(mem.read(0x4000), 1);
+
+        // Write to the real mapper register at $FFFE → should remap slot 1.
+        mem.write(0xFFFE, 3);
+        assert_eq!(
+            mem.read(0x4000),
+            3,
+            "write to $FFFE must update sega_banks[1]"
+        );
     }
 
     #[test]
@@ -1368,5 +1585,62 @@ mod tests {
         let c2 = crc32(data);
         assert_eq!(c1, c2);
         assert_ne!(c1, 0);
+    }
+
+    #[test]
+    fn test_bios_overlay_full_size() {
+        // The BIOS overlay must cover the full BIOS ROM size, not just the first
+        // 1 KB.  Real SMS BIOS ROMs are 8 KB; code beyond 0x03FF must come from
+        // the BIOS rather than the cartridge ROM.
+        let mut rom = vec![0u8; 0x8000];
+        // Mark every byte of the ROM with a known sentinel so we can detect
+        // accidental fall-through reads.
+        rom.fill(0xCC);
+
+        let mut mem = make_mem(rom);
+
+        // Create an 8 KB BIOS image with distinct bytes at various offsets.
+        let mut bios = vec![0xBBu8; 0x2000]; // 8 KB
+        bios[0x0000] = 0x01; // first byte
+        bios[0x03FF] = 0x02; // last byte of first 1 KB
+        bios[0x0400] = 0x03; // first byte of second 1 KB (was broken before the fix)
+        bios[0x1FFF] = 0x04; // last byte of the 8 KB BIOS
+
+        mem.load_bios(bios);
+        assert!(mem.is_bios_enabled());
+
+        // All addresses within the 8 KB BIOS range must return BIOS data.
+        assert_eq!(mem.read(0x0000), 0x01);
+        assert_eq!(mem.read(0x03FF), 0x02);
+        assert_eq!(mem.read(0x0400), 0x03); // this returned cartridge ROM before the fix
+        assert_eq!(mem.read(0x1FFF), 0x04); // this returned cartridge ROM before the fix
+
+        // Addresses above the BIOS range (0x2000+) must fall through to ROM/RAM.
+        // The cartridge ROM was filled with 0xCC so we expect that value back.
+        assert_eq!(mem.read(0x2000), 0xCC);
+    }
+
+    #[test]
+    fn test_bios_overlay_disabled_after_disable() {
+        // After the BIOS disables itself (port 0x3E bit 3 set to 1), the
+        // cartridge ROM must be visible at 0x0000.
+        let mut rom = vec![0u8; 0x8000];
+        rom[0x0400] = 0xDD; // cartridge data at 0x0400
+
+        let mut mem = make_mem(rom);
+
+        let mut bios = vec![0xBBu8; 0x2000];
+        bios[0x0400] = 0xAA; // BIOS data at 0x0400
+        mem.load_bios(bios);
+
+        // BIOS is enabled; 0x0400 should return BIOS data.
+        assert_eq!(mem.read(0x0400), 0xAA);
+
+        // Disable BIOS via port 0x3E (bit 3 = 1).
+        mem.io_write(0x3E, 0x08);
+        assert!(!mem.is_bios_enabled());
+
+        // Now 0x0400 must return cartridge data.
+        assert_eq!(mem.read(0x0400), 0xDD);
     }
 }

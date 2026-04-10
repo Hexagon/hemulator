@@ -2049,45 +2049,53 @@ impl<M: MemorySpc700> CpuSpc700<M> {
                 6
             }
 
-            // ADC dp, dp
+            // ADC (X), (Y) - Add with carry: (X) = (X) + (Y) + C
             0x99 => {
-                let src = self.fetch_byte();
-                let dst = self.fetch_byte();
-                let src_val = self.read(self.direct_page() | (src as u16));
-                let dst_val = self.read(self.direct_page() | (dst as u16));
+                let x_val = self.read(self.direct_page() | (self.x as u16));
+                let y_val = self.read(self.direct_page() | (self.y as u16));
                 let carry = if self.get_flag(psw_flags::CARRY) {
-                    1
+                    1u16
                 } else {
                     0
                 };
-                let result = dst_val as u16 + src_val as u16 + carry;
+                let result = x_val as u16 + y_val as u16 + carry;
                 self.set_flag(psw_flags::CARRY, result > 0xFF);
                 self.set_flag(
                     psw_flags::OVERFLOW,
-                    (!(dst_val ^ src_val) & (dst_val ^ result as u8) & 0x80) != 0,
+                    (!(x_val ^ y_val) & (x_val ^ result as u8) & 0x80) != 0,
                 );
                 self.set_flag(
                     psw_flags::HALF_CARRY,
-                    ((dst_val & 0x0F) + (src_val & 0x0F) + carry as u8) > 0x0F,
+                    ((x_val & 0x0F) + (y_val & 0x0F) + carry as u8) > 0x0F,
                 );
-                self.write(self.direct_page() | (dst as u16), result as u8);
+                self.write(self.direct_page() | (self.x as u16), result as u8);
                 self.update_nz(result as u8);
-                6
+                5
             }
 
+            // SBC A, (X) - Subtract with borrow: A = A - (X) - !C
             0xA6 => {
                 let val = self.read(self.direct_page() | (self.x as u16));
                 let carry = if self.get_flag(psw_flags::CARRY) {
-                    0
+                    0i16
                 } else {
                     1
                 };
                 let result = self.a as i16 - val as i16 - carry;
                 self.set_flag(psw_flags::CARRY, result >= 0);
+                self.set_flag(
+                    psw_flags::OVERFLOW,
+                    ((self.a ^ val) & (self.a ^ result as u8) & 0x80) != 0,
+                );
+                self.set_flag(
+                    psw_flags::HALF_CARRY,
+                    ((self.a & 0x0F) as i16 - (val & 0x0F) as i16 - carry) < 0,
+                );
                 self.a = result as u8;
                 self.update_nz(self.a);
                 3
             }
+            // SBC A, (dp+X) - Subtract with borrow indirect indexed
             0xA7 => {
                 let dp = self.fetch_byte();
                 let ptr_index = dp.wrapping_add(self.x);
@@ -2096,58 +2104,94 @@ impl<M: MemorySpc700> CpuSpc700<M> {
                 let addr = ((addr_hi as u16) << 8) | (addr_lo as u16);
                 let val = self.read(addr);
                 let carry = if self.get_flag(psw_flags::CARRY) {
-                    0
+                    0i16
                 } else {
                     1
                 };
                 let result = self.a as i16 - val as i16 - carry;
                 self.set_flag(psw_flags::CARRY, result >= 0);
+                self.set_flag(
+                    psw_flags::OVERFLOW,
+                    ((self.a ^ val) & (self.a ^ result as u8) & 0x80) != 0,
+                );
+                self.set_flag(
+                    psw_flags::HALF_CARRY,
+                    ((self.a & 0x0F) as i16 - (val & 0x0F) as i16 - carry) < 0,
+                );
                 self.a = result as u8;
                 self.update_nz(self.a);
                 6
             }
+            // SBC A, dp+X - Subtract with borrow direct page indexed
             0xB4 => {
                 let dp = self.fetch_byte();
                 let val = self.read(self.direct_page() | (dp.wrapping_add(self.x) as u16));
                 let carry = if self.get_flag(psw_flags::CARRY) {
-                    0
+                    0i16
                 } else {
                     1
                 };
                 let result = self.a as i16 - val as i16 - carry;
                 self.set_flag(psw_flags::CARRY, result >= 0);
+                self.set_flag(
+                    psw_flags::OVERFLOW,
+                    ((self.a ^ val) & (self.a ^ result as u8) & 0x80) != 0,
+                );
+                self.set_flag(
+                    psw_flags::HALF_CARRY,
+                    ((self.a & 0x0F) as i16 - (val & 0x0F) as i16 - carry) < 0,
+                );
                 self.a = result as u8;
                 self.update_nz(self.a);
                 4
             }
+            // SBC A, !abs+X - Subtract with borrow absolute indexed X
             0xB5 => {
                 let addr = self.fetch_word().wrapping_add(self.x as u16);
                 let val = self.read(addr);
                 let carry = if self.get_flag(psw_flags::CARRY) {
-                    0
+                    0i16
                 } else {
                     1
                 };
                 let result = self.a as i16 - val as i16 - carry;
                 self.set_flag(psw_flags::CARRY, result >= 0);
+                self.set_flag(
+                    psw_flags::OVERFLOW,
+                    ((self.a ^ val) & (self.a ^ result as u8) & 0x80) != 0,
+                );
+                self.set_flag(
+                    psw_flags::HALF_CARRY,
+                    ((self.a & 0x0F) as i16 - (val & 0x0F) as i16 - carry) < 0,
+                );
                 self.a = result as u8;
                 self.update_nz(self.a);
                 5
             }
+            // SBC A, !abs+Y - Subtract with borrow absolute indexed Y
             0xB6 => {
                 let addr = self.fetch_word().wrapping_add(self.y as u16);
                 let val = self.read(addr);
                 let carry = if self.get_flag(psw_flags::CARRY) {
-                    0
+                    0i16
                 } else {
                     1
                 };
                 let result = self.a as i16 - val as i16 - carry;
                 self.set_flag(psw_flags::CARRY, result >= 0);
+                self.set_flag(
+                    psw_flags::OVERFLOW,
+                    ((self.a ^ val) & (self.a ^ result as u8) & 0x80) != 0,
+                );
+                self.set_flag(
+                    psw_flags::HALF_CARRY,
+                    ((self.a & 0x0F) as i16 - (val & 0x0F) as i16 - carry) < 0,
+                );
                 self.a = result as u8;
                 self.update_nz(self.a);
                 5
             }
+            // SBC A, (dp)+Y - Subtract with borrow indirect indexed Y
             0xB7 => {
                 let dp = self.fetch_byte() as u16;
                 let dp_addr = self.direct_page() | dp;
@@ -2157,31 +2201,46 @@ impl<M: MemorySpc700> CpuSpc700<M> {
                 let addr = base.wrapping_add(self.y as u16);
                 let val = self.read(addr);
                 let carry = if self.get_flag(psw_flags::CARRY) {
-                    0
+                    0i16
                 } else {
                     1
                 };
                 let result = self.a as i16 - val as i16 - carry;
                 self.set_flag(psw_flags::CARRY, result >= 0);
+                self.set_flag(
+                    psw_flags::OVERFLOW,
+                    ((self.a ^ val) & (self.a ^ result as u8) & 0x80) != 0,
+                );
+                self.set_flag(
+                    psw_flags::HALF_CARRY,
+                    ((self.a & 0x0F) as i16 - (val & 0x0F) as i16 - carry) < 0,
+                );
                 self.a = result as u8;
                 self.update_nz(self.a);
                 6
             }
+            // SBC (X), (Y) - Subtract with borrow: (X) = (X) - (Y) - !C
             0xB9 => {
-                let src = self.fetch_byte();
-                let dst = self.fetch_byte();
-                let src_val = self.read(self.direct_page() | (src as u16));
-                let dst_val = self.read(self.direct_page() | (dst as u16));
+                let x_val = self.read(self.direct_page() | (self.x as u16));
+                let y_val = self.read(self.direct_page() | (self.y as u16));
                 let carry = if self.get_flag(psw_flags::CARRY) {
-                    0
+                    0i16
                 } else {
                     1
                 };
-                let result = dst_val as i16 - src_val as i16 - carry;
+                let result = x_val as i16 - y_val as i16 - carry;
                 self.set_flag(psw_flags::CARRY, result >= 0);
-                self.write(self.direct_page() | (dst as u16), result as u8);
+                self.set_flag(
+                    psw_flags::OVERFLOW,
+                    ((x_val ^ y_val) & (x_val ^ result as u8) & 0x80) != 0,
+                );
+                self.set_flag(
+                    psw_flags::HALF_CARRY,
+                    ((x_val & 0x0F) as i16 - (y_val & 0x0F) as i16 - carry) < 0,
+                );
+                self.write(self.direct_page() | (self.x as u16), result as u8);
                 self.update_nz(result as u8);
-                6
+                5
             }
 
             // Remaining opcodes to complete the 256-opcode SPC700 instruction set
@@ -2606,14 +2665,13 @@ impl<M: MemorySpc700> CpuSpc700<M> {
                 self.set_flag(psw_flags::CARRY, self.a >= val);
                 6
             }
-            // CMP dp, #imm
+            // CMP (X), (Y) - Compare values at direct page addresses X and Y
             0x79 => {
-                let imm = self.fetch_byte();
-                let dp = self.fetch_byte();
-                let val = self.read(self.direct_page() | (dp as u16));
-                let result = val.wrapping_sub(imm);
+                let x_val = self.read(self.direct_page() | (self.x as u16));
+                let y_val = self.read(self.direct_page() | (self.y as u16));
+                let result = x_val.wrapping_sub(y_val);
                 self.update_nz(result);
-                self.set_flag(psw_flags::CARRY, val >= imm);
+                self.set_flag(psw_flags::CARRY, x_val >= y_val);
                 5
             }
             // ROR dp+X
@@ -2642,19 +2700,27 @@ impl<M: MemorySpc700> CpuSpc700<M> {
                 6
             }
 
-            // ADC dp, dp
+            // ADC dd, ds - Add with carry: dp(dd) = dp(dd) + dp(ds) + C
             0x89 => {
                 let src = self.fetch_byte();
                 let dst = self.fetch_byte();
                 let src_val = self.read(self.direct_page() | (src as u16));
                 let dst_val = self.read(self.direct_page() | (dst as u16));
                 let carry = if self.get_flag(psw_flags::CARRY) {
-                    1
+                    1u16
                 } else {
                     0
                 };
                 let result = dst_val as u16 + src_val as u16 + carry;
                 self.set_flag(psw_flags::CARRY, result > 0xFF);
+                self.set_flag(
+                    psw_flags::OVERFLOW,
+                    (!(dst_val ^ src_val) & (dst_val ^ result as u8) & 0x80) != 0,
+                );
+                self.set_flag(
+                    psw_flags::HALF_CARRY,
+                    ((dst_val & 0x0F) + (src_val & 0x0F) + carry as u8) > 0x0F,
+                );
                 self.write(self.direct_page() | (dst as u16), result as u8);
                 self.update_nz(result as u8);
                 6
@@ -2671,80 +2737,105 @@ impl<M: MemorySpc700> CpuSpc700<M> {
                 self.set_carry(carry ^ bit_val);
                 5
             }
-            // ADC/SBC (X), (Y)
+            // ADC dp, #imm - Add with carry: dp = dp + imm + C
             0x98 => {
-                let x_val = self.read(self.direct_page() | (self.x as u16));
-                let y_val = self.read(self.direct_page() | (self.y as u16));
+                let imm = self.fetch_byte();
+                let dp = self.fetch_byte();
+                let dp_addr = self.direct_page() | (dp as u16);
+                let val = self.read(dp_addr);
                 let carry = if self.get_flag(psw_flags::CARRY) {
-                    1
+                    1u16
                 } else {
                     0
                 };
-                let result = x_val as u16 + y_val as u16 + carry;
+                let result = val as u16 + imm as u16 + carry;
                 self.set_flag(psw_flags::CARRY, result > 0xFF);
-                self.write(self.direct_page() | (self.x as u16), result as u8);
+                self.set_flag(
+                    psw_flags::OVERFLOW,
+                    (!(val ^ imm) & (val ^ result as u8) & 0x80) != 0,
+                );
+                self.set_flag(
+                    psw_flags::HALF_CARRY,
+                    ((val & 0x0F) + (imm & 0x0F) + carry as u8) > 0x0F,
+                );
+                self.write(dp_addr, result as u8);
                 self.update_nz(result as u8);
                 5
             }
-            // SBC dp, dp
+            // DEC dp+X - Decrement direct page indexed by X
             0x9B => {
+                let dp = self.fetch_byte();
+                let addr = self.direct_page() | (dp.wrapping_add(self.x) as u16);
+                let val = self.read(addr);
+                let result = val.wrapping_sub(1);
+                self.write(addr, result);
+                self.update_nz(result);
+                5
+            }
+            // SBC dp, #imm - Subtract with borrow: dp = dp - imm - !C
+            0xB8 => {
+                let imm = self.fetch_byte();
+                let dp = self.fetch_byte();
+                let dp_addr = self.direct_page() | (dp as u16);
+                let val = self.read(dp_addr);
+                let carry = if self.get_flag(psw_flags::CARRY) {
+                    0i16
+                } else {
+                    1
+                };
+                let result = val as i16 - imm as i16 - carry;
+                self.set_flag(psw_flags::CARRY, result >= 0);
+                self.set_flag(
+                    psw_flags::OVERFLOW,
+                    ((val ^ imm) & (val ^ result as u8) & 0x80) != 0,
+                );
+                self.set_flag(
+                    psw_flags::HALF_CARRY,
+                    ((val & 0x0F) as i16 - (imm & 0x0F) as i16 - carry) < 0,
+                );
+                self.write(dp_addr, result as u8);
+                self.update_nz(result as u8);
+                5
+            }
+
+            // SBC dd, ds - Subtract with borrow: dp(dd) = dp(dd) - dp(ds) - !C
+            0xA9 => {
                 let src = self.fetch_byte();
                 let dst = self.fetch_byte();
                 let src_val = self.read(self.direct_page() | (src as u16));
                 let dst_val = self.read(self.direct_page() | (dst as u16));
                 let carry = if self.get_flag(psw_flags::CARRY) {
-                    0
+                    0i16
                 } else {
                     1
                 };
                 let result = dst_val as i16 - src_val as i16 - carry;
                 self.set_flag(psw_flags::CARRY, result >= 0);
+                self.set_flag(
+                    psw_flags::OVERFLOW,
+                    ((dst_val ^ src_val) & (dst_val ^ result as u8) & 0x80) != 0,
+                );
+                self.set_flag(
+                    psw_flags::HALF_CARRY,
+                    ((dst_val & 0x0F) as i16 - (src_val & 0x0F) as i16 - carry) < 0,
+                );
                 self.write(self.direct_page() | (dst as u16), result as u8);
                 self.update_nz(result as u8);
                 6
             }
-            // SBC (X), (Y)
-            0xB8 => {
-                let x_val = self.read(self.direct_page() | (self.x as u16));
-                let y_val = self.read(self.direct_page() | (self.y as u16));
-                let carry = if self.get_flag(psw_flags::CARRY) {
-                    0
-                } else {
-                    1
-                };
-                let result = x_val as i16 - y_val as i16 - carry;
-                self.set_flag(psw_flags::CARRY, result >= 0);
-                self.write(self.direct_page() | (self.x as u16), result as u8);
-                self.update_nz(result as u8);
-                5
-            }
-
-            // SBC A, #imm (Note: A8 is already implemented above)
-            // SBC A, #imm (Note: A8 is already implemented above)
-            0xA9 => {
-                let val = self.fetch_byte();
-                let carry = if self.get_flag(psw_flags::CARRY) {
-                    0
-                } else {
-                    1
-                };
-                let result = self.a as i16 - val as i16 - carry;
-                self.set_flag(psw_flags::CARRY, result >= 0);
-                self.a = result as u8;
-                self.update_nz(self.a);
-                2
-            }
 
             // DAS - Decimal adjust for subtraction
+            // Hardware-accurate order: high nibble first, then low nibble
+            // (Matches bsnes/higan S-SMP implementation)
             0xBE => {
-                // Adjust low nibble if half-carry is clear or low nibble > 9
-                if !self.get_flag(psw_flags::HALF_CARRY) {
-                    self.a = self.a.wrapping_sub(0x06);
-                }
-                // Adjust high nibble if carry is clear or A > 0x99
+                // Adjust high nibble first if carry is clear
                 if !self.get_flag(psw_flags::CARRY) {
                     self.a = self.a.wrapping_sub(0x60);
                     self.set_carry(false);
+                }
+                // Then adjust low nibble if half-carry is clear
+                if !self.get_flag(psw_flags::HALF_CARRY) {
+                    self.a = self.a.wrapping_sub(0x06);
                 }
                 self.update_nz(self.a);
                 3
@@ -2826,15 +2917,17 @@ impl<M: MemorySpc700> CpuSpc700<M> {
             }
 
             // DAA - Decimal adjust for addition
+            // Hardware-accurate order: high nibble first, then low nibble
+            // (Matches bsnes/higan S-SMP implementation)
             0xDF => {
-                // Adjust low nibble if half-carry is set or low nibble > 9
-                if self.get_flag(psw_flags::HALF_CARRY) || (self.a & 0x0F) > 0x09 {
-                    self.a = self.a.wrapping_add(0x06);
-                }
-                // Adjust high nibble if carry is set or A > 0x99 (before adding 0x60)
+                // Adjust high nibble first if carry is set or A > 0x99
                 if self.get_flag(psw_flags::CARRY) || self.a > 0x99 {
                     self.a = self.a.wrapping_add(0x60);
                     self.set_carry(true);
+                }
+                // Then adjust low nibble if half-carry is set or low nibble > 9
+                if self.get_flag(psw_flags::HALF_CARRY) || (self.a & 0x0F) > 0x09 {
+                    self.a = self.a.wrapping_add(0x06);
                 }
                 self.update_nz(self.a);
                 3

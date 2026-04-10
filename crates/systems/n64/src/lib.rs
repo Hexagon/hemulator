@@ -22,6 +22,7 @@ mod pif;
 mod rdp;
 mod rdp_renderer;
 mod rdp_renderer_opengl;
+mod rdp_renderer_software;
 mod rsp;
 mod rsp_hle;
 mod tlb;
@@ -102,18 +103,18 @@ impl N64System {
         })
     }
 
-    /// Create a new N64 system for testing (uses a null GL context)
+    /// Create a new N64 system using the software renderer (no OpenGL required).
     ///
-    /// NOTE: Tests using this method require `#[ignore]` attribute because the null
-    /// GL context will fail when GL functions are actually called.
-    /// For proper headless GL testing, glutin+winit would be needed as dev-dependencies,
-    /// but this adds complexity. Tests are functional for manual testing with real GL.
+    /// Used by unit tests so the test suite can run in CI without a real GL context.
     pub fn new_for_test() -> Self {
-        // Use null GL context - tests will fail at runtime if GL functions are called
-        // Tests are marked as #[ignore] for this reason
-        let gl = unsafe { glow::Context::from_loader_function(|_s| std::ptr::null()) };
-
-        Self::new(gl).expect("Failed to create N64 system for test")
+        let bus = N64Bus::new_for_test();
+        Self {
+            cpu: N64Cpu::new(bus),
+            frame_cycles: 1_562_500,
+            current_cycles: 0,
+            instruction_tracer: emu_core::instruction_tracer::InstructionTracer::new(),
+            breakpoint_manager: emu_core::breakpoints::BreakpointManager::new(),
+        }
     }
 
     /// Update controller 1 state
@@ -356,11 +357,19 @@ impl System for N64System {
 
             // Execute CPU until we reach the cycles for this scanline
             while self.current_cycles < target_cycles {
-                // Capture PC before execution for tracing
                 let pc_before = self.cpu.cpu.pc as u32;
-
                 let cycles = self.cpu.step();
                 self.current_cycles += cycles;
+
+                // Propagate MI interrupts to CPU IP2 after every step.
+                // Bus operations (RSP task, RDP display list) can set MI interrupts
+                // during a CPU write, so we must update IP2 promptly.
+                let pending = self.cpu.bus().mi().get_pending_interrupts();
+                if pending != 0 {
+                    self.cpu.cpu.set_interrupt(2);
+                } else {
+                    self.cpu.cpu.clear_interrupt(2);
+                }
 
                 // Record instruction in tracer if enabled
                 if self.instruction_tracer.is_enabled() {
@@ -369,17 +378,6 @@ impl System for N64System {
                         self.instruction_tracer.trace(instruction, cpu_state);
                     }
                 }
-            }
-
-            // Check for pending interrupts once per scanline (performance optimization)
-            // This is much faster than checking every instruction
-            let bus = self.cpu.bus();
-            let pending = bus.mi().get_pending_interrupts();
-            if pending != 0 {
-                // On real N64, ALL MI interrupts are OR'd and routed to CPU IP2
-                // (interrupt line 2). Individual MI interrupt bits are distinguished
-                // by reading MI_INTR_REG, not by separate CPU interrupt lines.
-                self.cpu.cpu.set_interrupt(2);
             }
 
             // Update VI scanline and check for interrupt
@@ -397,6 +395,10 @@ impl System for N64System {
             }
         }
 
+        // Sync RDP framebuffer to RDRAM once per display frame
+        // This is deferred from individual RSP/RDP operations for performance
+        self.cpu.bus_mut().sync_rdp_framebuffer();
+
         // Get frame from VI framebuffer readback (primary display method)
         // The game renders to RDRAM, and VI reads from RDRAM at VI_ORIGIN
         if let Some(vi_frame) = self.cpu.bus().read_vi_framebuffer() {
@@ -404,6 +406,7 @@ impl System for N64System {
         }
 
         // Fallback: return RDP internal frame (for cases where VI isn't configured yet)
+        self.cpu.bus_mut().rdp_mut().sync_framebuffer();
         let frame = self.cpu.bus().rdp().get_frame().clone();
         Ok(frame)
     }
@@ -480,20 +483,15 @@ mod tests {
     use super::*;
     use emu_core::cpu_mips_r4300i::MemoryMips;
 
-    // NOTE: N64 tests use null GL context and are marked as #[ignore].
-    // For proper headless GL testing, glutin+winit would be needed as dev-dependencies.
-    // Tests are functional for manual testing with: cargo test --package emu_n64 -- --ignored
-    // (requires actual OpenGL 3.3+ support on the system)
+    // N64 tests use the software renderer (no OpenGL required) so they run in CI.
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_system_creation() {
         let sys = N64System::new_for_test();
         assert!(!sys.is_mounted("Cartridge"));
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_mount_points() {
         let sys = N64System::new_for_test();
         let mounts = sys.mount_points();
@@ -503,7 +501,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_reset() {
         let mut sys = N64System::new_for_test();
         sys.reset();
@@ -511,7 +508,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_save_load_state() {
         let sys = N64System::new_for_test();
         let state = sys.save_state();
@@ -521,7 +517,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_integration() {
         let sys = N64System::new_for_test();
         let frame = sys.cpu.bus().rdp().get_frame();
@@ -531,7 +526,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_register_access() {
         use emu_core::cpu_mips_r4300i::MemoryMips;
 
@@ -552,7 +546,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_step_frame_returns_rdp_frame() {
         let mut sys = N64System::new_for_test();
         let result = sys.step_frame();
@@ -568,7 +561,6 @@ mod tests {
     // See test_roms/n64/README.md for details on building and running n64-systemtest.
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_mi_register_access() {
         // Test that MI registers can be accessed through memory bus
         let mut sys = N64System::new_for_test();
@@ -579,7 +571,9 @@ mod tests {
         assert_eq!(version, 0x02020102);
 
         // Test writing to MI_INTR_MASK (enable VI interrupt)
-        bus.write_word(0x0430000C, 0x0800); // Set VI interrupt mask
+        // MI_INTR_MASK uses alternating clear/set bit pairs:
+        //   bit 7 (0x0080) sets the VI mask (mask bit 3 = 0x08)
+        bus.write_word(0x0430000C, 0x0080); // Set VI interrupt mask
         let mask = bus.read_word(0x0430000C);
         assert_eq!(mask, 0x08); // VI interrupt bit should be set
 
@@ -589,13 +583,13 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_vi_interrupt_generation() {
         // Test that VI generates interrupts when scanline matches VI_INTR
         let mut sys = N64System::new_for_test();
 
         // Enable VI interrupt in MI_INTR_MASK
-        sys.cpu.bus_mut().write_word(0x0430000C, 0x0800);
+        // bit 7 (0x0080) sets the VI mask
+        sys.cpu.bus_mut().write_word(0x0430000C, 0x0080);
 
         // Set VI_INTR to trigger on scanline 100 (stored as 200)
         sys.cpu.bus_mut().write_word(0x0440000C, 200);
@@ -625,7 +619,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_interrupt_acknowledge() {
         // Test that writing to MI_INTR clears the interrupt
         let mut sys = N64System::new_for_test();
@@ -645,7 +638,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_cpu_interrupt_handling() {
         // Test that CPU responds to interrupts
         let mut sys = N64System::new_for_test();
@@ -689,7 +681,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_full_interrupt_flow() {
         // Integration test: VI generates interrupt, MI propagates it, CPU handles it
         let mut sys = N64System::new_for_test();
@@ -731,7 +722,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_controller_input_integration() {
         // Test that controller input flows from system to PIF correctly
         use emu_core::cpu_mips_r4300i::MemoryMips;
@@ -776,7 +766,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_controller_multi_player() {
         // Test that multiple controllers work independently
         use emu_core::cpu_mips_r4300i::MemoryMips;
@@ -800,11 +789,12 @@ mod tests {
         bus.write_byte(0x1FC007C2, 0x01);
         let buttons1 = u16::from_be_bytes([bus.read_byte(0x1FC007C3), bus.read_byte(0x1FC007C4)]);
 
-        // Read controller 2 (at 0x1FC007C8)
-        bus.write_byte(0x1FC007C8, 0x01);
-        bus.write_byte(0x1FC007C9, 0x04);
-        bus.write_byte(0x1FC007CA, 0x01);
-        let buttons2 = u16::from_be_bytes([bus.read_byte(0x1FC007CB), bus.read_byte(0x1FC007CC)]);
+        // Read controller 2: channel 1 command starts at 0x7C7
+        // (immediately after the 7-byte channel-0 block that ends at 0x7C6)
+        bus.write_byte(0x1FC007C7, 0x01);
+        bus.write_byte(0x1FC007C8, 0x04);
+        bus.write_byte(0x1FC007C9, 0x01);
+        let buttons2 = u16::from_be_bytes([bus.read_byte(0x1FC007CA), bus.read_byte(0x1FC007CB)]);
 
         // Verify controller 1 has A pressed
         assert_ne!(buttons1 & (1 << 15), 0);
@@ -816,18 +806,14 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_n64_renderer_name() {
-        // Test that renderer_name() reports the correct renderer
-        // NOTE: Requires actual OpenGL 3.3+ to run
+        // Test that renderer_name() returns a non-empty string.
+        // In tests, the software renderer is used; in production, OpenGL is used.
         let sys = N64System::new_for_test();
-
-        // By default, should be using OpenGL renderer
         let renderer_name = sys.renderer_name();
         assert!(
-            renderer_name.contains("OpenGL"),
-            "Expected OpenGL renderer by default, got {}",
-            renderer_name
+            !renderer_name.is_empty(),
+            "Expected a non-empty renderer name, got empty string"
         );
     }
 }

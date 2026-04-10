@@ -86,6 +86,10 @@ pub struct NesTileData {
     pub scroll_y: u8,
     /// Current mirroring mode
     pub mirroring: String,
+    /// Sprite 0 hit status snapshot
+    pub sprite0_status: emu_nes::Sprite0Status,
+    /// Sprite 0 hit configuration (read-only snapshot; changes are sent via DebugAction)
+    pub sprite0_config: emu_nes::Sprite0Config,
 }
 
 /// Game Boy tile viewer data
@@ -366,7 +370,7 @@ pub enum TabAction {
 }
 
 /// Debug actions that can be triggered from the debug tab
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum DebugAction {
     Step,                                                         // Step one instruction
     Pause,                                                        // Pause emulation
@@ -376,6 +380,8 @@ pub enum DebugAction {
     AddBreakpoint(u32, emu_core::breakpoints::BreakpointType), // Add breakpoint (address, type)
     RemoveBreakpoint(u32, emu_core::breakpoints::BreakpointType), // Remove breakpoint
     SetGbAudioChannels([bool; 4]), // Pulse1, Pulse2, Wave, Noise
+    /// Update the NES PPU sprite 0 hit configuration.
+    SetNesPpuConfig(emu_nes::Sprite0Config),
 }
 
 pub struct TabManager {
@@ -410,6 +416,10 @@ pub struct TabManager {
     pub breakpoint_type_selected: usize, // 0=Execute, 1=Read, 2=Write
     pub show_breakpoint_panel: bool,
     pub gb_audio_channels: [bool; 4], // Pulse1, Pulse2, Wave, Noise
+    /// Local copy of the NES sprite 0 hit configuration (for the inspector tab).
+    /// Updated from the emulator each frame via NesTileData; changes are sent back
+    /// via DebugAction::SetNesPpuConfig.
+    pub nes_sprite0_config: emu_nes::Sprite0Config,
 }
 
 impl TabManager {
@@ -441,6 +451,7 @@ impl TabManager {
             breakpoint_type_selected: 0,
             show_breakpoint_panel: false,
             gb_audio_channels: [true, true, true, true],
+            nes_sprite0_config: emu_nes::Sprite0Config::default(),
         }
     }
 
@@ -4206,6 +4217,7 @@ impl TabManager {
                 };
 
                 let palette_num = (tile_attr & 0x07) as usize;
+                let tile_vram_bank = (tile_attr >> 3) & 0x01;
                 let flip_x = (tile_attr & 0x20) != 0;
                 let flip_y = (tile_attr & 0x40) != 0;
 
@@ -4222,8 +4234,11 @@ impl TabManager {
                         continue;
                     }
 
-                    let byte1 = data.vram_bank0[row_addr];
-                    let byte2 = data.vram_bank0[row_addr + 1];
+                    let (byte1, byte2) = if data.is_cgb_mode && tile_vram_bank == 1 {
+                        (data.vram_bank1[row_addr], data.vram_bank1[row_addr + 1])
+                    } else {
+                        (data.vram_bank0[row_addr], data.vram_bank0[row_addr + 1])
+                    };
 
                     for px in 0..8 {
                         let actual_px = if flip_x { 7 - px } else { px };

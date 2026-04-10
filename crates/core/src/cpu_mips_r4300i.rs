@@ -39,20 +39,19 @@
 //!
 //! ## Overflow Handling
 //!
-//! Signed arithmetic instructions (ADD, ADDI, SUB, DADD, DADDI, DSUB) should trap on overflow
-//! per MIPS spec, but this implementation uses wrapping arithmetic:
-//! - **Current behavior**: Uses `wrapping_add`/`wrapping_sub` (no trap)
-//! - **Rationale**: Most N64 software doesn't rely on overflow traps
-//! - **Unsigned variants**: ADDU, ADDIU, SUBU never trap (correct behavior)
+//! Signed arithmetic instructions (ADD, ADDI, SUB, DADD, DADDI, DSUB) raise IntegerOverflow
+//! exception (code 12) when overflow occurs, per the MIPS III specification:
+//! - **Current behavior**: Uses `checked_add`/`checked_sub`; raises exception on overflow
+//! - **Unsigned variants**: ADDU, ADDIU, SUBU, DADDU, DADDIU, DSUBU never trap (correct)
 //!
 //! ## Memory Alignment
 //!
-//! Load/store instructions have specific alignment requirements:
-//! - **LH/LHU/SH**: Must be 2-byte aligned
-//! - **LW/LWU/SW**: Must be 4-byte aligned
-//! - **LD/SD**: Must be 8-byte aligned
-//! - **Unaligned access**: Logs a warning (alignment validated)
+//! Load/store instructions raise AddressError exceptions on misaligned access:
+//! - **LH/LHU/SH**: Must be 2-byte aligned; raises AdEL (4) / AdES (5) if not
+//! - **LW/LWU/SW**: Must be 4-byte aligned; raises AdEL (4) / AdES (5) if not
+//! - **LD/SD**: Must be 8-byte aligned; raises AdEL (4) / AdES (5) if not
 //! - **LWL/LWR/LDL/LDR**: Used for unaligned access, don't require alignment
+//! - **BadVAddr** (CP0 reg 8) is set to the faulting address before the exception
 //!
 //! ## Register 0 Immutability
 //!
@@ -67,8 +66,6 @@
 //! - **32-bit shifts**: Shift amount masked to 5 bits (0-31)
 //! - **64-bit shifts**: Shift amount masked to 6 bits (0-63)
 //! - Safe against overflow/underflow
-
-use crate::logging::{log, LogCategory, LogLevel};
 
 /// TLB entry data structure for CP0 TLB instructions
 /// This is a simplified representation that matches CP0 register format
@@ -181,11 +178,14 @@ pub struct CpuMips<M: MemoryMips> {
     /// LO register (for multiply/divide results)
     pub lo: u64,
 
-    /// Floating-point registers
-    pub fpr: [f64; 32],
+    /// Floating-point registers (stored as raw u64 bit patterns)
+    pub fpr: [u64; 32],
 
     /// Floating-point control/status register
     pub fcr31: u32,
+
+    /// Load Linked bit (for LL/SC atomic operations)
+    ll_bit: bool,
 
     /// CP0 registers (coprocessor 0 - system control)
     pub cp0: [u64; 32],
@@ -212,7 +212,6 @@ const CP0_CONTEXT: usize = 4;
 const CP0_PAGEMASK: usize = 5;
 #[allow(dead_code)]
 const CP0_WIRED: usize = 6;
-#[allow(dead_code)]
 const CP0_BADVADDR: usize = 8;
 #[allow(dead_code)]
 const CP0_COUNT: usize = 9;
@@ -241,8 +240,9 @@ impl<M: MemoryMips> CpuMips<M> {
             in_delay_slot: false,
             hi: 0,
             lo: 0,
-            fpr: [0.0; 32],
+            fpr: [0; 32],
             fcr31: 0,
+            ll_bit: false,
             cp0: [0; 32],
             cycles: 0,
             memory,
@@ -264,8 +264,9 @@ impl<M: MemoryMips> CpuMips<M> {
         self.in_delay_slot = false;
         self.hi = 0;
         self.lo = 0;
-        self.fpr = [0.0; 32];
+        self.fpr = [0; 32];
         self.fcr31 = 0;
+        self.ll_bit = false;
         self.cp0 = [0; 32];
         self.cp0[CP0_PRID] = 0x0B00;
         self.cp0[CP0_STATUS] = 0x3400_0000;
@@ -356,7 +357,13 @@ impl<M: MemoryMips> CpuMips<M> {
             0x2D => self.execute_sdr(instr),                 // SDR
             0x2E => self.execute_swr(instr),                 // SWR
             0x2F => self.execute_cache(instr),               // CACHE
+            0x30 => self.execute_ll(instr),                  // LL
+            0x31 => self.execute_lwc1(instr),                // LWC1
+            0x35 => self.execute_ldc1(instr),                // LDC1
             0x37 => self.execute_ld(instr),                  // LD
+            0x38 => self.execute_sc(instr),                  // SC
+            0x39 => self.execute_swc1(instr),                // SWC1
+            0x3D => self.execute_sdc1(instr),                // SDC1
             0x3F => self.execute_sd(instr),                  // SD
             _ => {
                 // Unimplemented instruction
@@ -375,6 +382,24 @@ impl<M: MemoryMips> CpuMips<M> {
 
         // R0 is always zero
         self.gpr[0] = 0;
+
+        // Update CP0 Count register (increments at half the pipeline clock rate)
+        // On real R4300i, Count increments once every 2 PCycles (i.e., once per instruction)
+        // Count is a 32-bit register that wraps around
+        let elapsed = self.cycles - start_cycles;
+        let old_count = self.cp0[CP0_COUNT] & 0xFFFF_FFFF;
+        let new_count = old_count.wrapping_add(elapsed) & 0xFFFF_FFFF;
+        self.cp0[CP0_COUNT] = new_count;
+
+        // Check if Count crossed Compare → set timer interrupt (IP7)
+        let compare = self.cp0[CP0_COMPARE] & 0xFFFF_FFFF;
+        if compare != 0
+            && ((old_count < compare && new_count >= compare)
+                || (old_count > new_count && (new_count >= compare || old_count < compare)))
+        {
+            // Set IP7 (bit 15 in Cause register = interrupt pending bit 7)
+            self.cp0[CP0_CAUSE] |= 1u64 << 15;
+        }
 
         (self.cycles - start_cycles) as u32
     }
@@ -434,6 +459,9 @@ impl<M: MemoryMips> CpuMips<M> {
         // Jump to exception vector
         // Normal exception vector is at 0x80000180
         self.pc = 0x80000180;
+
+        // Clear LL bit - exceptions break atomic sequences
+        self.ll_bit = false;
 
         self.cycles += 1; // Exception handling takes cycles
     }
@@ -508,6 +536,18 @@ impl<M: MemoryMips> CpuMips<M> {
                 self.gpr[rd] = current_pc.wrapping_add(8);
                 self.next_pc = self.gpr[rs];
                 self.in_delay_slot = true;
+                self.cycles += 1;
+            }
+            0x0C => {
+                // SYSCALL - System Call
+                self.handle_exception(8);
+            }
+            0x0D => {
+                // BREAK - Breakpoint
+                self.handle_exception(9);
+            }
+            0x0F => {
+                // SYNC - Memory barrier (no-op in emulation)
                 self.cycles += 1;
             }
             0x10 => {
@@ -635,12 +675,13 @@ impl<M: MemoryMips> CpuMips<M> {
             }
             0x20 => {
                 // ADD - Add (with overflow trap)
-                // NOTE: Should trap on overflow, but not implemented in this emulator
-                // Most N64 software doesn't rely on overflow traps
+                // Raises IntegerOverflow exception (code 12) on signed 32-bit overflow
                 let a = self.gpr[rs] as i32;
                 let b = self.gpr[rt] as i32;
-                // Result is sign-extended to 64 bits
-                self.gpr[rd] = a.wrapping_add(b) as u64;
+                match a.checked_add(b) {
+                    Some(result) => self.gpr[rd] = result as u64,
+                    None => self.handle_exception(12), // IntegerOverflow
+                }
                 self.cycles += 1;
             }
             0x21 => {
@@ -652,11 +693,13 @@ impl<M: MemoryMips> CpuMips<M> {
             }
             0x22 => {
                 // SUB - Subtract (with overflow trap)
-                // NOTE: Should trap on overflow, but not implemented
+                // Raises IntegerOverflow exception (code 12) on signed 32-bit overflow
                 let a = self.gpr[rs] as i32;
                 let b = self.gpr[rt] as i32;
-                // Result is sign-extended to 64 bits
-                self.gpr[rd] = a.wrapping_sub(b) as u64;
+                match a.checked_sub(b) {
+                    Some(result) => self.gpr[rd] = result as u64,
+                    None => self.handle_exception(12), // IntegerOverflow
+                }
                 self.cycles += 1;
             }
             0x23 => {
@@ -702,10 +745,13 @@ impl<M: MemoryMips> CpuMips<M> {
             }
             0x2C => {
                 // DADD - Doubleword Add (with overflow trap)
+                // Raises IntegerOverflow exception (code 12) on signed 64-bit overflow
                 let a = self.gpr[rs] as i64;
                 let b = self.gpr[rt] as i64;
-                // For now, we don't implement traps, just perform the addition
-                self.gpr[rd] = a.wrapping_add(b) as u64;
+                match a.checked_add(b) {
+                    Some(result) => self.gpr[rd] = result as u64,
+                    None => self.handle_exception(12), // IntegerOverflow
+                }
                 self.cycles += 1;
             }
             0x2D => {
@@ -715,10 +761,13 @@ impl<M: MemoryMips> CpuMips<M> {
             }
             0x2E => {
                 // DSUB - Doubleword Subtract (with overflow trap)
+                // Raises IntegerOverflow exception (code 12) on signed 64-bit overflow
                 let a = self.gpr[rs] as i64;
                 let b = self.gpr[rt] as i64;
-                // For now, we don't implement traps, just perform the subtraction
-                self.gpr[rd] = a.wrapping_sub(b) as u64;
+                match a.checked_sub(b) {
+                    Some(result) => self.gpr[rd] = result as u64,
+                    None => self.handle_exception(12), // IntegerOverflow
+                }
                 self.cycles += 1;
             }
             0x2F => {
@@ -794,14 +843,11 @@ impl<M: MemoryMips> CpuMips<M> {
 
         let addr = (self.gpr[rs] as i64).wrapping_add(offset as i64) as u32;
 
-        // Validate 4-byte alignment
+        // Raise AddressError exception (AdEL) on misaligned access
         if addr & 3 != 0 {
-            log(LogCategory::CPU, LogLevel::Warn, || {
-                format!(
-                    "LW: Unaligned word access at 0x{:08X} (PC=0x{:016X})",
-                    addr, self.pc
-                )
-            });
+            self.cp0[CP0_BADVADDR] = addr as u64;
+            self.handle_exception(4); // AdEL - Address Error on Load
+            return;
         }
 
         let val = self.memory.read_word(addr);
@@ -819,17 +865,90 @@ impl<M: MemoryMips> CpuMips<M> {
 
         let addr = (self.gpr[rs] as i64).wrapping_add(offset as i64) as u32;
 
-        // Validate 4-byte alignment
+        // Raise AddressError exception (AdES) on misaligned access
         if addr & 3 != 0 {
-            log(LogCategory::CPU, LogLevel::Warn, || {
-                format!(
-                    "SW: Unaligned word access at 0x{:08X} (PC=0x{:016X})",
-                    addr, self.pc
-                )
-            });
+            self.cp0[CP0_BADVADDR] = addr as u64;
+            self.handle_exception(5); // AdES - Address Error on Store
+            return;
         }
 
         self.memory.write_word(addr, self.gpr[rt] as u32);
+        self.cycles += 1;
+    }
+
+    /// Execute LL - Load Linked Word (for atomic read-modify-write operations)
+    fn execute_ll(&mut self, instr: u32) {
+        let rt = ((instr >> 16) & 0x1F) as usize;
+        let rs = ((instr >> 21) & 0x1F) as usize;
+        let offset = (instr & 0xFFFF) as i16 as i32;
+
+        let addr = (self.gpr[rs] as i64).wrapping_add(offset as i64) as u32;
+        let val = self.memory.read_word(addr);
+        self.gpr[rt] = val as i32 as u64;
+        self.ll_bit = true;
+        self.cycles += 1;
+    }
+
+    /// Execute SC - Store Conditional Word (completes atomic read-modify-write)
+    fn execute_sc(&mut self, instr: u32) {
+        let rt = ((instr >> 16) & 0x1F) as usize;
+        let rs = ((instr >> 21) & 0x1F) as usize;
+        let offset = (instr & 0xFFFF) as i16 as i32;
+
+        if self.ll_bit {
+            let addr = (self.gpr[rs] as i64).wrapping_add(offset as i64) as u32;
+            self.memory.write_word(addr, self.gpr[rt] as u32);
+            self.gpr[rt] = 1; // Success
+        } else {
+            self.gpr[rt] = 0; // Failure
+        }
+        self.ll_bit = false;
+        self.cycles += 1;
+    }
+
+    /// Execute LWC1 - Load Word to Coprocessor 1 (FPU)
+    fn execute_lwc1(&mut self, instr: u32) {
+        let ft = ((instr >> 16) & 0x1F) as usize;
+        let rs = ((instr >> 21) & 0x1F) as usize;
+        let offset = (instr & 0xFFFF) as i16 as i32;
+
+        let addr = (self.gpr[rs] as i64).wrapping_add(offset as i64) as u32;
+        let val = self.memory.read_word(addr);
+        self.fpr[ft] = val as u64;
+        self.cycles += 1;
+    }
+
+    /// Execute SWC1 - Store Word from Coprocessor 1 (FPU)
+    fn execute_swc1(&mut self, instr: u32) {
+        let ft = ((instr >> 16) & 0x1F) as usize;
+        let rs = ((instr >> 21) & 0x1F) as usize;
+        let offset = (instr & 0xFFFF) as i16 as i32;
+
+        let addr = (self.gpr[rs] as i64).wrapping_add(offset as i64) as u32;
+        let val = self.fpr[ft] as u32;
+        self.memory.write_word(addr, val);
+        self.cycles += 1;
+    }
+
+    /// Execute LDC1 - Load Doubleword to Coprocessor 1 (FPU)
+    fn execute_ldc1(&mut self, instr: u32) {
+        let ft = ((instr >> 16) & 0x1F) as usize;
+        let rs = ((instr >> 21) & 0x1F) as usize;
+        let offset = (instr & 0xFFFF) as i16 as i32;
+
+        let addr = (self.gpr[rs] as i64).wrapping_add(offset as i64) as u32;
+        self.fpr[ft] = self.memory.read_doubleword(addr);
+        self.cycles += 1;
+    }
+
+    /// Execute SDC1 - Store Doubleword from Coprocessor 1 (FPU)
+    fn execute_sdc1(&mut self, instr: u32) {
+        let ft = ((instr >> 16) & 0x1F) as usize;
+        let rs = ((instr >> 21) & 0x1F) as usize;
+        let offset = (instr & 0xFFFF) as i16 as i32;
+
+        let addr = (self.gpr[rs] as i64).wrapping_add(offset as i64) as u32;
+        self.memory.write_doubleword(addr, self.fpr[ft]);
         self.cycles += 1;
     }
 
@@ -1087,8 +1206,11 @@ impl<M: MemoryMips> CpuMips<M> {
         let rt = ((instr >> 16) & 0x1F) as usize;
         let imm = (instr & 0xFFFF) as i16 as i32;
 
-        // For now, we don't implement traps
-        self.gpr[rt] = (self.gpr[rs] as i32).wrapping_add(imm) as u64;
+        let a = self.gpr[rs] as i32;
+        match a.checked_add(imm) {
+            Some(result) => self.gpr[rt] = result as u64,
+            None => self.handle_exception(12), // IntegerOverflow
+        }
         self.cycles += 1;
     }
 
@@ -1148,8 +1270,11 @@ impl<M: MemoryMips> CpuMips<M> {
         let rt = ((instr >> 16) & 0x1F) as usize;
         let imm = (instr & 0xFFFF) as i16 as i64;
 
-        // For now, we don't implement traps
-        self.gpr[rt] = (self.gpr[rs] as i64).wrapping_add(imm) as u64;
+        let a = self.gpr[rs] as i64;
+        match a.checked_add(imm) {
+            Some(result) => self.gpr[rt] = result as u64,
+            None => self.handle_exception(12), // IntegerOverflow
+        }
         self.cycles += 1;
     }
 
@@ -1199,14 +1324,11 @@ impl<M: MemoryMips> CpuMips<M> {
 
         let addr = (self.gpr[rs] as i64).wrapping_add(offset as i64) as u32;
 
-        // Validate 2-byte alignment
+        // Raise AddressError exception (AdEL) on misaligned access
         if addr & 1 != 0 {
-            log(LogCategory::CPU, LogLevel::Warn, || {
-                format!(
-                    "LH: Unaligned halfword access at 0x{:08X} (PC=0x{:016X})",
-                    addr, self.pc
-                )
-            });
+            self.cp0[CP0_BADVADDR] = addr as u64;
+            self.handle_exception(4); // AdEL - Address Error on Load
+            return;
         }
 
         let val = self.memory.read_halfword(addr);
@@ -1222,14 +1344,11 @@ impl<M: MemoryMips> CpuMips<M> {
 
         let addr = (self.gpr[rs] as i64).wrapping_add(offset as i64) as u32;
 
-        // Validate 2-byte alignment
+        // Raise AddressError exception (AdEL) on misaligned access
         if addr & 1 != 0 {
-            log(LogCategory::CPU, LogLevel::Warn, || {
-                format!(
-                    "LHU: Unaligned halfword access at 0x{:08X} (PC=0x{:016X})",
-                    addr, self.pc
-                )
-            });
+            self.cp0[CP0_BADVADDR] = addr as u64;
+            self.handle_exception(4); // AdEL - Address Error on Load
+            return;
         }
 
         let val = self.memory.read_halfword(addr);
@@ -1245,14 +1364,11 @@ impl<M: MemoryMips> CpuMips<M> {
 
         let addr = (self.gpr[rs] as i64).wrapping_add(offset as i64) as u32;
 
-        // Validate 4-byte alignment
+        // Raise AddressError exception (AdEL) on misaligned access
         if addr & 3 != 0 {
-            log(LogCategory::CPU, LogLevel::Warn, || {
-                format!(
-                    "LWU: Unaligned word access at 0x{:08X} (PC=0x{:016X})",
-                    addr, self.pc
-                )
-            });
+            self.cp0[CP0_BADVADDR] = addr as u64;
+            self.handle_exception(4); // AdEL - Address Error on Load
+            return;
         }
 
         let val = self.memory.read_word(addr);
@@ -1268,14 +1384,11 @@ impl<M: MemoryMips> CpuMips<M> {
 
         let addr = (self.gpr[rs] as i64).wrapping_add(offset as i64) as u32;
 
-        // Validate 8-byte alignment
+        // Raise AddressError exception (AdEL) on misaligned access
         if addr & 7 != 0 {
-            log(LogCategory::CPU, LogLevel::Warn, || {
-                format!(
-                    "LD: Unaligned doubleword access at 0x{:08X} (PC=0x{:016X})",
-                    addr, self.pc
-                )
-            });
+            self.cp0[CP0_BADVADDR] = addr as u64;
+            self.handle_exception(4); // AdEL - Address Error on Load
+            return;
         }
 
         let val = self.memory.read_doubleword(addr);
@@ -1378,14 +1491,11 @@ impl<M: MemoryMips> CpuMips<M> {
 
         let addr = (self.gpr[rs] as i64).wrapping_add(offset as i64) as u32;
 
-        // Validate 2-byte alignment
+        // Raise AddressError exception (AdES) on misaligned access
         if addr & 1 != 0 {
-            log(LogCategory::CPU, LogLevel::Warn, || {
-                format!(
-                    "SH: Unaligned halfword access at 0x{:08X} (PC=0x{:016X})",
-                    addr, self.pc
-                )
-            });
+            self.cp0[CP0_BADVADDR] = addr as u64;
+            self.handle_exception(5); // AdES - Address Error on Store
+            return;
         }
 
         self.memory.write_halfword(addr, self.gpr[rt] as u16);
@@ -1400,14 +1510,11 @@ impl<M: MemoryMips> CpuMips<M> {
 
         let addr = (self.gpr[rs] as i64).wrapping_add(offset as i64) as u32;
 
-        // Validate 8-byte alignment
+        // Raise AddressError exception (AdES) on misaligned access
         if addr & 7 != 0 {
-            log(LogCategory::CPU, LogLevel::Warn, || {
-                format!(
-                    "SD: Unaligned doubleword access at 0x{:08X} (PC=0x{:016X})",
-                    addr, self.pc
-                )
-            });
+            self.cp0[CP0_BADVADDR] = addr as u64;
+            self.handle_exception(5); // AdES - Address Error on Store
+            return;
         }
 
         self.memory.write_doubleword(addr, self.gpr[rt]);
@@ -1515,7 +1622,14 @@ impl<M: MemoryMips> CpuMips<M> {
             }
             0x04 => {
                 // MTC0 - Move To CP0
-                self.cp0[rd] = self.gpr[rt];
+                let value = self.gpr[rt];
+                self.cp0[rd] = value;
+
+                // Writing to CP0_COMPARE (register 11) clears the timer interrupt (IP7)
+                if rd == CP0_COMPARE {
+                    self.cp0[CP0_CAUSE] &= !(1u64 << 15);
+                }
+
                 self.cycles += 1;
             }
             0x10 => {
@@ -1545,6 +1659,8 @@ impl<M: MemoryMips> CpuMips<M> {
                         self.pc = self.cp0[CP0_EPC];
                         // Clear EXL bit to re-enable interrupts
                         self.cp0[CP0_STATUS] &= !0x02;
+                        // Clear LL bit
+                        self.ll_bit = false;
                         self.cycles += 1;
                     }
                     _ => {
@@ -1569,30 +1685,33 @@ impl<M: MemoryMips> CpuMips<M> {
 
         match rs {
             0x00 => {
-                // MFC1 - Move From FPU
-                self.gpr[rt] = self.fpr[fs].to_bits() as i32 as u64; // Sign-extend
+                // MFC1 - Move From FPU (lower 32 bits)
+                self.gpr[rt] = self.fpr[fs] as u32 as i32 as u64;
                 self.cycles += 1;
             }
             0x01 => {
                 // DMFC1 - Doubleword Move From FPU
-                self.gpr[rt] = self.fpr[fs].to_bits();
+                self.gpr[rt] = self.fpr[fs];
                 self.cycles += 1;
             }
             0x02 => {
                 // CFC1 - Move Control From FPU
                 if fs == 31 {
                     self.gpr[rt] = self.fcr31 as i32 as u64; // Sign-extend
+                } else if fs == 0 {
+                    // FCR0 - FPU Implementation/Revision register
+                    self.gpr[rt] = 0x0A00; // R4300i FPU
                 }
                 self.cycles += 1;
             }
             0x04 => {
-                // MTC1 - Move To FPU
-                self.fpr[fs] = f64::from_bits((self.gpr[rt] as u32) as u64);
+                // MTC1 - Move To FPU (32-bit)
+                self.fpr[fs] = self.gpr[rt] as u32 as u64;
                 self.cycles += 1;
             }
             0x05 => {
                 // DMTC1 - Doubleword Move To FPU
-                self.fpr[fs] = f64::from_bits(self.gpr[rt]);
+                self.fpr[fs] = self.gpr[rt];
                 self.cycles += 1;
             }
             0x06 => {
@@ -1611,92 +1730,62 @@ impl<M: MemoryMips> CpuMips<M> {
                 let condition = (self.fcr31 >> (23 + cc)) & 0x1;
 
                 if condition == tf {
-                    // Branch taken: set delay slot
                     self.next_pc =
                         (current_pc.wrapping_add(4) as i64).wrapping_add(offset as i64) as u64;
                     self.in_delay_slot = true;
                 } else if nd == 1 {
-                    // Branch not taken with ND bit set (BC1TL/BC1FL): nullify delay slot
                     self.pc = self.pc.wrapping_add(4);
                 }
-                // If branch not taken and ND bit not set: delay slot executes normally
                 self.cycles += 1;
             }
-            0x10 | 0x11 => {
-                // FPU operations (fmt = 0x10 for single, 0x11 for double)
+            0x10 => {
+                // Single-precision (fmt = S)
+                let a = f32::from_bits(self.fpr[fs] as u32);
+                let b = f32::from_bits(self.fpr[ft] as u32);
                 match funct {
-                    0x00 => {
-                        // ADD.fmt
-                        self.fpr[fd] = self.fpr[fs] + self.fpr[ft];
-                        self.cycles += 1;
+                    0x00 => self.fpr[fd] = (a + b).to_bits() as u64, // ADD.S
+                    0x01 => self.fpr[fd] = (a - b).to_bits() as u64, // SUB.S
+                    0x02 => self.fpr[fd] = (a * b).to_bits() as u64, // MUL.S
+                    0x03 => self.fpr[fd] = (a / b).to_bits() as u64, // DIV.S
+                    0x04 => self.fpr[fd] = a.sqrt().to_bits() as u64, // SQRT.S
+                    0x05 => self.fpr[fd] = a.abs().to_bits() as u64, // ABS.S
+                    0x06 => self.fpr[fd] = self.fpr[fs],             // MOV.S
+                    0x07 => self.fpr[fd] = (-a).to_bits() as u64,    // NEG.S
+                    0x09 => {
+                        // TRUNC.L.S - Truncate to Long
+                        self.fpr[fd] = (a as i64) as u64;
                     }
-                    0x01 => {
-                        // SUB.fmt
-                        self.fpr[fd] = self.fpr[fs] - self.fpr[ft];
-                        self.cycles += 1;
-                    }
-                    0x02 => {
-                        // MUL.fmt
-                        self.fpr[fd] = self.fpr[fs] * self.fpr[ft];
-                        self.cycles += 1;
-                    }
-                    0x03 => {
-                        // DIV.fmt
-                        self.fpr[fd] = self.fpr[fs] / self.fpr[ft];
-                        self.cycles += 1;
-                    }
-                    0x04 => {
-                        // SQRT.fmt
-                        self.fpr[fd] = self.fpr[fs].sqrt();
-                        self.cycles += 1;
-                    }
-                    0x05 => {
-                        // ABS.fmt
-                        self.fpr[fd] = self.fpr[fs].abs();
-                        self.cycles += 1;
-                    }
-                    0x06 => {
-                        // MOV.fmt
-                        self.fpr[fd] = self.fpr[fs];
-                        self.cycles += 1;
-                    }
-                    0x07 => {
-                        // NEG.fmt
-                        self.fpr[fd] = -self.fpr[fs];
-                        self.cycles += 1;
-                    }
-                    0x20 => {
-                        // CVT.S - Convert to Single
-                        self.fpr[fd] = self.fpr[fs]; // Already f64
-                        self.cycles += 1;
+                    0x0D => {
+                        // TRUNC.W.S - Truncate to Word
+                        self.fpr[fd] = (a as i32 as u32) as u64;
                     }
                     0x21 => {
-                        // CVT.D - Convert to Double
-                        self.fpr[fd] = self.fpr[fs]; // Already f64
-                        self.cycles += 1;
+                        // CVT.D.S - Convert Single to Double
+                        self.fpr[fd] = (a as f64).to_bits();
                     }
                     0x24 => {
-                        // CVT.W - Convert to Word
-                        self.fpr[fd] = f64::from_bits(self.fpr[fs].round() as i32 as u64);
-                        self.cycles += 1;
+                        // CVT.W.S - Convert Single to Word (uses rounding mode)
+                        self.fpr[fd] = (a.round() as i32 as u32) as u64;
                     }
                     0x25 => {
-                        // CVT.L - Convert to Long
-                        self.fpr[fd] = f64::from_bits(self.fpr[fs].round() as i64 as u64);
-                        self.cycles += 1;
+                        // CVT.L.S - Convert Single to Long
+                        self.fpr[fd] = (a.round() as i64) as u64;
                     }
                     0x30..=0x3F => {
-                        // C.cond.fmt - FPU Compare
+                        // C.cond.S - Compare Single
                         let cond = funct & 0x0F;
                         let result = match cond {
-                            0x00 => false,                        // C.F (always false)
-                            0x01 => false,                        // C.UN (unordered)
-                            0x02 => self.fpr[fs] == self.fpr[ft], // C.EQ
-                            0x03 => self.fpr[fs] == self.fpr[ft], // C.UEQ
-                            0x04 => self.fpr[fs] < self.fpr[ft],  // C.OLT
-                            0x05 => self.fpr[fs] < self.fpr[ft],  // C.ULT
-                            0x06 => self.fpr[fs] <= self.fpr[ft], // C.OLE
-                            0x07 => self.fpr[fs] <= self.fpr[ft], // C.ULE
+                            0x00 => false,                              // C.F
+                            0x01 => a.is_nan() || b.is_nan(),           // C.UN
+                            0x02 => a == b,                             // C.EQ
+                            0x03 => a == b || a.is_nan() || b.is_nan(), // C.UEQ
+                            0x04 => a < b,                              // C.OLT
+                            0x05 => a < b || a.is_nan() || b.is_nan(),  // C.ULT
+                            0x06 => a <= b,                             // C.OLE
+                            0x07 => a <= b || a.is_nan() || b.is_nan(), // C.ULE
+                            0x0A => a == b,                             // C.SEQ
+                            0x0C => a < b,                              // C.LT
+                            0x0E => a <= b,                             // C.LE
                             _ => false,
                         };
                         if result {
@@ -1704,12 +1793,102 @@ impl<M: MemoryMips> CpuMips<M> {
                         } else {
                             self.fcr31 &= !(1 << 23);
                         }
-                        self.cycles += 1;
                     }
-                    _ => {
-                        self.cycles += 1;
-                    }
+                    _ => {}
                 }
+                self.cycles += 1;
+            }
+            0x11 => {
+                // Double-precision (fmt = D)
+                let a = f64::from_bits(self.fpr[fs]);
+                let b = f64::from_bits(self.fpr[ft]);
+                match funct {
+                    0x00 => self.fpr[fd] = (a + b).to_bits(),  // ADD.D
+                    0x01 => self.fpr[fd] = (a - b).to_bits(),  // SUB.D
+                    0x02 => self.fpr[fd] = (a * b).to_bits(),  // MUL.D
+                    0x03 => self.fpr[fd] = (a / b).to_bits(),  // DIV.D
+                    0x04 => self.fpr[fd] = a.sqrt().to_bits(), // SQRT.D
+                    0x05 => self.fpr[fd] = a.abs().to_bits(),  // ABS.D
+                    0x06 => self.fpr[fd] = self.fpr[fs],       // MOV.D
+                    0x07 => self.fpr[fd] = (-a).to_bits(),     // NEG.D
+                    0x09 => {
+                        // TRUNC.L.D
+                        self.fpr[fd] = (a as i64) as u64;
+                    }
+                    0x0D => {
+                        // TRUNC.W.D
+                        self.fpr[fd] = (a as i32 as u32) as u64;
+                    }
+                    0x20 => {
+                        // CVT.S.D - Convert Double to Single
+                        self.fpr[fd] = (a as f32).to_bits() as u64;
+                    }
+                    0x24 => {
+                        // CVT.W.D - Convert Double to Word
+                        self.fpr[fd] = (a.round() as i32 as u32) as u64;
+                    }
+                    0x25 => {
+                        // CVT.L.D - Convert Double to Long
+                        self.fpr[fd] = (a.round() as i64) as u64;
+                    }
+                    0x30..=0x3F => {
+                        // C.cond.D - Compare Double
+                        let cond = funct & 0x0F;
+                        let result = match cond {
+                            0x00 => false,
+                            0x01 => a.is_nan() || b.is_nan(),
+                            0x02 => a == b,
+                            0x03 => a == b || a.is_nan() || b.is_nan(),
+                            0x04 => a < b,
+                            0x05 => a < b || a.is_nan() || b.is_nan(),
+                            0x06 => a <= b,
+                            0x07 => a <= b || a.is_nan() || b.is_nan(),
+                            0x0A => a == b,
+                            0x0C => a < b,
+                            0x0E => a <= b,
+                            _ => false,
+                        };
+                        if result {
+                            self.fcr31 |= 1 << 23;
+                        } else {
+                            self.fcr31 &= !(1 << 23);
+                        }
+                    }
+                    _ => {}
+                }
+                self.cycles += 1;
+            }
+            0x14 => {
+                // Word fixed-point (fmt = W)
+                let int_val = self.fpr[fs] as u32 as i32;
+                match funct {
+                    0x20 => {
+                        // CVT.S.W - Convert Word to Single
+                        self.fpr[fd] = (int_val as f32).to_bits() as u64;
+                    }
+                    0x21 => {
+                        // CVT.D.W - Convert Word to Double
+                        self.fpr[fd] = (int_val as f64).to_bits();
+                    }
+                    _ => {}
+                }
+                self.cycles += 1;
+            }
+            0x15 => {
+                // Long fixed-point (fmt = L)
+                let long_val = self.fpr[fs] as i64;
+                match funct {
+                    0x20 => {
+                        // CVT.S.L - Convert Long to Single
+                        self.fpr[fd] = (long_val as f32).to_bits() as u64;
+                    }
+                    0x21 => {
+                        // CVT.D.L - Convert Long to Double
+                        self.fpr[fd] = (long_val as f64).to_bits();
+                    }
+                    _ => {}
+                }
+                self.cycles += 1;
             }
             _ => {
                 self.cycles += 1;
@@ -2741,27 +2920,237 @@ mod tests {
         let mem = ArrayMemory::new();
         let mut cpu = CpuMips::new(mem);
         cpu.pc = 0;
-        cpu.fpr[1] = 10.5;
-        cpu.fpr[2] = 2.5;
+        cpu.fpr[1] = 10.5_f64.to_bits();
+        cpu.fpr[2] = 2.5_f64.to_bits();
 
         // ADD.D $f3, $f1, $f2
         cpu.memory.write_word(0, 0x462208C0);
         cpu.step();
-        assert_eq!(cpu.fpr[3], 13.0);
+        assert_eq!(cpu.fpr[3], 13.0_f64.to_bits());
 
         // SUB.D $f3, $f1, $f2
         cpu.memory.write_word(4, 0x462208C1);
         cpu.step();
-        assert_eq!(cpu.fpr[3], 8.0);
+        assert_eq!(cpu.fpr[3], 8.0_f64.to_bits());
 
         // MUL.D $f3, $f1, $f2
         cpu.memory.write_word(8, 0x462208C2);
         cpu.step();
-        assert_eq!(cpu.fpr[3], 26.25);
+        assert_eq!(cpu.fpr[3], 26.25_f64.to_bits());
 
         // DIV.D $f3, $f1, $f2
         cpu.memory.write_word(12, 0x462208C3);
         cpu.step();
-        assert_eq!(cpu.fpr[3], 4.2);
+        assert_eq!(cpu.fpr[3], 4.2_f64.to_bits());
+    }
+
+    // ============================================================================
+    // Overflow Trap Tests
+    // ============================================================================
+
+    #[test]
+    fn test_add_overflow_trap() {
+        let mem = ArrayMemory::new();
+        let mut cpu = CpuMips::new(mem);
+        cpu.pc = 0;
+
+        // Overflow: i32::MAX + 1 should trap (exception code 12)
+        cpu.gpr[1] = i32::MAX as u64;
+        cpu.gpr[2] = 1;
+        // ADD $3, $1, $2  →  overflows, triggers exception
+        cpu.memory.write_word(0, 0x00221820);
+        // Set IE=1 so interrupts fire, but EXL=0 so they can be taken
+        cpu.cp0[12] = 0x01; // Status: IE=1, EXL=0
+        cpu.step();
+        // Overflow exception should redirect PC to 0x80000180
+        assert_eq!(
+            cpu.pc, 0x80000180,
+            "ADD overflow should jump to exception vector"
+        );
+        // Exception code in Cause should be 12 (bits 2-6)
+        let exc_code = (cpu.cp0[13] >> 2) & 0x1F;
+        assert_eq!(
+            exc_code, 12,
+            "Exception code should be IntegerOverflow (12)"
+        );
+    }
+
+    #[test]
+    fn test_add_no_overflow() {
+        let mem = ArrayMemory::new();
+        let mut cpu = CpuMips::new(mem);
+        cpu.pc = 0;
+
+        // No overflow: normal addition
+        cpu.gpr[1] = 10;
+        cpu.gpr[2] = 20;
+        // ADD $3, $1, $2
+        cpu.memory.write_word(0, 0x00221820);
+        cpu.step();
+        assert_eq!(
+            cpu.gpr[3], 30,
+            "ADD without overflow should produce correct result"
+        );
+    }
+
+    #[test]
+    fn test_sub_overflow_trap() {
+        let mem = ArrayMemory::new();
+        let mut cpu = CpuMips::new(mem);
+        cpu.pc = 0;
+
+        // Overflow: i32::MIN - 1 should trap
+        cpu.gpr[1] = i32::MIN as i64 as u64;
+        cpu.gpr[2] = 1;
+        // SUB $3, $1, $2  →  overflows
+        cpu.memory.write_word(0, 0x00221822);
+        cpu.cp0[12] = 0x01; // Status: IE=1
+        cpu.step();
+        assert_eq!(
+            cpu.pc, 0x80000180,
+            "SUB overflow should jump to exception vector"
+        );
+        let exc_code = (cpu.cp0[13] >> 2) & 0x1F;
+        assert_eq!(exc_code, 12);
+    }
+
+    #[test]
+    fn test_addi_overflow_trap() {
+        let mem = ArrayMemory::new();
+        let mut cpu = CpuMips::new(mem);
+        cpu.pc = 0;
+
+        // ADDI: i32::MAX + 1 overflows
+        cpu.gpr[1] = i32::MAX as u64;
+        // ADDI $2, $1, 1  (opcode 0x08, rs=1, rt=2, imm=1)
+        // Encoding: 0010_00 00001 00010 0000000000000001
+        //         = 0x20220001
+        cpu.memory.write_word(0, 0x20220001);
+        cpu.cp0[12] = 0x01;
+        cpu.step();
+        assert_eq!(
+            cpu.pc, 0x80000180,
+            "ADDI overflow should jump to exception vector"
+        );
+        let exc_code = (cpu.cp0[13] >> 2) & 0x1F;
+        assert_eq!(exc_code, 12);
+    }
+
+    #[test]
+    fn test_dadd_overflow_trap() {
+        let mem = ArrayMemory::new();
+        let mut cpu = CpuMips::new(mem);
+        cpu.pc = 0;
+
+        // DADD overflow: i64::MAX + 1
+        cpu.gpr[1] = i64::MAX as u64;
+        cpu.gpr[2] = 1;
+        // DADD $3, $1, $2  (opcode 0x2C in SPECIAL)
+        // Encoding: 000000 00001 00010 00011 00000 101100
+        //         = 0x0022182C
+        cpu.memory.write_word(0, 0x0022182C);
+        cpu.cp0[12] = 0x01;
+        cpu.step();
+        assert_eq!(
+            cpu.pc, 0x80000180,
+            "DADD overflow should jump to exception vector"
+        );
+        let exc_code = (cpu.cp0[13] >> 2) & 0x1F;
+        assert_eq!(exc_code, 12);
+    }
+
+    // ============================================================================
+    // Alignment Exception Tests
+    // ============================================================================
+
+    #[test]
+    fn test_lh_alignment_exception() {
+        let mem = ArrayMemory::new();
+        let mut cpu = CpuMips::new(mem);
+        cpu.pc = 0;
+
+        // LH from misaligned address (0x1001 — odd address)
+        cpu.gpr[1] = 0x1001;
+        // LH $2, 0($1)  (opcode 0x21, rs=1, rt=2, offset=0)
+        cpu.memory.write_word(0, 0x84220000);
+        cpu.cp0[12] = 0x01; // IE=1
+        cpu.step();
+        assert_eq!(
+            cpu.pc, 0x80000180,
+            "LH misaligned should cause AdEL exception"
+        );
+        let exc_code = (cpu.cp0[13] >> 2) & 0x1F;
+        assert_eq!(exc_code, 4, "AdEL exception code should be 4");
+        assert_eq!(
+            cpu.cp0[8], 0x1001,
+            "BadVAddr should hold the faulting address"
+        );
+    }
+
+    #[test]
+    fn test_lw_alignment_exception() {
+        let mem = ArrayMemory::new();
+        let mut cpu = CpuMips::new(mem);
+        cpu.pc = 0;
+
+        // LW from 3-byte misaligned address
+        cpu.gpr[1] = 0x1003;
+        // LW $2, 0($1)  (opcode 0x23, rs=1, rt=2, offset=0)
+        cpu.memory.write_word(0, 0x8C220000);
+        cpu.cp0[12] = 0x01;
+        cpu.step();
+        assert_eq!(
+            cpu.pc, 0x80000180,
+            "LW misaligned should cause AdEL exception"
+        );
+        let exc_code = (cpu.cp0[13] >> 2) & 0x1F;
+        assert_eq!(exc_code, 4);
+        assert_eq!(
+            cpu.cp0[8], 0x1003,
+            "BadVAddr should hold the faulting address"
+        );
+    }
+
+    #[test]
+    fn test_sw_alignment_exception() {
+        let mem = ArrayMemory::new();
+        let mut cpu = CpuMips::new(mem);
+        cpu.pc = 0;
+
+        // SW to misaligned address
+        cpu.gpr[1] = 0x1002;
+        cpu.gpr[2] = 0xDEADBEEF;
+        // SW $2, 0($1)  (opcode 0x2B, rs=1, rt=2, offset=0)
+        cpu.memory.write_word(0, 0xAC220000);
+        cpu.cp0[12] = 0x01;
+        cpu.step();
+        assert_eq!(
+            cpu.pc, 0x80000180,
+            "SW misaligned should cause AdES exception"
+        );
+        let exc_code = (cpu.cp0[13] >> 2) & 0x1F;
+        assert_eq!(exc_code, 5, "AdES exception code should be 5");
+        assert_eq!(
+            cpu.cp0[8], 0x1002,
+            "BadVAddr should hold the faulting address"
+        );
+    }
+
+    #[test]
+    fn test_lw_aligned_ok() {
+        let mem = ArrayMemory::new();
+        let mut cpu = CpuMips::new(mem);
+        cpu.pc = 0;
+
+        // LW from aligned address — should succeed
+        cpu.gpr[1] = 0x1000;
+        cpu.memory.write_word(0x1000, 0xDEADBEEF);
+        // LW $2, 0($1)
+        cpu.memory.write_word(0, 0x8C220000);
+        cpu.step();
+        assert_eq!(
+            cpu.gpr[2], 0xDEADBEEF_u32 as i32 as u64,
+            "LW aligned should load correct value"
+        );
     }
 }

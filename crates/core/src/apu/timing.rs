@@ -8,6 +8,8 @@ pub enum TimingMode {
     Ntsc,
     /// PAL (Europe, Australia) - 1.662607 MHz CPU clock
     Pal,
+    /// GBA - 16.777216 MHz CPU clock, ~59.7275 Hz frame rate
+    Gba,
 }
 
 impl TimingMode {
@@ -16,6 +18,7 @@ impl TimingMode {
         match self {
             TimingMode::Ntsc => 1_789_773.0,
             TimingMode::Pal => 1_662_607.0,
+            TimingMode::Gba => 16_777_216.0,
         }
     }
 
@@ -24,6 +27,8 @@ impl TimingMode {
         match self {
             TimingMode::Ntsc => 60.0988,
             TimingMode::Pal => 50.0070,
+            // 16777216 / (1232 * 228) = 59.7275 Hz
+            TimingMode::Gba => 16_777_216.0 / 280_896.0,
         }
     }
 
@@ -32,6 +37,8 @@ impl TimingMode {
         match self {
             TimingMode::Ntsc => 240.0,
             TimingMode::Pal => 200.0,
+            // GBA frame sequencer runs at 512 Hz
+            TimingMode::Gba => 512.0,
         }
     }
 }

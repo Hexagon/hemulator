@@ -53,6 +53,8 @@ pub struct SmsSystem {
     cartridge_loaded: bool,
     /// Whether a BIOS is loaded
     bios_loaded: bool,
+    /// Whether this is a Game Gear system
+    is_game_gear: bool,
 
     // Debugging
     /// Instruction tracer for debugging
@@ -72,9 +74,6 @@ impl SmsSystem {
         let rom = vec![0; 0x8000];
         let memory = SmsMemory::new(rom, Rc::clone(&vdp), Rc::clone(&psg));
 
-        // Don't load BIOS by default - games should work without it
-        // BIOS can be loaded via mount() if needed
-
         // Create CPU
         let cpu = CpuZ80::new(memory);
 
@@ -86,10 +85,40 @@ impl SmsSystem {
             total_cycles: 0,
             timing_mode: emu_core::apu::TimingMode::Ntsc,
             cartridge_loaded: false,
-            bios_loaded: false, // No BIOS by default
+            bios_loaded: false,
+            is_game_gear: false,
             instruction_tracer: emu_core::instruction_tracer::InstructionTracer::new(),
             breakpoint_manager: emu_core::breakpoints::BreakpointManager::new(),
         }
+    }
+
+    /// Create a new Game Gear system
+    pub fn new_game_gear() -> Self {
+        let vdp = Rc::new(RefCell::new(Vdp::new_game_gear()));
+        let psg = Rc::new(RefCell::new(SmsPsg::new()));
+
+        let rom = vec![0; 0x8000];
+        let memory = SmsMemory::new_game_gear(rom, Rc::clone(&vdp), Rc::clone(&psg));
+        let cpu = CpuZ80::new(memory);
+
+        Self {
+            cpu,
+            vdp,
+            psg,
+            cycles: 0,
+            total_cycles: 0,
+            timing_mode: emu_core::apu::TimingMode::Ntsc, // GG is always NTSC
+            cartridge_loaded: false,
+            bios_loaded: false,
+            is_game_gear: true,
+            instruction_tracer: emu_core::instruction_tracer::InstructionTracer::new(),
+            breakpoint_manager: emu_core::breakpoints::BreakpointManager::new(),
+        }
+    }
+
+    /// Check if this is a Game Gear system
+    pub fn is_game_gear(&self) -> bool {
+        self.is_game_gear
     }
 
     /// Load a ROM
@@ -102,8 +131,10 @@ impl SmsSystem {
             )
         });
 
-        // Detect timing mode from ROM header
-        self.timing_mode = Self::detect_timing_mode(&rom_data);
+        // Game Gear is always NTSC; SMS detects from ROM header
+        if !self.is_game_gear {
+            self.timing_mode = Self::detect_timing_mode(&rom_data);
+        }
         log(LogCategory::CPU, LogLevel::Info, || {
             format!("SMS: Detected timing mode: {:?}", self.timing_mode)
         });
@@ -193,6 +224,11 @@ impl SmsSystem {
     pub fn set_controller_2(&mut self, state: u8) {
         self.cpu.memory.set_controller_2(state);
     }
+
+    /// Set Game Gear Start button state
+    pub fn set_gg_start_button(&mut self, pressed: bool) {
+        self.cpu.memory.set_gg_start_button(pressed);
+    }
 }
 
 impl Default for SmsSystem {
@@ -229,7 +265,7 @@ impl System for SmsSystem {
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
         // Calculate target cycles and scanlines based on timing mode
         let (target_cycles, total_scanlines) = match self.timing_mode {
-            emu_core::apu::TimingMode::Ntsc => {
+            emu_core::apu::TimingMode::Ntsc | emu_core::apu::TimingMode::Gba => {
                 // NTSC: 3.579545 MHz / 60 Hz = 59659 cycles/frame
                 // 262 scanlines total
                 (59659_u64, 262_u64)
@@ -276,6 +312,11 @@ impl System for SmsSystem {
                 (self.cycles * total_scanlines / target_cycles) % total_scanlines;
             self.vdp.borrow_mut().set_scanline(current_scanline as u16);
 
+            // Update cycle-in-scanline on the bus so TH transitions can latch H-counter
+            let cycles_per_scanline = target_cycles / total_scanlines;
+            let cycle_in_scanline = (self.cycles % cycles_per_scanline) as u32;
+            self.cpu.memory.set_cycle_in_scanline(cycle_in_scanline);
+
             // Check if VDP /INT line is active (any enabled interrupt pending).
             // On real SMS hardware, the Z80 has a single /IRQ line driven by
             // the VDP:  /INT = (frame_pending AND IE0) OR (line_pending AND IE1).
@@ -301,9 +342,10 @@ impl System for SmsSystem {
         serde_json::json!({
             "system": "sms",
             "version": 1,
+            "is_game_gear": self.is_game_gear,
             "cycles": self.cycles,
             "timing_mode": match self.timing_mode {
-                emu_core::apu::TimingMode::Ntsc => "ntsc",
+                emu_core::apu::TimingMode::Ntsc | emu_core::apu::TimingMode::Gba => "ntsc",
                 emu_core::apu::TimingMode::Pal => "pal",
             },
             "cpu": {
@@ -347,6 +389,7 @@ impl System for SmsSystem {
                 "controller_1": self.cpu.memory.get_controller_1(),
                 "controller_2": self.cpu.memory.get_controller_2(),
                 "memory_control": self.cpu.memory.get_memory_control(),
+                "io_control": self.cpu.memory.get_io_control(),
                 "mapper": self.cpu.memory.get_mapper_state(),
             },
             "vdp": vdp.get_state(),
@@ -393,6 +436,11 @@ impl System for SmsSystem {
         // Load cycles
         if let Some(cycles) = state.get("cycles").and_then(|v| v.as_u64()) {
             self.cycles = cycles;
+        }
+
+        // Restore is_game_gear (backward-compatible: defaults to current value)
+        if let Some(gg) = state.get("is_game_gear").and_then(|v| v.as_bool()) {
+            self.is_game_gear = gg;
         }
 
         // Load timing mode
@@ -465,6 +513,9 @@ impl System for SmsSystem {
             if let Some(mem_ctrl) = mem_state.get("memory_control").and_then(|v| v.as_u64()) {
                 self.cpu.memory.set_memory_control(mem_ctrl as u8);
             }
+            if let Some(io_ctrl) = mem_state.get("io_control").and_then(|v| v.as_u64()) {
+                self.cpu.memory.set_io_control(io_ctrl as u8);
+            }
             // Restore full mapper state (new format, backward-compatible)
             if let Some(mapper_state) = mem_state.get("mapper") {
                 self.cpu.memory.set_mapper_state(mapper_state);
@@ -485,17 +536,23 @@ impl System for SmsSystem {
     }
 
     fn mount_points(&self) -> Vec<MountPointInfo> {
+        let cart_extensions = if self.is_game_gear {
+            vec!["gg".to_string()]
+        } else {
+            vec!["sms".to_string()]
+        };
+
         vec![
             MountPointInfo {
                 id: "bios".to_string(),
                 name: "BIOS ROM".to_string(),
                 extensions: vec!["sms".to_string(), "bin".to_string(), "rom".to_string()],
-                required: false, // Optional: system starts without a BIOS and games can run without one
+                required: false,
             },
             MountPointInfo {
                 id: "cartridge".to_string(),
                 name: "Cartridge".to_string(),
-                extensions: vec!["sms".to_string()],
+                extensions: cart_extensions,
                 required: true,
             },
         ]

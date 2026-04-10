@@ -13,6 +13,7 @@ emu_nes = { path = "../../systems/nes", features = ["opengl"] }
 emu_gb = { path = "../../systems/gb" }
 hemu_gba = { path = "../../systems/gba" }
 emu_atari2600 = { path = "../../systems/atari2600" }
+emu_atari5200 = { path = "../../systems/atari5200" }
 emu_pc = { path = "../../systems/pc" }
 emu_snes = { path = "../../systems/snes" }
 emu_sms = { path = "../../systems/sms" }
@@ -22,6 +23,8 @@ emu_colecovision = { path = "../../systems/colecovision" }
 emu_sg1000 = { path = "../../systems/sg1000" }
 emu_ps1 = { path = "../../systems/ps1" }
 emu_gameandwatch = { path = "../../systems/gameandwatch" }
+emu_megadrive = { path = "../../systems/megadrive" }
+emu_c64 = { path = "../../systems/c64" }
 rodio = "0.22"
 log = "0.4"
 env_logger = "0.11"
@@ -29,7 +32,7 @@ serde = { version = "1.0", features = ["derive"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 png = "0.18"
 serde_json = "1.0"
-sha2 = "0.10"
+sha2 = "0.11"
 base64 = "0.22"
 open = "5.0"
 rfd = "0.17"
@@ -38,15 +41,14 @@ chrono = "0.4"
 
 # Window and rendering support
 sdl2 = { version = "0.38", features = ["bundled"] }
-glow = "0.16"
+glow = "0.17"
 bytemuck = "1.14"
 
 # egui support
-egui = "0.33"
-egui_glow = "0.33"
-egui_extras = { version = "0.33", features = ["image"] }
-egui_sdl2_gl = "0.33"
-egui_dock = "0.18"
+egui = "0.34"
+egui_glow = "0.34"
+egui_extras = { version = "0.34", features = ["image"] }
+egui_dock = "0.19"
 
 [build-dependencies]
 # Windows resource embedding

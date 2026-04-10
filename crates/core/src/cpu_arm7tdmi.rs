@@ -73,6 +73,7 @@ pub struct CpuState {
     pub spsr_und: u32,
     pub pipeline_flushed: bool,
     pub halted: bool,
+    pub intr_wait_flags: u16,
     pub cycles: u64,
 }
 
@@ -173,6 +174,12 @@ pub trait MemoryArm7 {
     /// an HLE BIOS stub, this method allows the memory bus to perform
     /// those critical bookkeeping steps.
     fn pre_irq_acknowledge(&mut self) {}
+
+    /// Check if the bus has requested a CPU halt (e.g., via HALTCNT register).
+    /// Returns true once and clears the request.
+    fn take_halt_request(&mut self) -> bool {
+        false
+    }
 }
 
 // =============================================================================
@@ -269,6 +276,11 @@ pub struct Arm7Tdmi<M: MemoryArm7> {
     /// When halted, instruction execution is skipped until an IRQ fires.
     pub halted: bool,
 
+    /// IntrWait interrupt mask — when non-zero, the CPU is waiting for specific
+    /// interrupts (BIOS IF & mask != 0). The CPU stays halted until the
+    /// requested interrupts fire, matching real BIOS IntrWait loop behavior.
+    intr_wait_flags: u16,
+
     // ---- Cycle counting ----
     /// Total cycles executed
     pub cycles: u64,
@@ -304,6 +316,7 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
             spsr_und: 0,
             pipeline_flushed: true,
             halted: false,
+            intr_wait_flags: 0,
             cycles: 0,
             memory,
         }
@@ -328,6 +341,7 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
         self.spsr_und = 0;
         self.pipeline_flushed = true;
         self.halted = false;
+        self.intr_wait_flags = 0;
         self.cycles = 0;
         // PC = reset vector
         self.gpr[15] = VECTOR_RESET;
@@ -396,6 +410,7 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
             spsr_und: self.spsr_und,
             pipeline_flushed: self.pipeline_flushed,
             halted: self.halted,
+            intr_wait_flags: self.intr_wait_flags,
             cycles: self.cycles,
         }
     }
@@ -419,6 +434,7 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
         self.spsr_und = state.spsr_und;
         self.pipeline_flushed = state.pipeline_flushed;
         self.halted = state.halted;
+        self.intr_wait_flags = state.intr_wait_flags;
         self.cycles = state.cycles;
     }
 
@@ -859,6 +875,7 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
                 self.cpsr &= !FLAG_I;
 
                 // Halt until an interrupt wakes us
+                self.intr_wait_flags = wait_flags;
                 self.halted = true;
                 true
             }
@@ -878,7 +895,8 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
                 // Ensure IRQs are enabled in CPSR so we can wake from halt
                 self.cpsr &= !FLAG_I;
 
-                // Halt until interrupt
+                // Halt until VBlank interrupt
+                self.intr_wait_flags = 1; // VBlank = bit 0
                 self.halted = true;
                 true
             }
@@ -933,6 +951,42 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
                 let src = self.gpr[0];
                 let dst = self.gpr[1];
                 self.bios_huff_uncomp(src, dst);
+                true
+            }
+            0x19 => {
+                // SoundBiasChange - ramp SOUNDBIAS to target
+                // R0: 0 = ramp down to 0x000, 1 = ramp up to 0x200
+                // In emulation, just set it immediately
+                let target = if self.gpr[0] != 0 {
+                    0x0200u16
+                } else {
+                    0x0000u16
+                };
+                self.memory.write_byte(0x04000088, target as u8);
+                self.memory.write_byte(0x04000089, (target >> 8) as u8);
+                true
+            }
+            0x1F => {
+                // MidiKey2Freq - convert MIDI note to frequency
+                // R0 = pointer to wave data (frequency at offset +4)
+                // R1 = MIDI note (mn)
+                // R2 = pitch adjust (fp, unsigned 0-255)
+                // Returns R0 = frequency value
+                let wave_ptr = self.gpr[0];
+                let mn = self.gpr[1] as i32;
+                let fp = self.gpr[2] as i32;
+
+                // Read the base frequency from wave data header at offset 4
+                let base_freq = self.memory.read_word(wave_ptr.wrapping_add(4));
+
+                // Calculate: freq = base_freq * 2^((mn-69)*256 + fp) / (12*256))
+                // This is the standard MIDI-to-frequency conversion
+                let note = (mn - 69) * 256 + fp;
+                let exponent = note as f64 / (12.0 * 256.0);
+                let factor = 2.0_f64.powf(exponent);
+                let result = (base_freq as f64 * factor) as u32;
+
+                self.gpr[0] = result;
                 true
             }
             _ => {
@@ -1731,8 +1785,40 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
             return (self.cycles - start_cycles) as u32;
         }
 
+        // IntrWait loop: emulates the real BIOS IntrWait polling loop.
+        // After an IRQ handler has run and returned to user code, check if
+        // the desired interrupt has been recorded in BIOS IF at 0x03007FF8.
+        // If yes, clear the matched flags and continue. If not, re-halt.
+        // Only check when CPU is in User/System mode (not during IRQ/SVC handler).
+        if self.intr_wait_flags != 0 && !self.halted {
+            let mode = self.cpsr & MODE_MASK;
+            if mode == MODE_USER || mode == MODE_SYSTEM {
+                let bios_if_addr = 0x0300_7FF8u32;
+                let bios_flags = self.memory.read_word(bios_if_addr) as u16;
+                if bios_flags & self.intr_wait_flags != 0 {
+                    // Desired interrupt fired — clear matched flags and resume
+                    let current = self.memory.read_word(bios_if_addr);
+                    self.memory
+                        .write_word(bios_if_addr, current & !(self.intr_wait_flags as u32));
+                    self.intr_wait_flags = 0;
+                } else {
+                    // Desired interrupt hasn't fired yet — re-halt to wait
+                    self.halted = true;
+                    self.cycles += 1;
+                    return 1;
+                }
+            }
+        }
+
         // When halted, skip instruction execution but advance time
         if self.halted {
+            self.cycles += 1;
+            return 1;
+        }
+
+        // Check if bus requested a halt (e.g., HALTCNT register write)
+        if self.memory.take_halt_request() {
+            self.halted = true;
             self.cycles += 1;
             return 1;
         }
@@ -2351,7 +2437,23 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
             base.wrapping_sub(total_size).wrapping_add(4)
         };
 
-        let _ = psr_force_user; // TODO: Handle S bit (force user banks)
+        // S bit (bit 22): force user bank for register access.
+        // - LDM with R15 in list + S bit: restore CPSR from SPSR (handled below)
+        // - LDM without R15 + S bit: load to user-mode registers
+        // - STM with S bit: store user-mode registers
+        // For user bank access, temporarily switch to System mode (shares user regs).
+        let use_user_bank = psr_force_user && !(is_load && (reg_list & (1 << 15)) != 0);
+        let saved_mode = if use_user_bank {
+            let mode = ProcessorMode::from_bits(self.cpsr).unwrap_or(ProcessorMode::System);
+            if mode != ProcessorMode::User && mode != ProcessorMode::System {
+                self.switch_mode(ProcessorMode::System);
+                Some(mode)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
         // Transfer registers
         for i in 0..16u32 {
@@ -2382,6 +2484,11 @@ impl<M: MemoryArm7> Arm7Tdmi<M> {
                 }
                 addr = addr.wrapping_add(4);
             }
+        }
+
+        // Restore original mode after user-bank access
+        if let Some(mode) = saved_mode {
+            self.switch_mode(mode);
         }
 
         // Write-back (skip if LDM and Rn is in register list - loaded value wins)

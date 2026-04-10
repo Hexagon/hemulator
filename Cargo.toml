@@ -6,6 +6,7 @@ members = [
   "crates/systems/gb",
   "crates/systems/gba",
   "crates/systems/atari2600",
+  "crates/systems/atari5200",
   "crates/systems/pc",
   "crates/systems/snes",
   "crates/systems/n64",
@@ -15,6 +16,8 @@ members = [
   "crates/systems/sg1000",
   "crates/systems/ps1",
   "crates/systems/gameandwatch",
+  "crates/systems/megadrive",
+  "crates/systems/c64",
   "crates/frontend/gui",
 ]
 

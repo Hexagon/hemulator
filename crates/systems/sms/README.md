@@ -50,12 +50,24 @@ This document describes the SMS (Sega Master System) implementation in Hemulator
 - System trait implementation
 - Frontend integration (ROM detection, controller input, audio)
 - Test ROM and smoke tests
-- All unit tests passing (51/51)
+- All unit tests passing (81/81)
+- **Game Gear support**:
+  - 160×144 LCD viewport (centered in 256×192 internal buffer)
+  - 64-byte CRAM with 12-bit color depth (4 bits per R/G/B)
+  - CRAM latch system (even byte latched, odd byte writes pair)
+  - Game Gear I/O ports (port 0x00: Start button + region)
+  - NTSC-only timing (Game Gear is always NTSC)
+  - ROM detection via `.gg` file extension
+  - Full frontend integration (menu, CLI `--system gg`, file dialogs)
+- **TMS9918A sprite rendering** in all backward-compatible modes (0–3):
+  - 32 sprites, 4-per-scanline limit with overflow flag
+  - 8×8 and 16×16 sprite sizes with 2× magnification
+  - Per-sprite TMS palette color
+  - Sprite collision detection
+  - Early clock support (shift left 32 pixels)
 
 **❌ Not Yet Implemented:**
-- Game Gear support (planned)
 - FM sound unit support (Master System only, optional accessory)
-- Sprite rendering in TMS modes (Mode 4 sprites work, TMS sprite implementation pending)
 
 ## Architecture
 
@@ -192,8 +204,8 @@ For 440 Hz (A4): register = 3579545 / (32 × 440) ≈ 254
 
 | Address Range | Description |
 |--------------|-------------|
-| 0x0000-0x03FF | BIOS ROM (1KB, when enabled via bit 3 of port 0x3E) |
-| 0x0000-0x3FFF | ROM Bank 0 (16KB, when BIOS disabled) |
+| 0x0000-(bios_size-1) | BIOS ROM (enabled when port 0x3E bit 3 = 0; size depends on BIOS image, typically 8KB) |
+| 0x0000-0x3FFF | ROM Bank 0 (16KB, when BIOS disabled or address beyond BIOS range) |
 | 0x4000-0x7FFF | ROM Bank 1 (16KB) |
 | 0x8000-0xBFFF | ROM Bank 2 (16KB) |
 | 0xC000-0xDFFF | RAM (8KB) |
@@ -207,7 +219,7 @@ The SMS has optional BIOS ROM support:
 
 **Memory Control Register (Port 0x3E):**
 - Bit 3: BIOS enable/disable
-  - 0 = BIOS enabled (BIOS ROM mapped at 0x0000-0x03FF)
+  - 0 = BIOS enabled (BIOS ROM mapped at 0x0000 up to the BIOS ROM size; typically 8KB = 0x0000-0x1FFF)
   - 1 = BIOS disabled (Cartridge ROM mapped from 0x0000)
 
 **Default Behavior:**

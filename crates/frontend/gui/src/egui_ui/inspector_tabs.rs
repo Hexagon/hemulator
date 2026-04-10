@@ -20,6 +20,7 @@ pub enum InspectorTab {
     NesTiles,
     NesPalettes,
     NesNametables,
+    NesSprite0Hit, // Sprite 0 hit debugger / configuration
 
     GbTiles,
     GbPalettes,
@@ -66,6 +67,7 @@ impl InspectorTab {
             InspectorTab::NesTiles => "🎨 Tiles",
             InspectorTab::NesPalettes => "🎨 Palettes",
             InspectorTab::NesNametables => "🗺️ Nametables",
+            InspectorTab::NesSprite0Hit => "🎯 Sprite 0",
             InspectorTab::GbTiles => "🎨 Tiles",
             InspectorTab::GbPalettes => "🎨 Palettes",
             InspectorTab::GbTilemaps => "🗺️ Tilemaps",
@@ -113,6 +115,7 @@ pub fn get_tabs_for_system(system_type: Option<&SystemType>) -> Vec<InspectorTab
                     InspectorTab::NesTiles,
                     InspectorTab::NesPalettes,
                     InspectorTab::NesNametables,
+                    InspectorTab::NesSprite0Hit,
                 ]);
             }
             SystemType::GameBoy => {
@@ -132,7 +135,7 @@ pub fn get_tabs_for_system(system_type: Option<&SystemType>) -> Vec<InspectorTab
                     InspectorTab::GbaBgLayers,
                 ]);
             }
-            SystemType::SMS => {
+            SystemType::SMS | SystemType::GameGear => {
                 tabs.push(InspectorTab::Cartridge); // Unified cartridge tab instead of Mounts
                 tabs.extend_from_slice(&[InspectorTab::SmsTiles, InspectorTab::SmsPalettes]);
             }
@@ -227,6 +230,9 @@ pub fn render_inspector_tab(tab: &InspectorTab, ui: &mut Ui, tab_manager: &mut T
         }
         InspectorTab::NesNametables | InspectorTab::GbTilemaps => {
             tab_manager.render_tilemaps_tab(ui);
+        }
+        InspectorTab::NesSprite0Hit => {
+            render_nes_sprite0_tab(ui, tab_manager);
         }
         InspectorTab::GbaOam => {
             render_gba_oam_tab(ui, tab_manager);
@@ -2130,5 +2136,216 @@ fn render_ps1_gpu_tab(ui: &mut Ui, tab_manager: &mut TabManager) {
                     ui.label("Load a PS1 game to see GPU state information");
                 });
             }
+        });
+}
+
+/// Render the NES Sprite 0 Hit debugger/configuration tab.
+///
+/// Shows the current sprite 0 hit status (live, each frame) and lets the user
+/// tweak the three configurable knobs of the hit-detection algorithm.  Changes
+/// are dispatched as `DebugAction::SetNesPpuConfig` so main.rs can forward them
+/// to the running NES system.
+fn render_nes_sprite0_tab(ui: &mut Ui, tab_manager: &mut TabManager) {
+    use crate::egui_ui::tabs::DebugAction;
+    use egui::ScrollArea;
+
+    let available_height = ui.available_height();
+    ScrollArea::vertical()
+        .auto_shrink([false; 2])
+        .max_height(available_height)
+        .show(ui, |ui| {
+            // ── Live status ─────────────────────────────────────────────────
+            if let Some(crate::egui_ui::SystemTileData::NES(ref nes)) =
+                tab_manager.system_tile_data
+            {
+                // Sync the local config copy from the emulator (read-only snapshot).
+                // We only overwrite if the user hasn't already made a local edit this frame.
+                let emulator_config = nes.sprite0_config.clone();
+                if tab_manager.nes_sprite0_config != emulator_config
+                    && tab_manager.pending_debug_action.is_none()
+                {
+                    tab_manager.nes_sprite0_config = emulator_config;
+                }
+
+                let status = &nes.sprite0_status;
+
+                ui.heading("🎯 Sprite 0 Hit Debugger");
+                ui.separator();
+                ui.add_space(6.0);
+
+                // Status panel
+                ui.heading("Current Frame Status");
+                ui.add_space(4.0);
+                egui::Grid::new("nes_sprite0_status_grid")
+                    .num_columns(2)
+                    .spacing([40.0, 6.0])
+                    .striped(true)
+                    .show(ui, |ui| {
+                        ui.label(egui::RichText::new("Hit flag active:").strong());
+                        let hit_text = if status.hit_active {
+                            egui::RichText::new("✅ SET").color(egui::Color32::GREEN)
+                        } else {
+                            egui::RichText::new("❌ CLEAR").color(egui::Color32::GRAY)
+                        };
+                        ui.label(hit_text);
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("Last hit scanline:").strong());
+                        ui.label(match status.last_hit_scanline {
+                            Some(sl) => format!("{sl}"),
+                            None => "—".to_string(),
+                        });
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("Last hit dot:").strong());
+                        ui.label(match status.last_hit_dot {
+                            Some(d) => format!("{d}"),
+                            None => "—".to_string(),
+                        });
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("Pending hit:").strong());
+                        ui.label(if status.pending {
+                            match status.pending_pos {
+                                Some((sl, x)) => {
+                                    let fire_dot = (x as isize)
+                                        .saturating_add(1)
+                                        .saturating_add(
+                                            tab_manager.nes_sprite0_config.hit_dot_offset
+                                                as isize,
+                                        )
+                                        .max(0);
+                                    format!("scanline {sl}, x={x} (fires at dot {fire_dot})")
+                                }
+                                None => "yes (unknown position)".to_string(),
+                            }
+                        } else {
+                            "none".to_string()
+                        });
+                        ui.end_row();
+                    });
+
+                ui.add_space(10.0);
+                ui.separator();
+                ui.add_space(6.0);
+            } else {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(40.0);
+                    ui.label(egui::RichText::new("🎯").size(48.0));
+                    ui.add_space(10.0);
+                    ui.heading("No NES Data");
+                    ui.add_space(10.0);
+                    ui.label("Load a NES ROM to use this tab.");
+                });
+                return;
+            }
+
+            // ── Configuration ────────────────────────────────────────────────
+            ui.heading("⚙️ Hit Detection Configuration");
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new(
+                    "Adjust these options to debug games with sprite 0 hit issues \
+                     (e.g. Bee 52, Battletoads).  Changes take effect immediately.",
+                )
+                .weak(),
+            );
+            ui.add_space(8.0);
+
+            let mut cfg = tab_manager.nes_sprite0_config.clone();
+            let mut changed = false;
+
+            // — VBlank early clear ———————————————————————————————————————
+            ui.group(|ui| {
+                ui.label(egui::RichText::new("VBlank early clear").strong());
+                ui.add_space(2.0);
+                ui.label(
+                    "When ON (default), the sprite 0 hit flag is cleared at the start of VBlank \
+                     (scanline 241, dot 1) in addition to the hardware-accurate clear on the \
+                     pre-render scanline.  This prevents Battletoads from reading a stale hit \
+                     flag from the previous frame.  Toggle OFF to test hardware-accurate behaviour.",
+                );
+                ui.add_space(4.0);
+                if ui
+                    .checkbox(&mut cfg.vblank_early_clear, "Clear at VBlank start (default: ON)")
+                    .changed()
+                {
+                    changed = true;
+                }
+            });
+
+            ui.add_space(8.0);
+
+            // — Dot offset ———————————————————————————————————————————————
+            ui.group(|ui| {
+                ui.label(egui::RichText::new("Hit timing offset (dots)").strong());
+                ui.add_space(2.0);
+                ui.label(
+                    "Shifts the dot at which the hit flag is set relative to the \
+                     hardware-accurate value of dot = sprite_x + 1.  Default: 0.  \
+                     Increase if the hit fires too early; decrease if too late.",
+                );
+                ui.add_space(4.0);
+                let mut offset_i32 = cfg.hit_dot_offset as i32;
+                if ui
+                    .add(
+                        egui::Slider::new(&mut offset_i32, -4..=4)
+                            .text("dots")
+                            .clamping(egui::SliderClamping::Always),
+                    )
+                    .changed()
+                {
+                    cfg.hit_dot_offset = offset_i32 as i8;
+                    changed = true;
+                }
+            });
+
+            ui.add_space(8.0);
+
+            // — Left column suppression ——————————————————————————————————
+            ui.group(|ui| {
+                ui.label(egui::RichText::new("Left-column suppression").strong());
+                ui.add_space(2.0);
+                ui.label(
+                    "When ON (default, hardware-accurate), sprite 0 hits are suppressed \
+                     in pixels 0–7 if either PPUMASK bit 1 (show BG left) or bit 2 \
+                     (show sprites left) is clear.  Toggle OFF to bypass this for debugging.",
+                );
+                ui.add_space(4.0);
+                if ui
+                    .checkbox(
+                        &mut cfg.left_col_suppression,
+                        "Suppress hits in left 8 pixels when clipping active (default: ON)",
+                    )
+                    .changed()
+                {
+                    changed = true;
+                }
+            });
+
+            if changed {
+                tab_manager.nes_sprite0_config = cfg.clone();
+                tab_manager.pending_debug_action = Some(DebugAction::SetNesPpuConfig(cfg));
+            }
+
+            ui.add_space(10.0);
+            ui.separator();
+            ui.add_space(4.0);
+
+            // Reference / help text
+            ui.label(
+                egui::RichText::new(
+                    "Reference: https://www.nesdev.org/wiki/PPU_OAM#Sprite_zero_hits",
+                )
+                .weak()
+                .small(),
+            );
+            ui.label(
+                egui::RichText::new(
+                    "PAL NES: pre-render scanline 311, 312 total scanlines, no odd-frame skip.",
+                )
+                .weak()
+                .small(),
+            );
         });
 }

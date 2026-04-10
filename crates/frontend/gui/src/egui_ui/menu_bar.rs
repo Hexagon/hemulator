@@ -153,11 +153,46 @@ impl MenuBar {
                     }
 
                     if ui
+                        .button("Atari 5200")
+                        .on_hover_text("Atari 5200 SuperSystem")
+                        .clicked()
+                    {
+                        self.pending_action =
+                            Some(MenuAction::NewProjectSystem("Atari 5200".to_string()));
+                        ui.close();
+                    }
+
+                    if ui
                         .button("SMS")
                         .on_hover_text("Sega Master System")
                         .clicked()
                     {
                         self.pending_action = Some(MenuAction::NewProjectSystem("SMS".to_string()));
+                        ui.close();
+                    }
+
+                    if ui
+                        .button("Game Gear")
+                        .on_hover_text("Sega Game Gear")
+                        .clicked()
+                    {
+                        self.pending_action =
+                            Some(MenuAction::NewProjectSystem("Game Gear".to_string()));
+                        ui.close();
+                    }
+
+                    if ui
+                        .button("Mega Drive")
+                        .on_hover_text("Sega Mega Drive / Genesis")
+                        .clicked()
+                    {
+                        self.pending_action =
+                            Some(MenuAction::NewProjectSystem("Mega Drive".to_string()));
+                        ui.close();
+                    }
+
+                    if ui.button("C64").on_hover_text("Commodore 64").clicked() {
+                        self.pending_action = Some(MenuAction::NewProjectSystem("C64".to_string()));
                         ui.close();
                     }
 

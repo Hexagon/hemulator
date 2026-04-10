@@ -248,6 +248,19 @@ pub struct Ppu {
     ///
     /// Reference: Pan Docs - Interrupt Sources, SameBoy issue #91
     stat_interrupt_line: bool,
+
+    // --- Per-scanline rendering state ---
+    // Games that use HDMA to modify VRAM mid-frame (e.g., parallax scrolling)
+    // require rendering each scanline before HDMA overwrites tile data for the
+    // next scanline. These buffers accumulate the rendered frame incrementally.
+    /// Per-scanline rendered frame buffer (160×144 ARGB pixels)
+    frame_pixels: Vec<u32>,
+    /// Per-scanline BG color index + priority data for sprite compositing
+    frame_bg_indices: Vec<u8>,
+    /// Whether the per-scanline frame is complete and ready
+    frame_ready: bool,
+    /// Window internal line counter for per-scanline rendering
+    frame_window_line: u8,
 }
 
 // LCDC (LCD Control) register bit flags
@@ -295,6 +308,10 @@ impl Ppu {
             scanline_states_captured: false,
             window_line_counter: 0,
             stat_interrupt_line: false,
+            frame_pixels: vec![0xFFFFFFFF; 160 * 144],
+            frame_bg_indices: vec![0u8; 160 * 144],
+            frame_ready: false,
+            frame_window_line: 0,
         }
     }
 
@@ -430,7 +447,9 @@ impl Ppu {
             self.prev_mode = 0;
             self.stat &= !0x03;
             self.stat_interrupt_line = false;
-            self.scanline_states_captured = false;
+            // Don't clear scanline_states_captured — if visible scanlines were
+            // already captured this frame, render_frame() should still use them.
+            // Games commonly disable LCD during VBlank for VRAM operations.
             self.window_line_counter = 0;
         } else if !was_enabled && now_enabled {
             // LCD turned on: restart timing from LY=0
@@ -563,11 +582,34 @@ impl Ppu {
     }
 
     /// Render a complete frame (160x144)
+    ///
+    /// If per-scanline rendering was active (frame_ready), returns that buffer.
+    /// Otherwise falls back to full-frame rendering from current VRAM state
+    /// (used by unit tests and when step() is not called).
     pub fn render_frame(&self) -> Frame {
+        // Per-scanline rendering: return the pre-rendered buffer
+        if self.frame_ready {
+            let mut frame = Frame::new(160, 144);
+            frame.pixels.copy_from_slice(&self.frame_pixels);
+            return frame;
+        }
+
+        // Fallback: full-frame rendering from current VRAM state
         let mut frame = Frame::new(160, 144);
 
-        if (self.lcdc & LCDC_ENABLE) == 0 {
-            // LCD is off - return blank screen
+        // Determine whether the LCD was active for this frame.
+        // When scanline states were captured (normal operation via step()),
+        // use that flag — it survives brief LCD disables during VBlank,
+        // preventing the blinking that occurs when games toggle LCD off
+        // for VRAM operations.  When render_frame() is called without
+        // step() (e.g. unit tests), fall back to the current LCDC register.
+        let lcd_active = if self.scanline_states_captured {
+            true
+        } else {
+            (self.lcdc & LCDC_ENABLE) != 0
+        };
+
+        if !lcd_active {
             return frame;
         }
 
@@ -598,6 +640,368 @@ impl Ppu {
         }
 
         frame
+    }
+
+    /// Reset per-scanline frame state at the start of a new frame.
+    ///
+    /// Does NOT clear frame_pixels or frame_ready — the buffer retains
+    /// data from the previous frame until each scanline overwrites it.
+    /// This avoids a frame-alignment bug: step_frame() runs exactly
+    /// 70224 PPU cycles but may not start at ly=0, so clearing the
+    /// buffer at ly=0 could lose valid data when render_frame() is
+    /// called later with frame_ready=false.
+    fn reset_scanline_frame(&mut self) {
+        self.frame_window_line = 0;
+    }
+
+    /// Render a single scanline to the internal frame buffer.
+    ///
+    /// Called from step() when entering HBlank for visible scanlines (ly < 144).
+    /// This captures the current VRAM state per-scanline, which is essential for
+    /// games that use HDMA to modify VRAM mid-frame (e.g., parallax scrolling in
+    /// Tomb Raider GBC). The HDMA transfer for this scanline runs AFTER this
+    /// method returns, so VRAM contains the correct data for this scanline.
+    fn render_scanline_to_buffer(&mut self, screen_y: u8) {
+        let ly = screen_y as usize;
+
+        // Clear this scanline's bg priority data so sprite rendering
+        // sees correct indices even if the BG loop is skipped.
+        let row_start = ly * 160;
+        self.frame_bg_indices[row_start..row_start + 160].fill(0);
+
+        // Read current register state directly (accurate for this scanline)
+        let lcdc = self.lcdc;
+        let scx = self.scx;
+        let scy = self.scy;
+        let wx = self.wx;
+        let wy = self.wy;
+        let bgp = self.bgp;
+        let obp0 = self.obp0;
+        let obp1 = self.obp1;
+
+        let bg_win_enabled = (lcdc & LCDC_BG_WIN_ENABLE) != 0;
+
+        // === Render Background ===
+        if bg_win_enabled || self.cgb_mode {
+            let tile_data_base: u16 = if (lcdc & LCDC_BG_WIN_TILES) != 0 {
+                0x0000
+            } else {
+                0x0800
+            };
+            let tilemap_base: u16 = if (lcdc & LCDC_BG_TILEMAP) != 0 {
+                0x1C00
+            } else {
+                0x1800
+            };
+
+            let y = screen_y.wrapping_add(scy);
+            let tile_y = ((y >> 3) & 31) as u16;
+            let pixel_y = (y & 7) as u16;
+
+            for screen_x in 0u8..160 {
+                let x = screen_x.wrapping_add(scx);
+                let tile_x = ((x >> 3) & 31) as u16;
+                let pixel_x = (x & 7) as u16;
+
+                let tilemap_addr = (tilemap_base + tile_y * 32 + tile_x) as usize;
+                let tile_index = self.vram_bank0[tilemap_addr];
+                let tile_attr = if self.cgb_mode {
+                    self.vram_bank1[tilemap_addr]
+                } else {
+                    0
+                };
+
+                let bg_palette_num = tile_attr & 0x07;
+                let tile_vram_bank = (tile_attr >> 3) & 0x01;
+                let flip_x = (tile_attr & 0x20) != 0;
+                let flip_y = (tile_attr & 0x40) != 0;
+                let bg_priority = (tile_attr & 0x80) != 0;
+
+                let tile_addr = if (lcdc & LCDC_BG_WIN_TILES) != 0 {
+                    tile_data_base + (tile_index as u16 * 16)
+                } else {
+                    self.calculate_signed_tile_address(tile_data_base, tile_index)
+                };
+
+                let actual_pixel_y = if flip_y { 7 - pixel_y } else { pixel_y };
+                let tile_row_addr = tile_addr + actual_pixel_y * 2;
+
+                let (byte1, byte2) = if self.cgb_mode && tile_vram_bank == 1 {
+                    (
+                        self.vram_bank1[tile_row_addr as usize],
+                        self.vram_bank1[(tile_row_addr + 1) as usize],
+                    )
+                } else {
+                    (
+                        self.vram_bank0[tile_row_addr as usize],
+                        self.vram_bank0[(tile_row_addr + 1) as usize],
+                    )
+                };
+
+                let actual_pixel_x = if flip_x { 7 - pixel_x } else { pixel_x };
+                let bit = 7 - actual_pixel_x;
+                let color_bit_0 = (byte1 >> bit) & 1;
+                let color_bit_1 = (byte2 >> bit) & 1;
+                let color_index = (color_bit_1 << 1) | color_bit_0;
+
+                let pixel_idx = ly * 160 + screen_x as usize;
+                self.frame_bg_indices[pixel_idx] = if bg_priority { 0x80 } else { 0 } | color_index;
+
+                let rgb = if self.cgb_mode {
+                    let palette_index = (bg_palette_num * 4 + color_index) * 2;
+                    let color_low = self.bg_palette_data[palette_index as usize];
+                    let color_high = self.bg_palette_data[(palette_index + 1) as usize];
+                    self.cgb_color_to_rgb(color_low, color_high)
+                } else {
+                    let palette_color = (bgp >> (color_index * 2)) & 0x03;
+                    match palette_color {
+                        0 => 0xFFFFFFFF,
+                        1 => 0xFFAAAAAA,
+                        2 => 0xFF555555,
+                        3 => 0xFF000000,
+                        _ => unreachable!(),
+                    }
+                };
+
+                self.frame_pixels[pixel_idx] = rgb;
+            }
+        }
+
+        // === Render Window ===
+        if (lcdc & LCDC_WIN_ENABLE) != 0
+            && (bg_win_enabled || self.cgb_mode)
+            && wx < 167
+            && screen_y >= wy
+        {
+            let tile_data_base: u16 = if (lcdc & LCDC_BG_WIN_TILES) != 0 {
+                0x0000
+            } else {
+                0x0800
+            };
+            let tilemap_base: u16 = if (lcdc & LCDC_WIN_TILEMAP) != 0 {
+                0x1C00
+            } else {
+                0x1800
+            };
+
+            let win_y = self.frame_window_line;
+            let tile_y = (win_y >> 3) as u16;
+            let pixel_y = (win_y & 7) as u16;
+
+            if tile_y < 32 {
+                let start_x = wx.saturating_sub(7);
+
+                for screen_x in start_x..160 {
+                    let win_x = screen_x - start_x;
+                    let tile_x = (win_x >> 3) as u16;
+                    if tile_x >= 32 {
+                        continue;
+                    }
+                    let pixel_x = (win_x & 7) as u16;
+
+                    let tilemap_addr = (tilemap_base + tile_y * 32 + tile_x) as usize;
+                    let tile_index = self.vram_bank0[tilemap_addr];
+                    let tile_attr = if self.cgb_mode {
+                        self.vram_bank1[tilemap_addr]
+                    } else {
+                        0
+                    };
+
+                    let bg_palette_num = tile_attr & 0x07;
+                    let tile_vram_bank = (tile_attr >> 3) & 0x01;
+                    let flip_x = (tile_attr & 0x20) != 0;
+                    let flip_y = (tile_attr & 0x40) != 0;
+                    let bg_priority = (tile_attr & 0x80) != 0;
+
+                    let tile_addr = if (lcdc & LCDC_BG_WIN_TILES) != 0 {
+                        tile_data_base + (tile_index as u16 * 16)
+                    } else {
+                        self.calculate_signed_tile_address(tile_data_base, tile_index)
+                    };
+
+                    let actual_pixel_y = if flip_y { 7 - pixel_y } else { pixel_y };
+                    let tile_row_addr = tile_addr + actual_pixel_y * 2;
+                    if (tile_row_addr + 1) as usize >= 0x2000 {
+                        continue;
+                    }
+
+                    let (byte1, byte2) = if self.cgb_mode && tile_vram_bank == 1 {
+                        (
+                            self.vram_bank1[tile_row_addr as usize],
+                            self.vram_bank1[(tile_row_addr + 1) as usize],
+                        )
+                    } else {
+                        (
+                            self.vram_bank0[tile_row_addr as usize],
+                            self.vram_bank0[(tile_row_addr + 1) as usize],
+                        )
+                    };
+
+                    let actual_pixel_x = if flip_x { 7 - pixel_x } else { pixel_x };
+                    let bit = 7 - actual_pixel_x;
+                    let color_bit_0 = (byte1 >> bit) & 1;
+                    let color_bit_1 = (byte2 >> bit) & 1;
+                    let color_index = (color_bit_1 << 1) | color_bit_0;
+
+                    let pixel_idx = ly * 160 + screen_x as usize;
+                    self.frame_bg_indices[pixel_idx] =
+                        if bg_priority { 0x80 } else { 0 } | color_index;
+
+                    let rgb = if self.cgb_mode {
+                        let palette_index = (bg_palette_num * 4 + color_index) * 2;
+                        let color_low = self.bg_palette_data[palette_index as usize];
+                        let color_high = self.bg_palette_data[(palette_index + 1) as usize];
+                        self.cgb_color_to_rgb(color_low, color_high)
+                    } else {
+                        let palette_color = (bgp >> (color_index * 2)) & 0x03;
+                        match palette_color {
+                            0 => 0xFFFFFFFF,
+                            1 => 0xFFAAAAAA,
+                            2 => 0xFF555555,
+                            3 => 0xFF000000,
+                            _ => unreachable!(),
+                        }
+                    };
+
+                    self.frame_pixels[pixel_idx] = rgb;
+                }
+
+                self.frame_window_line = self.frame_window_line.wrapping_add(1);
+            }
+        }
+
+        // === Render Sprites ===
+        if (lcdc & LCDC_OBJ_ENABLE) != 0 {
+            let sprite_height: u8 = if (lcdc & LCDC_OBJ_SIZE) != 0 { 16 } else { 8 };
+
+            // Collect sprites on this scanline
+            let mut sprites_on_line: Vec<(u8, u8, u8)> = Vec::new();
+            for sprite_idx in 0u8..40 {
+                let oam_addr = (sprite_idx as usize) * 4;
+                let oam_y = self.oam[oam_addr];
+                let oam_x = self.oam[oam_addr + 1];
+
+                let screen_y_offset = screen_y.wrapping_add(16);
+                if oam_y > 0
+                    && screen_y_offset >= oam_y
+                    && screen_y_offset < oam_y.wrapping_add(sprite_height)
+                {
+                    sprites_on_line.push((oam_x, oam_x.wrapping_sub(8), sprite_idx));
+                }
+            }
+
+            sprites_on_line.sort_by_key(|&(_, _, oam_idx)| oam_idx);
+            let max_sprites = if self.cgb_mode { 10 } else { 40 };
+            sprites_on_line.truncate(max_sprites);
+
+            if !self.cgb_mode {
+                sprites_on_line.sort_by_key(|&(oam_x, _, oam_idx)| (oam_x, oam_idx));
+            }
+
+            for &(_, x_pos, sprite_idx) in sprites_on_line.iter().rev() {
+                let oam_addr = (sprite_idx as usize) * 4;
+                let oam_y = self.oam[oam_addr];
+                let tile_index = self.oam[oam_addr + 2];
+                let flags = self.oam[oam_addr + 3];
+
+                let flip_x = (flags & 0x20) != 0;
+                let flip_y = (flags & 0x40) != 0;
+                let obj_bg_priority = (flags & 0x80) != 0;
+
+                let (dmg_palette_num, cgb_palette_num, sprite_vram_bank) = if self.cgb_mode {
+                    (0u8, flags & 0x07, (flags >> 3) & 0x01)
+                } else {
+                    ((flags >> 4) & 0x01, 0u8, 0u8)
+                };
+
+                let sy = screen_y.wrapping_add(16).wrapping_sub(oam_y);
+                let pixel_y = if flip_y { sprite_height - 1 - sy } else { sy };
+
+                let tile = if sprite_height == 16 {
+                    if pixel_y < 8 {
+                        tile_index & 0xFE
+                    } else {
+                        tile_index | 0x01
+                    }
+                } else {
+                    tile_index
+                };
+
+                let tile_addr = (tile as u16) * 16;
+                let row_offset = (pixel_y & 7) * 2;
+
+                if (tile_addr + row_offset as u16 + 1) as usize >= 0x2000 {
+                    continue;
+                }
+
+                let (byte1, byte2) = if self.cgb_mode && sprite_vram_bank == 1 {
+                    (
+                        self.vram_bank1[(tile_addr + row_offset as u16) as usize],
+                        self.vram_bank1[(tile_addr + row_offset as u16 + 1) as usize],
+                    )
+                } else {
+                    (
+                        self.vram_bank0[(tile_addr + row_offset as u16) as usize],
+                        self.vram_bank0[(tile_addr + row_offset as u16 + 1) as usize],
+                    )
+                };
+
+                for sx in 0..8u8 {
+                    let screen_x = x_pos.wrapping_add(sx);
+                    if screen_x >= 160 {
+                        continue;
+                    }
+
+                    let pixel_x_bit = if flip_x { 7 - sx } else { sx };
+                    let bit = 7 - pixel_x_bit;
+                    let color_bit_0 = (byte1 >> bit) & 1;
+                    let color_bit_1 = (byte2 >> bit) & 1;
+                    let color_index = (color_bit_1 << 1) | color_bit_0;
+                    if color_index == 0 {
+                        continue;
+                    }
+
+                    let pixel_idx = ly * 160 + screen_x as usize;
+                    let bg_data = self.frame_bg_indices[pixel_idx];
+                    let bg_color_index = bg_data & 0x03;
+                    let bg_has_priority = (bg_data & 0x80) != 0;
+
+                    let bg_win_master_priority = (lcdc & LCDC_BG_WIN_ENABLE) != 0;
+
+                    if self.cgb_mode && !bg_win_master_priority {
+                        // CGB: LCDC.0=0 means sprites always on top
+                    } else if bg_color_index == 0 {
+                        // BG transparent
+                    } else if (self.cgb_mode && bg_has_priority) || obj_bg_priority {
+                        continue;
+                    }
+
+                    let rgb = if self.cgb_mode {
+                        let palette_index = (cgb_palette_num * 4 + color_index) * 2;
+                        let color_low = self.obj_palette_data[palette_index as usize];
+                        let color_high = self.obj_palette_data[(palette_index + 1) as usize];
+                        self.cgb_color_to_rgb(color_low, color_high)
+                    } else {
+                        let palette = if dmg_palette_num == 1 { obp1 } else { obp0 };
+                        let palette_color = (palette >> (color_index * 2)) & 0x03;
+                        match palette_color {
+                            0 => 0xFFFFFFFF,
+                            1 => 0xFFAAAAAA,
+                            2 => 0xFF555555,
+                            3 => 0xFF000000,
+                            _ => unreachable!(),
+                        }
+                    };
+
+                    self.frame_pixels[pixel_idx] = rgb;
+                }
+            }
+        }
+
+        // Mark frame as ready when the last visible scanline is rendered
+        if screen_y == 143 {
+            self.frame_ready = true;
+        }
     }
 
     /// Calculate tile address using signed tile indexing mode
@@ -1137,7 +1541,8 @@ impl Ppu {
             self.prev_mode = 0;
             self.stat &= !0x03; // Mode 0 always when LCD off
             self.stat_interrupt_line = false;
-            self.scanline_states_captured = false;
+            // Don't clear scanline_states_captured — preserved for render_frame()
+            // so games that briefly disable LCD during VBlank still render.
             self.window_line_counter = 0;
 
             // Track cycle counter for HDMA timing even with LCD off
@@ -1208,7 +1613,20 @@ impl Ppu {
 
         // Update STAT mode bits and check for STAT interrupt (with edge-triggered blocking) and HBlank entry
         // The LYC=LY source is now integrated into the interrupt line calculation
-        let (stat_interrupt, hblank_entered) = self.update_stat_mode();
+        let (stat_interrupt, hblank_entered, mode3_entered) = self.update_stat_mode();
+
+        // Per-scanline rendering: render the current scanline when entering
+        // Mode 3 (Pixel Transfer). On real hardware, this is when the PPU
+        // reads VRAM and renders pixels to the LCD. By rendering here, we
+        // capture VRAM after any CPU writes from Mode 0 (HBlank) and Mode 2
+        // (OAM Search), but before any CPU writes during Mode 3 (which would
+        // normally be blocked by VRAM access on real hardware).
+        if mode3_entered && self.ly < 144 {
+            if self.ly == 0 {
+                self.reset_scanline_frame();
+            }
+            self.render_scanline_to_buffer(self.ly);
+        }
 
         (vblank_started, stat_interrupt, hblank_entered)
     }
@@ -1228,8 +1646,8 @@ impl Ppu {
     ///
     /// Reference: Pan Docs - Interrupt Sources, SameBoy issue #91
     ///
-    /// Returns (stat_interrupt, hblank_entered)
-    fn update_stat_mode(&mut self) -> (bool, bool) {
+    /// Returns (stat_interrupt, hblank_entered, mode3_entered)
+    fn update_stat_mode(&mut self) -> (bool, bool, bool) {
         // Get previous mode before updating
         let prev_mode = self.stat & 0x03;
 
@@ -1240,7 +1658,7 @@ impl Ppu {
         if (self.lcdc & LCDC_ENABLE) == 0 {
             // LCD disabled: mode is always 0, interrupt line is low
             self.stat_interrupt_line = false;
-            return (false, false);
+            return (false, false, false);
         }
 
         let mode = if self.ly >= 144 {
@@ -1262,6 +1680,9 @@ impl Ppu {
 
         // Check if we just entered HBlank
         let hblank_entered = mode == 0 && prev_mode != 0;
+
+        // Check if we just entered Mode 3 (Pixel Transfer)
+        let mode3_entered = mode == 3 && prev_mode != 3;
 
         // Store new mode for next iteration
         self.prev_mode = mode;
@@ -1286,10 +1707,8 @@ impl Ppu {
         // Update stored line state for next check
         self.stat_interrupt_line = new_line_state;
 
-        (stat_interrupt, hblank_entered)
+        (stat_interrupt, hblank_entered, mode3_entered)
     }
-
-    // Tile viewer helper methods
 
     /// Get VRAM bank 0 data
     pub fn get_vram_bank0(&self) -> &[u8; 0x2000] {

@@ -157,6 +157,13 @@ pub struct Rdp {
     /// Z-buffer image address in RDRAM
     z_image_addr: u32,
 
+    /// Color image (framebuffer) address in RDRAM, set by SET_COLOR_IMAGE
+    color_image_addr: u32,
+    /// Color image width (pixels), set by SET_COLOR_IMAGE
+    color_image_width: u32,
+    /// Color image pixel format size (2=16-bit, 3=32-bit), set by SET_COLOR_IMAGE
+    color_image_size: u8,
+
     /// Other mode settings (64-bit value from SET_OTHER_MODES)
     /// Controls cycle type, alpha blend, Z-buffer, texture filtering, etc.
     othermode: u64,
@@ -195,12 +202,32 @@ impl Rdp {
             )
         });
 
-        Ok(Self {
+        Ok(Self::from_renderer(renderer, width, height))
+    }
+
+    /// Create an RDP backed by an arbitrary renderer implementation.
+    ///
+    /// Delegates to `from_renderer`; accepts any `RdpRenderer` boxed trait object
+    /// so both software and hardware (OpenGL) renderers are supported.
+    pub fn with_renderer(mut renderer: Box<dyn super::rdp_renderer::RdpRenderer>) -> Self {
+        let width = renderer.get_frame().width;
+        let height = renderer.get_frame().height;
+        // Initialize framebuffer to black (transparent) for a consistent starting state.
+        renderer.clear(0x00000000);
+        Self::from_renderer(renderer, width, height)
+    }
+
+    fn from_renderer(
+        renderer: Box<dyn super::rdp_renderer::RdpRenderer>,
+        width: u32,
+        height: u32,
+    ) -> Self {
+        Self {
             renderer,
             width,
             height,
             color_format: ColorFormat::RGBA5551,
-            fill_color: 0xFF000000, // Black with full alpha
+            fill_color: 0xFF000000,
             scissor: ScissorBox {
                 x_min: 0,
                 y_min: 0,
@@ -220,42 +247,45 @@ impl Rdp {
                 t_shift: 0,
             }; 8],
             texture_image_addr: 0,
-            blend_color: 0xFF000000, // Black
-            prim_color: 0xFFFFFFFF,  // White
-            env_color: 0xFF000000,   // Black
-            fog_color: 0xFF000000,   // Black
-            combine_mode: 0,         // No combine mode
+            blend_color: 0xFF000000,
+            prim_color: 0xFFFFFFFF,
+            env_color: 0xFF000000,
+            fog_color: 0xFF000000,
+            combine_mode: 0,
             z_image_addr: 0,
-            othermode: 0, // Default other modes
+            color_image_addr: 0,
+            color_image_width: 320,
+            color_image_size: 2,
+            othermode: 0,
             dpc_start: 0,
             dpc_end: 0,
             dpc_current: 0,
-            dpc_status: DPC_STATUS_CBUF_READY, // Start ready for commands
+            dpc_status: DPC_STATUS_CBUF_READY,
             dpc_clock: 0,
             dpc_bufbusy: 0,
             dpc_pipebusy: 0,
             dpc_tmem: 0,
-        })
+        }
     }
 
-    /// Create a new RDP for testing (uses a null GL context)
-    /// This is only available in test builds
+    /// Create a new RDP backed by the software renderer (no OpenGL required).
     ///
-    /// NOTE: Tests using this require `#[ignore]` because null GL context will fail
+    /// Used by unit tests running in CI environments without GPU support.
     #[cfg(test)]
     pub fn new_for_test() -> Self {
-        let gl = unsafe { glow::Context::from_loader_function(|_s| std::ptr::null()) };
-        Self::new(gl).expect("Failed to create RDP for test")
+        use super::rdp_renderer_software::SoftwareRdpRenderer;
+        let renderer: Box<dyn super::rdp_renderer::RdpRenderer> =
+            Box::new(SoftwareRdpRenderer::new(320, 240));
+        Self::with_renderer(renderer)
     }
 
-    /// Create a new RDP with specified resolution for testing
-    /// This is only available in test builds
-    ///
-    /// NOTE: Tests using this require `#[ignore]` because null GL context will fail
+    /// Create a new RDP with specified resolution using the software renderer.
     #[cfg(test)]
     pub fn with_resolution_for_test(width: u32, height: u32) -> Self {
-        let gl = unsafe { glow::Context::from_loader_function(|_s| std::ptr::null()) };
-        Self::with_resolution(gl, width, height).expect("Failed to create RDP for test")
+        use super::rdp_renderer_software::SoftwareRdpRenderer;
+        let renderer: Box<dyn super::rdp_renderer::RdpRenderer> =
+            Box::new(SoftwareRdpRenderer::new(width, height));
+        Self::with_renderer(renderer)
     }
 
     /// Get the name of the current renderer backend
@@ -294,6 +324,9 @@ impl Rdp {
         self.fog_color = 0xFF000000;
         self.combine_mode = 0;
         self.z_image_addr = 0;
+        self.color_image_addr = 0;
+        self.color_image_width = 320;
+        self.color_image_size = 2;
         self.dpc_start = 0;
         self.dpc_end = 0;
         self.dpc_current = 0;
@@ -309,6 +342,17 @@ impl Rdp {
     #[allow(dead_code)] // Used in tests and reserved for future display list commands
     pub fn set_fill_color(&mut self, color: u32) {
         self.fill_color = color;
+    }
+
+    /// Set othermode (64-bit combined value from RSP HLE)
+    pub fn set_othermode(&mut self, othermode: u64) {
+        self.othermode = othermode;
+        // FORCE_BL is bit 14 of othermode_l (lower 32 bits of the combined value).
+        // When set, the game has configured the blender for alpha compositing, so
+        // enable src-alpha / (1-src-alpha) blending in the renderer.
+        let othermode_l = othermode as u32;
+        let force_bl = (othermode_l >> 14) & 0x1 != 0;
+        self.renderer.set_alpha_blend(force_bl);
     }
 
     /// Clear the framebuffer with the current fill color
@@ -438,9 +482,212 @@ impl Rdp {
         );
     }
 
+    /// Draw a textured triangle with Z-buffer, sampling from TMEM tile.
+    /// Texture coordinates (s0,t0) etc. are in texel-space fixed-point.
+    #[allow(dead_code)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_triangle_textured_zbuf(
+        &mut self,
+        x0: i32,
+        y0: i32,
+        z0: u16,
+        s0: f32,
+        t0: f32,
+        x1: i32,
+        y1: i32,
+        z1: u16,
+        s1: f32,
+        t1: f32,
+        x2: i32,
+        y2: i32,
+        z2: u16,
+        s2: f32,
+        t2: f32,
+        tile: usize,
+    ) {
+        let tile_idx = tile.min(7);
+        // Copy tile descriptor and TMEM slice to stack so the closure
+        // does not borrow `self`, avoiding the borrow-checker conflict with
+        // `self.renderer`.
+        let td = self.tiles[tile_idx];
+        let tmem_copy: [u8; 4096] = self.tmem;
+        let scissor = self.scissor;
+
+        let sampler = |s: f32, t: f32| -> u32 {
+            Self::sample_texture_static(&td, &tmem_copy, s.max(0.0) as u32, t.max(0.0) as u32)
+        };
+
+        self.renderer.draw_triangle_textured_zbuffer(
+            x0, y0, z0, s0, t0, x1, y1, z1, s1, t1, x2, y2, z2, s2, t2, &sampler, &scissor,
+        );
+    }
+
+    /// Draw a textured triangle with per-vertex shade colours and Z-buffer,
+    /// applying the current colour-combiner mode.
+    ///
+    /// The combine mode is inspected to decide how to blend texel and shade:
+    /// * **MODULATE** (`TEXEL0 × SHADE`): the shader multiplies the texture
+    ///   sample by the interpolated shade colour – the most common lit-texture
+    ///   mode used in N64 games.
+    /// * **All other modes**: shade colours are forced to opaque white so the
+    ///   texture is displayed unmodified (equivalent to DECAL).
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_triangle_textured_shaded_zbuf(
+        &mut self,
+        x0: i32,
+        y0: i32,
+        z0: u16,
+        s0: f32,
+        t0: f32,
+        c0: u32,
+        x1: i32,
+        y1: i32,
+        z1: u16,
+        s1: f32,
+        t1: f32,
+        c1: u32,
+        x2: i32,
+        y2: i32,
+        z2: u16,
+        s2: f32,
+        t2: f32,
+        c2: u32,
+        tile: usize,
+    ) {
+        // Determine the effective shade colours based on the colour-combiner mode.
+        // Only the MODULATE pattern (A=TEXEL0, C=SHADE) uses the per-vertex colour;
+        // everything else falls back to opaque white (no tinting).
+        let (sc0, sc1, sc2) = if Self::combine_mode_is_modulate(self.combine_mode) {
+            (c0, c1, c2)
+        } else {
+            (0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF)
+        };
+
+        let tile_idx = tile.min(7);
+        let td = self.tiles[tile_idx];
+        let tmem_copy: [u8; 4096] = self.tmem;
+        let scissor = self.scissor;
+
+        let sampler = |s: f32, t: f32| -> u32 {
+            Self::sample_texture_static(&td, &tmem_copy, s.max(0.0) as u32, t.max(0.0) as u32)
+        };
+
+        self.renderer.draw_triangle_textured_shaded_zbuffer(
+            x0, y0, z0, s0, t0, sc0, x1, y1, z1, s1, t1, sc1, x2, y2, z2, s2, t2, sc2, &sampler,
+            &scissor,
+        );
+    }
+
+    /// Return `true` when the current colour-combiner mode encodes the
+    /// `TEXEL0 × SHADE` (MODULATE) pattern.
+    ///
+    /// The combine_mode 64-bit word layout (bits relative to MSB = bit 63):
+    /// * `[55:52]` sub_a_rgb0 (A0): colour mux A for cycle 1
+    /// * `[51:47]` mul_rgb0   (C0): colour mux C for cycle 1 (5-bit)
+    ///
+    /// MODULATE is detected when A0 = TEXEL0 (1) **and** C0 = SHADE (11).
+    fn combine_mode_is_modulate(combine_mode: u64) -> bool {
+        let sub_a_rgb0 = (combine_mode >> 52) & 0xF; // A source, 4-bit
+        let mul_rgb0 = (combine_mode >> 47) & 0x1F; // C source, 5-bit
+                                                    // TEXEL0 = 1 for A; SHADE = 11 for C (5-bit mux)
+        sub_a_rgb0 == 1 && mul_rgb0 == 11
+    }
+
     /// Get the current framebuffer
     pub fn get_frame(&self) -> &Frame {
         self.renderer.get_frame()
+    }
+
+    /// Sync GPU framebuffer to CPU-side buffer (only needed for GPU-backed renderers).
+    pub fn sync_framebuffer(&mut self) {
+        self.renderer.sync_framebuffer();
+    }
+
+    /// Get the color image address set by SET_COLOR_IMAGE
+    #[allow(dead_code)]
+    pub fn get_color_image_addr(&self) -> u32 {
+        self.color_image_addr
+    }
+
+    /// Get the color image address (diagnostic accessor)
+    #[allow(dead_code)]
+    pub fn color_image_address(&self) -> u32 {
+        self.color_image_addr
+    }
+
+    /// Get the color image width (diagnostic accessor)
+    #[allow(dead_code)]
+    pub fn color_image_width_val(&self) -> u32 {
+        self.color_image_width
+    }
+
+    /// Get the color image size (pixel format: 2=16-bit, 3=32-bit)
+    #[allow(dead_code)]
+    pub fn get_color_image_size(&self) -> u8 {
+        self.color_image_size
+    }
+
+    /// Write the RDP internal framebuffer to RDRAM at the color_image_addr.
+    /// This bridges the gap between the RDP renderer and VI's RDRAM readback.
+    pub fn write_framebuffer_to_rdram(&mut self, rdram: &mut [u8]) {
+        if self.color_image_addr == 0 {
+            return;
+        }
+
+        // Ensure GPU framebuffer is synced to CPU before reading pixels
+        self.renderer.sync_framebuffer();
+
+        let frame = self.renderer.get_frame();
+        let origin = self.color_image_addr as usize;
+        let width = frame.width as usize;
+        let height = frame.height as usize;
+
+        match self.color_image_size {
+            2 => {
+                // 16-bit RGBA5551
+                let fb_size = width * height * 2;
+                if origin + fb_size > rdram.len() {
+                    return;
+                }
+                for y in 0..height {
+                    for x in 0..width {
+                        let pixel = frame.pixels[y * width + x];
+                        // Convert ARGB8888 → N64 RGBA5551 (big-endian)
+                        let r = ((pixel >> 19) & 0x1F) as u16;
+                        let g = ((pixel >> 11) & 0x1F) as u16;
+                        let b = ((pixel >> 3) & 0x1F) as u16;
+                        let a = if (pixel >> 24) > 0 { 1u16 } else { 0 };
+                        let rgba5551 = (r << 11) | (g << 6) | (b << 1) | a;
+                        let offset = origin + (y * width + x) * 2;
+                        rdram[offset] = (rgba5551 >> 8) as u8;
+                        rdram[offset + 1] = (rgba5551 & 0xFF) as u8;
+                    }
+                }
+            }
+            3 => {
+                // 32-bit RGBA8888
+                let fb_size = width * height * 4;
+                if origin + fb_size > rdram.len() {
+                    return;
+                }
+                for y in 0..height {
+                    for x in 0..width {
+                        let pixel = frame.pixels[y * width + x];
+                        // Convert ARGB8888 → RGBA8888 big-endian
+                        let r = ((pixel >> 16) & 0xFF) as u8;
+                        let g = ((pixel >> 8) & 0xFF) as u8;
+                        let b = (pixel & 0xFF) as u8;
+                        let a = ((pixel >> 24) & 0xFF) as u8;
+                        let offset = origin + (y * width + x) * 4;
+                        rdram[offset] = r;
+                        rdram[offset + 1] = g;
+                        rdram[offset + 2] = b;
+                        rdram[offset + 3] = a;
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 
     /// Read from RDP register
@@ -561,6 +808,27 @@ impl Rdp {
             // Extract command ID from top 6 bits of first word
             let cmd_id = (cmd_word0 >> 24) & 0x3F;
 
+            // Read word2/word3 for multi-word commands (TEXTURE_RECTANGLE)
+            let cmd_size = Self::rdp_command_size(cmd_id);
+            let (cmd_word2, cmd_word3) = if cmd_size > 8 && addr + 15 < rdram.len() {
+                (
+                    u32::from_be_bytes([
+                        rdram[addr + 8],
+                        rdram[addr + 9],
+                        rdram[addr + 10],
+                        rdram[addr + 11],
+                    ]),
+                    u32::from_be_bytes([
+                        rdram[addr + 12],
+                        rdram[addr + 13],
+                        rdram[addr + 14],
+                        rdram[addr + 15],
+                    ]),
+                )
+            } else {
+                (0, 0)
+            };
+
             log(LogCategory::PPU, LogLevel::Trace, || {
                 format!(
                     "N64 RDP: Command 0x{:02X} at 0x{:08X}: word0=0x{:08X} word1=0x{:08X}",
@@ -569,23 +837,19 @@ impl Rdp {
             });
 
             // Execute command
-            self.execute_rdp_command(cmd_id, cmd_word0, cmd_word1, rdram);
+            self.execute_rdp_command(cmd_id, cmd_word0, cmd_word1, cmd_word2, cmd_word3, rdram);
 
             // Increment performance counters
-            // Clock counter: increments for each command processed
-            self.dpc_clock = self.dpc_clock.wrapping_add(10); // ~10 cycles per command
+            self.dpc_clock = self.dpc_clock.wrapping_add(10);
 
-            // Pipe busy counter: increments when pipeline is active (rendering commands)
             if (0x08..=0x0F).contains(&cmd_id) || cmd_id == 0x36 {
-                // Triangle or fill commands keep pipeline busy
                 self.dpc_pipebusy = self.dpc_pipebusy.wrapping_add(1);
             }
 
-            // Track executed commands
             executed_commands = executed_commands.wrapping_add(1);
 
-            // Move to next command (all RDP commands are 8 bytes)
-            addr += 8;
+            // Advance by command size (most are 8 bytes, some are larger)
+            addr += cmd_size;
         }
 
         // Buffer busy counter: increments by number of commands actually executed
@@ -665,8 +929,12 @@ impl Rdp {
         if tile >= 8 {
             return 0xFFFF00FF; // Return magenta for invalid tile (debugging)
         }
+        Self::sample_texture_static(&self.tiles[tile], &self.tmem, s, t)
+    }
 
-        let tile_desc = &self.tiles[tile];
+    /// Sample a texel using a tile descriptor and TMEM buffer (no `&self` needed).
+    /// This allows usage inside closures that also need `&mut self.renderer`.
+    fn sample_texture_static(tile_desc: &TileDescriptor, tmem: &[u8; 4096], s: u32, t: u32) -> u32 {
         let format = tile_desc.format;
         let size = tile_desc.size;
         let tmem_addr = (tile_desc.tmem_addr * 8) as usize;
@@ -703,15 +971,15 @@ impl Rdp {
         let addr = tmem_addr + texel_offset;
 
         // Sample based on format and size
-        if addr >= self.tmem.len() {
+        if addr >= tmem.len() {
             return 0xFFFF00FF; // Magenta for out of bounds
         }
 
         match (format, size) {
             // RGBA 16-bit (5-5-5-1)
             (0, 2) => {
-                if addr + 1 < self.tmem.len() {
-                    let texel = u16::from_be_bytes([self.tmem[addr], self.tmem[addr + 1]]);
+                if addr + 1 < tmem.len() {
+                    let texel = u16::from_be_bytes([tmem[addr], tmem[addr + 1]]);
                     let r = ((texel >> 11) & 0x1F) as u32;
                     let g = ((texel >> 6) & 0x1F) as u32;
                     let b = ((texel >> 1) & 0x1F) as u32;
@@ -728,13 +996,8 @@ impl Rdp {
             }
             // RGBA 32-bit (8-8-8-8)
             (0, 3) => {
-                if addr + 3 < self.tmem.len() {
-                    u32::from_be_bytes([
-                        self.tmem[addr],
-                        self.tmem[addr + 1],
-                        self.tmem[addr + 2],
-                        self.tmem[addr + 3],
-                    ])
+                if addr + 3 < tmem.len() {
+                    u32::from_be_bytes([tmem[addr], tmem[addr + 1], tmem[addr + 2], tmem[addr + 3]])
                 } else {
                     0xFFFF00FF
                 }
@@ -742,10 +1005,10 @@ impl Rdp {
             // YUV 16-bit (format=1, size=2) - Used for video textures
             // Stored as interleaved YUYV: 8-bit Y, 8-bit U/V alternating
             (1, 2) => {
-                if addr + 1 < self.tmem.len() {
+                if addr + 1 < tmem.len() {
                     // YUV stored as pairs in memory: (Y0 U0)(Y1 V0)
                     // Both pixels (Y0 and Y1) share the same U0/V0 chroma.
-                    let texel = u16::from_be_bytes([self.tmem[addr], self.tmem[addr + 1]]);
+                    let texel = u16::from_be_bytes([tmem[addr], tmem[addr + 1]]);
                     let y = ((texel >> 8) & 0xFF) as i32;
                     let uv = (texel & 0xFF) as i32;
 
@@ -755,9 +1018,8 @@ impl Rdp {
                     let (u, v) = if s & 1 == 0 {
                         // Even position - this byte is U, get V from next texel if available
                         let u_val = uv - 128;
-                        let v_val = if addr + 3 < self.tmem.len() {
-                            let next_texel =
-                                u16::from_be_bytes([self.tmem[addr + 2], self.tmem[addr + 3]]);
+                        let v_val = if addr + 3 < tmem.len() {
+                            let next_texel = u16::from_be_bytes([tmem[addr + 2], tmem[addr + 3]]);
                             ((next_texel & 0xFF) as i32) - 128
                         } else {
                             // Fallback: reuse U as V when next texel is out of bounds
@@ -768,8 +1030,7 @@ impl Rdp {
                         // Odd position - this byte is V, get U from previous texel if available
                         let v_val = uv - 128;
                         let u_val = if addr >= 2 {
-                            let prev_texel =
-                                u16::from_be_bytes([self.tmem[addr - 2], self.tmem[addr - 1]]);
+                            let prev_texel = u16::from_be_bytes([tmem[addr - 2], tmem[addr - 1]]);
                             ((prev_texel & 0xFF) as i32) - 128
                         } else {
                             // Fallback: reuse V as U when previous texel is not available
@@ -794,14 +1055,13 @@ impl Rdp {
             // CI (Color Index) 8-bit (format=2, size=1)
             (2, 1) => {
                 // Color index format - lookup in palette
-                let index = self.tmem[addr] as usize;
+                let index = tmem[addr] as usize;
                 // Palette is stored in upper half of TMEM (0x800-0xFFF)
                 let palette_offset = 0x800 + (tile_desc.palette as usize * 16 * 2);
                 let color_addr = palette_offset + (index * 2);
 
-                if color_addr + 1 < self.tmem.len() {
-                    let texel =
-                        u16::from_be_bytes([self.tmem[color_addr], self.tmem[color_addr + 1]]);
+                if color_addr + 1 < tmem.len() {
+                    let texel = u16::from_be_bytes([tmem[color_addr], tmem[color_addr + 1]]);
                     let r = ((texel >> 11) & 0x1F) as u32;
                     let g = ((texel >> 6) & 0x1F) as u32;
                     let b = ((texel >> 1) & 0x1F) as u32;
@@ -818,7 +1078,7 @@ impl Rdp {
             // CI (Color Index) 4-bit (format=2, size=0)
             (2, 0) => {
                 // 4-bit color index - two texels per byte
-                let byte = self.tmem[addr];
+                let byte = tmem[addr];
                 let index = if s & 1 == 0 {
                     (byte >> 4) & 0x0F // High nibble
                 } else {
@@ -828,9 +1088,8 @@ impl Rdp {
                 let palette_offset = 0x800 + (tile_desc.palette as usize * 16 * 2);
                 let color_addr = palette_offset + (index * 2);
 
-                if color_addr + 1 < self.tmem.len() {
-                    let texel =
-                        u16::from_be_bytes([self.tmem[color_addr], self.tmem[color_addr + 1]]);
+                if color_addr + 1 < tmem.len() {
+                    let texel = u16::from_be_bytes([tmem[color_addr], tmem[color_addr + 1]]);
                     let r = ((texel >> 11) & 0x1F) as u32;
                     let g = ((texel >> 6) & 0x1F) as u32;
                     let b = ((texel >> 1) & 0x1F) as u32;
@@ -846,8 +1105,8 @@ impl Rdp {
             }
             // IA (Intensity + Alpha) 16-bit (format=3, size=2)
             (3, 2) => {
-                if addr + 1 < self.tmem.len() {
-                    let texel = u16::from_be_bytes([self.tmem[addr], self.tmem[addr + 1]]);
+                if addr + 1 < tmem.len() {
+                    let texel = u16::from_be_bytes([tmem[addr], tmem[addr + 1]]);
                     let intensity = ((texel >> 8) & 0xFF) as u32;
                     let alpha = (texel & 0xFF) as u32;
                     (alpha << 24) | (intensity << 16) | (intensity << 8) | intensity
@@ -857,7 +1116,7 @@ impl Rdp {
             }
             // IA (Intensity + Alpha) 8-bit (format=3, size=1)
             (3, 1) => {
-                let texel = self.tmem[addr];
+                let texel = tmem[addr];
                 let intensity = ((texel >> 4) & 0x0F) as u32;
                 let alpha = (texel & 0x0F) as u32;
                 let i8 = (intensity * 255 / 15) & 0xFF;
@@ -866,7 +1125,7 @@ impl Rdp {
             }
             // IA (Intensity + Alpha) 4-bit (format=3, size=0)
             (3, 0) => {
-                let byte = self.tmem[addr];
+                let byte = tmem[addr];
                 let texel = if s & 1 == 0 {
                     (byte >> 4) & 0x0F
                 } else {
@@ -880,12 +1139,12 @@ impl Rdp {
             }
             // I (Intensity) 8-bit (format=4, size=1)
             (4, 1) => {
-                let intensity = self.tmem[addr] as u32;
+                let intensity = tmem[addr] as u32;
                 0xFF000000 | (intensity << 16) | (intensity << 8) | intensity
             }
             // I (Intensity) 4-bit (format=4, size=0)
             (4, 0) => {
-                let byte = self.tmem[addr];
+                let byte = tmem[addr];
                 let nibble = if s & 1 == 0 {
                     (byte >> 4) & 0x0F
                 } else {
@@ -899,8 +1158,38 @@ impl Rdp {
         }
     }
 
+    /// Return the size in bytes of an RDP command by its ID
+    fn rdp_command_size(cmd_id: u32) -> usize {
+        match cmd_id {
+            // Triangle commands have variable sizes based on attributes
+            0x08 => 32,  // Non-shaded triangle
+            0x09 => 48,  // Non-shaded Z-buffered triangle
+            0x0A => 96,  // Textured triangle
+            0x0B => 112, // Textured Z-buffered triangle
+            0x0C => 96,  // Shaded triangle
+            0x0D => 112, // Shaded Z-buffered triangle
+            0x0E => 160, // Shaded textured triangle
+            0x0F => 176, // Shaded textured Z-buffered triangle
+            // Texture rectangle commands are 16 bytes (2 × 64-bit words)
+            0x24 | 0x25 => 16,
+            // All other commands are 8 bytes
+            _ => 8,
+        }
+    }
+
     /// Execute a single RDP command
-    pub fn execute_rdp_command(&mut self, cmd_id: u32, word0: u32, word1: u32, rdram: &[u8]) {
+    ///
+    /// For most commands, only word0/word1 are used. For TEXTURE_RECTANGLE (0x24/0x25),
+    /// word2/word3 contain texture coordinates (S, T, DSDX, DTDY).
+    pub fn execute_rdp_command(
+        &mut self,
+        cmd_id: u32,
+        word0: u32,
+        word1: u32,
+        word2: u32,
+        word3: u32,
+        rdram: &[u8],
+    ) {
         match cmd_id {
             // Triangle commands (0x08-0x0F)
             // Note: Real N64 triangle commands have complex formats with edge coefficients
@@ -1095,18 +1384,46 @@ impl Rdp {
                 let width = xh.saturating_sub(xl);
                 let height = yh.saturating_sub(yl);
 
+                // Convert fill_color from N64 format to ARGB8888 based on color image size
+                let argb_color = match self.color_image_size {
+                    2 => {
+                        // 16-bit mode: fill_color has two RGBA5551 pixels packed.
+                        // Use upper 16 bits as the fill pixel.
+                        let pixel = (self.fill_color >> 16) as u16;
+                        let r = ((pixel >> 11) & 0x1F) as u32;
+                        let g = ((pixel >> 6) & 0x1F) as u32;
+                        let b = ((pixel >> 1) & 0x1F) as u32;
+                        let r8 = (r << 3) | (r >> 2);
+                        let g8 = (g << 3) | (g >> 2);
+                        let b8 = (b << 3) | (b >> 2);
+                        0xFF000000 | (r8 << 16) | (g8 << 8) | b8
+                    }
+                    3 => {
+                        // 32-bit mode: fill_color is RGBA8888, convert to ARGB8888
+                        let r = (self.fill_color >> 24) & 0xFF;
+                        let g = (self.fill_color >> 16) & 0xFF;
+                        let b = (self.fill_color >> 8) & 0xFF;
+                        let a = self.fill_color & 0xFF;
+                        (a << 24) | (r << 16) | (g << 8) | b
+                    }
+                    _ => self.fill_color, // Fallback: use as-is
+                };
+
                 log(LogCategory::PPU, LogLevel::Info, || {
                     format!(
                         "N64 RDP: FILL_RECTANGLE x={}-{} y={}-{} ({}x{}) color=0x{:08X}",
-                        xl, xh, yl, yh, width, height, self.fill_color
+                        xl, xh, yl, yh, width, height, argb_color
                     )
                 });
 
-                self.fill_rect(xl, yl, width, height);
+                self.renderer
+                    .fill_rect(xl, yl, width, height, argb_color, &self.scissor);
             }
             // SET_FILL_COLOR (0x37)
             0x37 => {
-                // word1 contains the fill color (RGBA)
+                // word1 contains the raw fill color in N64 format:
+                // 16-bit mode: two RGBA5551 pixels packed into 32 bits
+                // 32-bit mode: one RGBA8888 pixel
                 self.fill_color = word1;
                 log(LogCategory::PPU, LogLevel::Info, || {
                     format!("N64 RDP: SET_FILL_COLOR = 0x{:08X}", word1)
@@ -1131,26 +1448,39 @@ impl Rdp {
             // TEXTURE_RECTANGLE (0x24)
             0x24 => {
                 // Texture rectangle command - renders a textured rectangle
-                // word0: cmd | XH(12) | YH(12)
-                // word1: tile(3) | XL(12) | YL(12)
-                // Followed by another 64-bit word with texture coordinates:
-                // word2: S(16) | T(16)
-                // word3: DSDX(16) | DTDY(16)
-                let xh = ((word0 >> 12) & 0xFFF) / 4;
-                let yh = (word0 & 0xFFF) / 4;
-                let xl = ((word1 >> 12) & 0xFFF) / 4;
-                let yl = (word1 & 0xFFF) / 4;
+                // word0: cmd | XH(12) | YH(12)  (lower-right corner in 10.2 fixed point)
+                // word1: tile(3) | XL(12) | YL(12)  (upper-left corner in 10.2 fixed point)
+                // word2: S(16) | T(16)  - texture start coords in S.10.5 fixed point
+                // word3: DSDX(16) | DTDY(16)  - texture increments in S.10.5 fixed point
+                let xh = ((word0 >> 12) & 0xFFF) as i32;
+                let yh = (word0 & 0xFFF) as i32;
+                let xl = ((word1 >> 12) & 0xFFF) as i32;
+                let yl = (word1 & 0xFFF) as i32;
                 let tile = ((word1 >> 24) & 0x07) as usize;
 
-                log(LogCategory::Stubs, LogLevel::Debug, || {
+                // Texture coordinates in S.10.5 fixed point
+                let s_start = ((word2 >> 16) & 0xFFFF) as i16 as i32;
+                let t_start = (word2 & 0xFFFF) as i16 as i32;
+                let dsdx = ((word3 >> 16) & 0xFFFF) as i16 as i32;
+                let dtdy = (word3 & 0xFFFF) as i16 as i32;
+
+                // Convert 10.2 fixed point coords to pixels
+                let px_xl = xl / 4;
+                let px_yl = yl / 4;
+                let px_xh = xh / 4;
+                let px_yh = yh / 4;
+
+                log(LogCategory::PPU, LogLevel::Debug, || {
                     format!(
-                        "N64 RDP: TEXTURE_RECTANGLE - rendering textured rect (xl={}, yl={}, xh={}, yh={}, tile={})",
-                        xl, yl, xh, yh, tile
+                        "N64 RDP: TEXTURE_RECTANGLE - rect ({},{})..({},{}) tile={} s={} t={} dsdx={} dtdy={}",
+                        px_xl, px_yl, px_xh, px_yh, tile, s_start, t_start, dsdx, dtdy
                     )
                 });
 
-                let width = xh.saturating_sub(xl);
-                let height = yh.saturating_sub(yl);
+                let width = (px_xh - px_xl).max(0) as u32;
+                let height = (px_yh - px_yl).max(0) as u32;
+                let xl = px_xl.max(0) as u32;
+                let yl = px_yl.max(0) as u32;
 
                 // Check if tile has valid texture data in TMEM
                 let has_texture = if tile < 8 {
@@ -1160,25 +1490,26 @@ impl Rdp {
                     false
                 };
 
-                // Render textured rectangle if texture data is available
+                // Render textured rectangle using actual texture coordinates
                 if has_texture && width > 0 && height > 0 {
+                    let mut t = t_start;
                     for y in 0..height {
+                        let mut s = s_start;
                         for x in 0..width {
                             let px = xl + x;
                             let py = yl + y;
 
                             if px < self.width && py < self.height {
-                                // Calculate texture coordinates (simple mapping)
-                                let s = ((x * 64) / width.max(1)) & 0x3F; // Map to 0-63
-                                let t = ((y * 64) / height.max(1)) & 0x3F;
+                                // S.10.5 fixed point: >> 5 to get integer part
+                                let tex_s = ((s >> 5) & 0x3FF) as u32;
+                                let tex_t = ((t >> 5) & 0x3FF) as u32;
 
-                                // Sample texture
-                                let color = self.sample_texture(tile, s, t);
-
-                                // Draw pixel using renderer
+                                let color = self.sample_texture(tile, tex_s, tex_t);
                                 self.renderer.set_pixel(px, py, color);
                             }
+                            s = s.wrapping_add(dsdx);
                         }
+                        t = t.wrapping_add(dtdy);
                     }
                 } else {
                     // Fallback to solid fill if texture is not available
@@ -1187,29 +1518,39 @@ impl Rdp {
             }
             // TEXTURE_RECTANGLE_FLIP (0x25)
             0x25 => {
-                // Flipped texture rectangle - same as 0x24 but with S/T swapped
+                // Flipped texture rectangle - same as 0x24 but S increments along Y, T along X
                 // word0: cmd | XH(12) | YH(12)
                 // word1: tile(3) | XL(12) | YL(12)
-                // Followed by another 64-bit word with texture coordinates:
-                // word2: S(16) | T(16)
-                // word3: DSDX(16) | DTDY(16)
-                let xh = ((word0 >> 12) & 0xFFF) / 4;
-                let yh = (word0 & 0xFFF) / 4;
-                let xl = ((word1 >> 12) & 0xFFF) / 4;
-                let yl = (word1 & 0xFFF) / 4;
+                // word2: S(16) | T(16)  - texture start coords in S.10.5 fixed point
+                // word3: DSDX(16) | DTDY(16)  - texture increments in S.10.5 fixed point
+                let xh = ((word0 >> 12) & 0xFFF) as i32;
+                let yh = (word0 & 0xFFF) as i32;
+                let xl = ((word1 >> 12) & 0xFFF) as i32;
+                let yl = (word1 & 0xFFF) as i32;
                 let tile = ((word1 >> 24) & 0x07) as usize;
 
-                log(LogCategory::Stubs, LogLevel::Debug, || {
+                let s_start = ((word2 >> 16) & 0xFFFF) as i16 as i32;
+                let t_start = (word2 & 0xFFFF) as i16 as i32;
+                let dsdx = ((word3 >> 16) & 0xFFFF) as i16 as i32;
+                let dtdy = (word3 & 0xFFFF) as i16 as i32;
+
+                let px_xl = xl / 4;
+                let px_yl = yl / 4;
+                let px_xh = xh / 4;
+                let px_yh = yh / 4;
+
+                log(LogCategory::PPU, LogLevel::Debug, || {
                     format!(
-                        "N64 RDP: TEXTURE_RECTANGLE_FLIP - rendering flipped textured rect (xl={}, yl={}, xh={}, yh={}, tile={})",
-                        xl, yl, xh, yh, tile
+                        "N64 RDP: TEXTURE_RECTANGLE_FLIP - rect ({},{})..({},{}) tile={} s={} t={} dsdx={} dtdy={}",
+                        px_xl, px_yl, px_xh, px_yh, tile, s_start, t_start, dsdx, dtdy
                     )
                 });
 
-                let width = xh.saturating_sub(xl);
-                let height = yh.saturating_sub(yl);
+                let width = (px_xh - px_xl).max(0) as u32;
+                let height = (px_yh - px_yl).max(0) as u32;
+                let xl = px_xl.max(0) as u32;
+                let yl = px_yl.max(0) as u32;
 
-                // Check if tile has valid texture data in TMEM
                 let has_texture = if tile < 8 {
                     let tmem_addr = self.tiles[tile].tmem_addr as usize;
                     tmem_addr < self.tmem.len() && self.tmem[tmem_addr] != 0
@@ -1217,28 +1558,27 @@ impl Rdp {
                     false
                 };
 
-                // Render flipped textured rectangle if texture data is available
+                // Flipped: S increments along Y axis, T increments along X axis
                 if has_texture && width > 0 && height > 0 {
+                    let mut s = s_start;
                     for y in 0..height {
+                        let mut t = t_start;
                         for x in 0..width {
                             let px = xl + x;
                             let py = yl + y;
 
                             if px < self.width && py < self.height {
-                                // Calculate texture coordinates (flipped: S/T swapped)
-                                let s = ((y * 64) / height.max(1)) & 0x3F; // Map to 0-63 (from Y)
-                                let t = ((x * 64) / width.max(1)) & 0x3F; // Map to 0-63 (from X)
+                                let tex_s = ((s >> 5) & 0x3FF) as u32;
+                                let tex_t = ((t >> 5) & 0x3FF) as u32;
 
-                                // Sample texture
-                                let color = self.sample_texture(tile, s, t);
-
-                                // Draw pixel using renderer
+                                let color = self.sample_texture(tile, tex_s, tex_t);
                                 self.renderer.set_pixel(px, py, color);
                             }
+                            t = t.wrapping_add(dtdy);
                         }
+                        s = s.wrapping_add(dsdx);
                     }
                 } else {
-                    // Fallback to solid fill if texture is not available
                     self.fill_rect(xl, yl, width, height);
                 }
             }
@@ -1459,7 +1799,19 @@ impl Rdp {
             0x3F => {
                 // word0: bits 21-19 = format, bits 18-17 = size, bits 11-0 = width-1
                 // word1: DRAM address of color buffer
-                // For now, we ignore this and use our internal framebuffer
+                let _format = (word0 >> 19) & 0x07;
+                let size = ((word0 >> 17) & 0x03) as u8;
+                let width = (word0 & 0x0FFF) + 1;
+                let addr = word1 & 0x00FFFFFF;
+                self.color_image_addr = addr;
+                self.color_image_width = width;
+                self.color_image_size = size;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!(
+                        "N64 RDP: SET_COLOR_IMAGE addr=0x{:08X} width={} size={}",
+                        addr, width, size
+                    )
+                });
             }
             // SYNC_PIPE (0x27), SYNC_TILE (0x28), SYNC_LOAD (0x26)
             0x26..=0x28 => {
@@ -1483,7 +1835,6 @@ mod tests {
     use super::*;
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_creation() {
         let rdp = Rdp::new_for_test();
         assert_eq!(rdp.width, 320);
@@ -1493,7 +1844,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_custom_resolution() {
         let rdp = Rdp::with_resolution_for_test(640, 480);
         assert_eq!(rdp.width, 640);
@@ -1501,7 +1851,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_clear() {
         let mut rdp = Rdp::new_for_test();
         rdp.set_fill_color(0xFFFF0000); // Red
@@ -1514,7 +1863,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_fill_rect() {
         let mut rdp = Rdp::new_for_test();
         rdp.set_fill_color(0xFF00FF00); // Green
@@ -1533,7 +1881,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_set_pixel() {
         let mut rdp = Rdp::new_for_test();
         rdp.set_pixel(100, 100, 0xFFFFFFFF); // White
@@ -1543,7 +1890,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_reset() {
         let mut rdp = Rdp::new_for_test();
         rdp.set_fill_color(0xFFFF0000);
@@ -1557,7 +1903,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_registers() {
         let mut rdp = Rdp::new_for_test();
 
@@ -1575,7 +1920,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_bounds_checking() {
         let mut rdp = Rdp::new_for_test();
 
@@ -1587,7 +1931,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_get_frame() {
         let mut rdp = Rdp::new_for_test();
         rdp.set_fill_color(0xFF0000FF); // Blue
@@ -1600,17 +1943,21 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_display_list_fill_rect() {
         let mut rdp = Rdp::new_for_test();
+        // Use 32-bit color mode so fill_color is treated as RGBA8888
+        rdp.color_image_size = 3;
         let mut rdram = vec![0u8; 1024];
 
         // Create a display list with FILL_RECTANGLE command
         // Fill a 100x100 rectangle at (50, 50)
 
-        // SET_FILL_COLOR (0x37) - Red color
-        let set_color_cmd = 0x37000000u32; // Command ID in top bits
-        let color = 0xFFFF0000u32; // RGBA red
+        // SET_FILL_COLOR (0x37) – hardware stores fill color in RGBA8888 order
+        // (bytes: R G B A = 0xFF 0x00 0x00 0xFF → value 0xFF0000FF).
+        // The 32-bit renderer converts RGBA→internal ARGB: (A<<24)|(R<<16)|(G<<8)|B
+        // = (0xFF<<24)|(0xFF<<16)|0 = 0xFFFF0000.
+        let set_color_cmd = 0x37000000u32;
+        let color = 0xFF0000FFu32; // RGBA8888: R=0xFF, G=0x00, B=0x00, A=0xFF
         rdram[0..4].copy_from_slice(&set_color_cmd.to_be_bytes());
         rdram[4..8].copy_from_slice(&color.to_be_bytes());
 
@@ -1629,7 +1976,7 @@ mod tests {
         // Process the display list
         rdp.process_display_list(&rdram);
 
-        // Verify the rectangle was filled
+        // Verify the rectangle was filled (expected ARGB = 0xFFFF0000 = opaque red)
         // Check a pixel inside the rectangle (75, 75)
         let idx = (75 * 320 + 75) as usize;
         assert_eq!(rdp.get_frame().pixels[idx], 0xFFFF0000);
@@ -1639,7 +1986,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_display_list_sync_commands() {
         let mut rdp = Rdp::new_for_test();
         let mut rdram = vec![0u8; 64];
@@ -1667,7 +2013,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_needs_processing() {
         let mut rdp = Rdp::new_for_test();
 
@@ -1688,9 +2033,10 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_scissor_command() {
         let mut rdp = Rdp::new_for_test();
+        // Use 32-bit color mode so fill_color 0xFF0000FF → ARGB 0xFFFF0000 (opaque red)
+        rdp.color_image_size = 3;
         let mut rdram = vec![0u8; 64];
 
         // Create a display list with SET_SCISSOR command
@@ -1703,9 +2049,10 @@ mod tests {
         rdram[0..4].copy_from_slice(&set_scissor_cmd.to_be_bytes());
         rdram[4..8].copy_from_slice(&set_scissor_data.to_be_bytes());
 
-        // SET_FILL_COLOR - Red
+        // SET_FILL_COLOR – RGBA8888 0xFF0000FF (R=255,G=0,B=0,A=255).
+        // 32-bit mode converts to internal ARGB: (A<<24)|(R<<16)|(G<<8)|B = 0xFFFF0000.
         rdram[8..12].copy_from_slice(&0x37000000u32.to_be_bytes());
-        rdram[12..16].copy_from_slice(&0xFFFF0000u32.to_be_bytes());
+        rdram[12..16].copy_from_slice(&0xFF0000FFu32.to_be_bytes());
 
         // FILL_RECTANGLE covering (5,5) to (150,150)
         // Should be clipped to scissor bounds (10,10) to (100,100)
@@ -1732,7 +2079,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_triangle_rendering() {
         let mut rdp = Rdp::new_for_test();
 
@@ -1747,7 +2093,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_texture_rectangle_stub() {
         let mut rdp = Rdp::new_for_test();
         let mut rdram = vec![0u8; 64];
@@ -1756,15 +2101,16 @@ mod tests {
         rdram[0..4].copy_from_slice(&0x37000000u32.to_be_bytes());
         rdram[4..8].copy_from_slice(&0xFF0000FFu32.to_be_bytes());
 
-        // TEXTURE_RECTANGLE (0x24) - stub implementation fills with solid color
+        // TEXTURE_RECTANGLE (0x24) - 16 bytes total
         // Coordinates: (50,50) to (100,100)
         let tex_rect_cmd: u32 = (0x24 << 24) | ((100 * 4) << 12) | (100 * 4);
         let tex_rect_data: u32 = ((50 * 4) << 12) | (50 * 4); // tile=0, coords
         rdram[8..12].copy_from_slice(&tex_rect_cmd.to_be_bytes());
         rdram[12..16].copy_from_slice(&tex_rect_data.to_be_bytes());
+        // word2 (S|T) and word3 (DSDX|DTDY) at bytes 16-23 are 0 (no texture data)
 
         rdp.write_register(0x00, 0);
-        rdp.write_register(0x04, 16);
+        rdp.write_register(0x04, 24); // 8 (SET_FILL_COLOR) + 16 (TEXTURE_RECTANGLE)
         rdp.process_display_list(&rdram);
 
         // Verify the rectangle was filled (stub implementation)
@@ -1773,7 +2119,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_set_tile_command() {
         let mut rdp = Rdp::new_for_test();
         let mut rdram = vec![0u8; 64];
@@ -1816,7 +2161,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_set_texture_image() {
         let mut rdp = Rdp::new_for_test();
         let mut rdram = vec![0u8; 64];
@@ -1840,7 +2184,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_tmem_initialized() {
         let rdp = Rdp::new_for_test();
 
@@ -1859,7 +2202,6 @@ mod tests {
     // These high-level tests verify the Z-buffer still works correctly via the RDP API
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_zbuffer_enable_disable() {
         let mut rdp = Rdp::new_for_test();
         // Z-buffer should start disabled
@@ -1874,7 +2216,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_zbuffer_clear() {
         let mut rdp = Rdp::new_for_test();
         rdp.set_zbuffer_enabled(true);
@@ -1885,7 +2226,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_triangle_zbuffer() {
         let mut rdp = Rdp::new_for_test();
         rdp.set_zbuffer_enabled(true);
@@ -1906,7 +2246,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_triangle_zbuffer_occlusion() {
         let mut rdp = Rdp::new_for_test();
         rdp.set_zbuffer_enabled(true);
@@ -1928,7 +2267,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_triangle_shaded() {
         let mut rdp = Rdp::new_for_test();
 
@@ -1952,7 +2290,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_triangle_shaded_zbuffer() {
         let mut rdp = Rdp::new_for_test();
         rdp.set_zbuffer_enabled(true);
@@ -1975,7 +2312,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_color_interpolation() {
         // Test linear color interpolation
         // ARGB format: 0xAARRGGBB
@@ -2005,7 +2341,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_adjust_brightness() {
         // Test brightness adjustment
         let color = 0xFFFF8040; // ARGB: Full alpha, R=255, G=128, B=64
@@ -2036,7 +2371,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_triangle_command_0x08() {
         let mut rdp = Rdp::new_for_test();
         let mut rdram = vec![0u8; 1024];
@@ -2076,7 +2410,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_triangle_command_0x09() {
         let mut rdp = Rdp::new_for_test();
         rdp.set_zbuffer_enabled(true);
@@ -2117,7 +2450,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_triangle_command_0x0c() {
         let mut rdp = Rdp::new_for_test();
         let mut rdram = vec![0u8; 1024];
@@ -2153,7 +2485,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_triangle_command_0x0d() {
         let mut rdp = Rdp::new_for_test();
         rdp.set_zbuffer_enabled(true);
@@ -2191,7 +2522,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_triangle_scissor_clipping() {
         let mut rdp = Rdp::new_for_test();
 
@@ -2220,7 +2550,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_texture_loading_load_tile() {
         let mut rdp = Rdp::new_for_test();
         let mut rdram = vec![0u8; 8192]; // Larger buffer for texture data
@@ -2288,7 +2617,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_texture_loading_load_block() {
         let mut rdp = Rdp::new_for_test();
         let mut rdram = vec![0u8; 16384]; // Larger buffer
@@ -2342,7 +2670,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_texture_sampling() {
         let mut rdp = Rdp::new_for_test();
 
@@ -2399,7 +2726,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_textured_triangle_command_0x0a() {
         let mut rdp = Rdp::new_for_test();
         let mut rdram = vec![0u8; 0x400000];
@@ -2464,7 +2790,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     fn test_rdp_textured_triangle_zbuffer_command_0x0b() {
         let mut rdp = Rdp::new_for_test();
         rdp.set_zbuffer_enabled(true);

@@ -160,6 +160,16 @@ pub struct SnesBus {
     wrdivb: u8,
     div_quotient: u16,
 
+    /// Hardware math delay counters (in master cycles)
+    /// Multiply takes 8 CPU cycles ≈ 48-96 master cycles
+    /// Divide takes 16 CPU cycles ≈ 96-192 master cycles
+    /// While > 0, results at $4214-$4217 are not yet valid
+    math_timer: u32,
+    /// Pending math result (multiply product or divide remainder+quotient)
+    /// Stored as: [quotient, product_or_remainder]
+    math_pending_quotient: u16,
+    math_pending_product: u16,
+
     /// $4207-$420A - H/V timer registers
     htime: u16,
     vtime: u16,
@@ -183,16 +193,42 @@ pub struct SnesBus {
     /// Pending DMA cycles that halt the CPU
     /// When non-zero, the CPU should not execute and these cycles should be consumed
     pending_dma_cycles: Cell<u32>,
+
+    /// Master clock cycle accumulator for accurate CPU timing.
+    /// Each memory read/write adds the appropriate number of master cycles (6, 8, or 12)
+    /// based on the accessed memory region. Read and reset after each CPU step.
+    master_cycles_accumulated: Cell<u32>,
+
+    /// Count of bus accesses since last take_master_cycles().
+    /// Used to compute IO cycles: io_cycles = cpu_cycles - bus_access_count.
+    bus_access_count: Cell<u32>,
+
+    /// WRAM refresh tracking: master cycle within scanline when refresh occurs
+    /// On real hardware, ~40 master cycles are stolen at H≈538 every scanline
+    wram_refresh_done: Cell<bool>,
 }
 
 impl SnesBus {
-    // Timing constants (approximate CPU cycles, see lib.rs for detailed explanation)
+    // Timing constants in master clock cycles
     // Reference: https://wiki.superfamicom.org/timing
-    // - Actual hardware: 1364 master cycles per scanline, 262 scanlines per frame
-    // - CPU cycles are abstract and depend on operation type (IO vs memory access)
-    // - These constants are tuned for the emulator's CPU cycle tracking
-    const SCANLINE_CYCLES: u32 = 341; // Approximate CPU cycles per scanline
-    const HBLANK_CYCLES: u32 = 40; // Approximate CPU cycles during H-blank (~40-60 depending on HDMA)
+    // - Master Clock: 21.477272 MHz
+    // - Scanline: 1364 master cycles (340 dots × 4 master cycles/dot, with +4 for long dots)
+    // - Frame: 262 scanlines × 1364 = 357,368 master cycles
+    // - H-Blank: ~66 dots = ~268 master cycles (H=274 to H=339)
+    // - WRAM refresh: 40 master cycles stolen at H≈538 each scanline
+    //
+    // Memory access speeds (master cycles per bus access):
+    // - 6 mc: CPU internal ops (IO), FastROM ($80-$FF upper when MEMSEL=1)
+    // - 8 mc: Slow regions (WRAM $0000-$1FFF, PPU $2100-$21FF, I/O $4000-$437F)
+    // - 12 mc: XSlow regions (ROM when MEMSEL=0)
+    const MASTER_CYCLES_PER_SCANLINE: u32 = 1364;
+    #[allow(dead_code)]
+    const MASTER_CYCLES_PER_FRAME: u32 = 1364 * 262; // 357,368
+    #[allow(dead_code)]
+    const HBLANK_START_DOT: u32 = 274;
+    const HBLANK_MASTER_CYCLES: u32 = 268; // ~66 dots × 4 mc
+    const WRAM_REFRESH_HPOS: u32 = 538; // Master cycle within scanline where WRAM refresh occurs
+    const WRAM_REFRESH_CYCLES: u32 = 40; // Master cycles stolen for WRAM refresh
     pub fn new() -> Self {
         log(LogCategory::Bus, LogLevel::Info, || {
             "SNES Bus: Initializing with stub APU (audio disabled)".to_string()
@@ -236,6 +272,9 @@ impl SnesBus {
             wrdiv: 0,
             wrdivb: 0,
             div_quotient: 0,
+            math_timer: 0,
+            math_pending_quotient: 0,
+            math_pending_product: 0,
             htime: 0,
             vtime: 0,
             irq_flag: Cell::new(false),
@@ -244,11 +283,118 @@ impl SnesBus {
 
             wram_port_addr: Cell::new(0),
             pending_dma_cycles: Cell::new(0),
+            master_cycles_accumulated: Cell::new(0),
+            bus_access_count: Cell::new(0),
+            wram_refresh_done: Cell::new(false),
         }
     }
 
     pub fn set_last_cpu_pc(&mut self, pc: u32) {
         self.last_cpu_pc = pc;
+    }
+
+    /// Determine the memory access speed in master clock cycles for a given address.
+    ///
+    /// Reference: https://wiki.superfamicom.org/timing
+    /// - 6 mc (3.58 MHz): CPU internal ops, FastROM upper half ($80-$FF:$8000-$FFFF when MEMSEL=1)
+    /// - 8 mc (2.68 MHz): WRAM, PPU, APU, I/O registers, DMA registers
+    /// - 12 mc (1.79 MHz): SlowROM ($00-$3F/$80-$BF:$8000-$FFFF when MEMSEL=0)
+    ///
+    /// Note: Banks $40-$7D and $C0-$FF upper half are always 8 mc (slow) for LoROM,
+    /// or follow MEMSEL for HiROM. We simplify to: fast if MEMSEL=1 and bank >= $80.
+    #[inline]
+    fn access_speed(&self, addr: u32) -> u32 {
+        let bank = (addr >> 16) as u8;
+        let offset = (addr & 0xFFFF) as u16;
+
+        match bank {
+            // Banks $00-$3F: System area
+            0x00..=0x3F => match offset {
+                0x0000..=0x1FFF => 8,  // WRAM mirror - slow
+                0x2000..=0x20FF => 6,  // Unused - fast
+                0x2100..=0x21FF => 6,  // PPU registers - fast (3.58 MHz)
+                0x2200..=0x3FFF => 6,  // Unused/expansion - fast (3.58 MHz)
+                0x4000..=0x41FF => 12, // Joypad/internal - xslow
+                0x4200..=0x5FFF => 6,  // CPU I/O, DMA - fast (3.58 MHz)
+                0x6000..=0x7FFF => 8,  // Expansion RAM - slow
+                0x8000..=0xFFFF => 8,  // SlowROM (banks $00-$3F always slow)
+            },
+            // Banks $40-$7D: Cartridge area (always slow for LoROM)
+            0x40..=0x7D => 8,
+            // Bank $7E-$7F: WRAM (128KB)
+            0x7E..=0x7F => 8,
+            // Banks $80-$BF: Mirror of $00-$3F but ROM area can be fast
+            0x80..=0xBF => match offset {
+                0x0000..=0x1FFF => 8,  // WRAM mirror - slow
+                0x2000..=0x20FF => 6,  // Unused - fast
+                0x2100..=0x21FF => 6,  // PPU registers - fast (3.58 MHz)
+                0x2200..=0x3FFF => 6,  // Unused/expansion - fast (3.58 MHz)
+                0x4000..=0x41FF => 12, // Joypad/internal - xslow
+                0x4200..=0x5FFF => 6,  // CPU I/O, DMA - fast (3.58 MHz)
+                0x6000..=0x7FFF => 8,  // Expansion RAM - slow
+                0x8000..=0xFFFF => {
+                    // FastROM: 6 mc when MEMSEL bit 0 is set, otherwise 8 mc
+                    if self.memsel & 0x01 != 0 {
+                        6
+                    } else {
+                        8
+                    }
+                }
+            },
+            // Banks $C0-$FF: Cartridge ROM (fast if MEMSEL enabled)
+            0xC0..=0xFF => {
+                if self.memsel & 0x01 != 0 {
+                    6
+                } else {
+                    8
+                }
+            }
+        }
+    }
+
+    /// Add master clock cycles for a memory access at the given address.
+    /// Called from read/write to track accurate timing.
+    #[inline]
+    fn accumulate_access_cycles(&self, addr: u32) {
+        let speed = self.access_speed(addr);
+        self.master_cycles_accumulated
+            .set(self.master_cycles_accumulated.get() + speed);
+        self.bus_access_count.set(self.bus_access_count.get() + 1);
+    }
+
+    /// Take the accumulated master cycles and reset the counters.
+    /// `cpu_cycles` is the WDC datasheet cycle count from the CPU step.
+    /// IO cycles (cpu_cycles - bus_accesses) are added at 6 mc each.
+    /// Returns the total master cycle cost of the instruction.
+    #[inline]
+    pub fn take_master_cycles(&self, cpu_cycles: u32) -> u32 {
+        let bus_mc = self.master_cycles_accumulated.get();
+        let bus_accesses = self.bus_access_count.get();
+        self.master_cycles_accumulated.set(0);
+        self.bus_access_count.set(0);
+
+        // IO cycles = total WDC cycles - bus accesses actually performed
+        let io_cycles = cpu_cycles.saturating_sub(bus_accesses);
+        bus_mc + io_cycles * 6
+    }
+
+    /// Reset WRAM refresh tracking for a new scanline
+    #[inline]
+    pub fn reset_wram_refresh(&mut self) {
+        self.wram_refresh_done.set(false);
+    }
+
+    /// Check and apply WRAM refresh cycle steal.
+    /// Returns the number of master cycles stolen (0 or WRAM_REFRESH_CYCLES).
+    /// Should be called with the current master cycle position within the scanline.
+    #[inline]
+    pub fn check_wram_refresh(&self, scanline_master_cycle: u32) -> u32 {
+        if !self.wram_refresh_done.get() && scanline_master_cycle >= Self::WRAM_REFRESH_HPOS {
+            self.wram_refresh_done.set(true);
+            Self::WRAM_REFRESH_CYCLES
+        } else {
+            0
+        }
     }
 
     /// Re-initialize the SPC700 APU (creates a new instance)
@@ -343,44 +489,45 @@ impl SnesBus {
         }
 
         self.auto_joypad_latch = self.controller_state;
-        // Auto-joypad read takes ~4224 master cycles (~704 CPU cycles).
-        self.auto_joypad_busy_cycles = 704;
+        // Auto-joypad read takes ~4224 master cycles
+        self.auto_joypad_busy_cycles = 4224;
     }
 
     /// Update cycle counter within frame (called after each CPU step)
-    pub fn tick_cycles(&mut self, cycles: u32) {
-        self.frame_cycle += cycles;
+    /// `master_cycles` is the number of master clock cycles elapsed
+    pub fn tick_cycles(&mut self, master_cycles: u32) {
+        self.frame_cycle += master_cycles;
 
         if self.auto_joypad_busy_cycles > 0 {
-            self.auto_joypad_busy_cycles = self.auto_joypad_busy_cycles.saturating_sub(cycles);
+            self.auto_joypad_busy_cycles =
+                self.auto_joypad_busy_cycles.saturating_sub(master_cycles);
+        }
+
+        // Tick hardware math timer (multiply/divide completion delay)
+        if self.math_timer > 0 {
+            self.math_timer = self.math_timer.saturating_sub(master_cycles);
+            if self.math_timer == 0 {
+                // Math operation complete — latch results
+                self.div_quotient = self.math_pending_quotient;
+                self.math_4216 = self.math_pending_product;
+            }
         }
 
         // Tick cartridge enhancement chip (e.g., SuperFX) with master cycles
         // SuperFX runs at the master clock frequency (21.48 MHz)
-        // Main CPU cycles are abstract units, but we approximate master cycles as CPU cycles * 6
-        // (since most CPU operations take 6 master cycles)
         if let Some(ref mut cart) = self.cartridge {
-            let master_cycles = cycles * 6;
             cart.tick_chip(master_cycles);
         }
 
-        // Convert main CPU cycles to SPC700 cycles using proper clock ratio.
-        //
-        // Our CPU cycle counts come from the WDC 65C816 datasheet (e.g. 2 for LDA #imm).
-        // The SPC700 runs at ~1.024 MHz and the main CPU at ~3.58 MHz (NTSC).
-        // Ratio: 1024 / 3580 ≈ 0.286 SPC cycles per CPU cycle.
-        //
-        // Note: SNES_SCANLINE_CYCLES = 341 processes more CPU instructions per scanline
-        // than real hardware (~170-227 depending on memory speed), but the SPC ratio is
-        // calibrated for correct CPU:SPC instruction-level timing, which is what matters
-        // for port communication protocols (upload handshakes, echo synchronization).
-
-        // Calculate SPC700 cycles with fractional tracking
-        let numerator = cycles as u64 * 1024;
+        // Convert master cycles to SPC700 cycles.
+        // SPC700 runs at 1.024 MHz. Master clock is 21.477272 MHz.
+        // Ratio: 1024000 / 21477272 ≈ 1024 / 21477
+        // We use integer math with fractional accumulator to prevent drift.
+        let numerator = master_cycles as u64 * 1024;
         let accumulator = self.spc700_cycle_accumulator.get();
         let total = numerator + accumulator;
-        let spc700_cycles = total / 3580;
-        let remainder = total % 3580;
+        let spc700_cycles = total / 21477;
+        let remainder = total % 21477;
 
         // Store remainder for next calculation to prevent drift
         self.spc700_cycle_accumulator.set(remainder);
@@ -394,7 +541,7 @@ impl SnesBus {
 
         // Decrement APU response delay for simulating processing time
         if self.apu_response_delay > 0 {
-            self.apu_response_delay = self.apu_response_delay.saturating_sub(cycles);
+            self.apu_response_delay = self.apu_response_delay.saturating_sub(master_cycles);
         }
     }
 
@@ -444,15 +591,16 @@ impl SnesBus {
     /// Called only when frame_cycle changes, avoiding expensive division/modulo in hot path.
     #[inline]
     fn update_blanking_cache(&self) {
-        let current_scanline = self.frame_cycle / Self::SCANLINE_CYCLES;
-        let cycle_in_scanline = self.frame_cycle % Self::SCANLINE_CYCLES;
+        let current_scanline = self.frame_cycle / Self::MASTER_CYCLES_PER_SCANLINE;
+        let cycle_in_scanline = self.frame_cycle % Self::MASTER_CYCLES_PER_SCANLINE;
 
         // VBlank is active during scanlines 225-261 (NTSC has 262 scanlines total)
         self.cached_in_vblank.set(current_scanline >= 225);
 
-        // HBlank is the last ~40 cycles of each scanline
-        self.cached_in_hblank
-            .set(cycle_in_scanline >= (Self::SCANLINE_CYCLES - Self::HBLANK_CYCLES));
+        // HBlank is the last ~268 master cycles of each scanline (~66 dots)
+        self.cached_in_hblank.set(
+            cycle_in_scanline >= (Self::MASTER_CYCLES_PER_SCANLINE - Self::HBLANK_MASTER_CYCLES),
+        );
 
         // Update the cached cycle value
         self.last_cached_cycle.set(self.frame_cycle);
@@ -462,27 +610,32 @@ impl SnesBus {
     ///
     /// Hardware behavior (https://sneslab.net/wiki/H/V_Count_Timer):
     /// - Mode 00 (hv_irq_mode=0): Timer off, never triggers
-    /// - Mode 01 (hv_irq_mode=1): H-IRQ only - triggers every scanline at H = HTIME + ~3.5 cycles
-    /// - Mode 10 (hv_irq_mode=2): V-IRQ only - triggers at V = VTIME, H ≈ 2.5
-    /// - Mode 11 (hv_irq_mode=3): HV-IRQ - triggers at V=VTIME and H=HTIME + ~3.5 cycles
+    /// - Mode 01 (hv_irq_mode=1): H-IRQ only - triggers every scanline at H = HTIME
+    /// - Mode 10 (hv_irq_mode=2): V-IRQ only - triggers at V = VTIME, H ≈ dot 2-4
+    /// - Mode 11 (hv_irq_mode=3): HV-IRQ - triggers at V=VTIME and H=HTIME
     ///
-    /// Returns true if IRQ should be triggered
-    pub fn check_hv_timer_irq(&self, scanline: u32, h_pos: u32) -> bool {
+    /// `h_dot` is the current dot position (0-339) within the scanline.
+    /// Returns true if IRQ should be triggered.
+    /// Only fires when TIMEUP ($4211 bit 7) is not already set, preventing
+    /// duplicate IRQ triggers for the same timer event.
+    pub fn check_hv_timer_irq(&self, scanline: u32, h_dot: u32) -> bool {
+        // Don't re-trigger if TIMEUP flag is already set (prevents duplicate IRQs)
+        if self.irq_flag.get() {
+            return false;
+        }
         match self.hv_irq_mode {
             0 => false, // Timer off
             1 => {
-                // H-timer only: trigger every scanline when H matches
-                // Approximate HTIME comparison (real hardware has +3.5 cycle offset)
-                h_pos as u16 == self.htime
+                // H-timer only: trigger every scanline when dot matches HTIME
+                h_dot as u16 == self.htime
             }
             2 => {
-                // V-timer only: trigger on specific scanline
-                // Trigger at beginning of scanline (H ≈ 2.5)
-                scanline as u16 == self.vtime && h_pos < 10
+                // V-timer only: trigger on specific scanline at ~dot 2-4
+                scanline as u16 == self.vtime && (2..5).contains(&h_dot)
             }
             3 => {
-                // HV-timer: trigger on specific scanline AND H-position
-                scanline as u16 == self.vtime && h_pos as u16 == self.htime
+                // HV-timer: trigger on specific scanline AND dot position
+                scanline as u16 == self.vtime && h_dot as u16 == self.htime
             }
             _ => false,
         }
@@ -636,12 +789,12 @@ impl SnesBus {
 
                 for i in 0..count {
                     // Calculate B-bus register address based on transfer mode for each byte.
-                    // Note: bytes_per_transfer is precomputed, but b_reg is still computed per byte.
+                    // B-bus address wraps within 8-bit range ($2100-$21FF)
                     let b_reg = match transfer_mode {
                         0 => 0x2100 | (dma.b_addr as u16),
                         1 | 5 => {
                             // Alternate: b_addr, b_addr+1
-                            0x2100 | ((dma.b_addr as u16) + (i as u16 & 1))
+                            0x2100 | ((dma.b_addr as u16 + (i as u16 & 1)) & 0xFF)
                         }
                         2 | 6 => {
                             // Write twice to same register: b_addr, b_addr
@@ -649,12 +802,11 @@ impl SnesBus {
                         }
                         3 | 7 => {
                             // Pattern: b_addr, b_addr, b_addr+1, b_addr+1
-                            0x2100 | ((dma.b_addr as u16) + ((i as u16 >> 1) & 1))
+                            0x2100 | ((dma.b_addr as u16 + ((i as u16 >> 1) & 1)) & 0xFF)
                         }
                         4 => {
                             // Four consecutive registers: b_addr, b_addr+1, b_addr+2, b_addr+3
-                            // e.g., if b_addr=0x18, accesses $2118, $2119, $211A, $211B
-                            0x2100 | ((dma.b_addr as u16) + (i as u16 & 3))
+                            0x2100 | ((dma.b_addr as u16 + (i as u16 & 3)) & 0xFF)
                         }
                         _ => 0x2100 | (dma.b_addr as u16),
                     };
@@ -670,10 +822,12 @@ impl SnesBus {
                     }
 
                     // Update A-bus address based on increment mode
+                    // DMA only modifies the low 16 bits; bank byte stays fixed
+                    let bank = a_addr & 0xFF0000;
                     match increment_mode {
-                        0 => a_addr += 1,     // Increment
-                        1 => {}               // Fixed
-                        2 | 3 => a_addr -= 1, // Decrement
+                        0 => a_addr = bank | ((a_addr.wrapping_add(1)) & 0xFFFF), // Increment within bank
+                        1 => {}                                                   // Fixed
+                        2 | 3 => a_addr = bank | ((a_addr.wrapping_sub(1)) & 0xFFFF), // Decrement within bank
                         _ => {}
                     }
 
@@ -705,9 +859,10 @@ impl SnesBus {
             if (self.hdma_enable & (1 << ch)) != 0 {
                 let dma = self.dma_channels[ch];
 
-                // Initialize HDMA state from registers
-                self.hdma_state[ch].table_addr =
-                    (dma.hdma_table as u32) | ((dma.hdma_bank as u32) << 16);
+                // Initialize HDMA table address from $43x2-$43x4 (a_addr)
+                // NOT from $43x8-$43x9 (those are internal mirrors updated during HDMA)
+                // Reference: bsnes hdmaInitialize() uses channel.sourceAddress
+                self.hdma_state[ch].table_addr = dma.a_addr;
                 self.hdma_state[ch].line_counter = 0;
                 self.hdma_state[ch].repeat = false;
                 self.hdma_state[ch].active = true;
@@ -763,7 +918,10 @@ impl SnesBus {
             if self.hdma_state[ch].line_counter == 0 {
                 // Read line count byte from table
                 let line_byte = self.read(self.hdma_state[ch].table_addr);
-                self.hdma_state[ch].table_addr += 1;
+                // HDMA table address wraps within bank (only low 16 bits change)
+                let bank = self.hdma_state[ch].table_addr & 0xFF0000;
+                self.hdma_state[ch].table_addr =
+                    bank | ((self.hdma_state[ch].table_addr + 1) & 0xFFFF);
 
                 // Check for termination (line count = 0)
                 if line_byte == 0 {
@@ -783,8 +941,10 @@ impl SnesBus {
                 if indirect {
                     // Read 2-byte indirect address
                     let addr_low = self.read(self.hdma_state[ch].table_addr) as u32;
-                    let addr_high = self.read(self.hdma_state[ch].table_addr + 1) as u32;
-                    self.hdma_state[ch].table_addr += 2;
+                    let addr_high =
+                        self.read(bank | ((self.hdma_state[ch].table_addr + 1) & 0xFFFF)) as u32;
+                    self.hdma_state[ch].table_addr =
+                        bank | ((self.hdma_state[ch].table_addr + 2) & 0xFFFF);
 
                     // Store indirect address for data fetch
                     self.dma_channels[ch].a_addr =
@@ -814,30 +974,35 @@ impl SnesBus {
                     self.hdma_state[ch].table_addr
                 };
 
-                // Transfer the bytes
+                // Transfer the bytes (source address wraps within bank)
+                let source_bank = source_addr & 0xFF0000;
                 for i in 0..bytes_to_transfer {
+                    // B-bus address wraps within 8-bit range ($2100-$21FF)
                     let b_reg = match transfer_mode {
                         0 => 0x2100 | (dma.b_addr as u16),
-                        1 | 5 => 0x2100 | ((dma.b_addr as u16) + (i as u16 & 1)),
+                        1 | 5 => 0x2100 | ((dma.b_addr as u16 + (i as u16 & 1)) & 0xFF),
                         2 | 6 => 0x2100 | (dma.b_addr as u16),
-                        3 | 7 => 0x2100 | ((dma.b_addr as u16) + ((i as u16 >> 1) & 1)),
-                        4 => 0x2100 | ((dma.b_addr as u16) + (i as u16 & 3)),
+                        3 | 7 => 0x2100 | ((dma.b_addr as u16 + ((i as u16 >> 1) & 1)) & 0xFF),
+                        4 => 0x2100 | ((dma.b_addr as u16 + (i as u16 & 3)) & 0xFF),
                         _ => 0x2100 | (dma.b_addr as u16),
                     };
 
-                    let val = self.read(source_addr + i);
+                    let effective_addr = source_bank | ((source_addr + i) & 0xFFFF);
+                    let val = self.read(effective_addr);
                     self.write(b_reg as u32, val);
                     cycles += 8; // 8 cycles per byte
                 }
 
-                // Advance source address after transfer
+                // Advance source address after transfer (wraps within bank)
                 if indirect {
-                    self.dma_channels[ch].a_addr += bytes_to_transfer;
+                    let a_bank = self.dma_channels[ch].a_addr & 0xFF0000;
+                    self.dma_channels[ch].a_addr =
+                        a_bank | ((self.dma_channels[ch].a_addr + bytes_to_transfer) & 0xFFFF);
                 } else {
                     // In direct mode: ALWAYS advance table_addr past the data bytes.
-                    // For repeat mode: advances to next set of data bytes for next scanline.
-                    // For non-repeat mode: advances past the data so next entry read is correct.
-                    self.hdma_state[ch].table_addr += bytes_to_transfer;
+                    let t_bank = self.hdma_state[ch].table_addr & 0xFF0000;
+                    self.hdma_state[ch].table_addr =
+                        t_bank | ((self.hdma_state[ch].table_addr + bytes_to_transfer) & 0xFFFF);
                 }
             }
 
@@ -862,6 +1027,7 @@ impl Default for SnesBus {
 
 impl Memory65c816 for SnesBus {
     fn read(&self, addr: u32) -> u8 {
+        self.accumulate_access_cycles(addr);
         let bank = (addr >> 16) as u8;
         let offset = (addr & 0xFFFF) as u16;
 
@@ -928,8 +1094,10 @@ impl Memory65c816 for SnesBus {
                     // $4200 - NMITIMEN - Interrupt Enable and Joypad Request
                     0x4200 => {
                         // Bit 7: NMI enable
-                        // Other bits: H/V timer interrupt enable, auto-joypad read enable
+                        // Bits 5-4: H/V timer IRQ enable mode
+                        // Bit 0: Auto-joypad read enable
                         let v = (if self.ppu.nmi_enable { 0x80 } else { 0x00 })
+                            | ((self.hv_irq_mode & 0x03) << 4)
                             | (if self.auto_joypad_enable { 0x01 } else { 0x00 });
                         self.open_bus.set(v);
                         v
@@ -1070,29 +1238,36 @@ impl Memory65c816 for SnesBus {
                     0x4016 => {
                         // Bit 0: Serial data for controller 1
                         // Bits 1-7: Open bus (typically 0)
-                        if self.controller_strobe {
-                            // While strobed, return bit 0 of the current state
-                            (self.controller_state[0] & 1) as u8
+                        // Button order: B, Y, Select, Start, Up, Down, Left, Right, A, X, L, R
+                        // B is at bit 15 (MSB), read MSB first per hardware serial protocol
+                        let v = if self.controller_strobe {
+                            // While strobed, return current button B state (bit 15)
+                            ((self.controller_state[0] >> 15) & 1) as u8
                         } else {
-                            // Shift out the latched state
+                            // Shift out the latched state, MSB first
                             let cur = self.controller_shift[0].get();
-                            let bit = (cur & 1) as u8;
-                            self.controller_shift[0].set(cur >> 1);
+                            let bit = ((cur >> 15) & 1) as u8;
+                            self.controller_shift[0].set(cur << 1);
                             bit
-                        }
+                        };
+                        self.open_bus.set(v);
+                        v
                     }
                     // $4017 - JOYSER1 - Controller 2 Serial Data
                     0x4017 => {
                         // Bit 0: Serial data for controller 2
                         // Bits 1-4: Not used (0x1E if nothing connected)
-                        if self.controller_strobe {
-                            (self.controller_state[1] & 1) as u8
+                        // Button order: B, Y, Select, Start, Up, Down, Left, Right, A, X, L, R
+                        let v = if self.controller_strobe {
+                            ((self.controller_state[1] >> 15) & 1) as u8
                         } else {
                             let cur = self.controller_shift[1].get();
-                            let bit = (cur & 1) as u8;
-                            self.controller_shift[1].set(cur >> 1);
+                            let bit = ((cur >> 15) & 1) as u8;
+                            self.controller_shift[1].set(cur << 1);
                             bit
-                        }
+                        };
+                        self.open_bus.set(v);
+                        v
                     }
                     // $4218-$421F - JOYxL/JOYxH - Auto-joypad read (only valid when auto-read enabled)
                     0x4218 => {
@@ -1140,7 +1315,7 @@ impl Memory65c816 for SnesBus {
                     0x4300..=0x437F => {
                         let ch = ((offset - 0x4300) >> 4) as usize & 7;
                         let reg = (offset & 0x0F) as usize;
-                        match reg {
+                        let v = match reg {
                             0x0 => self.dma_channels[ch].control,
                             0x1 => self.dma_channels[ch].b_addr,
                             0x2 => (self.dma_channels[ch].a_addr & 0xFF) as u8,
@@ -1153,7 +1328,9 @@ impl Memory65c816 for SnesBus {
                             0x9 => ((self.dma_channels[ch].hdma_table >> 8) & 0xFF) as u8,
                             0xA => self.dma_channels[ch].hdma_line,
                             _ => 0xFF, // Open bus for unused registers
-                        }
+                        };
+                        self.open_bus.set(v);
+                        v
                     }
                     // Other hardware registers
                     0x2000..=0x5FFF => {
@@ -1198,6 +1375,7 @@ impl Memory65c816 for SnesBus {
     }
 
     fn write(&mut self, addr: u32, val: u8) {
+        self.accumulate_access_cycles(addr);
         let bank = (addr >> 16) as u8;
         let offset = (addr & 0xFFFF) as u16;
 
@@ -1495,7 +1673,13 @@ impl Memory65c816 for SnesBus {
                     0x4203 => {
                         self.open_bus.set(val);
                         self.wrmpyb = val;
-                        self.math_4216 = (self.wrmpya as u16).wrapping_mul(self.wrmpyb as u16);
+                        // Hardware multiply takes 8 CPU cycles.
+                        // CPU cycle = 6-12 master cycles depending on speed.
+                        // Use 8 * 8 = 64 master cycles as a reasonable average.
+                        let product = (self.wrmpya as u16).wrapping_mul(self.wrmpyb as u16);
+                        self.math_pending_quotient = self.div_quotient; // unchanged
+                        self.math_pending_product = product;
+                        self.math_timer = 64;
                     }
                     // $4204-$4205 - WRDIVL/WRDIVH - Dividend
                     0x4204 => {
@@ -1510,15 +1694,17 @@ impl Memory65c816 for SnesBus {
                     0x4206 => {
                         self.open_bus.set(val);
                         self.wrdivb = val;
-
-                        if self.wrdivb == 0 {
-                            self.div_quotient = 0xFFFF;
-                            self.math_4216 = self.wrdiv;
+                        // Hardware divide takes 16 CPU cycles.
+                        // Use 16 * 8 = 128 master cycles as a reasonable average.
+                        let (quotient, remainder) = if self.wrdivb == 0 {
+                            (0xFFFF, self.wrdiv)
                         } else {
                             let divisor = self.wrdivb as u16;
-                            self.div_quotient = self.wrdiv / divisor;
-                            self.math_4216 = self.wrdiv % divisor;
-                        }
+                            (self.wrdiv / divisor, self.wrdiv % divisor)
+                        };
+                        self.math_pending_quotient = quotient;
+                        self.math_pending_product = remainder;
+                        self.math_timer = 128;
                     }
                     // $4207-$420A - H/V timer registers
                     0x4207 => {
@@ -1692,11 +1878,11 @@ mod tests {
         bus.write(0x4016, 1);
         bus.write(0x4016, 0);
 
-        // Read bits serially (SNES sends LSB first)
+        // Read bits serially (SNES sends MSB first: B, Y, Select, Start, ...)
         let mut bits_read = 0u16;
         for i in 0..16 {
             let bit = bus.read(0x4016) & 1;
-            bits_read |= (bit as u16) << i;
+            bits_read |= (bit as u16) << (15 - i);
         }
 
         assert_eq!(bits_read, 0x0080); // Should match the A button state
@@ -1709,17 +1895,17 @@ mod tests {
         // Set controller state
         bus.set_controller(0, 0x1234);
 
-        // Strobe on - should read current bit 0
+        // Strobe on - should read current button B (bit 15)
         bus.write(0x4016, 1);
         let bit_strobed = bus.read(0x4016) & 1;
-        assert_eq!(bit_strobed, 0); // bit 0 of 0x1234 is 0
+        assert_eq!(bit_strobed, 0); // bit 15 of 0x1234 is 0
 
         // Strobe off - latch and shift
         bus.write(0x4016, 0);
 
-        // Read first bit
+        // Read first bit (bit 15 = MSB)
         let bit0 = bus.read(0x4016) & 1;
-        assert_eq!(bit0, 0); // LSB of 0x1234
+        assert_eq!(bit0, 0); // MSB of 0x1234 is 0
     }
 
     #[test]
@@ -1743,12 +1929,12 @@ mod tests {
         bus.write(0x4016, 1);
         bus.write(0x4016, 0);
 
-        // Read first bits from both controllers
+        // Read first bits from both controllers (MSB first = bit 15)
         let bit1_0 = bus.read(0x4016) & 1;
         let bit2_0 = bus.read(0x4017) & 1;
 
-        assert_eq!(bit1_0, 0); // LSB of 0xAAAA
-        assert_eq!(bit2_0, 1); // LSB of 0x5555
+        assert_eq!(bit1_0, 1); // MSB of 0xAAAA is 1
+        assert_eq!(bit2_0, 0); // MSB of 0x5555 is 0
     }
 
     #[test]
@@ -1782,8 +1968,9 @@ mod tests {
         bus.enable_spc700();
 
         // With real SPC700, we need to wait for it to boot and write $BBAA signature
-        // With proper clock ratio (SPC700 ~28.6% of main CPU), we need more cycles
-        bus.tick_cycles(15000);
+        // tick_cycles now takes master cycles. SPC700 ratio: 1024/21477.
+        // IPL boot needs ~4000 SPC cycles ≈ 90000 master cycles.
+        bus.tick_cycles(100000);
 
         // Verify SPC700 is ready (wrote $BBAA)
         assert_eq!(
@@ -1803,7 +1990,7 @@ mod tests {
         bus.write(0x2141, 0x01); // Non-zero (upload mode)
         bus.write(0x2140, 0xCC); // Start signal
 
-        bus.tick_cycles(500);
+        bus.tick_cycles(5000);
 
         // SPC700 should echo $CC back
         assert_eq!(bus.read(0x2140), 0xCC, "SPC700 should acknowledge with $CC");
@@ -1811,7 +1998,7 @@ mod tests {
         // CRITICAL: Write 0 to port 0 to signal ready for upload
         // The IPL ROM at $FFD6-$FFD8 waits for port 0 to become 0 before proceeding
         bus.write(0x2140, 0x00);
-        bus.tick_cycles(50); // Give SPC700 time to see the 0
+        bus.tick_cycles(500); // Give SPC700 time to see the 0
 
         // Now upload a byte (index 1, data $DE)
         // Note: IPL ROM waits for port 0 = 0 at $FFD6-$FFD8, then proceeds to upload loop
@@ -1819,7 +2006,7 @@ mod tests {
         bus.write(0x2140, 0x01); // Index 1
         bus.write(0x2141, 0xDE); // Data
 
-        bus.tick_cycles(500);
+        bus.tick_cycles(5000);
 
         // SPC700 should echo index 1
         assert_eq!(bus.read(0x2140), 0x01, "SPC700 should echo index 1");
@@ -1834,9 +2021,8 @@ mod tests {
 
         // With real SPC700, we need to run it for enough cycles to complete boot
         // and write the $BBAA ready signature
-        // The IPL ROM clears memory first, then writes ports
-        // With proper clock ratio (SPC700 ~28.6% of main CPU), we need more cycles
-        bus.tick_cycles(15000);
+        // tick_cycles now takes master cycles. IPL boot needs ~90000+ master cycles.
+        bus.tick_cycles(100000);
 
         // APU ports should now have ready values from SPC700 IPL ROM
         // SPC700 IPL sets ports to $BBAA when read as 16-bit little-endian value
@@ -1920,9 +2106,9 @@ mod tests {
         // Configure HDMA channel 0
         bus.write(0x4300, 0x00); // Mode 0, direct
         bus.write(0x4301, 0x00); // B-bus: $2100 (INIDISP - brightness)
-        bus.write(0x4307, 0x7E); // HDMA bank
-        bus.write(0x4308, 0x00); // HDMA table address low
-        bus.write(0x4309, 0x10); // HDMA table address high ($7E1000)
+        bus.write(0x4302, 0x00); // HDMA table address low ($43x2)
+        bus.write(0x4303, 0x10); // HDMA table address high ($43x3)
+        bus.write(0x4304, 0x7E); // HDMA table bank ($43x4)
 
         // Set up a simple HDMA table in WRAM
         // Format: [line_count, data, line_count, data, ..., 0]
@@ -1948,9 +2134,9 @@ mod tests {
         // Configure HDMA channel 0 for brightness control
         bus.write(0x4300, 0x00); // Mode 0: 1 byte transfer, direct
         bus.write(0x4301, 0x00); // B-bus: $2100 (INIDISP)
-        bus.write(0x4307, 0x7E); // HDMA bank
-        bus.write(0x4308, 0x00); // HDMA table low
-        bus.write(0x4309, 0x20); // HDMA table high ($7E2000)
+        bus.write(0x4302, 0x00); // HDMA table address low ($43x2)
+        bus.write(0x4303, 0x20); // HDMA table address high ($43x3)
+        bus.write(0x4304, 0x7E); // HDMA table bank ($43x4)
 
         // Set up HDMA table: 2 scanlines of 0x0F brightness, then terminate
         bus.wram[0x2000] = 0x02; // 2 scanlines
@@ -1987,9 +2173,9 @@ mod tests {
         // Configure HDMA
         bus.write(0x4300, 0x00); // Mode 0
         bus.write(0x4301, 0x00); // $2100
-        bus.write(0x4307, 0x7E);
-        bus.write(0x4308, 0x00);
-        bus.write(0x4309, 0x30);
+        bus.write(0x4302, 0x00); // Table address low
+        bus.write(0x4303, 0x30); // Table address high
+        bus.write(0x4304, 0x7E); // Table bank
 
         // HDMA table with repeat flag set (0x80 | line_count)
         bus.wram[0x3000] = 0x83; // Repeat for 3 scanlines
@@ -2065,9 +2251,9 @@ mod tests {
         // Configure HDMA: Mode 2 (2 bytes to 1 register)
         bus.write(0x4300, 0x02); // Mode 2, direct
         bus.write(0x4301, 0x18); // B-bus: $2118
-        bus.write(0x4307, 0x7E); // HDMA bank
-        bus.write(0x4308, 0x00); // HDMA table address
-        bus.write(0x4309, 0x30);
+        bus.write(0x4302, 0x00); // Table address low
+        bus.write(0x4303, 0x30); // Table address high
+        bus.write(0x4304, 0x7E); // Table bank
 
         // HDMA table: 1 scanline, 2 bytes
         bus.wram[0x3000] = 0x01; // 1 scanline
@@ -2092,9 +2278,9 @@ mod tests {
         // Configure HDMA: Mode 4 (4 bytes to 4 registers)
         bus.write(0x4300, 0x04); // Mode 4, direct
         bus.write(0x4301, 0x18); // B-bus: $2118-$211B
-        bus.write(0x4307, 0x7E); // HDMA bank
-        bus.write(0x4308, 0x00); // HDMA table address
-        bus.write(0x4309, 0x30);
+        bus.write(0x4302, 0x00); // Table address low
+        bus.write(0x4303, 0x30); // Table address high
+        bus.write(0x4304, 0x7E); // Table bank
 
         // HDMA table: 1 scanline, 4 bytes
         bus.wram[0x3000] = 0x01; // 1 scanline
@@ -2125,6 +2311,9 @@ mod tests {
         bus.write(0x4202, 10); // WRMPYA
         bus.write(0x4203, 20); // WRMPYB (triggers multiplication)
 
+        // Tick enough cycles for multiply to complete (8 CPU cycles ≈ 64 master cycles)
+        bus.tick_cycles(64);
+
         // Read result from $4216-$4217
         let result_low = bus.read(0x4216);
         let result_high = bus.read(0x4217);
@@ -2134,6 +2323,7 @@ mod tests {
         // Test maximum values: 255 * 255 = 65025
         bus.write(0x4202, 255);
         bus.write(0x4203, 255);
+        bus.tick_cycles(64);
         let result_low = bus.read(0x4216);
         let result_high = bus.read(0x4217);
         let result = (result_high as u16) << 8 | result_low as u16;
@@ -2142,6 +2332,7 @@ mod tests {
         // Test zero multiplication
         bus.write(0x4202, 100);
         bus.write(0x4203, 0);
+        bus.tick_cycles(64);
         let result_low = bus.read(0x4216);
         let result_high = bus.read(0x4217);
         let result = (result_high as u16) << 8 | result_low as u16;
@@ -2156,6 +2347,9 @@ mod tests {
         bus.write(0x4204, 100); // WRDIVL
         bus.write(0x4205, 0); // WRDIVH
         bus.write(0x4206, 5); // WRDIVB (triggers division)
+
+        // Tick enough cycles for divide to complete (16 CPU cycles ≈ 128 master cycles)
+        bus.tick_cycles(128);
 
         // Read quotient from $4214-$4215
         let quotient_low = bus.read(0x4214);
@@ -2173,6 +2367,7 @@ mod tests {
         bus.write(0x4204, 107);
         bus.write(0x4205, 0);
         bus.write(0x4206, 10);
+        bus.tick_cycles(128);
         let quotient_low = bus.read(0x4214);
         let quotient_high = bus.read(0x4215);
         let quotient = (quotient_high as u16) << 8 | quotient_low as u16;
@@ -2186,6 +2381,7 @@ mod tests {
         bus.write(0x4204, 123);
         bus.write(0x4205, 0);
         bus.write(0x4206, 0); // Divide by zero
+        bus.tick_cycles(128);
         let quotient_low = bus.read(0x4214);
         let quotient_high = bus.read(0x4215);
         let quotient = (quotient_high as u16) << 8 | quotient_low as u16;
@@ -2202,6 +2398,7 @@ mod tests {
         bus.write(0x4204, 0x50); // Low byte (50000 = 0xC350)
         bus.write(0x4205, 0xC3); // High byte
         bus.write(0x4206, 100);
+        bus.tick_cycles(128);
         let quotient_low = bus.read(0x4214);
         let quotient_high = bus.read(0x4215);
         let quotient = (quotient_high as u16) << 8 | quotient_low as u16;

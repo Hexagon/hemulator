@@ -132,6 +132,60 @@ fn palette_mirror_index(i: usize) -> usize {
     }
 }
 
+/// Configuration for sprite 0 hit detection behaviour.
+///
+/// These options exist to allow manual debugging of games that have sprite 0 hit issues
+/// (e.g. Bee 52, Battletoads). The hardware-accurate defaults are documented below.
+///
+/// Reference: https://www.nesdev.org/wiki/PPU_OAM#Sprite_zero_hits
+#[derive(Debug, Clone, PartialEq)]
+pub struct Sprite0Config {
+    /// Clear sprite 0 hit flag at the start of VBlank (scanline 241, dot 1) in addition
+    /// to the hardware-accurate clear on the pre-render scanline.
+    ///
+    /// Hardware-accurate: **false** (clear only on pre-render scanline).
+    /// Default: **true** — this non-hardware-accurate early clear prevents Battletoads from
+    /// reading a stale hit flag from the previous frame during VBlank.
+    pub vblank_early_clear: bool,
+
+    /// Dot offset added to the computed hit position (x + 1).
+    ///
+    /// Hardware-accurate: **0** (hit fires at dot = x + 1).
+    /// Increase by 1 if the hit fires too early; decrease by 1 if too late.
+    /// Useful for games that are sensitive to the exact PPU cycle of the hit.
+    pub hit_dot_offset: i8,
+
+    /// When true (hardware-accurate), left-column clipping suppresses sprite 0 hits
+    /// in pixels 0–7 if either PPUMASK bit 1 (show_bg_left) or bit 2 (show_sprites_left)
+    /// is clear.  Set to false to disable this suppression for debugging.
+    pub left_col_suppression: bool,
+}
+
+impl Default for Sprite0Config {
+    fn default() -> Self {
+        Self {
+            vblank_early_clear: true,
+            hit_dot_offset: 0,
+            left_col_suppression: true,
+        }
+    }
+}
+
+/// Sprite 0 hit status snapshot — updated each frame for the inspector.
+#[derive(Debug, Clone, Default)]
+pub struct Sprite0Status {
+    /// Whether the hit flag is currently set.
+    pub hit_active: bool,
+    /// Scanline on which the hit last fired (None if not fired this frame yet).
+    pub last_hit_scanline: Option<u16>,
+    /// Dot on which the hit last fired.
+    pub last_hit_dot: Option<u16>,
+    /// Whether there is a pending hit scheduled (position found but not yet fired).
+    pub pending: bool,
+    /// Pending hit position (scanline, x).
+    pub pending_pos: Option<(u16, u16)>,
+}
+
 /// NES PPU (Picture Processing Unit).
 ///
 /// Implements the 2C02 PPU with frame-based rendering.
@@ -219,6 +273,10 @@ pub struct Ppu {
     /// This is set during render_scanline() and the flag is actually set during tick()
     /// when we reach the corresponding dot position (X + 2 to account for PPU pipeline).
     sprite_0_hit_pending: Cell<Option<(u16, u16)>>,
+    /// Configurable sprite 0 hit behaviour — set via the inspector GUI.
+    pub sprite0_config: Sprite0Config,
+    /// Scanline/dot on which sprite 0 hit last fired this frame (for the inspector).
+    sprite_0_hit_fired_at: Cell<Option<(u16, u16)>>,
 }
 
 impl fmt::Debug for Ppu {
@@ -242,7 +300,7 @@ impl Ppu {
         };
         // Pre-render scanline: 261 for NTSC, 311 for PAL
         let pre_render_scanline = match timing_mode {
-            TimingMode::Ntsc => 261,
+            TimingMode::Ntsc | TimingMode::Gba => 261,
             TimingMode::Pal => 311,
         };
         Self {
@@ -280,6 +338,8 @@ impl Ppu {
             frame_counter: Cell::new(0),
             timing_mode,
             sprite_0_hit_pending: Cell::new(None),
+            sprite0_config: Sprite0Config::default(),
+            sprite_0_hit_fired_at: Cell::new(None),
         }
     }
 
@@ -288,7 +348,7 @@ impl Ppu {
     /// PAL: 312 scanlines (0-239 visible, 240 post-render, 241-310 vblank, 311 pre-render)
     fn total_scanlines(&self) -> u16 {
         match self.timing_mode {
-            TimingMode::Ntsc => 262,
+            TimingMode::Ntsc | TimingMode::Gba => 262,
             TimingMode::Pal => 312,
         }
     }
@@ -298,7 +358,7 @@ impl Ppu {
     #[inline(always)]
     fn pre_render_scanline(&self) -> u16 {
         match self.timing_mode {
-            TimingMode::Ntsc => 261,
+            TimingMode::Ntsc | TimingMode::Gba => 261,
             TimingMode::Pal => 311,
         }
     }
@@ -461,6 +521,21 @@ impl Ppu {
     pub fn clear_sprite_flags(&self) {
         self.sprite_0_hit.set(false);
         self.sprite_overflow.set(false);
+        // Clear all per-frame sprite-0 bookkeeping so both the tick-driven pre-render
+        // reset path and this helper stay consistent, and the inspector starts fresh.
+        self.sprite_0_hit_pending.set(None);
+        self.sprite_0_hit_fired_at.set(None);
+    }
+
+    /// Return a snapshot of the current sprite 0 hit state for the inspector.
+    pub fn sprite0_status(&self) -> Sprite0Status {
+        Sprite0Status {
+            hit_active: self.sprite_0_hit.get(),
+            last_hit_scanline: self.sprite_0_hit_fired_at.get().map(|(sl, _)| sl),
+            last_hit_dot: self.sprite_0_hit_fired_at.get().map(|(_, dot)| dot),
+            pending: self.sprite_0_hit_pending.get().is_some(),
+            pending_pos: self.sprite_0_hit_pending.get(),
+        }
     }
 
     pub fn vblank_flag(&self) -> bool {
@@ -1407,13 +1482,23 @@ impl Ppu {
                     // We store the position instead of setting the flag immediately for cycle-accurate timing.
                     // Conditions: sprite 0, no hit found yet, flag not already set, background opaque at this x,
                     // x < 255 (hit can't occur at rightmost pixel), and not in clipped region.
+                    //
+                    // Left-column suppression (hardware-accurate, configurable):
+                    //   When left_col_suppression is true (default), hits in columns 0-7 are suppressed
+                    //   if either show_bg_left or show_sprites_left is false — matching NESdev wiki.
+                    //   When false, the suppression is skipped (useful for debugging).
+                    let left_col_ok = if self.sprite0_config.left_col_suppression {
+                        show_bg_left && show_sprites_left || x >= 8
+                    } else {
+                        true
+                    };
                     let is_sprite_0_hit_candidate = sprite_idx == 0
                         && sprite_0_hit_x.is_none()
                         && !self.sprite_0_hit.get()
                         && bg_enabled
                         && bg_priority[x]
                         && x < 255
-                        && (show_bg_left && show_sprites_left || x >= 8);
+                        && left_col_ok;
 
                     // Sprite 0 NO HIT logging disabled - too verbose
                     // if sprite_idx == 0 && sprite_0_hit_x.is_none() && !is_sprite_0_hit_candidate { ... }
@@ -1425,7 +1510,7 @@ impl Ppu {
                                 "Sprite 0 hit FOUND at scanline {} x={} (will trigger at dot {})",
                                 y,
                                 x,
-                                x + 2
+                                x + 1
                             )
                         });
                     }
@@ -1448,7 +1533,7 @@ impl Ppu {
                             "Sprite 0 HIT scheduled at scanline {} x={} (dot {})",
                             y,
                             hit_x,
-                            hit_x + 2
+                            hit_x + 1
                         )
                     });
                 }
@@ -1511,9 +1596,15 @@ impl Ppu {
             // Double-clearing here is intentional and safe: the flag is simply guaranteed to be
             // false throughout VBlank, and it will be cleared again on the pre-render scanline
             // for correctness with code that assumes the hardware timing.
-            // NOTE: This is a deviation from strict hardware accuracy for better game compatibility.
-            self.sprite_0_hit.set(false);
-            self.sprite_0_hit_pending.set(None);
+            //
+            // NOTE: Configurable via sprite0_config.vblank_early_clear.  Default: true.
+            //       Set to false (hardware-accurate) if a game fails because it polls the
+            //       sprite 0 hit flag during VBlank and expects it to still be set.
+            if self.sprite0_config.vblank_early_clear {
+                self.sprite_0_hit.set(false);
+                self.sprite_0_hit_pending.set(None);
+                self.sprite_0_hit_fired_at.set(None);
+            }
 
             // If VBlank just started and NMI is enabled, trigger NMI
             if !was_vblank && self.nmi_enabled() {
@@ -1535,8 +1626,9 @@ impl Ppu {
             // Clear sprite flags (this is the ONLY place they're cleared on hardware)
             self.sprite_0_hit.set(false);
             self.sprite_overflow.set(false);
-            // Also clear pending sprite 0 hit for the new frame
+            // Also clear pending sprite 0 hit and the fired-at tracker for the new frame
             self.sprite_0_hit_pending.set(None);
+            self.sprite_0_hit_fired_at.set(None);
 
             log(LogCategory::PPU, LogLevel::Trace, || {
                 "PPU: Pre-render scanline, dot 1: cleared VBlank and sprite flags".to_string()
@@ -1586,13 +1678,19 @@ impl Ppu {
 
         // Cycle-accurate sprite 0 hit: check if we've reached the pending hit position.
         // On real hardware, sprite 0 hit is detected during visible scanline rendering
-        // at approximately dot = X_position + 2 (accounting for PPU pipeline delay).
-        // The hit can only occur during dots 2-257 of visible scanlines (0-239).
-        if scanline < 240 && dot >= 2 && dot <= 257 {
+        // at dot = X_position + 1 (dot 1 = pixel x=0, so hit fires at dot = x + 1).
+        // The hit can only occur during dots 1-256 of visible scanlines (0-239).
+        // Reference: NESdev wiki PPU sprite evaluation, Mesen2 NesPpu.cpp GetPixelColor()
+        if scanline < 240 && dot >= 1 && dot <= 256 {
             if let Some((hit_scanline, hit_x)) = self.sprite_0_hit_pending.get() {
-                // Check if we're on the right scanline and have reached the hit position
-                // Hit triggers at dot = X + 2 (2 cycle pipeline delay)
-                let trigger_dot = hit_x.saturating_add(2);
+                // Check if we're on the right scanline and have reached the hit position.
+                // hit_dot_offset (default 0) lets the user nudge the timing for debugging.
+                let base_trigger = hit_x.saturating_add(1);
+                let trigger_dot = if self.sprite0_config.hit_dot_offset >= 0 {
+                    base_trigger.saturating_add(self.sprite0_config.hit_dot_offset as u16)
+                } else {
+                    base_trigger.saturating_sub((-self.sprite0_config.hit_dot_offset) as u16)
+                };
                 if scanline == hit_scanline && dot >= trigger_dot && !self.sprite_0_hit.get() {
                     log(LogCategory::PPU, LogLevel::Info, || {
                         format!(
@@ -1602,6 +1700,7 @@ impl Ppu {
                     });
                     self.sprite_0_hit.set(true);
                     self.sprite_0_hit_pending.set(None);
+                    self.sprite_0_hit_fired_at.set(Some((scanline, dot)));
                 }
             }
         }
@@ -1665,7 +1764,13 @@ impl Ppu {
         // the pre-render scanline, not the start of the next frame).
         // Reference: https://www.nesdev.org/wiki/PPU_frame_timing
         // "For odd frames, the cycle at the end of the scanline is skipped"
-        if scanline == pre_render_scanline && dot == 339 && self.odd_frame.get() {
+        // NOTE: The PAL PPU (2C07) never performs this skip; every PAL frame is
+        // exactly 312 × 341 dots. This guard is NTSC-only.
+        if scanline == pre_render_scanline
+            && dot == 339
+            && self.odd_frame.get()
+            && self.timing_mode == TimingMode::Ntsc
+        {
             let rendering_enabled = (self.mask & 0x18) != 0;
             if rendering_enabled {
                 next_dot = 341; // Force end-of-scanline wrap
@@ -1743,7 +1848,7 @@ impl Ppu {
     pub fn is_in_vblank_region(&self) -> bool {
         let scanline = self.scanline.get();
         let vblank_end = match self.timing_mode {
-            TimingMode::Ntsc => 260,
+            TimingMode::Ntsc | TimingMode::Gba => 260,
             TimingMode::Pal => 310,
         };
         scanline >= 241 && scanline <= vblank_end
@@ -4672,5 +4777,143 @@ mod tests {
             !ppu.is_in_vblank_region(),
             "Scanline 311 should not be in VBlank region (PAL)"
         );
+    }
+
+    #[test]
+    fn test_sprite_0_hit_cycle_accurate_timing() {
+        // Verify that sprite 0 hit fires at exactly dot = x + 1, not at dot x or dot x + 2.
+        // Reference: NESdev wiki PPU sprite evaluation — dot 1 = pixel x=0, so
+        // the hit fires at dot = x + 1.
+        let ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
+        ppu.clear_first_frame_lock();
+
+        // Simulate a pending sprite 0 hit at scanline 10, x=20
+        // → trigger_dot = 20 + 1 = 21
+        ppu.sprite_0_hit_pending.set(Some((10, 20)));
+
+        // Position at (10, 20) — one dot BEFORE the trigger dot 21
+        ppu.scanline.set(10);
+        ppu.dot.set(20);
+        ppu.tick(); // processes at (10,20); 20 < 21 → no hit; advances to (10,21)
+        assert_eq!(ppu.dot.get(), 21);
+        assert!(
+            !ppu.sprite_0_hit.get(),
+            "Sprite 0 hit must NOT fire at dot 20 (one dot before trigger dot 21)"
+        );
+
+        // Position is now (10, 21) — exactly at trigger dot
+        ppu.tick(); // processes at (10,21); 21 >= 21 → HIT; advances to (10,22)
+        assert_eq!(ppu.dot.get(), 22);
+        assert!(
+            ppu.sprite_0_hit.get(),
+            "Sprite 0 hit must fire at dot 21 (= x + 1 = 20 + 1)"
+        );
+    }
+
+    #[test]
+    fn test_odd_frame_skip_ntsc_only() {
+        // NTSC: On an odd frame with rendering enabled, dot 340 of the pre-render
+        // scanline (261) is skipped — the PPU jumps directly from dot 339 to (0,0).
+        // PAL: The 2C07 PPU never skips a dot; every PAL frame is exactly 312×341
+        // dots regardless of the odd_frame flag.
+
+        // --- NTSC: skip must happen ---
+        {
+            let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
+            ppu.clear_first_frame_lock();
+            ppu.mask = 0x18; // Rendering enabled
+            ppu.odd_frame.set(true);
+
+            // Position at pre-render scanline 261, dot 339
+            ppu.scanline.set(261);
+            ppu.dot.set(339);
+            ppu.tick(); // odd + NTSC + rendering → dot 340 skipped; wraps to (0, 0)
+            assert_eq!(
+                ppu.scanline.get(),
+                0,
+                "NTSC odd frame: should skip dot 340 and wrap to scanline 0"
+            );
+            assert_eq!(
+                ppu.dot.get(),
+                0,
+                "NTSC odd frame: should skip dot 340 and start at dot 0"
+            );
+        }
+
+        // --- NTSC: even frame — no skip ---
+        {
+            let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
+            ppu.clear_first_frame_lock();
+            ppu.mask = 0x18; // Rendering enabled
+            ppu.odd_frame.set(false);
+
+            ppu.scanline.set(261);
+            ppu.dot.set(339);
+            ppu.tick(); // even frame → no skip; advances to dot 340
+            assert_eq!(
+                ppu.scanline.get(),
+                261,
+                "NTSC even frame: must NOT skip, stay on scanline 261"
+            );
+            assert_eq!(
+                ppu.dot.get(),
+                340,
+                "NTSC even frame: must advance normally to dot 340"
+            );
+        }
+
+        // --- NTSC: odd frame but rendering disabled — no skip ---
+        {
+            let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Ntsc);
+            ppu.clear_first_frame_lock();
+            ppu.mask = 0x00; // Rendering disabled
+            ppu.odd_frame.set(true);
+
+            ppu.scanline.set(261);
+            ppu.dot.set(339);
+            ppu.tick(); // rendering disabled → no skip; advances to dot 340
+            assert_eq!(
+                ppu.scanline.get(),
+                261,
+                "NTSC odd frame with rendering off: must NOT skip"
+            );
+            assert_eq!(
+                ppu.dot.get(),
+                340,
+                "NTSC odd frame with rendering off: must advance to dot 340"
+            );
+        }
+
+        // --- PAL: odd frame with rendering enabled — skip must NOT happen ---
+        {
+            let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal, TimingMode::Pal);
+            ppu.clear_first_frame_lock();
+            ppu.mask = 0x18; // Rendering enabled
+            ppu.odd_frame.set(true);
+
+            // Pre-render scanline for PAL is 311
+            ppu.scanline.set(311);
+            ppu.dot.set(339);
+            ppu.tick(); // PAL → no skip; must advance normally to dot 340
+            assert_eq!(
+                ppu.scanline.get(),
+                311,
+                "PAL odd frame: must NOT skip, stay on scanline 311"
+            );
+            assert_eq!(
+                ppu.dot.get(),
+                340,
+                "PAL odd frame: must advance normally to dot 340 (no skip)"
+            );
+
+            // Continuing: dot 340 → end-of-scanline → (0, 0) on PAL too
+            ppu.tick(); // advances dot 340 → wraps to (0, 0)
+            assert_eq!(
+                ppu.scanline.get(),
+                0,
+                "PAL: end-of-frame wraps to scanline 0"
+            );
+            assert_eq!(ppu.dot.get(), 0, "PAL: end-of-frame wraps to dot 0");
+        }
     }
 }

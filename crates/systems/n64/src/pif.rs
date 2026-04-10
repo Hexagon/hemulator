@@ -60,18 +60,6 @@
 //! - No memory card support (yet)
 //! - Minimal boot ROM (just enough to start games)
 
-/// Physical address of the exception vector in RDRAM
-const EXCEPTION_VECTOR_ADDR: usize = 0x0180;
-
-/// Exception vector code: eret; nop
-/// ERET (Exception Return) instruction allows the interrupt to return gracefully
-/// This is a placeholder until the game sets up its own exception handler
-/// Instruction encoding: 0x42000018 (eret), 0x00000000 (nop)
-const EXCEPTION_VECTOR_CODE: [u8; 8] = [
-    0x42, 0x00, 0x00, 0x18, // eret (exception return)
-    0x00, 0x00, 0x00, 0x00, // nop (delay slot)
-];
-
 /// N64 controller button flags
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ControllerButtons {
@@ -374,17 +362,65 @@ impl Pif {
         }
     }
 
-    /// Perform IPL3 boot sequence for commercial ROMs
-    /// This copies the ROM header and code segments to RDRAM and sets up the CPU
-    /// Returns the entry point address to jump to
-    pub fn perform_ipl3_boot(&self, rdram: &mut [u8], rom_data: &[u8]) -> u64 {
-        // Step 1: Copy ROM header (first 0x1000 bytes) to RDRAM at 0x00000000
-        let header_size = 0x1000_usize.min(rom_data.len());
-        rdram[0..header_size].copy_from_slice(&rom_data[0..header_size]);
+    /// Detect CIC type from IPL3 boot code checksum and return the CIC seed.
+    /// IPL3 code is at ROM[0x40..0x1000] (0xFC0 bytes).
+    /// Returns the CIC seed value for PIF RAM.
+    pub fn detect_cic_seed(rom_data: &[u8]) -> u8 {
+        if rom_data.len() < 0x1000 {
+            return 0x3F; // Default CIC-6102
+        }
 
-        // Step 2: Extract entry point from ROM header
-        // Entry point is at offset 0x08 in the ROM header (4 bytes, big-endian)
-        let entry_point = if rom_data.len() >= 0x0C {
+        // Compute a simple checksum of IPL3 code (ROM[0x40..0x1000])
+        let mut sum: u64 = 0;
+        for i in (0x40..0x1000).step_by(4) {
+            let word = u32::from_be_bytes([
+                rom_data[i],
+                rom_data[i + 1],
+                rom_data[i + 2],
+                rom_data[i + 3],
+            ]);
+            sum = sum.wrapping_add(word as u64);
+        }
+
+        // Match known IPL3 checksums to CIC types
+        match sum {
+            0x0000001F_F9FBF25E => 0x3F, // CIC-6101 (Star Fox 64)
+            0x0000001F_F9FBD1B0 => 0x3F, // CIC-6102 (most games)
+            0x0000001F_F9FB0DAA => 0x78, // CIC-6103 (Banjo-Kazooie, etc.)
+            0x0000001F_F9FBD860 => 0x91, // CIC-6105 (Zelda OoT, etc.)
+            0x0000001F_F9FBD4E4 => 0x85, // CIC-6106 (F-Zero X, etc.)
+            _ => 0x3F,                   // Default to CIC-6102 seed
+        }
+    }
+
+    /// Set up PIF RAM for IPL3 boot.
+    /// Places the CIC seed in PIF RAM and sets the boot status byte
+    /// to signal IPL3 to start.
+    ///
+    /// PIF RAM is 64 bytes at the end of the PIF address space:
+    /// - Physical 0x1FC007C0-0x1FC007FF (offset 0x7C0-0x7FF in our array)
+    /// - CIC seed at PIF RAM byte 0x24 (array offset 0x7E4)
+    /// - Boot status at PIF RAM byte 0x3F (array offset 0x7FF)
+    pub fn setup_boot(&mut self, cic_seed: u8) {
+        // PIF RAM base offset in our 2KB array
+        const PIF_RAM_BASE: usize = 0x7C0;
+
+        // CIC seed at PIF RAM byte 0x24-0x27
+        // IPL3 reads this to determine CIC variant for checksum calculation
+        self.ram[PIF_RAM_BASE + 0x24] = 0x00;
+        self.ram[PIF_RAM_BASE + 0x25] = 0x00;
+        self.ram[PIF_RAM_BASE + 0x26] = (cic_seed >> 4) & 0x0F;
+        self.ram[PIF_RAM_BASE + 0x27] = cic_seed & 0x0F;
+
+        // Boot status byte: 0x08 signals that PIF boot is complete
+        // and IPL3 should proceed with game boot
+        self.ram[PIF_RAM_BASE + 0x3F] = 0x08;
+    }
+
+    /// Extract the entry point from the ROM header.
+    /// Entry point is at offset 0x08 in the ROM header (4 bytes, big-endian).
+    pub fn extract_entry_point(rom_data: &[u8]) -> u64 {
+        if rom_data.len() >= 0x0C {
             u32::from_be_bytes([
                 rom_data[0x08],
                 rom_data[0x09],
@@ -392,30 +428,12 @@ impl Pif {
                 rom_data[0x0B],
             ]) as u64
         } else {
-            0x80000400 // Default entry point
-        };
-
-        // Step 3: Copy ROM code segments to RDRAM
-        // Most N64 games expect their code to be loaded starting at 0x00001000 in RDRAM
-        // We copy from ROM offset 0x1000 to RDRAM offset 0x1000
-        let code_start = 0x1000_usize;
-        if rom_data.len() > code_start {
-            let code_size = (rom_data.len() - code_start).min(rdram.len() - code_start);
-            rdram[code_start..code_start + code_size]
-                .copy_from_slice(&rom_data[code_start..code_start + code_size]);
+            0x80000400
         }
-
-        // Step 4: Set up exception vectors in RDRAM
-        // Exception handler entry point at 0x80000180 (physical 0x00000180)
-        // Set up infinite loop as a placeholder exception handler
-        if EXCEPTION_VECTOR_ADDR + EXCEPTION_VECTOR_CODE.len() <= rdram.len() {
-            rdram[EXCEPTION_VECTOR_ADDR..EXCEPTION_VECTOR_ADDR + EXCEPTION_VECTOR_CODE.len()]
-                .copy_from_slice(&EXCEPTION_VECTOR_CODE);
-        }
-
-        entry_point
     }
 
+    /// Perform IPL3 boot setup for commercial ROMs.
+    /// Instead of HLE-copying ROM data to RDRAM, this sets up the state for
     /// Read from PIF RAM
     pub fn read_ram(&self, offset: u32) -> u8 {
         let addr = (offset & 0x7FF) as usize;

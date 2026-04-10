@@ -5,8 +5,9 @@
 //! - Flat-shaded and Gouraud-shaded polygons
 //! - Textured and untextured primitives
 //! - 4-bit, 8-bit, and 15-bit texture modes
-//! - Semi-transparency blending
+//! - Semi-transparency blending (4 modes)
 //! - Sprite rendering
+//! - Dithering (4×4 Bayer matrix)
 //! - Display resolution up to 640×480
 //!
 //! Communication via two 32-bit ports:
@@ -14,7 +15,7 @@
 //! - GP1 (0x1F801814): Display control commands
 //!
 //! ## References
-//! - nocash PSX-SPX GPU documentation
+//! - <https://psx-spx.consoledev.net/graphicsprocessingunitgpu/> (nocash PSX-SPX)
 //! - Martin Korth's PSX GPU timing info
 
 use emu_core::renderer::Renderer;
@@ -237,6 +238,8 @@ pub struct Gpu {
     dot_clock: u32,
     /// In VBlank region
     pub in_vblank: bool,
+    /// Current interlace field (0 = even, 1 = odd)
+    odd_field: bool,
 }
 
 impl Default for Gpu {
@@ -307,6 +310,7 @@ impl Gpu {
             scanline: 0,
             dot_clock: 0,
             in_vblank: false,
+            odd_field: false,
         }
     }
 
@@ -355,7 +359,10 @@ impl Gpu {
         if self.check_mask_bit {
             stat |= 1 << 12;
         }
-        // Bit 13: Interlace field (not implemented)
+        // Bit 13: Interlace field
+        if self.odd_field {
+            stat |= 1 << 13;
+        }
         // Bit 14: Reverse flag (not standard, always 0)
         // Bit 15: Texture disable
         if self.texture_disable {
@@ -418,8 +425,7 @@ impl Gpu {
         } << 29;
 
         // Bit 31: Drawing even/odd line in interlace mode
-        // (toggled each frame)
-        if self.scanline % 2 == 1 {
+        if self.interlace && self.odd_field {
             stat |= 1 << 31;
         }
 
@@ -645,10 +651,12 @@ impl Gpu {
     // GP0 rendering commands
     // ========================================================================
 
-    /// Decode a vertex from a GP0 word: X (bits 0-10), Y (bits 16-26)
+    /// Decode a vertex from a GP0 word: X (bits 0-10), Y (bits 16-26), both 11-bit signed.
     fn decode_vertex(&self, word: u32) -> (i32, i32) {
-        let x = (word & 0x7FF) as i16 as i32;
-        let y = ((word >> 16) & 0x7FF) as i16 as i32;
+        // Sign-extend 11-bit fields using arithmetic shift (same approach as mednafen GPU).
+        // Shift the 11-bit value into the MSB of i32, then arithmetic-right-shift back.
+        let x = ((word << 21) as i32) >> 21;
+        let y = (((word >> 16) << 21) as i32) >> 21;
         (x + self.draw_offset_x, y + self.draw_offset_y)
     }
 
@@ -660,8 +668,13 @@ impl Gpu {
         (r, g, b)
     }
 
-    /// Set a pixel in VRAM (with draw area clipping, mask bit, and semi-transparency).
+    /// Set a pixel in VRAM (with draw area clipping, dithering, mask bit, and semi-transparency).
     fn set_pixel(&mut self, x: i32, y: i32, r: u8, g: u8, b: u8) {
+        let (r, g, b) = if self.dithering {
+            apply_dither(x, y, r, g, b)
+        } else {
+            (r, g, b)
+        };
         self.set_pixel_ex(x, y, r, g, b, self.prim_semi_transparent);
     }
 
@@ -732,6 +745,11 @@ impl Gpu {
         g: u8,
         b: u8,
     ) {
+        // Cull primitives that exceed the hardware limit (> 1023 pixels wide/tall)
+        if !primitive_in_range(v0, v1, v2) {
+            return;
+        }
+
         // Simple scanline rasterizer
         let mut verts = [v0, v1, v2];
         // Sort by Y
@@ -822,6 +840,11 @@ impl Gpu {
         v2: (i32, i32),
         c2: (u8, u8, u8),
     ) {
+        // Cull primitives that exceed the hardware limit (> 1023 pixels wide/tall)
+        if !primitive_in_range(v0, v1, v2) {
+            return;
+        }
+
         // Barycentric rasterizer for Gouraud shading
         let min_x = v0.0.min(v1.0).min(v2.0).max(self.draw_area_left as i32);
         let max_x = v0.0.max(v1.0).max(v2.0).min(self.draw_area_right as i32);
@@ -852,9 +875,12 @@ impl Gpu {
                 let b1 = w1 as f32 * inv_area;
                 let b2 = w2 as f32 * inv_area;
 
-                let r = (c0.0 as f32 * b0 + c1.0 as f32 * b1 + c2.0 as f32 * b2) as u8;
-                let g = (c0.1 as f32 * b0 + c1.1 as f32 * b1 + c2.1 as f32 * b2) as u8;
-                let b = (c0.2 as f32 * b0 + c1.2 as f32 * b1 + c2.2 as f32 * b2) as u8;
+                let r = (c0.0 as f32 * b0 + c1.0 as f32 * b1 + c2.0 as f32 * b2).clamp(0.0, 255.0)
+                    as u8;
+                let g = (c0.1 as f32 * b0 + c1.1 as f32 * b1 + c2.1 as f32 * b2).clamp(0.0, 255.0)
+                    as u8;
+                let b = (c0.2 as f32 * b0 + c1.2 as f32 * b1 + c2.2 as f32 * b2).clamp(0.0, 255.0)
+                    as u8;
 
                 self.set_pixel(x, y, r, g, b);
             }
@@ -908,7 +934,9 @@ impl Gpu {
     }
 
     /// Sample a texel from VRAM given texture coordinates, page, depth, and CLUT.
-    /// Returns (r, g, b, transparent) where transparent means the pixel should be skipped.
+    /// Returns (r, g, b, transparent, stp) where:
+    /// - transparent: pixel should be skipped entirely (color==0 with no STP)
+    /// - stp: texel has the semi-transparency bit set (bit 15 in CLUT entry or direct 15-bit)
     #[allow(clippy::too_many_arguments)]
     fn sample_texture(
         &self,
@@ -919,7 +947,7 @@ impl Gpu {
         depth: TextureDepth,
         clut_x: u32,
         clut_y: u32,
-    ) -> (u8, u8, u8, bool) {
+    ) -> (u8, u8, u8, bool, bool) {
         match depth {
             TextureDepth::T4Bit => {
                 // 4-bit indexed: 4 texels per VRAM pixel
@@ -935,13 +963,15 @@ impl Gpu {
                 let cx = ((clut_x + index) & 0x3FF) as usize;
                 let cy = (clut_y & 0x1FF) as usize;
                 let color = self.vram[cy * VRAM_WIDTH + cx];
+                // CLUT entry 0x0000 = transparent (color==0 regardless of STP bit)
                 if color == 0 {
-                    return (0, 0, 0, true); // Fully transparent
+                    return (0, 0, 0, true, false);
                 }
-                let r = ((color & 0x1F) << 3) as u8;
-                let g = (((color >> 5) & 0x1F) << 3) as u8;
-                let b = (((color >> 10) & 0x1F) << 3) as u8;
-                (r, g, b, false)
+                let stp = color & 0x8000 != 0;
+                let r = expand5to8((color & 0x1F) as u8);
+                let g = expand5to8(((color >> 5) & 0x1F) as u8);
+                let b = expand5to8(((color >> 10) & 0x1F) as u8);
+                (r, g, b, false, stp)
             }
             TextureDepth::T8Bit => {
                 // 8-bit indexed: 2 texels per VRAM pixel
@@ -958,27 +988,30 @@ impl Gpu {
                 let cy = (clut_y & 0x1FF) as usize;
                 let color = self.vram[cy * VRAM_WIDTH + cx];
                 if color == 0 {
-                    return (0, 0, 0, true);
+                    return (0, 0, 0, true, false);
                 }
-                let r = ((color & 0x1F) << 3) as u8;
-                let g = (((color >> 5) & 0x1F) << 3) as u8;
-                let b = (((color >> 10) & 0x1F) << 3) as u8;
-                (r, g, b, false)
+                let stp = color & 0x8000 != 0;
+                let r = expand5to8((color & 0x1F) as u8);
+                let g = expand5to8(((color >> 5) & 0x1F) as u8);
+                let b = expand5to8(((color >> 10) & 0x1F) as u8);
+                (r, g, b, false, stp)
             }
             TextureDepth::T15Bit => {
-                // Direct 15-bit color
+                // Direct 15-bit color; bit 15 is STP
                 let texel_x = texpage_x + u as u32;
                 let texel_y = texpage_y + v as u32;
                 let vx = (texel_x & 0x3FF) as usize;
                 let vy = (texel_y & 0x1FF) as usize;
                 let color = self.vram[vy * VRAM_WIDTH + vx];
+                // 0x0000 = fully transparent (black with STP=0)
                 if color == 0 {
-                    return (0, 0, 0, true);
+                    return (0, 0, 0, true, false);
                 }
-                let r = ((color & 0x1F) << 3) as u8;
-                let g = (((color >> 5) & 0x1F) << 3) as u8;
-                let b = (((color >> 10) & 0x1F) << 3) as u8;
-                (r, g, b, false)
+                let stp = color & 0x8000 != 0;
+                let r = expand5to8((color & 0x1F) as u8);
+                let g = expand5to8(((color >> 5) & 0x1F) as u8);
+                let b = expand5to8(((color >> 10) & 0x1F) as u8);
+                (r, g, b, false, stp)
             }
         }
     }
@@ -1201,6 +1234,11 @@ impl Gpu {
         clut_x: u32,
         clut_y: u32,
     ) {
+        // Cull primitives that exceed the hardware limit (> 1023 pixels wide/tall)
+        if !primitive_in_range(v0, v1, v2) {
+            return;
+        }
+
         let min_x = v0.0.min(v1.0).min(v2.0).max(self.draw_area_left as i32);
         let max_x = v0.0.max(v1.0).max(v2.0).min(self.draw_area_right as i32);
         let min_y = v0.1.min(v1.1).min(v2.1).max(self.draw_area_top as i32);
@@ -1230,11 +1268,13 @@ impl Gpu {
                 let b2 = w2 as f32 * inv_area;
 
                 // Interpolate texture coordinates
-                let u = (uv0.0 as f32 * b0 + uv1.0 as f32 * b1 + uv2.0 as f32 * b2) as u8;
-                let v = (uv0.1 as f32 * b0 + uv1.1 as f32 * b1 + uv2.1 as f32 * b2) as u8;
+                let u = (uv0.0 as f32 * b0 + uv1.0 as f32 * b1 + uv2.0 as f32 * b2)
+                    .clamp(0.0, 255.0) as u8;
+                let v = (uv0.1 as f32 * b0 + uv1.1 as f32 * b1 + uv2.1 as f32 * b2)
+                    .clamp(0.0, 255.0) as u8;
                 let (u, v) = self.apply_tex_window(u, v);
 
-                let (tr, tg, tb, transparent) =
+                let (tr, tg, tb, transparent, stp) =
                     self.sample_texture(u, v, texpage_x, texpage_y, tex_depth, clut_x, clut_y);
                 if transparent {
                     continue;
@@ -1246,7 +1286,9 @@ impl Gpu {
                     Self::modulate_color((tr, tg, tb), prim_color)
                 };
 
-                self.set_pixel(x, y, fr, fg, fb);
+                // For textured primitives, semi-transparency applies only when
+                // both the primitive flag AND the texel STP bit are set.
+                self.set_pixel_ex(x, y, fr, fg, fb, self.prim_semi_transparent && stp);
             }
         }
     }
@@ -1271,6 +1313,11 @@ impl Gpu {
         clut_x: u32,
         clut_y: u32,
     ) {
+        // Cull primitives that exceed the hardware limit (> 1023 pixels wide/tall)
+        if !primitive_in_range(v0, v1, v2) {
+            return;
+        }
+
         let min_x = v0.0.min(v1.0).min(v2.0).max(self.draw_area_left as i32);
         let max_x = v0.0.max(v1.0).max(v2.0).min(self.draw_area_right as i32);
         let min_y = v0.1.min(v1.1).min(v2.1).max(self.draw_area_top as i32);
@@ -1300,11 +1347,13 @@ impl Gpu {
                 let b2 = w2 as f32 * inv_area;
 
                 // Interpolate texture coordinates
-                let u = (uv0.0 as f32 * b0 + uv1.0 as f32 * b1 + uv2.0 as f32 * b2) as u8;
-                let v = (uv0.1 as f32 * b0 + uv1.1 as f32 * b1 + uv2.1 as f32 * b2) as u8;
+                let u = (uv0.0 as f32 * b0 + uv1.0 as f32 * b1 + uv2.0 as f32 * b2)
+                    .clamp(0.0, 255.0) as u8;
+                let v = (uv0.1 as f32 * b0 + uv1.1 as f32 * b1 + uv2.1 as f32 * b2)
+                    .clamp(0.0, 255.0) as u8;
                 let (u, v) = self.apply_tex_window(u, v);
 
-                let (tr, tg, tb, transparent) =
+                let (tr, tg, tb, transparent, stp) =
                     self.sample_texture(u, v, texpage_x, texpage_y, tex_depth, clut_x, clut_y);
                 if transparent {
                     continue;
@@ -1314,13 +1363,18 @@ impl Gpu {
                     (tr, tg, tb)
                 } else {
                     // Interpolate Gouraud color
-                    let gr = (c0.0 as f32 * b0 + c1.0 as f32 * b1 + c2.0 as f32 * b2) as u8;
-                    let gg = (c0.1 as f32 * b0 + c1.1 as f32 * b1 + c2.1 as f32 * b2) as u8;
-                    let gb = (c0.2 as f32 * b0 + c1.2 as f32 * b1 + c2.2 as f32 * b2) as u8;
+                    let gr = (c0.0 as f32 * b0 + c1.0 as f32 * b1 + c2.0 as f32 * b2)
+                        .clamp(0.0, 255.0) as u8;
+                    let gg = (c0.1 as f32 * b0 + c1.1 as f32 * b1 + c2.1 as f32 * b2)
+                        .clamp(0.0, 255.0) as u8;
+                    let gb = (c0.2 as f32 * b0 + c1.2 as f32 * b1 + c2.2 as f32 * b2)
+                        .clamp(0.0, 255.0) as u8;
                     Self::modulate_color((tr, tg, tb), (gr, gg, gb))
                 };
 
-                self.set_pixel(x, y, fr, fg, fb);
+                // For textured primitives, semi-transparency applies only when
+                // both the primitive flag AND the texel STP bit are set.
+                self.set_pixel_ex(x, y, fr, fg, fb, self.prim_semi_transparent && stp);
             }
         }
     }
@@ -1350,11 +1404,11 @@ impl Gpu {
     fn gp0_shaded_line(&mut self) {
         // Two-vertex shaded line: [c0+cmd, v0, c1, v1]
         if self.gp0_buffer.len() >= 4 {
-            let (r, g, b) = Self::decode_color(self.gp0_buffer[0]);
+            let c0 = Self::decode_color(self.gp0_buffer[0]);
             let v0 = self.decode_vertex(self.gp0_buffer[1]);
+            let c1 = Self::decode_color(self.gp0_buffer[2]);
             let v1 = self.decode_vertex(self.gp0_buffer[3]);
-            // Use the start color for the whole line (simplified; full Gouraud for lines is rare)
-            self.draw_line(v0, v1, r, g, b);
+            self.draw_shaded_line(v0, c0, v1, c1);
         }
     }
 
@@ -1362,15 +1416,26 @@ impl Gpu {
         // Draw the first segment (cmd+c0, v0, c1, v1)
         // Subsequent color/vertex pairs are handled in Gp0Mode::Polyline via gp0_write
         if self.gp0_buffer.len() >= 4 {
-            let (r, g, b) = Self::decode_color(self.gp0_buffer[0]);
+            let c0 = Self::decode_color(self.gp0_buffer[0]);
             let v0 = self.decode_vertex(self.gp0_buffer[1]);
+            let c1 = Self::decode_color(self.gp0_buffer[2]);
             let v1 = self.decode_vertex(self.gp0_buffer[3]);
-            self.draw_line(v0, v1, r, g, b);
+            self.draw_shaded_line(v0, c0, v1, c1);
         }
     }
 
     fn draw_line(&mut self, v0: (i32, i32), v1: (i32, i32), r: u8, g: u8, b: u8) {
-        // Bresenham's line algorithm
+        self.draw_shaded_line(v0, (r, g, b), v1, (r, g, b));
+    }
+
+    fn draw_shaded_line(
+        &mut self,
+        v0: (i32, i32),
+        c0: (u8, u8, u8),
+        v1: (i32, i32),
+        c1: (u8, u8, u8),
+    ) {
+        // Bresenham's line algorithm with Gouraud color interpolation
         let (mut x0, mut y0) = v0;
         let (x1, y1) = v1;
         let dx = (x1 - x0).abs();
@@ -1379,7 +1444,20 @@ impl Gpu {
         let sy = if y0 < y1 { 1 } else { -1 };
         let mut err = dx + dy;
 
+        let total_steps = dx.max((y1 - y0).abs());
+        let mut step = 0;
+
         loop {
+            // Interpolate color along the line
+            let t = if total_steps > 0 {
+                step as f32 / total_steps as f32
+            } else {
+                0.0
+            };
+            let r = (c0.0 as f32 + (c1.0 as f32 - c0.0 as f32) * t).clamp(0.0, 255.0) as u8;
+            let g = (c0.1 as f32 + (c1.1 as f32 - c0.1 as f32) * t).clamp(0.0, 255.0) as u8;
+            let b = (c0.2 as f32 + (c1.2 as f32 - c0.2 as f32) * t).clamp(0.0, 255.0) as u8;
+
             self.set_pixel(x0, y0, r, g, b);
             if x0 == x1 && y0 == y1 {
                 break;
@@ -1393,6 +1471,7 @@ impl Gpu {
                 err += dx;
                 y0 += sy;
             }
+            step += 1;
         }
     }
 
@@ -1460,7 +1539,7 @@ impl Gpu {
                 let u = u_base.wrapping_add(dx as u8);
                 let v = v_base.wrapping_add(dy as u8);
                 let (u, v) = self.apply_tex_window(u, v);
-                let (tr, tg, tb, transparent) =
+                let (tr, tg, tb, transparent, stp) =
                     self.sample_texture(u, v, tp_x, tp_y, tp_depth, clut_x, clut_y);
                 if transparent {
                     continue;
@@ -1470,7 +1549,14 @@ impl Gpu {
                 } else {
                     Self::modulate_color((tr, tg, tb), (pr, pg, pb))
                 };
-                self.set_pixel(x + dx, y + dy, fr, fg, fb);
+                self.set_pixel_ex(
+                    x + dx,
+                    y + dy,
+                    fr,
+                    fg,
+                    fb,
+                    self.prim_semi_transparent && stp,
+                );
             }
         }
     }
@@ -1517,7 +1603,7 @@ impl Gpu {
                 let u = u_base.wrapping_add(dx as u8);
                 let v = v_base.wrapping_add(dy as u8);
                 let (u, v) = self.apply_tex_window(u, v);
-                let (tr, tg, tb, transparent) =
+                let (tr, tg, tb, transparent, stp) =
                     self.sample_texture(u, v, tp_x, tp_y, tp_depth, clut_x, clut_y);
                 if transparent {
                     continue;
@@ -1527,7 +1613,14 @@ impl Gpu {
                 } else {
                     Self::modulate_color((tr, tg, tb), (pr, pg, pb))
                 };
-                self.set_pixel(x + dx, y + dy, fr, fg, fb);
+                self.set_pixel_ex(
+                    x + dx,
+                    y + dy,
+                    fr,
+                    fg,
+                    fb,
+                    self.prim_semi_transparent && stp,
+                );
             }
         }
     }
@@ -1568,7 +1661,7 @@ impl Gpu {
                 let u = u_base.wrapping_add(dx as u8);
                 let v = v_base.wrapping_add(dy as u8);
                 let (u, v) = self.apply_tex_window(u, v);
-                let (tr, tg, tb, transparent) =
+                let (tr, tg, tb, transparent, stp) =
                     self.sample_texture(u, v, tp_x, tp_y, tp_depth, clut_x, clut_y);
                 if transparent {
                     continue;
@@ -1578,7 +1671,14 @@ impl Gpu {
                 } else {
                     Self::modulate_color((tr, tg, tb), (pr, pg, pb))
                 };
-                self.set_pixel(x + dx, y + dy, fr, fg, fb);
+                self.set_pixel_ex(
+                    x + dx,
+                    y + dy,
+                    fr,
+                    fg,
+                    fb,
+                    self.prim_semi_transparent && stp,
+                );
             }
         }
     }
@@ -1603,7 +1703,15 @@ impl Gpu {
                 let dy2 = (dst_y + dy) & 0x1FF;
                 let src_idx = (sy as usize) * VRAM_WIDTH + (sx as usize);
                 let dst_idx = (dy2 as usize) * VRAM_WIDTH + (dx2 as usize);
-                self.vram[dst_idx] = self.vram[src_idx];
+                // Respect mask bit: skip destination pixels with bit 15 set
+                if self.check_mask_bit && (self.vram[dst_idx] & 0x8000 != 0) {
+                    continue;
+                }
+                let mut pixel = self.vram[src_idx];
+                if self.set_mask_bit {
+                    pixel |= 0x8000;
+                }
+                self.vram[dst_idx] = pixel;
             }
         }
     }
@@ -1892,6 +2000,10 @@ impl Gpu {
         if self.scanline >= total_lines {
             self.scanline = 0;
             self.in_vblank = false;
+            // Toggle interlace field each frame
+            if self.interlace {
+                self.odd_field = !self.odd_field;
+            }
         }
 
         if self.scanline == vblank_start {
@@ -1932,6 +2044,13 @@ impl Renderer for Gpu {
 // Helper functions
 // ============================================================================
 
+/// Expand a 5-bit colour component to 8 bits.
+/// Uses the standard (c << 3) | (c >> 2) formula so that 0→0 and 31→255.
+#[inline]
+fn expand5to8(c: u8) -> u8 {
+    (c << 3) | (c >> 2)
+}
+
 /// Convert RGB888 to PS1 15-bit pixel (XBBBBBGGGGGRRRRR).
 fn rgb_to_15bit(r: u8, g: u8, b: u8) -> u16 {
     let r5 = (r >> 3) as u16;
@@ -1942,15 +2061,48 @@ fn rgb_to_15bit(r: u8, g: u8, b: u8) -> u16 {
 
 /// Convert PS1 15-bit pixel to ARGB8888.
 fn pixel15_to_argb(pixel: u16) -> u32 {
-    let r = ((pixel & 0x1F) << 3) as u32;
-    let g = (((pixel >> 5) & 0x1F) << 3) as u32;
-    let b = (((pixel >> 10) & 0x1F) << 3) as u32;
+    let r = expand5to8((pixel & 0x1F) as u8) as u32;
+    let g = expand5to8(((pixel >> 5) & 0x1F) as u8) as u32;
+    let b = expand5to8(((pixel >> 10) & 0x1F) as u8) as u32;
     0xFF00_0000 | (r << 16) | (g << 8) | b
 }
 
 /// Cross product for triangle rasterization.
 fn cross(a: (i32, i32), b: (i32, i32), c: (i32, i32)) -> i32 {
     (b.0 - a.0) * (c.1 - a.1) - (b.1 - a.1) * (c.0 - a.0)
+}
+
+/// Check whether all three triangle vertices are within the PS1's drawable range.
+/// The hardware skips ("culls") triangles whose bounding box exceeds 1023 pixels
+/// in either dimension, preventing runaway rasterization from corrupted geometry.
+fn primitive_in_range(v0: (i32, i32), v1: (i32, i32), v2: (i32, i32)) -> bool {
+    let min_x = v0.0.min(v1.0).min(v2.0);
+    let max_x = v0.0.max(v1.0).max(v2.0);
+    let min_y = v0.1.min(v1.1).min(v2.1);
+    let max_y = v0.1.max(v1.1).max(v2.1);
+    (max_x - min_x) <= 1023 && (max_y - min_y) <= 511
+}
+
+/// PS1 dithering — 4×4 Bayer matrix applied to 8-bit colour before truncation
+/// to 5-bit (via rgb_to_15bit). Offsets are in the range [-4, +3].
+/// Source: Nocash PSX-SPX "Dither" section.
+const DITHER_TABLE: [[i8; 4]; 4] = [
+    [-4, 0, -3, 1],
+    [2, -2, 3, -1],
+    [-3, 1, -4, 0],
+    [3, -1, 2, -2],
+];
+
+/// Apply the PS1 4×4 dither matrix to an RGB888 pixel and return the dithered result.
+/// The dithered values are clamped to [0, 255] before the caller converts to 15-bit.
+fn apply_dither(x: i32, y: i32, r: u8, g: u8, b: u8) -> (u8, u8, u8) {
+    let offset = DITHER_TABLE[(y & 3) as usize][(x & 3) as usize] as i16;
+    let clamp = |v: i16| v.clamp(0, 255) as u8;
+    (
+        clamp(r as i16 + offset),
+        clamp(g as i16 + offset),
+        clamp(b as i16 + offset),
+    )
 }
 
 /// Apply PS1 semi-transparency blending to a pixel.
@@ -2304,5 +2456,294 @@ mod tests {
             50,
             "draw area top should be in bits 10-18 of GPU info latch"
         );
+    }
+
+    // =========================================================================
+    // New tests for improved behaviours
+    // =========================================================================
+
+    #[test]
+    fn test_decode_vertex_negative_x() {
+        // 11-bit signed: 0x400 = 1024 which maps to -1024 in two's complement.
+        let gpu = make_gpu();
+        // word with X=0x400 (sign bit set → -1024), Y=0 (no offset)
+        let (x, y) = gpu.decode_vertex(0x0000_0400);
+        assert_eq!(x, -1024, "X=0x400 should sign-extend to -1024");
+        assert_eq!(y, 0);
+    }
+
+    #[test]
+    fn test_decode_vertex_negative_y() {
+        let gpu = make_gpu();
+        // word with X=0, Y=0x700 (= -256 as 11-bit signed)
+        let (x, y) = gpu.decode_vertex(0x0700_0000);
+        assert_eq!(x, 0);
+        assert_eq!(y, -256, "Y=0x700 should sign-extend to -256");
+    }
+
+    #[test]
+    fn test_decode_vertex_positive_max() {
+        let gpu = make_gpu();
+        // 0x3FF = 1023, maximum positive 11-bit value
+        let (x, y) = gpu.decode_vertex(0x03FF_03FF);
+        assert_eq!(x, 1023);
+        assert_eq!(y, 1023);
+    }
+
+    #[test]
+    fn test_decode_vertex_negative_one() {
+        let gpu = make_gpu();
+        // 0x7FF = -1 in 11-bit two's complement
+        let (x, y) = gpu.decode_vertex(0x07FF_07FF);
+        assert_eq!(x, -1);
+        assert_eq!(y, -1);
+    }
+
+    #[test]
+    fn test_expand5to8_boundary_values() {
+        // 0 → 0, 31 → 255
+        assert_eq!(expand5to8(0), 0, "5-bit 0 should expand to 0");
+        assert_eq!(expand5to8(31), 255, "5-bit 31 should expand to 255");
+        // Intermediate: 16 → (16<<3)|(16>>2) = 128|4 = 132
+        assert_eq!(expand5to8(16), 132);
+    }
+
+    #[test]
+    fn test_pixel15_to_argb_full_white() {
+        // 0x7FFF = R=31 G=31 B=31 → all channels should be 255 after expansion
+        let argb = pixel15_to_argb(0x7FFF);
+        assert_eq!(argb & 0xFF, 255, "blue channel should be 255");
+        assert_eq!((argb >> 8) & 0xFF, 255, "green channel should be 255");
+        assert_eq!((argb >> 16) & 0xFF, 255, "red channel should be 255");
+        assert_eq!((argb >> 24) & 0xFF, 0xFF, "alpha should be opaque");
+    }
+
+    #[test]
+    fn test_pixel15_to_argb_full_black() {
+        let argb = pixel15_to_argb(0x0000);
+        assert_eq!(argb, 0xFF00_0000, "0x0000 should produce opaque black");
+    }
+
+    #[test]
+    fn test_large_triangle_culled() {
+        let mut gpu = make_gpu();
+
+        // Triangle spanning > 1023 pixels wide — should be silently discarded
+        let v0 = (0, 0);
+        let v1 = (1024, 0);
+        let v2 = (512, 100);
+        gpu.draw_flat_triangle(v0, v1, v2, 255, 0, 0);
+
+        // Nothing should have been written to VRAM (the triangle was culled)
+        let any_written = gpu.vram[..1024].iter().any(|&p| p != 0);
+        assert!(
+            !any_written,
+            "oversized triangle (> 1023px wide) should be culled"
+        );
+    }
+
+    #[test]
+    fn test_normal_triangle_not_culled() {
+        let mut gpu = make_gpu();
+
+        // Triangle within 1023 px — should be drawn
+        let v0 = (10, 10);
+        let v1 = (110, 10);
+        let v2 = (60, 60);
+        gpu.draw_flat_triangle(v0, v1, v2, 255, 0, 0);
+
+        // At least the centroid should be written
+        let centroid_x = 60;
+        let centroid_y = 26;
+        let p = gpu.vram[centroid_y * VRAM_WIDTH + centroid_x];
+        assert_ne!(p, 0, "centroid of a valid triangle should be drawn");
+    }
+
+    #[test]
+    fn test_primitive_in_range_pass() {
+        assert!(primitive_in_range((0, 0), (1023, 0), (511, 511)));
+    }
+
+    #[test]
+    fn test_primitive_in_range_fail_wide() {
+        // Width = 1024 → rejected
+        assert!(!primitive_in_range((0, 0), (1024, 0), (512, 10)));
+    }
+
+    #[test]
+    fn test_primitive_in_range_fail_tall() {
+        // Height = 512 → rejected
+        assert!(!primitive_in_range((0, 0), (10, 512), (5, 256)));
+    }
+
+    #[test]
+    fn test_dithering_shifts_channel_values() {
+        // The dither offset at (0,0) is -4 from the DITHER_TABLE.
+        // Starting with R=100, dithered value should be 96.
+        let (r, g, b) = apply_dither(0, 0, 100, 100, 100);
+        assert_eq!(r, 96, "dither at (0,0) should subtract 4");
+        assert_eq!(g, 96);
+        assert_eq!(b, 96);
+    }
+
+    #[test]
+    fn test_dithering_clamps_at_zero() {
+        // Dither offset -4 applied to colour value 2 must clamp to 0, not underflow.
+        let (r, _, _) = apply_dither(0, 0, 2, 0, 0);
+        assert_eq!(r, 0, "dithered value below 0 should clamp to 0");
+    }
+
+    #[test]
+    fn test_dithering_clamps_at_255() {
+        // Dither offset +3 applied to 255 must stay at 255.
+        // Table[1][0] = 2, Table[0][1] = 0, Table[0][3] = 1, Table[1][2] = 3
+        // Use (x=2, y=1) → offset = 3
+        let (r, _, _) = apply_dither(2, 1, 255, 0, 0);
+        assert_eq!(r, 255, "dithered value above 255 should clamp to 255");
+    }
+
+    #[test]
+    fn test_vram_to_vram_respects_mask_check() {
+        let mut gpu = make_gpu();
+
+        // Mark destination pixel (0, 0) as masked
+        gpu.vram[0] = 0x8000;
+        gpu.check_mask_bit = true;
+
+        // Write source pixel at (1, 0)
+        gpu.vram[1] = 0x001F; // red
+
+        // Copy (1,0) → (0,0): destination is masked, should be skipped
+        gpu.gp0_write(0x8000_0000); // VRAM-to-VRAM copy
+        gpu.gp0_write(0x0000_0001); // src (1, 0)
+        gpu.gp0_write(0x0000_0000); // dst (0, 0)
+        gpu.gp0_write(0x0001_0001); // w=1, h=1
+
+        assert_eq!(
+            gpu.vram[0], 0x8000,
+            "masked destination pixel should not be overwritten"
+        );
+    }
+
+    #[test]
+    fn test_vram_to_vram_sets_mask_bit() {
+        let mut gpu = make_gpu();
+
+        gpu.set_mask_bit = true;
+        gpu.vram[1] = 0x001F; // source: red (no mask bit)
+
+        // Copy (1,0) → (0,0)
+        gpu.gp0_write(0x8000_0000);
+        gpu.gp0_write(0x0000_0001); // src (1, 0)
+        gpu.gp0_write(0x0000_0000); // dst (0, 0)
+        gpu.gp0_write(0x0001_0001); // w=1, h=1
+
+        assert_eq!(
+            gpu.vram[0] & 0x8000,
+            0x8000,
+            "set_mask_bit should force bit 15 on copied pixels"
+        );
+        assert_eq!(
+            gpu.vram[0] & 0x7FFF,
+            0x001F,
+            "pixel data should be preserved"
+        );
+    }
+
+    #[test]
+    fn test_interlace_field_toggles_each_frame() {
+        let mut gpu = Gpu::new();
+        gpu.interlace = true;
+
+        assert!(!gpu.odd_field, "initial field should be even");
+
+        // Advance through enough scanlines to complete a frame (NTSC = 263 lines)
+        for _ in 0..263 {
+            gpu.step_scanline();
+        }
+        assert!(gpu.odd_field, "field should toggle to odd after one frame");
+
+        for _ in 0..263 {
+            gpu.step_scanline();
+        }
+        assert!(
+            !gpu.odd_field,
+            "field should toggle back to even after two frames"
+        );
+    }
+
+    #[test]
+    fn test_interlace_field_not_toggled_when_disabled() {
+        let mut gpu = Gpu::new();
+        gpu.interlace = false;
+
+        for _ in 0..263 {
+            gpu.step_scanline();
+        }
+        assert!(
+            !gpu.odd_field,
+            "odd_field should not toggle when interlace is disabled"
+        );
+    }
+
+    #[test]
+    fn test_gpustat_interlace_field_bit() {
+        let mut gpu = Gpu::new();
+        gpu.interlace = true;
+        gpu.odd_field = true;
+
+        let stat = gpu.gpustat();
+        assert_ne!(
+            stat & (1 << 31),
+            0,
+            "GPUSTAT bit 31 should be set when odd_field is true"
+        );
+
+        gpu.odd_field = false;
+        let stat = gpu.gpustat();
+        assert_eq!(
+            stat & (1 << 31),
+            0,
+            "GPUSTAT bit 31 should be clear when odd_field is false"
+        );
+    }
+
+    #[test]
+    fn test_texel_stp_controls_semi_transparency() {
+        let mut gpu = make_gpu();
+
+        // Build a 1×1 CLUT at VRAM (0, 0):
+        // CLUT[0] = 0x0000 (transparent)
+        // CLUT[1] = 0x8000 | 0x001F = 0x801F (red + STP bit)
+        gpu.vram[0] = 0x0000; // CLUT entry 0
+        gpu.vram[1] = 0x801F; // CLUT entry 1 — red with STP
+
+        // Write a 4-bit texture at (0, 256): index=1 at (u=0, v=0)
+        // 4-bit: one 16-bit word covers 4 texels; index for u=0 is bits[3:0]
+        gpu.vram[256 * VRAM_WIDTH] = 0x0001; // texel 0 = index 1
+
+        // Set up texpage at (0, 0) for 4-bit texture
+        gpu.texpage_x = 0;
+        gpu.texpage_y = 256;
+        gpu.tex_depth = TextureDepth::T4Bit;
+
+        // prim_semi_transparent = true, background = blue (0x7C00)
+        gpu.vram[0] = 0x7C00; // Overwrite CLUT[0] with blue background first
+                              // Actually we need to keep CLUT at a different location. Let's use CLUT at y=1.
+                              // CLUT[0] = 0x0000, CLUT[1] = 0x801F at y=1, x=0..1
+        gpu.vram[VRAM_WIDTH] = 0x0000; // CLUT entry 0
+        gpu.vram[VRAM_WIDTH + 1] = 0x801F; // CLUT entry 1 — red+STP
+
+        // Set background pixel at (0, 0) = blue
+        gpu.vram[0] = 0x7C00; // pure blue
+
+        // Sample the texture: u=0, v=0, texpage=(0,256), CLUT at (0,1)
+        let (r, g, b, transparent, stp) =
+            gpu.sample_texture(0, 0, 0, 256, TextureDepth::T4Bit, 0, 1);
+        assert!(!transparent, "index=1 should not be transparent");
+        assert!(stp, "texel with STP bit in CLUT entry should set stp=true");
+        assert!(r > 0, "red channel should be non-zero");
+        assert_eq!(g, 0, "green should be 0 for red texel");
+        assert_eq!(b, 0, "blue should be 0 for red texel");
     }
 }

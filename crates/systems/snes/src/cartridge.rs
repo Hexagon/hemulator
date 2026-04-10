@@ -181,9 +181,9 @@ impl Cartridge {
 
         let mut score = 0u32;
 
-        // Check mapper type byte at +$15 (should be reasonable value)
+        // Check mapper type byte at +$15 (valid values are $20,$21,$25,$30,$31,$35)
         let mapper_type = rom[offset + 0x15];
-        if mapper_type < 0x08 {
+        if Self::map_mode_byte_to_mapping(mapper_type).is_some() {
             score += 2; // Valid mapper type
         }
 
@@ -278,7 +278,9 @@ impl Cartridge {
 
     pub fn read(&self, addr: u32) -> u8 {
         // Check if this address should be handled by the enhancement chip
-        // DSP-1 in LoROM: banks $30-$3F at $3000-$3FFF (DR) and $7000-$7FFF (SR)
+        // DSP-1 in LoROM: two common PCB mappings (both supported):
+        //   - Banks $00-$1F / $80-$9F at $6000-$7FFF (DR at $6xxx, SR at $7xxx)
+        //   - Banks $20-$3F / $A0-$BF at $8000-$FFFF (DR bit14=0, SR bit14=1)
         // DSP-1 in HiROM: banks $00-$1F at $6000-$7FFF
         if let Some(ref chip) = self.chip {
             let bank = (addr >> 16) as u8;
@@ -286,7 +288,18 @@ impl Cartridge {
 
             match (self.chip_type, self.mapping_mode) {
                 (ChipType::Dsp1, MappingMode::LoROM) => {
-                    // DSP-1 LoROM mapping (Mode B, default for <16Mbit ROMs like SMK):
+                    // DSP-1 LoROM mapping - support both PCB variants:
+                    //
+                    // Variant 1 (SHVC-1DSP-01, used by Super Mario Kart):
+                    //   Banks $00-$1F / $80-$9F at $6000-$7FFF
+                    //   DR (Data Register):   $6000-$6FFF (bit 12 = 0)
+                    //   SR (Status Register): $7000-$7FFF (bit 12 = 1)
+                    if matches!(bank, 0x00..=0x1F | 0x80..=0x9F)
+                        && (0x6000..=0x7FFF).contains(&offset)
+                    {
+                        return chip.borrow_mut().read(addr);
+                    }
+                    // Variant 2 (SHVC-1A3M, used by some Pilotwings revisions):
                     //   Banks $20-$3F / $A0-$BF at $8000-$FFFF
                     //   DR (Data Register):   offset bit 14 = 0 ($8000-$BFFF)
                     //   SR (Status Register): offset bit 14 = 1 ($C000-$FFFF)
@@ -361,7 +374,13 @@ impl Cartridge {
                     self.read_rom_mirrored(rom_offset)
                 } else if matches!(bank, 0x70..=0x7D) && offset < 0x8000 {
                     // SRAM in banks $70-$7D at $0000-$7FFF
-                    *self.ram.get(offset as usize).unwrap_or(&0)
+                    // Each bank maps to a different 32KB region for large SRAM
+                    let sram_offset = ((bank as usize - 0x70) * 0x8000) | (offset as usize);
+                    if self.ram.is_empty() {
+                        0
+                    } else {
+                        self.ram[sram_offset % self.ram.len()]
+                    }
                 } else {
                     0
                 }
@@ -372,8 +391,13 @@ impl Cartridge {
                         (((bank as usize) - 0x80) << 15) | ((offset as usize - 0x8000) & 0x7FFF);
                     self.read_rom_mirrored(rom_offset)
                 } else if matches!(bank, 0xF0..=0xFF) && offset < 0x8000 {
-                    // SRAM in banks $F0-$FF at $0000-$7FFF (mirror)
-                    *self.ram.get(offset as usize).unwrap_or(&0)
+                    // SRAM in banks $F0-$FF at $0000-$7FFF (mirror of $70-$7D)
+                    let sram_offset = ((bank as usize - 0xF0) * 0x8000) | (offset as usize);
+                    if self.ram.is_empty() {
+                        0
+                    } else {
+                        self.ram[sram_offset % self.ram.len()]
+                    }
                 } else {
                     0
                 }
@@ -388,12 +412,27 @@ impl Cartridge {
 
         // HiROM mapping: Full 64KB per bank
         match bank {
-            // Banks $00-$3F: SRAM at $6000-$7FFF, ROM at $8000-$FFFF
-            0x00..=0x3F => {
+            // Banks $00-$1F: ROM at $8000-$FFFF, no SRAM
+            0x00..=0x1F => {
+                if offset >= 0x8000 {
+                    // ROM mirror
+                    let rom_offset = ((bank as usize) << 16) | (offset as usize);
+                    self.read_rom_mirrored(rom_offset)
+                } else {
+                    0
+                }
+            }
+            // Banks $20-$3F: SRAM at $6000-$7FFF, ROM at $8000-$FFFF
+            0x20..=0x3F => {
                 if (0x6000..0x8000).contains(&offset) {
-                    // SRAM
-                    let sram_offset = (offset - 0x6000) as usize;
-                    *self.ram.get(sram_offset).unwrap_or(&0)
+                    // SRAM - each bank maps to a different 8KB region for large SRAM
+                    let sram_offset =
+                        ((bank as usize - 0x20) & 0x1F) * 0x2000 + (offset as usize - 0x6000);
+                    if self.ram.is_empty() {
+                        0
+                    } else {
+                        self.ram[sram_offset % self.ram.len()]
+                    }
                 } else if offset >= 0x8000 {
                     // ROM mirror
                     let rom_offset = ((bank as usize) << 16) | (offset as usize);
@@ -410,9 +449,14 @@ impl Cartridge {
             // Banks $80-$BF: Mirror of $00-$3F
             0x80..=0xBF => {
                 if (0x6000..0x8000).contains(&offset) {
-                    // SRAM (mirror)
-                    let sram_offset = (offset - 0x6000) as usize;
-                    *self.ram.get(sram_offset).unwrap_or(&0)
+                    // SRAM (mirror) - each bank maps to a different 8KB region
+                    let sram_offset =
+                        ((bank as usize - 0x80) & 0x1F) * 0x2000 + (offset as usize - 0x6000);
+                    if self.ram.is_empty() {
+                        0
+                    } else {
+                        self.ram[sram_offset % self.ram.len()]
+                    }
                 } else if offset >= 0x8000 {
                     // ROM mirror
                     let rom_offset = (((bank - 0x80) as usize) << 16) | (offset as usize);
@@ -435,71 +479,80 @@ impl Cartridge {
         let offset = (addr & 0xFFFF) as u16;
 
         // ExHiROM mapping: Extended HiROM for ROMs up to 8MB
-        // Banks $00-$3F:$8000-$FFFF mirror $40-$7F:$0000-$FFFF (first 4MB)
-        // Banks $C0-$FF:$0000-$FFFF contain second 4MB
+        // Per bsnes board XML (SHVC-1CA0N8S):
+        // $C0-$FF:$0000-$FFFF → First 4MB of ROM (offset 0, standard HiROM)
+        // $40-$7D:$0000-$FFFF → First 4MB of ROM (offset 0, overlaps $C0-$FF)
+        // $00-$3F:$8000-$FFFF → Extended ROM at offset 0x400000 (32KB stride)
+        // $80-$BF:$8000-$FFFF → Mirror of $00-$3F
         match bank {
-            // Banks $00-$1F: ROM at $8000-$FFFF
+            // Banks $00-$1F: ROM at $8000-$FFFF (extended area, 32KB stride)
             0x00..=0x1F => {
                 if offset >= 0x8000 {
-                    // ROM (mirrors $40-$5F area)
-                    // Formula: ((Bank + $40) * $10000) + (Address - $8000)
-                    let rom_offset = ((bank as usize + 0x40) << 16) | (offset as usize - 0x8000);
+                    // Maps to ROM[0x400000 + bank * 0x8000 + (offset - 0x8000)]
+                    let rom_offset =
+                        0x400000 + (bank as usize) * 0x8000 + (offset as usize - 0x8000);
                     self.read_rom_mirrored(rom_offset)
                 } else {
                     0
                 }
             }
-            // Banks $20-$3F: SRAM at $6000-$7FFF, ROM at $8000-$FFFF
+            // Banks $20-$3F: SRAM at $6000-$7FFF, ROM at $8000-$FFFF (extended area)
             0x20..=0x3F => {
                 if (0x6000..0x8000).contains(&offset) {
-                    // SRAM
-                    let sram_offset = (offset - 0x6000) as usize;
-                    *self.ram.get(sram_offset).unwrap_or(&0)
+                    // SRAM - each bank maps to a different 8KB region
+                    let sram_offset =
+                        ((bank as usize - 0x20) & 0x1F) * 0x2000 + (offset as usize - 0x6000);
+                    if self.ram.is_empty() {
+                        0
+                    } else {
+                        self.ram[sram_offset % self.ram.len()]
+                    }
                 } else if offset >= 0x8000 {
-                    // ROM (mirrors $60-$7F area)
-                    // Formula: ((Bank + $40) * $10000) + (Address - $8000)
-                    let rom_offset = ((bank as usize + 0x40) << 16) | (offset as usize - 0x8000);
+                    // Maps to ROM[0x400000 + bank * 0x8000 + (offset - 0x8000)]
+                    let rom_offset =
+                        0x400000 + (bank as usize) * 0x8000 + (offset as usize - 0x8000);
                     self.read_rom_mirrored(rom_offset)
                 } else {
                     0
                 }
             }
-            // Banks $40-$7D: Extended ROM area (first 4MB of 8MB)
+            // Banks $40-$7D: First 4MB ROM area (same as $C0-$FF, standard HiROM)
             0x40..=0x7D => {
-                let rom_offset = ((bank as usize) << 16) | (offset as usize);
+                let rom_offset = (((bank - 0x40) as usize) << 16) | (offset as usize);
                 self.read_rom_mirrored(rom_offset)
             }
-            // Banks $80-$9F: Mirror of $00-$1F with same ROM mapping
+            // Banks $80-$9F: Mirror of $00-$1F (extended area)
             0x80..=0x9F => {
                 if offset >= 0x8000 {
-                    // ROM (mirrors $40-$5F area)
-                    // Formula: ((Bank - $80 + $40) * $10000) + (Address - $8000)
                     let rom_offset =
-                        ((bank as usize - 0x80 + 0x40) << 16) | (offset as usize - 0x8000);
+                        0x400000 + ((bank - 0x80) as usize) * 0x8000 + (offset as usize - 0x8000);
                     self.read_rom_mirrored(rom_offset)
                 } else {
                     0
                 }
             }
-            // Banks $A0-$BF: Mirror of $20-$3F with same ROM mapping
+            // Banks $A0-$BF: Mirror of $20-$3F (extended area)
             0xA0..=0xBF => {
                 if (0x6000..0x8000).contains(&offset) {
-                    // SRAM (mirror)
-                    let sram_offset = (offset - 0x6000) as usize;
-                    *self.ram.get(sram_offset).unwrap_or(&0)
+                    // SRAM (mirror) - each bank maps to a different 8KB region
+                    let sram_offset =
+                        ((bank as usize - 0xA0) & 0x1F) * 0x2000 + (offset as usize - 0x6000);
+                    if self.ram.is_empty() {
+                        0
+                    } else {
+                        self.ram[sram_offset % self.ram.len()]
+                    }
                 } else if offset >= 0x8000 {
-                    // ROM (mirrors $60-$7F area)
-                    // Formula: ((Bank - $A0 + $60) * $10000) + (Address - $8000)
                     let rom_offset =
-                        ((bank as usize - 0xA0 + 0x60) << 16) | (offset as usize - 0x8000);
+                        0x400000 + ((bank - 0x80) as usize) * 0x8000 + (offset as usize - 0x8000);
                     self.read_rom_mirrored(rom_offset)
                 } else {
                     0
                 }
             }
-            // Banks $C0-$FF: Extended ROM area (second 4MB of 8MB)
+            // Banks $C0-$FF: Primary ROM area (first 4MB)
             0xC0..=0xFF => {
-                let rom_offset = ((bank as usize) << 16) | (offset as usize);
+                let rom_offset = (((bank - 0xC0) as usize) << 16) | (offset as usize);
                 self.read_rom_mirrored(rom_offset)
             }
             _ => 0,
@@ -522,10 +575,16 @@ impl Cartridge {
 
             match (self.chip_type, self.mapping_mode) {
                 (ChipType::Dsp1, MappingMode::LoROM) => {
-                    // DSP-1 LoROM mapping (Mode B):
-                    //   Banks $20-$3F / $A0-$BF at $8000-$FFFF
-                    //   DR (Data Register) at $8000-$BFFF is writable
-                    //   SR (Status Register) at $C000-$FFFF is read-only
+                    // DSP-1 LoROM mapping - support both PCB variants:
+                    // Variant 1: Banks $00-$1F / $80-$9F at $6000-$6FFF (DR writable)
+                    if matches!(bank, 0x00..=0x1F | 0x80..=0x9F)
+                        && (0x6000..=0x6FFF).contains(&offset)
+                    {
+                        chip.borrow_mut().write(addr, val);
+                        return;
+                    }
+                    // Variant 2: Banks $20-$3F / $A0-$BF at $8000-$BFFF (DR writable)
+                    //   SR at $C000-$FFFF is read-only
                     if matches!(bank, 0x20..=0x3F | 0xA0..=0xBF) && offset >= 0x8000 {
                         chip.borrow_mut().write(addr, val);
                         return;
@@ -587,17 +646,20 @@ impl Cartridge {
         let offset = (addr & 0xFFFF) as u16;
 
         // SRAM mapping (banks $70-$7D, $F0-$FF at $0000-$7FFF)
-        if matches!(bank, 0x70..=0x7D | 0xF0..=0xFF) && offset < 0x8000 {
-            let ram_offset = offset as usize;
-            if ram_offset < self.ram.len() {
-                log(LogCategory::Bus, LogLevel::Trace, || {
-                    format!(
-                        "SNES Cartridge: LoROM SRAM Write ${:06X} = ${:02X}",
-                        addr, val
-                    )
-                });
-                self.ram[ram_offset] = val;
-            }
+        if matches!(bank, 0x70..=0x7D | 0xF0..=0xFF) && offset < 0x8000 && !self.ram.is_empty() {
+            let base_bank = if bank >= 0xF0 {
+                bank as usize - 0xF0
+            } else {
+                bank as usize - 0x70
+            };
+            let ram_offset = (base_bank * 0x8000 + offset as usize) % self.ram.len();
+            log(LogCategory::Bus, LogLevel::Trace, || {
+                format!(
+                    "SNES Cartridge: LoROM SRAM Write ${:06X} = ${:02X}",
+                    addr, val
+                )
+            });
+            self.ram[ram_offset] = val;
         }
     }
 
@@ -606,17 +668,23 @@ impl Cartridge {
         let offset = (addr & 0xFFFF) as u16;
 
         // SRAM mapping (banks $20-$3F, $A0-$BF at $6000-$7FFF)
-        if matches!(bank, 0x20..=0x3F | 0xA0..=0xBF) && (0x6000..0x8000).contains(&offset) {
-            let ram_offset = (offset - 0x6000) as usize;
-            if ram_offset < self.ram.len() {
-                log(LogCategory::Bus, LogLevel::Trace, || {
-                    format!(
-                        "SNES Cartridge: HiROM SRAM Write ${:06X} = ${:02X}",
-                        addr, val
-                    )
-                });
-                self.ram[ram_offset] = val;
-            }
+        if matches!(bank, 0x20..=0x3F | 0xA0..=0xBF)
+            && (0x6000..0x8000).contains(&offset)
+            && !self.ram.is_empty()
+        {
+            let base_bank = if bank >= 0xA0 {
+                (bank as usize - 0xA0) & 0x1F
+            } else {
+                (bank as usize - 0x20) & 0x1F
+            };
+            let ram_offset = (base_bank * 0x2000 + (offset as usize - 0x6000)) % self.ram.len();
+            log(LogCategory::Bus, LogLevel::Trace, || {
+                format!(
+                    "SNES Cartridge: HiROM SRAM Write ${:06X} = ${:02X}",
+                    addr, val
+                )
+            });
+            self.ram[ram_offset] = val;
         }
     }
 
@@ -625,17 +693,23 @@ impl Cartridge {
         let offset = (addr & 0xFFFF) as u16;
 
         // SRAM mapping (banks $20-$3F, $A0-$BF at $6000-$7FFF, same as HiROM)
-        if matches!(bank, 0x20..=0x3F | 0xA0..=0xBF) && (0x6000..0x8000).contains(&offset) {
-            let ram_offset = (offset - 0x6000) as usize;
-            if ram_offset < self.ram.len() {
-                log(LogCategory::Bus, LogLevel::Trace, || {
-                    format!(
-                        "SNES Cartridge: ExHiROM SRAM Write ${:06X} = ${:02X}",
-                        addr, val
-                    )
-                });
-                self.ram[ram_offset] = val;
-            }
+        if matches!(bank, 0x20..=0x3F | 0xA0..=0xBF)
+            && (0x6000..0x8000).contains(&offset)
+            && !self.ram.is_empty()
+        {
+            let base_bank = if bank >= 0xA0 {
+                (bank as usize - 0xA0) & 0x1F
+            } else {
+                (bank as usize - 0x20) & 0x1F
+            };
+            let ram_offset = (base_bank * 0x2000 + (offset as usize - 0x6000)) % self.ram.len();
+            log(LogCategory::Bus, LogLevel::Trace, || {
+                format!(
+                    "SNES Cartridge: ExHiROM SRAM Write ${:06X} = ${:02X}",
+                    addr, val
+                )
+            });
+            self.ram[ram_offset] = val;
         }
     }
 
@@ -891,16 +965,19 @@ mod tests {
         data[header_offset + 0x3C] = 0x00; // Reset vector
         data[header_offset + 0x3D] = 0x80;
 
-        // Put test data in bank $40 area (which will be mirrored by $00:$8000)
-        // Bank $00:$8000 mirrors Bank $40:$0000
-        data[0x400000] = 0xAB; // Bank $40:$0000 = SNES $00:$8000
-        data[0x408000] = 0xCD; // Bank $40:$8000 = SNES $00:$10000 (wraps) or $01:$8000
+        // $00-$3F:$8000-$FFFF maps to extended ROM area at offset 0x400000
+        // 32KB stride: $00:$8000 → ROM[0x400000], $01:$8000 → ROM[0x408000]
+        data[0x400000] = 0xAB;
+        // $01:$8000 → ROM[0x400000 + 1 * 0x8000] = ROM[0x408000]
+        data[0x408000] = 0xCD;
 
         let cart = Cartridge::load(&data).unwrap();
         assert!(cart.is_exhirom());
 
-        // Bank $00:$8000 should map to ROM offset $400000 (Bank $40:$0000)
+        // Bank $00:$8000 → ROM[0x400000] (extended area)
         assert_eq!(cart.read(0x008000), 0xAB);
+        // Bank $01:$8000 → ROM[0x408000] (32KB stride)
+        assert_eq!(cart.read(0x018000), 0xCD);
     }
 
     #[test]
@@ -920,14 +997,15 @@ mod tests {
         data[header_offset + 0x3C] = 0x00; // Reset vector
         data[header_offset + 0x3D] = 0x80;
 
-        // Put test data in bank $40 area
-        data[0x400000] = 0xCD; // Bank $40:$0000
-        data[0x401234] = 0xEF; // Bank $40:$1234
+        // Put test data - $40-$7D maps to first 4MB (offset 0)
+        // $40:$0000 → ROM[((0x40-0x40) << 16) | 0] = ROM[0]
+        data[0x000000] = 0xCD; // Bank $40:$0000
+        data[0x001234] = 0xEF; // Bank $40:$1234
 
         let cart = Cartridge::load(&data).unwrap();
         assert!(cart.is_exhirom());
 
-        // Banks $40-$7D map directly to ROM
+        // Banks $40-$7D map to first 4MB of ROM (same area as $C0-$FF)
         assert_eq!(cart.read(0x400000), 0xCD);
         assert_eq!(cart.read(0x401234), 0xEF);
     }
@@ -977,10 +1055,11 @@ mod tests {
         assert_eq!(cart.read(0x206000), 0x55);
         assert_eq!(cart.read(0x207FFF), 0xAA);
 
-        // Test mirror in $A0-$BF range
+        // Test mirror in $A0-$BF range (bank $A0 mirrors bank $20, bank $A1 mirrors bank $21)
         assert_eq!(cart.read(0xA06000), 0x55);
         cart.write(0xA16001, 0x77);
-        assert_eq!(cart.read(0x206001), 0x77);
+        // Bank $A1 mirrors bank $21 (second 8KB SRAM page), not bank $20
+        assert_eq!(cart.read(0x216001), 0x77);
     }
 
     #[test]
@@ -999,14 +1078,21 @@ mod tests {
         data[header_offset + 0x3C] = 0x00; // Reset vector
         data[header_offset + 0x3D] = 0x80;
 
-        data[0x400000] = 0x99; // Bank $40:$0000
+        // $80-$BF mirrors $00-$3F (extended area at ROM[0x400000+])
+        // $80:$8000 → ROM[0x400000 + 0 * 0x8000] = ROM[0x400000]
+        data[0x400000] = 0x99;
+        // Also check that $00:$8000 maps to the same place (mirrors $80-$9F)
+        // And $C0:$8000 maps to first 4MB: ROM[0x8000]
+        data[0x8000] = 0x88;
 
         let cart = Cartridge::load(&data).unwrap();
 
-        // Banks $80-$BF at $8000-$FFFF should mirror $00-$3F behavior
-        // which maps to bank $40-$7F ROM area
-        // So $80:$8000 should read same as $00:$8000 which maps to $400000
+        // Banks $80-$BF at $8000-$FFFF mirror $00-$3F (extended area)
+        // $80:$8000 → ROM[0x400000]
         assert_eq!(cart.read(0x808000), 0x99);
+        // $00:$8000 → ROM[0x400000] (same as $80:$8000)
         assert_eq!(cart.read(0x008000), 0x99);
+        // $C0:$8000 → ROM[0x8000] (first 4MB, different from $00/$80)
+        assert_eq!(cart.read(0xC08000), 0x88);
     }
 }

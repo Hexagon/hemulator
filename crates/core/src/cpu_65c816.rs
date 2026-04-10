@@ -57,7 +57,7 @@ pub struct Cpu65c816<M: Memory65c816> {
     /// NMI in progress flag
     in_nmi: bool,
     /// WAI (Wait for Interrupt) state - CPU is halted until interrupt occurs
-    waiting_for_interrupt: bool,
+    pub waiting_for_interrupt: bool,
     /// STP (Stop Processor) state - CPU is halted until reset
     stopped: bool,
 }
@@ -4630,8 +4630,13 @@ impl<M: Memory65c816> Cpu65c816<M> {
     fn branch(&mut self, condition: bool) {
         let offset = self.fetch_byte() as i8;
         if condition {
+            let old_pc = self.pc;
             self.pc = self.pc.wrapping_add(offset as u16);
             self.cycles += 3;
+            // In emulation mode, +1 cycle if branch crosses a page boundary
+            if self.emulation && (old_pc & 0xFF00) != (self.pc & 0xFF00) {
+                self.cycles += 1;
+            }
         } else {
             self.cycles += 2;
         }

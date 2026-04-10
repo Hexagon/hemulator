@@ -2,6 +2,12 @@
 use std::error::Error;
 use std::fmt;
 
+/// Standard floppy disk image sizes in bytes.
+///
+/// Re-exported from `emu_pc` so the GUI and the PC mount validation use a
+/// single authoritative list and can never drift apart.
+pub use emu_pc::FLOPPY_IMAGE_SIZES;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(clippy::upper_case_acronyms)]
 pub enum SystemType {
@@ -13,11 +19,15 @@ pub enum SystemType {
     SNES,
     N64,
     SMS,
+    GameGear,
     Chip8,
     ColecoVision,
     SG1000,
     PS1,
     GameAndWatch,
+    Atari5200,
+    MegaDrive,
+    C64,
 }
 
 #[derive(Debug)]
@@ -49,6 +59,9 @@ pub fn detect_rom_type_with_extension(
         match ext_lower.as_str() {
             "ch8" | "c8" => return Ok(SystemType::Chip8),
             "gw" | "gnw" | "mgw" => return Ok(SystemType::GameAndWatch),
+            "a52" => return Ok(SystemType::Atari5200),
+            "md" | "gen" | "smd" => return Ok(SystemType::MegaDrive),
+            "prg" | "crt" => return Ok(SystemType::C64),
             "nes" => {
                 // For .nes extension, still verify it has iNES header
                 if data.len() >= 16 && &data[0..4] == b"NES\x1A" {
@@ -73,6 +86,10 @@ pub fn detect_rom_type_with_extension(
                 // Prefer SMS for .sms extension even without header
                 return Ok(SystemType::SMS);
             }
+            "gg" => {
+                // Game Gear cartridge
+                return Ok(SystemType::GameGear);
+            }
             "col" => {
                 // ColecoVision cartridge
                 return Ok(SystemType::ColecoVision);
@@ -89,7 +106,7 @@ pub fn detect_rom_type_with_extension(
                 }
                 // Fall through to content detection for other sizes
             }
-            "bin" | "iso" | "img" => {
+            "bin" | "iso" | "img" | "ima" | "vhd" => {
                 // Check for PS1 BIOS first (512KB .bin files)
                 if is_ps1_bios(data) {
                     return Ok(SystemType::PS1);
@@ -97,6 +114,25 @@ pub fn detect_rom_type_with_extension(
                 // Check for PS1 disc image
                 if is_ps1_disc_image(data) {
                     return Ok(SystemType::PS1);
+                }
+                // .img and .ima are PC disk image extensions: detect floppy/hard-drive sizes
+                if matches!(ext_lower.as_str(), "img" | "ima") {
+                    if FLOPPY_IMAGE_SIZES.contains(&data.len()) {
+                        return Ok(SystemType::PC);
+                    }
+                    // Hard drive: >= 1 MB and not a recognised floppy size
+                    if data.len() >= 1024 * 1024 {
+                        return Ok(SystemType::PC);
+                    }
+                }
+                // .vhd is a PC virtual hard drive format (Virtual PC / VirtualBox)
+                if ext_lower == "vhd" && data.len() >= 1024 * 1024 {
+                    return Ok(SystemType::PC);
+                }
+                // .iso that is not a PS1 image is treated as a PC CD-ROM image
+                // (minimum 32 KB for ISO 9660 system area, already checked PS1 above)
+                if ext_lower == "iso" && data.len() >= 32 * 1024 {
+                    return Ok(SystemType::PC);
                 }
                 // For .bin extension (ambiguous), use preferred system if provided
                 if let Some(preferred) = preferred_system {
@@ -219,6 +255,12 @@ pub fn detect_rom_type_with_extension(
 }
 
 pub fn detect_rom_type(data: &[u8]) -> Result<SystemType, UnsupportedRomError> {
+    // Check for Mega Drive / Genesis
+    // "SEGA" string at offset 0x100 in the ROM header
+    if data.len() >= 0x200 && &data[0x100..0x104] == b"SEGA" {
+        return Ok(SystemType::MegaDrive);
+    }
+
     // Check for NES (iNES format)
     if data.len() >= 16 && &data[0..4] == b"NES\x1A" {
         return Ok(SystemType::NES);
@@ -337,12 +379,12 @@ pub fn detect_rom_type(data: &[u8]) -> Result<SystemType, UnsupportedRomError> {
     // Check if it might be a raw binary
     if data.len().is_multiple_of(1024) {
         return Err(UnsupportedRomError {
-            reason: "Unrecognized ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), GBA (.gba), Atari 2600 (.a26/.bin), DOS (.com/.exe), SNES (.smc/.sfc), N64 (.z64/.n64/.v64), SMS (.sms), CHIP-8 (.ch8/.c8), ColecoVision (.col), SG-1000 (.sg/.sc), PS1 (.exe/.psexe/.cue/.bin/.iso), Game & Watch (.gw/.gnw/.mgw)".to_string(),
+            reason: "Unrecognized ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), GBA (.gba), Atari 2600 (.a26/.bin), Atari 5200 (.a52/.bin), DOS (.com/.exe), SNES (.smc/.sfc), N64 (.z64/.n64/.v64), SMS (.sms), Game Gear (.gg), CHIP-8 (.ch8/.c8), ColecoVision (.col), SG-1000 (.sg/.sc), PS1 (.exe/.psexe/.cue/.bin/.iso), Game & Watch (.gw/.gnw/.mgw)".to_string(),
         });
     }
 
     Err(UnsupportedRomError {
-        reason: "Unknown ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), GBA (.gba), Atari 2600 (.a26/.bin), DOS (.com/.exe), SNES (.smc/.sfc), N64 (.z64/.n64/.v64), SMS (.sms), CHIP-8 (.ch8/.c8), ColecoVision (.col), SG-1000 (.sg/.sc), PS1 (.exe/.psexe/.cue/.bin/.iso), Game & Watch (.gw/.gnw/.mgw)"
+        reason: "Unknown ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), GBA (.gba), Atari 2600 (.a26/.bin), Atari 5200 (.a52/.bin), DOS (.com/.exe), SNES (.smc/.sfc), N64 (.z64/.n64/.v64), SMS (.sms), Game Gear (.gg), CHIP-8 (.ch8/.c8), ColecoVision (.col), SG-1000 (.sg/.sc), PS1 (.exe/.psexe/.cue/.bin/.iso), Game & Watch (.gw/.gnw/.mgw)"
             .to_string(),
     })
 }
@@ -408,6 +450,39 @@ fn is_ps1_disc_image(data: &[u8]) -> bool {
 /// Public check if data appears to be a PS1 BIOS (for use by main.rs)
 pub fn is_ps1_bios_file(data: &[u8]) -> bool {
     is_ps1_bios(data)
+}
+
+/// Determine the PC mount-point and a short status message for a file.
+///
+/// Returns the appropriate mount-point ID and message:
+/// - `"FloppyA"` for standard floppy image sizes (`.img`/`.ima`)
+/// - `"HardDrive"` for images ≥ 1 MB that are not floppy-sized (`.img`/`.ima`/`.vhd`)
+/// - `"CDROM"` for CD-ROM images (`.iso`/`.cue`)
+/// - `("", "<descriptive message>")` when no automatic mount is appropriate
+///   (unrecognised size, or a non-disk-image file like `.com`/`.exe`)
+///
+/// `extension` must be supplied in lower-case.
+pub fn pc_disk_mount_target(extension: &str, size: usize) -> (&'static str, &'static str) {
+    match extension {
+        "img" | "ima" => {
+            if FLOPPY_IMAGE_SIZES.contains(&size) {
+                ("FloppyA", "PC floppy A: loaded")
+            } else if size >= 1024 * 1024 {
+                ("HardDrive", "PC hard drive loaded")
+            } else {
+                ("", "PC disk image size not recognised")
+            }
+        }
+        "vhd" => {
+            if size >= 1024 * 1024 {
+                ("HardDrive", "PC hard drive loaded")
+            } else {
+                ("", "PC disk image size not recognised")
+            }
+        }
+        "iso" | "cue" => ("CDROM", "PC CD-ROM loaded"),
+        _ => ("", "PC system started – use mount points to add disks"),
+    }
 }
 
 #[cfg(test)]
@@ -726,5 +801,120 @@ mod edge_case_tests {
         println!("4KB file detected as: {:?}", result);
         // Currently detected as Atari2600 (line 110 matches 4096)
         assert_eq!(result, SystemType::Atari2600);
+    }
+
+    #[test]
+    fn test_img_floppy_detection() {
+        // 1.44 MB floppy image (.img) should be detected as PC
+        let data = vec![0u8; 1474560];
+        assert_eq!(
+            detect_rom_type_with_extension(&data, Some("img"), None).unwrap(),
+            SystemType::PC
+        );
+
+        // 720 KB floppy image (.img)
+        let data = vec![0u8; 737280];
+        assert_eq!(
+            detect_rom_type_with_extension(&data, Some("img"), None).unwrap(),
+            SystemType::PC
+        );
+
+        // .ima extension also detected as PC floppy
+        let data = vec![0u8; 1474560];
+        assert_eq!(
+            detect_rom_type_with_extension(&data, Some("ima"), None).unwrap(),
+            SystemType::PC
+        );
+    }
+
+    #[test]
+    fn test_img_hard_drive_detection() {
+        // Any .img file >= 1 MB that is not a standard floppy size should be
+        // detected as a PC hard drive image.  Use the smallest possible size
+        // above 1 MB to keep the test fast and memory-efficient.
+        let data = vec![0u8; 1024 * 1024 + 1];
+        assert_eq!(
+            detect_rom_type_with_extension(&data, Some("img"), None).unwrap(),
+            SystemType::PC
+        );
+    }
+
+    #[test]
+    fn test_pc_disk_mount_target_floppy() {
+        // Standard 1.44 MB floppy image → FloppyA
+        let (mount, msg) = pc_disk_mount_target("img", 1_474_560);
+        assert_eq!(mount, "FloppyA");
+        assert!(!msg.is_empty());
+
+        // .ima extension also maps to FloppyA
+        let (mount, _) = pc_disk_mount_target("ima", 737_280);
+        assert_eq!(mount, "FloppyA");
+    }
+
+    #[test]
+    fn test_pc_disk_mount_target_hard_drive() {
+        // Image >= 1 MB but not a standard floppy size → HardDrive
+        let (mount, msg) = pc_disk_mount_target("img", 1024 * 1024 + 1);
+        assert_eq!(mount, "HardDrive");
+        assert!(!msg.is_empty());
+
+        // .vhd always maps to HardDrive when >= 1 MB
+        let (mount, msg) = pc_disk_mount_target("vhd", 1024 * 1024 + 1);
+        assert_eq!(mount, "HardDrive");
+        assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn test_pc_disk_mount_target_cdrom() {
+        // .iso → CDROM regardless of size
+        let (mount, msg) = pc_disk_mount_target("iso", 32 * 1024 * 1024);
+        assert_eq!(mount, "CDROM");
+        assert!(!msg.is_empty());
+
+        // .cue → CDROM
+        let (mount, _) = pc_disk_mount_target("cue", 1024);
+        assert_eq!(mount, "CDROM");
+    }
+
+    #[test]
+    fn test_pc_disk_mount_target_unrecognised_size() {
+        // .img file that is neither a floppy size nor >= 1 MB → no mount
+        let (mount, _) = pc_disk_mount_target("img", 1024);
+        assert_eq!(mount, "");
+
+        // .vhd below 1 MB → no mount
+        let (mount, _) = pc_disk_mount_target("vhd", 512 * 1024);
+        assert_eq!(mount, "");
+    }
+
+    #[test]
+    fn test_pc_disk_mount_target_non_disk_file() {
+        // .com / .exe or other extension → no mount, just start PC
+        let (mount, _) = pc_disk_mount_target("com", 4096);
+        assert_eq!(mount, "");
+        let (mount, _) = pc_disk_mount_target("exe", 65536);
+        assert_eq!(mount, "");
+        let (mount, _) = pc_disk_mount_target("", 0);
+        assert_eq!(mount, "");
+    }
+
+    #[test]
+    fn test_vhd_detected_as_pc() {
+        // .vhd >= 1 MB → PC hard drive
+        let data = vec![0u8; 1024 * 1024 + 1];
+        assert_eq!(
+            detect_rom_type_with_extension(&data, Some("vhd"), None).unwrap(),
+            SystemType::PC
+        );
+    }
+
+    #[test]
+    fn test_iso_non_ps1_detected_as_pc() {
+        // A non-PS1 .iso >= 32 KB → PC CD-ROM
+        let data = vec![0u8; 32 * 1024];
+        assert_eq!(
+            detect_rom_type_with_extension(&data, Some("iso"), None).unwrap(),
+            SystemType::PC
+        );
     }
 }
