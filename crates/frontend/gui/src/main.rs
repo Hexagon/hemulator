@@ -1093,7 +1093,7 @@ impl EmulatorSystem {
             EmulatorSystem::Chip8(sys) => sys.check_breakpoint(),
             EmulatorSystem::ColecoVision(sys) => sys.check_breakpoint(),
             EmulatorSystem::SG1000(sys) => sys.check_breakpoint(),
-            EmulatorSystem::PS1(_) => None,
+            EmulatorSystem::PS1(sys) => sys.check_breakpoint(),
             EmulatorSystem::GameAndWatch(_) => None,
             EmulatorSystem::Atari5200(sys) => sys.check_breakpoint(),
             EmulatorSystem::MegaDrive(sys) => sys.check_breakpoint(),
@@ -1115,7 +1115,7 @@ impl EmulatorSystem {
             EmulatorSystem::Chip8(sys) => sys.get_breakpoint_manager().get_all(),
             EmulatorSystem::ColecoVision(sys) => sys.get_breakpoint_manager().get_all(),
             EmulatorSystem::SG1000(sys) => sys.get_breakpoint_manager().get_all(),
-            EmulatorSystem::PS1(_) => Vec::new(),
+            EmulatorSystem::PS1(sys) => sys.get_breakpoint_manager().get_all(),
             EmulatorSystem::GameAndWatch(_) => Vec::new(),
             EmulatorSystem::Atari5200(sys) => sys.get_breakpoint_manager().get_all(),
             EmulatorSystem::MegaDrive(sys) => sys.get_breakpoint_manager().get_all(),
@@ -1137,7 +1137,7 @@ impl EmulatorSystem {
             EmulatorSystem::Chip8(sys) => Some(sys.get_instruction_tracer()),
             EmulatorSystem::ColecoVision(sys) => Some(sys.get_instruction_tracer()),
             EmulatorSystem::SG1000(sys) => Some(sys.get_instruction_tracer()),
-            EmulatorSystem::PS1(_) => None,
+            EmulatorSystem::PS1(sys) => Some(sys.get_instruction_tracer()),
             EmulatorSystem::GameAndWatch(_) => None,
             EmulatorSystem::Atari5200(sys) => Some(sys.get_instruction_tracer()),
             EmulatorSystem::MegaDrive(sys) => Some(sys.get_instruction_tracer()),
@@ -1161,7 +1161,7 @@ impl EmulatorSystem {
             EmulatorSystem::Chip8(sys) => Some(sys.get_instruction_tracer_mut()),
             EmulatorSystem::ColecoVision(sys) => Some(sys.get_instruction_tracer_mut()),
             EmulatorSystem::SG1000(sys) => Some(sys.get_instruction_tracer_mut()),
-            EmulatorSystem::PS1(_) => None,
+            EmulatorSystem::PS1(sys) => Some(sys.get_instruction_tracer_mut()),
             EmulatorSystem::GameAndWatch(_) => None,
             EmulatorSystem::Atari5200(sys) => Some(sys.get_instruction_tracer_mut()),
             EmulatorSystem::MegaDrive(sys) => Some(sys.get_instruction_tracer_mut()),
@@ -2511,8 +2511,11 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
                     s.get_instruction_tracer_mut().set_max_history(limit);
                 }
             }
-            EmulatorSystem::PS1(_) => {
-                // PS1 instruction tracing not yet implemented
+            EmulatorSystem::PS1(s) => {
+                s.set_instruction_tracing(true);
+                if let Some(limit) = cli_args.trace_limit {
+                    s.get_instruction_tracer_mut().set_max_history(limit);
+                }
             }
             EmulatorSystem::GameAndWatch(_) => {
                 // Game & Watch instruction tracing not yet implemented
@@ -2552,7 +2555,7 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
             EmulatorSystem::PC(s) => s.add_breakpoint(addr),
             EmulatorSystem::ColecoVision(s) => s.add_breakpoint(addr),
             EmulatorSystem::SG1000(s) => s.add_breakpoint(addr),
-            EmulatorSystem::PS1(_) => {} // PS1 breakpoints not yet implemented
+            EmulatorSystem::PS1(s) => s.add_breakpoint(addr),
             EmulatorSystem::GameAndWatch(_) => {} // Game & Watch breakpoints not yet implemented
             EmulatorSystem::Atari5200(s) => s.add_breakpoint(addr),
             EmulatorSystem::MegaDrive(s) => s.add_breakpoint(addr),
@@ -2574,7 +2577,7 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
             EmulatorSystem::PC(s) => s.add_read_breakpoint(addr),
             EmulatorSystem::ColecoVision(s) => s.add_read_breakpoint(addr),
             EmulatorSystem::SG1000(s) => s.add_read_breakpoint(addr),
-            EmulatorSystem::PS1(_) => {}
+            EmulatorSystem::PS1(s) => s.add_read_breakpoint(addr),
             EmulatorSystem::GameAndWatch(_) => {}
             EmulatorSystem::Atari5200(s) => s.add_read_breakpoint(addr),
             EmulatorSystem::MegaDrive(s) => s.add_read_breakpoint(addr),
@@ -2596,7 +2599,7 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
             EmulatorSystem::PC(s) => s.add_write_breakpoint(addr),
             EmulatorSystem::ColecoVision(s) => s.add_write_breakpoint(addr),
             EmulatorSystem::SG1000(s) => s.add_write_breakpoint(addr),
-            EmulatorSystem::PS1(_) => {}
+            EmulatorSystem::PS1(s) => s.add_write_breakpoint(addr),
             EmulatorSystem::GameAndWatch(_) => {}
             EmulatorSystem::Atari5200(s) => s.add_write_breakpoint(addr),
             EmulatorSystem::MegaDrive(s) => s.add_write_breakpoint(addr),
@@ -8542,6 +8545,17 @@ fn main() {
                                     s.add_write_breakpoint(address)
                                 }
                             },
+                            EmulatorSystem::PS1(s) => match bp_type {
+                                emu_core::breakpoints::BreakpointType::Execute => {
+                                    s.add_breakpoint(address)
+                                }
+                                emu_core::breakpoints::BreakpointType::Read => {
+                                    s.add_read_breakpoint(address)
+                                }
+                                emu_core::breakpoints::BreakpointType::Write => {
+                                    s.add_write_breakpoint(address)
+                                }
+                            },
                             _ => {} // SMS, ColecoVision, SG1000 don't have breakpoint manager yet
                         }
                         let type_str = match bp_type {
@@ -8576,6 +8590,7 @@ fn main() {
                             }
                             EmulatorSystem::N64(s) => s.remove_breakpoint_by_type(address, bp_type),
                             EmulatorSystem::PC(s) => s.remove_breakpoint_by_type(address, bp_type),
+                            EmulatorSystem::PS1(s) => s.remove_breakpoint_by_type(address, bp_type),
                             _ => false, // SMS, ColecoVision, SG1000 don't have breakpoint manager yet
                         };
 

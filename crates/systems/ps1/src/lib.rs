@@ -1514,6 +1514,8 @@ pub struct Ps1System {
     frame_index: u64,
     /// Instruction tracer for debugging
     instruction_tracer: emu_core::instruction_tracer::InstructionTracer,
+    /// Breakpoint manager for execution, read, and write breakpoints
+    breakpoint_manager: emu_core::breakpoints::BreakpointManager,
 }
 
 impl Default for Ps1System {
@@ -1530,10 +1532,28 @@ impl Ps1System {
             total_cycles: 0,
             frame_index: 0,
             instruction_tracer: emu_core::instruction_tracer::InstructionTracer::new(),
+            breakpoint_manager: emu_core::breakpoints::BreakpointManager::new(),
         }
     }
 
     emu_core::impl_instruction_tracer_methods!();
+    emu_core::impl_breakpoint_methods!();
+
+    /// Get the breakpoint manager.
+    pub fn get_breakpoint_manager(&self) -> &emu_core::breakpoints::BreakpointManager {
+        &self.breakpoint_manager
+    }
+
+    /// Check if the current PC is at an execute breakpoint.
+    /// Returns `Some(pc)` if a breakpoint is hit, `None` otherwise.
+    pub fn check_breakpoint(&self) -> Option<u32> {
+        let pc = self.cpu.pc;
+        if self.breakpoint_manager.should_break_execute(pc) {
+            Some(pc)
+        } else {
+            None
+        }
+    }
 
     /// Get GPU inspector data for the debug UI.
     pub fn get_gpu_inspector_data(&self) -> gpu::Ps1GpuInspectorData {
@@ -1577,8 +1597,16 @@ impl System for Ps1System {
             // Run CPU for one scanline worth of cycles
             let mut cycles_this_line = 0u32;
             while cycles_this_line < CYCLES_PER_SCANLINE {
-                // Capture PC before step for instruction tracing
+                // Capture PC before step for instruction tracing and breakpoints
                 let pc_before = self.cpu.pc;
+
+                // Check execute breakpoint before stepping
+                if self.breakpoint_manager.should_break_execute(pc_before) {
+                    log(LogCategory::CPU, LogLevel::Debug, || {
+                        format!("PS1: Breakpoint hit at PC=0x{:08X}", pc_before)
+                    });
+                }
+
                 let c = self.cpu.step();
                 cycles_this_line += c;
                 self.total_cycles += c as u64;

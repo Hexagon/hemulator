@@ -307,4 +307,58 @@ mod tests {
         let debugger = system.debugger();
         assert!(debugger.is_some(), "PS1 system should provide a debugger");
     }
+
+    #[test]
+    fn test_ps1_instruction_tracing() {
+        let mut system = Ps1System::new();
+
+        // Initially tracing should be disabled
+        assert!(!system.get_instruction_tracer().is_enabled());
+
+        // Enable tracing
+        system.set_instruction_tracing(true);
+        assert!(system.get_instruction_tracer().is_enabled());
+
+        // Disable tracing
+        system.set_instruction_tracing(false);
+        assert!(!system.get_instruction_tracer().is_enabled());
+    }
+
+    #[test]
+    fn test_ps1_breakpoints() {
+        let mut system = Ps1System::new();
+
+        // No breakpoint initially at reset vector
+        assert!(system.check_breakpoint().is_none());
+
+        // Add a breakpoint at reset vector (0xBFC00000)
+        let reset_pc = 0xBFC0_0000u32;
+        system.add_breakpoint(reset_pc);
+
+        // Should hit the breakpoint (PC starts at reset vector)
+        assert_eq!(system.check_breakpoint(), Some(reset_pc));
+
+        // Remove it
+        system.remove_breakpoint(reset_pc);
+        assert!(system.check_breakpoint().is_none());
+    }
+
+    #[test]
+    fn test_ps1_breakpoint_manager() {
+        let mut system = Ps1System::new();
+
+        // No breakpoints initially
+        assert_eq!(system.get_breakpoint_manager().count(), 0);
+
+        // Add execute, read, and write breakpoints
+        system.add_breakpoint(0x8000_1000);
+        system.add_read_breakpoint(0x0000_0010);
+        system.add_write_breakpoint(0x0000_0020);
+
+        assert_eq!(system.get_breakpoint_manager().count(), 3);
+
+        // Clear all
+        system.clear_breakpoints();
+        assert_eq!(system.get_breakpoint_manager().count(), 0);
+    }
 }

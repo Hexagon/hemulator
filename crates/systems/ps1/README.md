@@ -38,6 +38,21 @@ full disc (CD-ROM) game compatibility is not yet implemented.
   - CC, CDP, DCPL (color operations), DPCS/DPCT (depth cue), INTPL, GPF, GPL
   - Full FLAG register overflow/saturation tracking
 - ✅ **SPU (stub)** — 24-voice register file; audio output not yet implemented
+- ✅ **Debugger** — Full `Debugger` trait implementation via `crates/systems/ps1/src/debugger.rs`:
+  - CPU state: all 32 GPRs, PC, HI, LO, COP0 SR/Cause/EPC, status-register flags
+  - Memory regions: Main RAM, Scratchpad, I/O, BIOS, KSEG0/KSEG1 mirrors
+  - Physical address translation (KSEG0/KSEG1 → physical) for memory reads
+  - MIPS R3000A disassembly via `disasm_mips_r3000a` (all MIPS I + GTE COP2 ops)
+- ✅ **Instruction Tracing** — Circular-buffer instruction trace with CPU state snapshots;
+  enabled with `--trace-instructions` CLI flag; configurable history depth via `--trace-limit`
+- ✅ **Breakpoints** — Execute, read, and write breakpoints via `BreakpointManager`;
+  set via `--breakpoint` CLI flag or the GUI Debug Inspector; hit-logging routed to the CPU log category
+- ✅ **GPU Inspector Tab** — Live GPU state viewer in the Inspector dock:
+  - GPUSTAT register decoded (draw/display mode, color depth, interlace, DMA direction)
+  - Drawing area (left/top/right/bottom) and drawing offset (X/Y)
+  - Texture page (X/Y, bit depth, semi-transparency mode), texture-window mask/offset
+  - Display area (VRAM X/Y, horizontal/vertical ranges), display enable/disable
+  - Timing info (current scanline, VBlank flag, IRQ flag)
 
 ### What's Missing
 
@@ -77,9 +92,10 @@ full disc (CD-ROM) game compatibility is not yet implemented.
 ```
 crates/systems/ps1/
 ├── src/
-│   ├── lib.rs      # System trait impl, bus, DMA, timers, IRQ, CD-ROM stubs
-│   ├── gpu.rs      # GPU state machine (GP0/GP1), VRAM, renderer
-│   └── spu.rs      # SPU register file (24 voices, audio stubs)
+│   ├── lib.rs       # System trait impl, bus, DMA, timers, IRQ, CD-ROM stubs
+│   ├── debugger.rs  # Debugger trait: CPU state, memory regions, disassembly, breakpoints, tracing
+│   ├── gpu.rs       # GPU state machine (GP0/GP1), VRAM, renderer, inspector data
+│   └── spu.rs       # SPU register file (24 voices, ADPCM decode, ADSR)
 └── Cargo.toml
 ```
 
@@ -109,6 +125,58 @@ println!("{}×{}", frame.width, frame.height);
 # Direct CLI launch with BIOS + PS-X EXE
 hemu --bios SCPH1001.BIN game.exe
 ```
+
+## Debugging
+
+### Instruction Tracing
+
+```bash
+# Trace all executed MIPS instructions (last 10,000 by default)
+hemu --trace-instructions --bios SCPH1001.BIN game.exe
+
+# Limit trace buffer size
+hemu --trace-instructions --trace-limit 5000 --bios SCPH1001.BIN game.exe
+
+# Dump trace to file when a breakpoint is hit
+hemu --trace-instructions --trace-dump-file trace.txt --breakpoint 0x80030000 --bios SCPH1001.BIN game.exe
+```
+
+Each trace entry records the disassembled instruction and a full CPU state snapshot
+(all 32 GPRs, PC, HI, LO, COP0 SR/Cause/EPC).
+
+### Breakpoints
+
+```bash
+# Break execution at a specific address
+hemu --breakpoint 0x80030000 --bios SCPH1001.BIN game.exe
+
+# Multiple breakpoints
+hemu --breakpoint 0x80030000 --breakpoint 0x80031000 --bios SCPH1001.BIN game.exe
+```
+
+Breakpoints can also be added and removed at runtime from the **Debug** inspector tab in the GUI.
+Execute, read, and write breakpoints are all supported.
+
+### Debug Dump
+
+```bash
+# Dump CPU state + disassembly + memory map at a specific PC
+hemu --debug-dump-pc 0x80030000 --bios SCPH1001.BIN game.exe
+
+# Dump after N cycles
+hemu --debug-dump-cycles 1000000 --bios SCPH1001.BIN game.exe
+```
+
+### GPU Inspector Tab
+
+Open the **Inspector** dock (View → Inspector) when a PS1 game is loaded to see the live
+**🎮 GPU** tab.  It shows:
+- **GPUSTAT** register: draw mode, color depth, interlace, DMA direction, display enable
+- **Drawing area** and **drawing offset**
+- **Texture page**: X/Y base, bit-depth, semi-transparency mode, texture disable flag
+- **Texture window** mask and offset
+- **Display area**: VRAM X/Y origin, horizontal/vertical display ranges, 15-bit vs 24-bit color
+- **Timing**: current scanline, VBlank status, IRQ flag
 
 ## Known Limitations
 
