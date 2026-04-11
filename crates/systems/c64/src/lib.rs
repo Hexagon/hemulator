@@ -15,6 +15,7 @@
 
 mod bus;
 mod cia;
+mod debugger;
 mod sid;
 mod system;
 mod vic;

@@ -121,6 +121,45 @@ impl C64Bus {
         self.io_port & 0x04 != 0
     }
 
+    /// Read a byte for the debugger without side effects.
+    ///
+    /// Identical to [`Memory6502::read`] for most addresses.  For the I/O area
+    /// ($D000–$DFFF) the underlying RAM byte is returned instead of routing to
+    /// the live chip registers.  This avoids clearing latched registers such as
+    /// the VIC-II sprite-collision latches ($D01E/$D01F) or CIA ICR status
+    /// simply because the user opened the memory viewer.
+    pub fn peek(&self, addr: u16) -> u8 {
+        use emu_core::cpu_6502::Memory6502;
+        match addr {
+            // 6510 I/O port — no side effects, same as normal read
+            0x0000 => self.io_port_ddr,
+            0x0001 => {
+                let output_bits = self.io_port & self.io_port_ddr;
+                let input_bits = !self.io_port_ddr & 0x37;
+                output_bits | input_bits
+            }
+            // I/O / Char ROM area: return RAM to avoid chip side effects
+            0xD000..=0xDFFF => {
+                if self.charen() && (self.hiram() || self.loram()) {
+                    // I/O visible — read from RAM instead of live I/O bus
+                    self.ram[addr as usize]
+                } else if !self.charen() && (self.hiram() || self.loram()) {
+                    // Char ROM visible
+                    let off = (addr - 0xD000) as usize;
+                    if off < self.char_rom.len() {
+                        self.char_rom[off]
+                    } else {
+                        self.ram[addr as usize]
+                    }
+                } else {
+                    self.ram[addr as usize]
+                }
+            }
+            // All other addresses: delegate to the standard (side-effect-free) read
+            _ => self.read(addr),
+        }
+    }
+
     /// Read from I/O area ($D000–$DFFF)
     fn io_read(&self, addr: u16) -> u8 {
         match addr {

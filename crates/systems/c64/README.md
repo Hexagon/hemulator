@@ -64,6 +64,9 @@ The 6510 CPU's built-in I/O port at $0001 (bits 0–2) controls which ROM/IO reg
   - Bad line detection and cycle stealing
   - VIC bank selection via CIA2 PA
   - Character ROM substitution in banks 0/2
+  - Smooth scrolling (XSCROLL/YSCROLL via $D011/$D016)
+  - Sprite-sprite and sprite-background collision detection ($D01E/$D01F)
+  - Sprite-to-background priority ($D01B)
 - **SID (MOS 6581)**:
   - 3 independent voices with 16-bit frequency
   - Waveforms: triangle, sawtooth, pulse (variable duty), noise
@@ -71,6 +74,7 @@ The 6510 CPU's built-in I/O port at $0001 (bits 0–2) controls which ROM/IO reg
   - Ring modulation (voice N with voice N-1)
   - Hard synchronization
   - 23-bit Galois LFSR noise generator
+  - Multimode filter (LP/BP/HP) via state-variable filter
   - Master volume control
   - Voice 3 oscillator/envelope readback registers
   - 44.1 kHz stereo audio output
@@ -91,21 +95,18 @@ The 6510 CPU's built-in I/O port at $0001 (bits 0–2) controls which ROM/IO reg
   - PRG file loading (2-byte load address header)
   - Save states (CPU + I/O port state)
   - Instruction tracing and breakpoints
+  - Debugger trait (`Debugger`) for GUI Inspector (disassembly, memory view, CPU state)
   - Stub KERNAL/BASIC/CHAR ROMs for testing without real ROMs
 
 ### 🚧 Not Yet Implemented
 
-- **SID filter**: Registers are stored but multimode filter (LP/BP/HP) is not applied to audio output
-- **Sprite collision detection**: Collision registers are readable but not populated during rendering
-- **Smooth scrolling**: X/Y scroll registers ($D011/$D016) are not applied to display offset
+- **SID filter accuracy**: Basic LP/BP/HP filter is implemented via a state-variable filter, but the MOS 6581 non-linearity and distortion are not modelled
 - **Border rendering**: 38/40 column and 24/25 row border modes not fully implemented
-- **Sprite priority**: Sprite-to-background priority bit not enforced
 - **Light pen**: Light pen registers return fixed values
 - **Datasette**: Cassette port not emulated
 - **Disk drive**: 1541 drive emulation not implemented (.d64 files)
 - **Cartridge formats**: .crt cartridge bank switching not implemented
 - **Real ROM loading**: Requires stub ROMs; real KERNAL/BASIC/CHAR ROMs can be loaded via mount points
-- **Debugger trait**: Full `Debugger` implementation for GUI Inspector
 - **NTSC mode**: Only PAL timing implemented
 
 ## Architecture
