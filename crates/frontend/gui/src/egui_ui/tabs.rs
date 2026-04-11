@@ -27,6 +27,7 @@ pub enum SystemTileData {
     SNES(SnesTileData),
     Atari2600(Atari2600TileData),
     Chip8(Chip8TileData),
+    C64(C64InspectorData),
 }
 
 /// NES cartridge information data
@@ -282,6 +283,19 @@ pub struct Atari2600TileData {
     /// Video blanking state
     pub vblank: bool,
     pub vsync: bool,
+}
+
+/// C64 inspector data (VIC-II and SID snapshot)
+#[derive(Clone)]
+pub struct C64InspectorData {
+    /// Raw VIC-II register snapshot ($D000–$D03F, 64 bytes)
+    pub vic_regs: [u8; 64],
+    /// Raw SID register snapshot ($D400–$D41F, 32 bytes)
+    pub sid_regs: [u8; 32],
+    /// Current raster line (0–311 PAL)
+    pub raster_line: u32,
+    /// Total CPU cycles (for reference)
+    pub total_cycles: u64,
 }
 
 /// PC BIOS Data Area (BDA) and Extended BIOS Data Area (EBDA) viewer data
@@ -1937,6 +1951,17 @@ impl TabManager {
                             ui.label(format!("VDP Registers: {}", sg1000_data.registers.len()));
                             ui.add_space(5.0);
                             ui.label("See VDP tab for detailed register information");
+                        }
+                        SystemTileData::C64(_) => {
+                            // C64 uses dedicated VIC-II / SID inspector tabs
+                            ui.vertical_centered(|ui| {
+                                ui.add_space(20.0);
+                                ui.label(egui::RichText::new("📺").size(36.0));
+                                ui.add_space(8.0);
+                                ui.heading("C64 Inspector");
+                                ui.add_space(8.0);
+                                ui.label("Use the 📺 VIC-II and 🎵 SID tabs for C64 inspection.");
+                            });
                         }
                     }
                 } else {
