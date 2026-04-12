@@ -434,7 +434,6 @@ impl Rsp {
             return (0, false);
         }
 
-
         log(LogCategory::PPU, LogLevel::Info, || {
             format!(
                 "RSP: Executing task (microcode: {:?})",

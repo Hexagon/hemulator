@@ -11,7 +11,12 @@ out vec2 vTexCoord;  // Pass texture coordinates to fragment shader
 out float vDepth;    // Pass depth to fragment shader
 
 void main() {
-    gl_Position = vec4(aPosition, aDepth * 2.0 - 1.0, 1.0);
+    // Map depth from [0, 1] to NDC z range [-1, 1] for correct GPU depth
+    // testing.  When aDepth is unbound (non-z-buffer paths) it is 0 by
+    // default, which places the fragment at the near plane; depth testing is
+    // disabled for those paths so this has no visible effect.
+    float ndcZ = aDepth * 2.0 - 1.0;
+    gl_Position = vec4(aPosition, ndcZ, 1.0);
     vTexCoord = aTexCoord;
     vDepth = aDepth;
 }

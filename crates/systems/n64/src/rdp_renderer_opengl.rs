@@ -41,9 +41,10 @@ impl std::ops::Deref for SendContext {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum ShaderProgram {
-    Flat,     // Solid color triangles
-    Gouraud,  // Per-vertex color interpolation
-    Textured, // Textured triangles
+    Flat,           // Solid color triangles
+    Gouraud,        // Per-vertex color interpolation
+    Textured,       // Textured triangles (decal – texture only)
+    TexturedShaded, // Textured triangles multiplied by per-vertex shade colour
 }
 
 /// OpenGL-based RDP renderer
@@ -62,6 +63,8 @@ pub struct OpenGLRdpRenderer {
     flat_program: glow::Program,
     gouraud_program: glow::Program,
     textured_program: glow::Program,
+    /// Texture × shade (MODULATE) shader – multiplies texel colour by per-vertex shade colour.
+    textured_shaded_program: glow::Program,
     current_program: ShaderProgram,
 
     // Vertex data
@@ -75,6 +78,9 @@ pub struct OpenGLRdpRenderer {
 
     // Z-buffer state
     zbuffer_enabled: bool,
+
+    // Alpha-blend state
+    alpha_blend_enabled: bool,
 
     /// Whether the GPU framebuffer has been modified since the last read_pixels
     dirty: bool,
@@ -153,6 +159,7 @@ impl OpenGLRdpRenderer {
             let flat_program = create_flat_program(&gl)?;
             let gouraud_program = create_gouraud_program(&gl)?;
             let textured_program = create_textured_program(&gl)?;
+            let textured_shaded_program = create_textured_shaded_program(&gl)?;
 
             // Create VAO and VBO
             let vao = gl
@@ -205,6 +212,7 @@ impl OpenGLRdpRenderer {
                 flat_program,
                 gouraud_program,
                 textured_program,
+                textured_shaded_program,
                 current_program: ShaderProgram::Flat,
                 vao,
                 vbo,
@@ -212,6 +220,7 @@ impl OpenGLRdpRenderer {
                 dynamic_texture_width: 0,
                 dynamic_texture_height: 0,
                 zbuffer_enabled: false,
+                alpha_blend_enabled: false,
                 dirty: false,
             })
         }
@@ -602,6 +611,9 @@ impl RdpRenderer for OpenGLRdpRenderer {
             let d1 = Self::zbuffer_to_depth(z1);
             let d2 = Self::zbuffer_to_depth(z2);
 
+            // Layout: x, y, depth  (3 floats per vertex)
+            // Position is attribute 0 (2 floats), depth is attribute 2 (1 float).
+            // Attribute 1 (colour) is not used by the flat shader, so we skip it.
             #[rustfmt::skip]
             let vertices: [f32; 9] = [
                 nx0, ny0, d0,
@@ -617,19 +629,14 @@ impl RdpRenderer for OpenGLRdpRenderer {
                 glow::STREAM_DRAW,
             );
 
-            // Position + depth attribute
             let stride = 3 * std::mem::size_of::<f32>() as i32;
-            self.gl.vertex_attrib_pointer_f32(
-                0,
-                2,
-                glow::FLOAT,
-                false,
-                stride,
-                0,
-            );
+
+            // Position attribute (2 floats at offset 0)
+            self.gl
+                .vertex_attrib_pointer_f32(0, 2, glow::FLOAT, false, stride, 0);
             self.gl.enable_vertex_attrib_array(0);
 
-            // Depth attribute (location 2)
+            // Depth attribute (1 float at offset 8 = 2 × sizeof(f32))
             self.gl.vertex_attrib_pointer_f32(
                 2,
                 1,
@@ -975,6 +982,13 @@ impl RdpRenderer for OpenGLRdpRenderer {
                 self.gl.depth_func(glow::LESS);
             }
 
+            // Enable alpha blending if requested
+            if self.alpha_blend_enabled {
+                self.gl.enable(glow::BLEND);
+                self.gl
+                    .blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+            }
+
             // Enable scissor test
             self.gl.enable(glow::SCISSOR_TEST);
             self.gl.scissor(
@@ -1074,6 +1088,7 @@ impl RdpRenderer for OpenGLRdpRenderer {
             self.gl.disable_vertex_attrib_array(1);
             self.gl.disable_vertex_attrib_array(2);
             self.gl.disable(glow::DEPTH_TEST);
+            self.gl.disable(glow::BLEND);
             self.gl.disable(glow::SCISSOR_TEST);
             self.dirty = true;
             self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
@@ -1092,6 +1107,159 @@ impl RdpRenderer for OpenGLRdpRenderer {
         self.zbuffer_enabled = enabled;
     }
 
+    fn set_alpha_blend(&mut self, enabled: bool) {
+        self.alpha_blend_enabled = enabled;
+    }
+
+    fn draw_triangle_textured_shaded_zbuffer(
+        &mut self,
+        x0: i32,
+        y0: i32,
+        z0: u16,
+        s0: f32,
+        t0: f32,
+        c0: u32,
+        x1: i32,
+        y1: i32,
+        z1: u16,
+        s1: f32,
+        t1: f32,
+        c1: u32,
+        x2: i32,
+        y2: i32,
+        z2: u16,
+        s2: f32,
+        t2: f32,
+        c2: u32,
+        texture: &dyn Fn(f32, f32) -> u32,
+        scissor: &ScissorBox,
+    ) {
+        unsafe {
+            self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.fbo));
+
+            if self.zbuffer_enabled {
+                self.gl.enable(glow::DEPTH_TEST);
+                self.gl.depth_func(glow::LESS);
+            }
+
+            if self.alpha_blend_enabled {
+                self.gl.enable(glow::BLEND);
+                self.gl
+                    .blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+            }
+
+            self.gl.enable(glow::SCISSOR_TEST);
+            self.gl.scissor(
+                scissor.x_min as i32,
+                (self.height - scissor.y_max) as i32,
+                (scissor.x_max - scissor.x_min) as i32,
+                (scissor.y_max - scissor.y_min) as i32,
+            );
+
+            let max_s = s0.max(s1).max(s2).ceil() as u32;
+            let max_t = t0.max(t1).max(t2).ceil() as u32;
+            let tex_width = max_s.max(1);
+            let tex_height = max_t.max(1);
+
+            self.upload_dynamic_texture(tex_width, tex_height, texture);
+
+            self.gl.use_program(Some(self.textured_shaded_program));
+            self.current_program = ShaderProgram::TexturedShaded;
+
+            self.gl.active_texture(glow::TEXTURE0);
+            self.gl
+                .bind_texture(glow::TEXTURE_2D, Some(self.dynamic_texture));
+            let u_texture = self
+                .gl
+                .get_uniform_location(self.textured_shaded_program, "uTexture");
+            if let Some(loc) = u_texture {
+                self.gl.uniform_1_i32(Some(&loc), 0);
+            }
+
+            let (nx0, ny0) = self.screen_to_ndc(x0, y0);
+            let (nx1, ny1) = self.screen_to_ndc(x1, y1);
+            let (nx2, ny2) = self.screen_to_ndc(x2, y2);
+            let d0 = Self::zbuffer_to_depth(z0);
+            let d1 = Self::zbuffer_to_depth(z1);
+            let d2 = Self::zbuffer_to_depth(z2);
+
+            let ns0 = s0 / tex_width as f32;
+            let nt0 = t0 / tex_height as f32;
+            let ns1 = s1 / tex_width as f32;
+            let nt1 = t1 / tex_height as f32;
+            let ns2 = s2 / tex_width as f32;
+            let nt2 = t2 / tex_height as f32;
+
+            let rgba0 = Self::argb_to_rgba(c0);
+            let rgba1 = Self::argb_to_rgba(c1);
+            let rgba2 = Self::argb_to_rgba(c2);
+
+            // Layout per vertex: x, y, s, t, depth, r, g, b, a  (9 floats)
+            #[rustfmt::skip]
+            let vertices: [f32; 27] = [
+                nx0, ny0, ns0, nt0, d0, rgba0[0], rgba0[1], rgba0[2], rgba0[3],
+                nx1, ny1, ns1, nt1, d1, rgba1[0], rgba1[1], rgba1[2], rgba1[3],
+                nx2, ny2, ns2, nt2, d2, rgba2[0], rgba2[1], rgba2[2], rgba2[3],
+            ];
+
+            self.gl.bind_vertex_array(Some(self.vao));
+            self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vbo));
+            self.gl.buffer_data_u8_slice(
+                glow::ARRAY_BUFFER,
+                bytemuck::cast_slice(&vertices),
+                glow::STREAM_DRAW,
+            );
+
+            let stride = 9 * std::mem::size_of::<f32>() as i32;
+
+            // Attribute 0: position (x, y)
+            self.gl
+                .vertex_attrib_pointer_f32(0, 2, glow::FLOAT, false, stride, 0);
+            self.gl.enable_vertex_attrib_array(0);
+
+            // Attribute 1: texture coordinates (s, t)
+            self.gl.vertex_attrib_pointer_f32(
+                1,
+                2,
+                glow::FLOAT,
+                false,
+                stride,
+                2 * std::mem::size_of::<f32>() as i32,
+            );
+            self.gl.enable_vertex_attrib_array(1);
+
+            // Attribute 2: depth
+            self.gl.vertex_attrib_pointer_f32(
+                2,
+                1,
+                glow::FLOAT,
+                false,
+                stride,
+                4 * std::mem::size_of::<f32>() as i32,
+            );
+            self.gl.enable_vertex_attrib_array(2);
+
+            // Attribute 3: shade colour (r, g, b, a)
+            self.gl.vertex_attrib_pointer_f32(
+                3,
+                4,
+                glow::FLOAT,
+                false,
+                stride,
+                5 * std::mem::size_of::<f32>() as i32,
+            );
+            self.gl.enable_vertex_attrib_array(3);
+
+            self.gl.draw_arrays(glow::TRIANGLES, 0, 3);
+
+            self.gl.disable(glow::DEPTH_TEST);
+            self.gl.disable(glow::BLEND);
+            self.gl.disable(glow::SCISSOR_TEST);
+            self.dirty = true;
+            self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+        }
+    }
+
     fn resize(&mut self, width: u32, height: u32) {
         self.init(width, height);
     }
@@ -1101,7 +1269,7 @@ impl RdpRenderer for OpenGLRdpRenderer {
         self.clear_zbuffer();
     }
 
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "OpenGL RDP Renderer"
     }
 
@@ -1234,6 +1402,42 @@ fn create_textured_program(gl: &SendContext) -> Result<glow::Program, String> {
     }
 }
 
+/// Create textured+shaded (MODULATE) program: out = texel × shade
+fn create_textured_shaded_program(gl: &SendContext) -> Result<glow::Program, String> {
+    unsafe {
+        let vertex_shader = compile_shader(
+            gl,
+            glow::VERTEX_SHADER,
+            include_str!("shaders/vertex_textured_shaded.glsl"),
+        )?;
+
+        let fragment_shader = compile_shader(
+            gl,
+            glow::FRAGMENT_SHADER,
+            include_str!("shaders/fragment_textured_shaded.glsl"),
+        )?;
+
+        let program = gl
+            .create_program()
+            .map_err(|e| format!("Failed to create program: {}", e))?;
+
+        gl.attach_shader(program, vertex_shader);
+        gl.attach_shader(program, fragment_shader);
+        gl.link_program(program);
+
+        if !gl.get_program_link_status(program) {
+            let log = gl.get_program_info_log(program);
+            gl.delete_program(program);
+            return Err(format!("Program linking failed: {}", log));
+        }
+
+        gl.delete_shader(vertex_shader);
+        gl.delete_shader(fragment_shader);
+
+        Ok(program)
+    }
+}
+
 /// Implement Drop to clean up OpenGL resources
 impl Drop for OpenGLRdpRenderer {
     fn drop(&mut self) {
@@ -1244,6 +1448,7 @@ impl Drop for OpenGLRdpRenderer {
             self.gl.delete_program(self.flat_program);
             self.gl.delete_program(self.gouraud_program);
             self.gl.delete_program(self.textured_program);
+            self.gl.delete_program(self.textured_shaded_program);
             self.gl.delete_vertex_array(self.vao);
             self.gl.delete_buffer(self.vbo);
             self.gl.delete_texture(self.dynamic_texture);
