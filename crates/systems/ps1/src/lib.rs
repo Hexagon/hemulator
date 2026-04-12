@@ -1593,18 +1593,20 @@ impl System for Ps1System {
         let mut cpu_steps: u32 = 0;
         let mut timer_irqs: u32 = 0;
 
-        for _scanline in 0..total_scanlines {
+        'frame: for _scanline in 0..total_scanlines {
             // Run CPU for one scanline worth of cycles
             let mut cycles_this_line = 0u32;
             while cycles_this_line < CYCLES_PER_SCANLINE {
                 // Capture PC before step for instruction tracing and breakpoints
                 let pc_before = self.cpu.pc;
 
-                // Check execute breakpoint before stepping
+                // Check execute breakpoint before stepping; halt mid-frame so the
+                // outer loop can observe the hit via check_breakpoint().
                 if self.breakpoint_manager.should_break_execute(pc_before) {
                     log(LogCategory::CPU, LogLevel::Debug, || {
                         format!("PS1: Breakpoint hit at PC=0x{:08X}", pc_before)
                     });
+                    break 'frame;
                 }
 
                 let c = self.cpu.step();

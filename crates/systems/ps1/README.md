@@ -45,8 +45,10 @@ full disc (CD-ROM) game compatibility is not yet implemented.
   - MIPS R3000A disassembly via `disasm_mips_r3000a` (all MIPS I + GTE COP2 ops)
 - ✅ **Instruction Tracing** — Circular-buffer instruction trace with CPU state snapshots;
   enabled with `--trace-instructions` CLI flag; configurable history depth via `--trace-limit`
-- ✅ **Breakpoints** — Execute, read, and write breakpoints via `BreakpointManager`;
-  set via `--breakpoint` CLI flag or the GUI Debug Inspector; hit-logging routed to the CPU log category
+- ✅ **Breakpoints** — Execute breakpoints via `BreakpointManager`; halt mid-frame so the
+  outer loop can detect the hit via `check_breakpoint()`. Read/write breakpoint slots are
+  stored but not yet triggered from memory-access paths.
+  Set via `--breakpoint` CLI flag or the GUI Debug Inspector.
 - ✅ **GPU Inspector Tab** — Live GPU state viewer in the Inspector dock:
   - GPUSTAT register decoded (draw/display mode, color depth, interlace, DMA direction)
   - Drawing area (left/top/right/bottom) and drawing offset (X/Y)
@@ -95,7 +97,7 @@ crates/systems/ps1/
 │   ├── lib.rs       # System trait impl, bus, DMA, timers, IRQ, CD-ROM stubs
 │   ├── debugger.rs  # Debugger trait: CPU state, memory regions, disassembly, breakpoints, tracing
 │   ├── gpu.rs       # GPU state machine (GP0/GP1), VRAM, renderer, inspector data
-│   └── spu.rs       # SPU register file (24 voices, ADPCM decode, ADSR)
+│   └── spu.rs       # Partial SPU: register file/voices, ADPCM decode, ADSR; no audio output yet
 └── Cargo.toml
 ```
 
@@ -137,7 +139,7 @@ hemu --trace-instructions --bios SCPH1001.BIN game.exe
 # Limit trace buffer size
 hemu --trace-instructions --trace-limit 5000 --bios SCPH1001.BIN game.exe
 
-# Dump trace to file when a breakpoint is hit
+# Write the instruction trace to a file while debugging with a breakpoint configured
 hemu --trace-instructions --trace-dump-file trace.txt --breakpoint 0x80030000 --bios SCPH1001.BIN game.exe
 ```
 
@@ -155,7 +157,8 @@ hemu --breakpoint 0x80030000 --breakpoint 0x80031000 --bios SCPH1001.BIN game.ex
 ```
 
 Breakpoints can also be added and removed at runtime from the **Debug** inspector tab in the GUI.
-Execute, read, and write breakpoints are all supported.
+Only execute breakpoints currently trigger mid-frame halting; read/write slots are stored but not
+yet connected to the PS1 bus memory-access paths.
 
 ### Debug Dump
 

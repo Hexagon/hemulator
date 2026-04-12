@@ -344,13 +344,65 @@ mod tests {
     }
 
     #[test]
+    fn test_ps1_breakpoint_halts_execution() {
+        // Build a minimal BIOS:
+        //   offset 0: NOP  (0x00000000)   → executed at 0xBFC00000
+        //   offset 4: NOP  (0x00000000)   → target breakpoint at 0xBFC00004
+        //   offset 8: J 0xBFC00008        → infinite loop (avoids running off the end)
+        let mut bios = vec![0u8; 512 * 1024];
+        // NOP at offset 0
+        for b in &mut bios[0..4] {
+            *b = 0;
+        }
+        // NOP at offset 4
+        for b in &mut bios[4..8] {
+            *b = 0;
+        }
+        // J 0xBFC00008 at offset 8 (opcode=2, target = 0xBFC00008 >> 2)
+        let j_word = (2u32 << 26) | (0xBFC0_0008u32 >> 2);
+        bios[8] = j_word as u8;
+        bios[9] = (j_word >> 8) as u8;
+        bios[10] = (j_word >> 16) as u8;
+        bios[11] = (j_word >> 24) as u8;
+
+        let mut system = Ps1System::new();
+        system.bus_mut().load_bios(&bios).unwrap();
+
+        // Place breakpoint at the second instruction (0xBFC00004)
+        let bp_addr = 0xBFC0_0004u32;
+        system.add_breakpoint(bp_addr);
+
+        // No hit yet — PC is at reset vector, not the breakpoint address
+        assert!(system.check_breakpoint().is_none());
+
+        // Run one frame — the breakpoint should halt execution mid-frame
+        let _ = system.step_frame();
+
+        // After step_frame returns, the PC must be at the breakpoint address and
+        // check_breakpoint() must return Some(bp_addr) (i.e. the hit is observable
+        // from outside the CPU loop, as required by the CLI/GUI flow).
+        assert_eq!(
+            system.check_breakpoint(),
+            Some(bp_addr),
+            "breakpoint at 0xBFC00004 should be visible after step_frame"
+        );
+
+        // Repeated calls must still return the same value (non-destructive read)
+        assert_eq!(system.check_breakpoint(), Some(bp_addr));
+
+        // Remove the breakpoint and verify the hit is no longer reported
+        system.remove_breakpoint(bp_addr);
+        assert!(system.check_breakpoint().is_none());
+    }
+
+    #[test]
     fn test_ps1_breakpoint_manager() {
         let mut system = Ps1System::new();
 
         // No breakpoints initially
         assert_eq!(system.get_breakpoint_manager().count(), 0);
 
-        // Add execute, read, and write breakpoints
+        // Add execute and read breakpoints (write breakpoints stored too)
         system.add_breakpoint(0x8000_1000);
         system.add_read_breakpoint(0x0000_0010);
         system.add_write_breakpoint(0x0000_0020);
