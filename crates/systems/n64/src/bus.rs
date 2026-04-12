@@ -807,7 +807,11 @@ impl MemoryMips for N64Bus {
             // RDRAM
             0x0000_0000..=0x003F_FFFF => {
                 let offset = (phys_addr & 0x003FFFFF) as usize;
-                u32::from_be_bytes(self.rdram[offset..offset + 4].try_into().unwrap_or([0; 4]))
+                if let Some(bytes) = self.rdram.get(offset..offset + 4) {
+                    u32::from_be_bytes(bytes.try_into().unwrap_or([0; 4]))
+                } else {
+                    0
+                }
             }
             // RSP registers (0x04040000 - 0x0404001F)
             0x0404_0000..=0x0404_001F => {
@@ -1036,7 +1040,9 @@ impl MemoryMips for N64Bus {
             // RDRAM
             0x0000_0000..=0x003F_FFFF => {
                 let offset = (phys_addr & 0x003FFFFF) as usize;
-                self.rdram[offset..offset + 4].copy_from_slice(&val.to_be_bytes());
+                if let Some(dest) = self.rdram.get_mut(offset..offset + 4) {
+                    dest.copy_from_slice(&val.to_be_bytes());
+                }
             }
             // SP DMEM (0x04000000 - 0x04000FFF)
             0x0400_0000..=0x0400_0FFF => {

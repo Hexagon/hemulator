@@ -399,7 +399,8 @@ impl Rsp {
     /// bits of both addresses are forced to 0. This matches the behaviour of
     /// mupen64plus, Project64, and confirmed hardware tests.
     fn dma_read(&mut self, rdram: &[u8]) {
-        // Length: OR low 3 bits → 1, then add 1.  E.g. reg=3 → (3|7)+1 = 8 bytes.
+        // Length: OR low 3 bits → 1, then add 1.  E.g. reg=3 → (3|7)+1 = 8,
+        // reg=7 → 8, reg=8 → (8|7)+1 = 16.  Always a multiple of 8.
         let length = ((self.sp_rd_len & 0xFFF) | 7) + 1; // bytes per line (8-byte aligned, rounds up)
         let count = ((self.sp_rd_len >> 12) & 0xFF) + 1; // number of lines
         let skip = (self.sp_rd_len >> 20) & 0xFFF; // DRAM skip between lines
