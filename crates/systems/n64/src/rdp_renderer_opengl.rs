@@ -1255,7 +1255,7 @@ impl RdpRenderer for OpenGLRdpRenderer {
         self.clear_zbuffer();
     }
 
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "OpenGL RDP Renderer"
     }
 
