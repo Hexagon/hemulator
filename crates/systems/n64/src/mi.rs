@@ -164,8 +164,15 @@ impl MipsInterface {
     }
 
     /// Get the raw interrupt status (unmasked)
+    #[allow(dead_code)]
     pub fn get_interrupt_status(&self) -> u32 {
         self.intr
+    }
+
+    /// Get the interrupt mask value
+    #[allow(dead_code)]
+    pub fn get_intr_mask(&self) -> u32 {
+        self.intr_mask
     }
 }
 

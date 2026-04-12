@@ -167,12 +167,16 @@ impl VideoInterface {
     }
 
     /// Update current scanline (called per frame)
-    /// Returns true if scanline matches VI_INTR and interrupt should be triggered
+    /// Returns true if scanline matches VI_INTR and interrupt should be triggered.
+    /// VI_INTR and VI_CURRENT use half-line values (NTSC has 525 half-lines).
+    /// Our scanline parameter is 0..262, so we compare using half-lines.
     pub fn update_scanline(&mut self, scanline: u32) -> bool {
-        self.current = scanline;
+        // Store current half-line (scanline * 2) for games that read VI_CURRENT
+        let half_line = scanline * 2;
+        self.current = half_line;
 
-        // Check if scanline matches interrupt line
-        scanline == (self.intr >> 1) // VI_INTR is stored as scanline * 2
+        // Check if either half-line for this scanline matches VI_INTR
+        half_line == self.intr || half_line + 1 == self.intr
     }
 
     /// Get the framebuffer origin address
@@ -258,7 +262,8 @@ mod tests {
     fn test_vi_current_register() {
         let mut vi = VideoInterface::new();
         vi.update_scanline(100);
-        assert_eq!(vi.read_register(VI_CURRENT), 100);
+        // VI_CURRENT reports half-lines (scanline * 2)
+        assert_eq!(vi.read_register(VI_CURRENT), 200);
 
         // Writing to VI_CURRENT clears it
         vi.write_register(VI_CURRENT, 0);

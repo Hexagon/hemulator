@@ -105,6 +105,10 @@ pub struct Rsp {
 
     /// High-level emulation state
     hle: RspHle,
+
+    /// RDRAM address of the last task structure DMA'd to DMEM[FC0].
+    /// Used to clear the task type field after audio HLE completion.
+    last_task_dram_addr: u32,
 }
 
 impl Rsp {
@@ -123,6 +127,7 @@ impl Rsp {
             sp_dma_busy: 0,
             sp_semaphore: Cell::new(0),
             hle: RspHle::new(),
+            last_task_dram_addr: 0,
         }
     }
 
@@ -206,7 +211,10 @@ impl Rsp {
             }
             SP_RD_LEN => {
                 // DMA read from RDRAM to RSP memory (DMEM or IMEM)
-                self.sp_rd_len = value & 0x0FFF;
+                // Bits 0-11: length per line minus 1
+                // Bits 12-19: count (number of lines minus 1)
+                // Bits 20-31: skip (DRAM skip between lines)
+                self.sp_rd_len = value;
                 use emu_core::logging::{log, LogCategory, LogLevel};
                 log(LogCategory::PPU, LogLevel::Info, || {
                     format!(
@@ -220,7 +228,10 @@ impl Rsp {
             }
             SP_WR_LEN => {
                 // DMA write from RSP memory to RDRAM
-                self.sp_wr_len = value & 0x0FFF;
+                // Bits 0-11: length per line minus 1
+                // Bits 12-19: count (number of lines minus 1)
+                // Bits 20-31: skip (DRAM skip between lines)
+                self.sp_wr_len = value;
                 self.dma_write(rdram);
             }
             SP_STATUS => {
@@ -338,23 +349,36 @@ impl Rsp {
     }
 
     /// DMA read from RDRAM to RSP memory
+    /// Supports multi-line transfers with count and skip fields
     fn dma_read(&mut self, rdram: &[u8]) {
-        let length = (self.sp_rd_len & 0xFFF) + 1;
-        let dram_addr = (self.sp_dram_addr & 0x00FFFFFF) as usize;
-        let mem_addr = (self.sp_mem_addr & 0x1FFF) as usize;
+        let length = (self.sp_rd_len & 0xFFF) + 1; // bytes per line
+        let count = ((self.sp_rd_len >> 12) & 0xFF) + 1; // number of lines
+        let skip = (self.sp_rd_len >> 20) & 0xFFF; // DRAM skip between lines
+        let mut dram_addr = (self.sp_dram_addr & 0x00FFFFFF) as usize;
+        let mut mem_addr = (self.sp_mem_addr & 0x1FFF) as usize;
         let is_imem = (self.sp_mem_addr & 0x1000) != 0;
 
-        for i in 0..length as usize {
-            if dram_addr + i < rdram.len() {
-                let value = rdram[dram_addr + i];
-                let dest_addr = (mem_addr + i) & 0xFFF;
+        // Track if this DMA loads the task structure area (DMEM[FC0..FFF])
+        if !is_imem && (mem_addr & 0xFFF) == 0xFC0 {
+            self.last_task_dram_addr = self.sp_dram_addr & 0x00FFFFFF;
+        }
 
-                if is_imem {
-                    self.imem[dest_addr] = value;
-                } else {
-                    self.dmem[dest_addr] = value;
+        for _line in 0..count {
+            for i in 0..length as usize {
+                if dram_addr + i < rdram.len() {
+                    let value = rdram[dram_addr + i];
+                    let dest_addr = (mem_addr + i) & 0xFFF;
+
+                    if is_imem {
+                        self.imem[dest_addr] = value;
+                    } else {
+                        self.dmem[dest_addr] = value;
+                    }
                 }
             }
+            // Advance pointers for next line
+            dram_addr += length as usize + skip as usize;
+            mem_addr += length as usize;
         }
 
         // If we just loaded IMEM, detect microcode
@@ -368,23 +392,31 @@ impl Rsp {
     }
 
     /// DMA write from RSP memory to RDRAM
+    /// Supports multi-line transfers with count and skip fields
     fn dma_write(&mut self, rdram: &mut [u8]) {
-        let length = (self.sp_wr_len & 0xFFF) + 1;
-        let dram_addr = (self.sp_dram_addr & 0x00FFFFFF) as usize;
-        let mem_addr = (self.sp_mem_addr & 0x1FFF) as usize;
+        let length = (self.sp_wr_len & 0xFFF) + 1; // bytes per line
+        let count = ((self.sp_wr_len >> 12) & 0xFF) + 1; // number of lines
+        let skip = (self.sp_wr_len >> 20) & 0xFFF; // DRAM skip between lines
+        let mut dram_addr = (self.sp_dram_addr & 0x00FFFFFF) as usize;
+        let mut mem_addr = (self.sp_mem_addr & 0x1FFF) as usize;
         let is_imem = (self.sp_mem_addr & 0x1000) != 0;
 
-        for i in 0..length as usize {
-            let src_addr = (mem_addr + i) & 0xFFF;
-            let value = if is_imem {
-                self.imem[src_addr]
-            } else {
-                self.dmem[src_addr]
-            };
+        for _line in 0..count {
+            for i in 0..length as usize {
+                let src_addr = (mem_addr + i) & 0xFFF;
+                let value = if is_imem {
+                    self.imem[src_addr]
+                } else {
+                    self.dmem[src_addr]
+                };
 
-            if dram_addr + i < rdram.len() {
-                rdram[dram_addr + i] = value;
+                if dram_addr + i < rdram.len() {
+                    rdram[dram_addr + i] = value;
+                }
             }
+            // Advance pointers for next line
+            dram_addr += length as usize + skip as usize;
+            mem_addr += length as usize;
         }
     }
 
@@ -402,6 +434,7 @@ impl Rsp {
             return (0, false);
         }
 
+
         log(LogCategory::PPU, LogLevel::Info, || {
             format!(
                 "RSP: Executing task (microcode: {:?})",
@@ -416,8 +449,12 @@ impl Rsp {
             format!("RSP: Task complete ({} cycles)", cycles)
         });
 
-        // Set broke flag and halt after task completion
-        self.sp_status |= SP_STATUS_BROKE | SP_STATUS_HALT;
+        // Set broke flag, halt, and signal 1 (task done) after task completion.
+        // Signal 1 (SIG1 = bit 8) tells the N64 OS interrupt handler that the RSP
+        // task completed normally (as opposed to yielding). Without SIG1, the handler
+        // ignores the SP interrupt and never notifies the scheduler of task completion.
+        // Real RSP microcode (F3DEX/F3DEX2) explicitly sets this signal before halting.
+        self.sp_status |= SP_STATUS_BROKE | SP_STATUS_HALT | SP_STATUS_SIG1;
 
         // Check if interrupt on break is enabled
         let should_interrupt = (self.sp_status & SP_STATUS_INTR_BREAK) != 0;
@@ -425,10 +462,30 @@ impl Rsp {
         (cycles, should_interrupt)
     }
 
+    /// Get current SP_STATUS register value
+    #[allow(dead_code)]
+    pub fn get_sp_status(&self) -> u32 {
+        self.sp_status
+    }
+
     /// Get current microcode type (for debugging/monitoring)
     #[allow(dead_code)]
     pub fn microcode(&self) -> super::rsp_hle::MicrocodeType {
         self.hle.microcode()
+    }
+
+    /// Mark the RSP as having finished its task (set BROKE+HALT).
+    /// Called by the bus when the deferred RSP interrupt timer expires,
+    /// simulating the moment the RSP finishes execution on real hardware.
+    #[allow(dead_code)]
+    pub fn set_task_complete(&mut self) {
+        self.sp_status |= SP_STATUS_BROKE | SP_STATUS_HALT;
+    }
+
+    /// Get the RDRAM address of the last task structure loaded via DMA.
+    #[allow(dead_code)]
+    pub fn get_last_task_dram_addr(&self) -> u32 {
+        self.last_task_dram_addr
     }
 
     /// Get current microcode type
@@ -439,6 +496,13 @@ impl Rsp {
     /// Get vertex count in RSP vertex buffer
     pub fn vertex_count(&self) -> usize {
         self.hle.vertex_count()
+    }
+
+    /// Debug: get and reset zero matrix count
+    pub fn take_zero_mtx_count(&mut self) -> u32 {
+        let c = self.hle.zero_mtx_count;
+        self.hle.zero_mtx_count = 0;
+        c
     }
 }
 

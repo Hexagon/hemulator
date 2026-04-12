@@ -233,6 +233,8 @@ const CP0_EPC: usize = 14;
 const CP0_PRID: usize = 15;
 #[allow(dead_code)]
 const CP0_CONFIG: usize = 16;
+#[allow(dead_code)]
+const CP0_ERROREPC: usize = 30;
 
 impl<M: MemoryMips> CpuMips<M> {
     /// Create a new MIPS R4300i CPU with the given memory interface
@@ -390,17 +392,13 @@ impl<M: MemoryMips> CpuMips<M> {
         // Update CP0 Count register (increments at half the pipeline clock rate)
         // On real R4300i, Count increments once every 2 PCycles (i.e., once per instruction)
         // Count is a 32-bit register that wraps around
-        let elapsed = self.cycles - start_cycles;
-        let old_count = self.cp0[CP0_COUNT] & 0xFFFF_FFFF;
-        let new_count = old_count.wrapping_add(elapsed) & 0xFFFF_FFFF;
-        self.cp0[CP0_COUNT] = new_count;
+        let old_count = (self.cp0[CP0_COUNT] & 0xFFFF_FFFF) as u32;
+        let new_count = old_count.wrapping_add(1);
+        self.cp0[CP0_COUNT] = new_count as u64;
 
         // Check if Count crossed Compare → set timer interrupt (IP7)
-        let compare = self.cp0[CP0_COMPARE] & 0xFFFF_FFFF;
-        if compare != 0
-            && ((old_count < compare && new_count >= compare)
-                || (old_count > new_count && (new_count >= compare || old_count < compare)))
-        {
+        let compare = (self.cp0[CP0_COMPARE] & 0xFFFF_FFFF) as u32;
+        if old_count < compare && new_count >= compare {
             // Set IP7 (bit 15 in Cause register = interrupt pending bit 7)
             self.cp0[CP0_CAUSE] |= 1u64 << 15;
         }
@@ -1636,7 +1634,18 @@ impl<M: MemoryMips> CpuMips<M> {
             0x04 => {
                 // MTC0 - Move To CP0
                 let value = self.gpr[rt];
-                self.cp0[rd] = value;
+
+                if rd == CP0_CAUSE {
+                    // Cause register: only software interrupt bits (IP0/IP1 = bits 8-9) are
+                    // writable by software. All other bits (exception code, hardware IP bits,
+                    // BD flag) are maintained by hardware. Writing to Cause must NOT destroy
+                    // hardware interrupt pending bits or the exception code.
+                    let writable_mask = 0x300u64; // bits 8 and 9 only
+                    self.cp0[CP0_CAUSE] =
+                        (self.cp0[CP0_CAUSE] & !writable_mask) | (value & writable_mask);
+                } else {
+                    self.cp0[rd] = value;
+                }
 
                 // Writing to CP0_COMPARE (register 11) clears the timer interrupt (IP7)
                 if rd == CP0_COMPARE {
@@ -1669,9 +1678,16 @@ impl<M: MemoryMips> CpuMips<M> {
                         // ERET - Exception Return
                         // ERET does NOT have a delay slot - it immediately returns to EPC
                         // This is different from branches/jumps
-                        self.pc = self.cp0[CP0_EPC];
-                        // Clear EXL bit to re-enable interrupts
-                        self.cp0[CP0_STATUS] &= !0x02;
+                        if (self.cp0[CP0_STATUS] & 0x04) != 0 {
+                            // ERL = 1: return from Error Level
+                            self.pc = self.cp0[CP0_ERROREPC];
+                            self.cp0[CP0_STATUS] &= !0x04; // Clear ERL
+                        } else {
+                            // Normal exception return
+                            self.pc = self.cp0[CP0_EPC];
+                            self.cp0[CP0_STATUS] &= !0x02; // Clear EXL
+                        }
+
                         // Clear LL bit
                         self.ll_bit = false;
                         self.cycles += 1;

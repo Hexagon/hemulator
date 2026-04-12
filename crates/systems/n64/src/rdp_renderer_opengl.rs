@@ -458,6 +458,7 @@ impl RdpRenderer for OpenGLRdpRenderer {
 
             self.gl.draw_arrays(glow::TRIANGLES, 0, 6);
 
+            self.gl.disable_vertex_attrib_array(0);
             self.gl.disable(glow::SCISSOR_TEST);
             self.dirty = true;
             self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
@@ -542,6 +543,7 @@ impl RdpRenderer for OpenGLRdpRenderer {
 
             self.gl.draw_arrays(glow::TRIANGLES, 0, 3);
 
+            self.gl.disable_vertex_attrib_array(0);
             self.gl.disable(glow::SCISSOR_TEST);
             self.dirty = true;
             self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
@@ -616,18 +618,32 @@ impl RdpRenderer for OpenGLRdpRenderer {
             );
 
             // Position + depth attribute
+            let stride = 3 * std::mem::size_of::<f32>() as i32;
             self.gl.vertex_attrib_pointer_f32(
                 0,
-                3,
+                2,
                 glow::FLOAT,
                 false,
-                3 * std::mem::size_of::<f32>() as i32,
+                stride,
                 0,
             );
             self.gl.enable_vertex_attrib_array(0);
 
+            // Depth attribute (location 2)
+            self.gl.vertex_attrib_pointer_f32(
+                2,
+                1,
+                glow::FLOAT,
+                false,
+                stride,
+                2 * std::mem::size_of::<f32>() as i32,
+            );
+            self.gl.enable_vertex_attrib_array(2);
+
             self.gl.draw_arrays(glow::TRIANGLES, 0, 3);
 
+            self.gl.disable_vertex_attrib_array(0);
+            self.gl.disable_vertex_attrib_array(2);
             self.gl.disable(glow::DEPTH_TEST);
             self.gl.disable(glow::SCISSOR_TEST);
             self.dirty = true;
@@ -707,6 +723,8 @@ impl RdpRenderer for OpenGLRdpRenderer {
 
             self.gl.draw_arrays(glow::TRIANGLES, 0, 3);
 
+            self.gl.disable_vertex_attrib_array(0);
+            self.gl.disable_vertex_attrib_array(1);
             self.gl.disable(glow::SCISSOR_TEST);
             self.dirty = true;
             self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
@@ -808,6 +826,9 @@ impl RdpRenderer for OpenGLRdpRenderer {
 
             self.gl.draw_arrays(glow::TRIANGLES, 0, 3);
 
+            self.gl.disable_vertex_attrib_array(0);
+            self.gl.disable_vertex_attrib_array(1);
+            self.gl.disable_vertex_attrib_array(2);
             self.gl.disable(glow::DEPTH_TEST);
             self.gl.disable(glow::SCISSOR_TEST);
             self.dirty = true;
@@ -917,6 +938,8 @@ impl RdpRenderer for OpenGLRdpRenderer {
 
             self.gl.draw_arrays(glow::TRIANGLES, 0, 3);
 
+            self.gl.disable_vertex_attrib_array(0);
+            self.gl.disable_vertex_attrib_array(1);
             self.gl.disable(glow::SCISSOR_TEST);
             self.dirty = true;
             self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
@@ -1047,6 +1070,9 @@ impl RdpRenderer for OpenGLRdpRenderer {
 
             self.gl.draw_arrays(glow::TRIANGLES, 0, 3);
 
+            self.gl.disable_vertex_attrib_array(0);
+            self.gl.disable_vertex_attrib_array(1);
+            self.gl.disable_vertex_attrib_array(2);
             self.gl.disable(glow::DEPTH_TEST);
             self.gl.disable(glow::SCISSOR_TEST);
             self.dirty = true;

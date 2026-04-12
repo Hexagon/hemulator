@@ -333,6 +333,16 @@ impl System for N64System {
 
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
         self.current_cycles = 0;
+        let mut goddard_count: u32 = 0;
+        let mut total_count: u32 = 0;
+        let mut mtxf2l_count: u32 = 0;
+        let mut prev_in_mtxf2l = false;
+        let mut unseen1_count: u32 = 0; // around 0x803256C4
+        let mut unseen2_count: u32 = 0; // around 0x803258AC
+        let mut hit_funcb_entry: u32 = 0; // 0x80325874
+        let mut hit_callee: u32 = 0; // 0x803256E0
+        let mut hit_after_jal: u32 = 0; // 0x803258A8
+        let mut first_unseen2_pc: u32 = 0; // first PC in unseen2 range
 
         // Log every 60th frame (once per second at 60fps)
         static mut FRAME_COUNTER: u32 = 0;
@@ -354,15 +364,61 @@ impl System for N64System {
         for scanline in 0..SCANLINES_PER_FRAME {
             let target_cycles = (scanline + 1) * cycles_per_scanline;
 
+            // Update VI_CURRENT BEFORE executing CPU cycles for this scanline.
+            // Games (especially SM64) poll VI_CURRENT to wait for vertical blank.
+            // If we update it only after the inner loop, reads during execution
+            // see a stale value and the game gets stuck in a polling loop.
+            let vi_intr = self.cpu.bus_mut().vi_mut().update_scanline(scanline);
+            if vi_intr {
+                self.cpu.bus_mut().mi_mut().set_interrupt(crate::mi::MI_INTR_VI);
+
+                log(LogCategory::Interrupts, LogLevel::Info, || {
+                    format!("N64: VI interrupt triggered at scanline {}", scanline)
+                });
+            }
+
             // Execute CPU until we reach the cycles for this scanline
             while self.current_cycles < target_cycles {
                 let pc_before = self.cpu.cpu.pc as u32;
+                self.cpu.bus_mut().last_cpu_pc = pc_before;
+                total_count += 1;
+                if (0x80378000..=0x803B0000).contains(&pc_before) {
+                    goddard_count += 1;
+                }
+                // guMtxF2L function body range
+                let in_mtxf2l = (0x80329480..=0x80329540).contains(&pc_before);
+                if in_mtxf2l {
+                    mtxf2l_count += 1;
+                }
+                // Log guMtxF2L transitions
+                if in_mtxf2l && !prev_in_mtxf2l {
+                    let a0 = self.cpu.cpu.gpr[4] as u32;
+                    let a1 = self.cpu.cpu.gpr[5] as u32;
+                    let ra = self.cpu.cpu.gpr[31] as u32;
+                    eprintln!("MTXF2L_ENTER: pc=0x{:08X} a0=0x{:08X} a1=0x{:08X} ra=0x{:08X}", pc_before, a0, a1, ra);
+                }
+                if !in_mtxf2l && prev_in_mtxf2l {
+                    eprintln!("MTXF2L_EXIT: pc=0x{:08X}", pc_before);
+                }
+                // Count unseen caller regions
+                if (0x80325600..=0x80325700).contains(&pc_before) {
+                    unseen1_count += 1;
+                }
+                if (0x80325800..=0x80325900).contains(&pc_before) {
+                    unseen2_count += 1;
+                    if first_unseen2_pc == 0 { first_unseen2_pc = pc_before; }
+                }
+                if pc_before == 0x80325874 { hit_funcb_entry += 1; }
+                if pc_before == 0x803256E0 { hit_callee += 1; }
+                if pc_before == 0x803258A8 { hit_after_jal += 1; }
+                prev_in_mtxf2l = in_mtxf2l;
                 let cycles = self.cpu.step();
                 self.current_cycles += cycles;
 
+                // Tick deferred RSP interrupt timer (simulates async RSP completion)
+                self.cpu.bus_mut().tick_rsp_interrupt();
+
                 // Propagate MI interrupts to CPU IP2 after every step.
-                // Bus operations (RSP task, RDP display list) can set MI interrupts
-                // during a CPU write, so we must update IP2 promptly.
                 let pending = self.cpu.bus().mi().get_pending_interrupts();
                 if pending != 0 {
                     self.cpu.cpu.set_interrupt(2);
@@ -378,19 +434,44 @@ impl System for N64System {
                     }
                 }
             }
+        }
 
-            // Update VI scanline and check for interrupt
-            let bus = self.cpu.bus_mut();
-            if bus.vi_mut().update_scanline(scanline) {
-                // VI interrupt triggered - set interrupt in MI (only if not already set)
-                let mi_status = bus.mi().get_interrupt_status();
-                if (mi_status & crate::mi::MI_INTR_VI) == 0 {
-                    bus.mi_mut().set_interrupt(crate::mi::MI_INTR_VI);
-
-                    log(LogCategory::Interrupts, LogLevel::Info, || {
-                        format!("N64: VI interrupt triggered at scanline {}", scanline)
-                    });
+        // Debug: Goddard code execution counter  
+        static mut FRAME_DBG: u32 = 0;
+        unsafe {
+            FRAME_DBG += 1;
+            if FRAME_DBG == 30 {
+                let rdram = self.cpu.bus().rdram();
+                // Dump perspective handler from its start prologue through child processing
+                // Also dump from 0x80324A00 to find the dispatcher
+                eprintln!("=== GEO CODE 0x80324A00-0x80325200 ===");
+                for addr in (0x324A00u32..0x325200).step_by(4) {
+                    if (addr as usize + 3) < rdram.len() {
+                        let w = u32::from_be_bytes([
+                            rdram[addr as usize], rdram[addr as usize + 1],
+                            rdram[addr as usize + 2], rdram[addr as usize + 3]
+                        ]);
+                        eprintln!("  {:08X}: {:08X}", 0x80000000u32 + addr, w);
+                    }
                 }
+                // Search for LUI ??, 0x4780 (any register) - find all matrix conversion code
+                eprintln!("=== Search for LUI xx, 0x4780 ===");
+                for addr in (0x320000u32..0x340000).step_by(4) {
+                    if (addr as usize + 3) < rdram.len() {
+                        let w = u32::from_be_bytes([
+                            rdram[addr as usize], rdram[addr as usize + 1],
+                            rdram[addr as usize + 2], rdram[addr as usize + 3]
+                        ]);
+                        if (w & 0xFFE0FFFF) == 0x3C004780 {
+                            eprintln!("  LUI 0x4780 at 0x{:08X}: {:08X}", 0x80000000u32 + addr, w);
+                        }
+                    }
+                }
+                eprintln!("=== END ===");
+            }
+            if FRAME_DBG <= 60 {
+                let zero_mtx = self.cpu.bus_mut().rsp_mut().take_zero_mtx_count();
+                eprintln!("FRAME {}: total={} goddard={} mtxf2l={} zero_mtx={} unseen1={} unseen2={} first_pc=0x{:08X} funcb={} callee={} after_jal={}", FRAME_DBG, total_count, goddard_count, mtxf2l_count, zero_mtx, unseen1_count, unseen2_count, first_unseen2_pc, hit_funcb_entry, hit_callee, hit_after_jal);
             }
         }
 

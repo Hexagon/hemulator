@@ -11,7 +11,7 @@ out vec4 vColor;   // Pass color to fragment shader
 out float vDepth;  // Pass depth to fragment shader
 
 void main() {
-    gl_Position = vec4(aPosition, 0.0, 1.0);
+    gl_Position = vec4(aPosition, aDepth * 2.0 - 1.0, 1.0);
     vColor = aColor;
     vDepth = aDepth;
 }
