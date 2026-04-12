@@ -900,8 +900,9 @@ impl RspHle {
                 rdp.execute_rdp_command(rdp_cmd_id, word0, word1, w2, w3, rdram);
                 16 // skip the 2 extra 8-byte entries
             } else {
-                // Process F3DEX command normally
-                let should_continue = self.execute_f3dex_command(cmd_id, word0, word1, rdram, rdp);
+                // Process F3DEX command normally (handles both F3DEX and F3DEX2 formats)
+                let should_continue =
+                    self.execute_display_list_command(cmd_id, word0, word1, rdram, rdp);
 
                 if !should_continue {
                     break; // G_ENDDL or branch command
@@ -2222,9 +2223,25 @@ impl RspHle {
     ) {
         // Back-face culling
         if self.geometry_mode & (G_CULL_FRONT | G_CULL_BACK) != 0 {
-            let (sx0, sy0, _) = self.clip_to_screen(&clip0);
-            let (sx1, sy1, _) = self.clip_to_screen(&clip1);
-            let (sx2, sy2, _) = self.clip_to_screen(&clip2);
+            let (sx0, sy0, _) = self.clip_to_screen(clip0);
+            let (sx1, sy1, _) = self.clip_to_screen(clip1);
+            let (sx2, sy2, _) = self.clip_to_screen(clip2);
+            // 2D cross product of edges: positive = CCW, negative = CW
+            let cross =
+                (sx1 - sx0) as i64 * (sy2 - sy0) as i64 - (sx2 - sx0) as i64 * (sy1 - sy0) as i64;
+            if (self.geometry_mode & G_CULL_BACK) != 0 && cross <= 0 {
+                return; // back-facing, cull
+            }
+            if (self.geometry_mode & G_CULL_FRONT) != 0 && cross >= 0 {
+                return; // front-facing, cull
+            }
+        }
+
+        // Back-face culling
+        if self.geometry_mode & (G_CULL_FRONT | G_CULL_BACK) != 0 {
+            let (sx0, sy0, _) = self.clip_to_screen(clip0);
+            let (sx1, sy1, _) = self.clip_to_screen(clip1);
+            let (sx2, sy2, _) = self.clip_to_screen(clip2);
             // 2D cross product of edges: positive = CCW, negative = CW
             let cross =
                 (sx1 - sx0) as i64 * (sy2 - sy0) as i64 - (sx2 - sx0) as i64 * (sy1 - sy0) as i64;
@@ -2237,9 +2254,9 @@ impl RspHle {
         }
 
         // Transform to screen space
-        let (x0, y0, z0) = self.clip_to_screen(&clip0);
-        let (x1, y1, z1) = self.clip_to_screen(&clip1);
-        let (x2, y2, z2) = self.clip_to_screen(&clip2);
+        let (x0, y0, z0) = self.clip_to_screen(clip0);
+        let (x1, y1, z1) = self.clip_to_screen(clip1);
+        let (x2, y2, z2) = self.clip_to_screen(clip2);
 
         log(LogCategory::PPU, LogLevel::Debug, || {
             format!(
@@ -2718,7 +2735,7 @@ mod tests {
     #[test]
     fn test_f3dex_display_list_parsing() {
         let mut hle = RspHle::new();
-        hle.microcode = MicrocodeType::F3DEX;
+        hle.microcode = MicrocodeType::F3DEX2; // test uses F3DEX2 opcodes (0x01=G_VTX, 0x05=G_TRI1, 0xDF=G_ENDDL)
 
         let mut rdram = vec![0u8; 1024];
         let mut rdp = Rdp::new_for_test();
@@ -2779,7 +2796,7 @@ mod tests {
     #[test]
     fn test_f3dex_quad_command() {
         let mut hle = RspHle::new();
-        hle.microcode = MicrocodeType::F3DEX;
+        hle.microcode = MicrocodeType::F3DEX2; // test uses F3DEX2 opcodes (0x01=G_VTX, 0xDF=G_ENDDL)
 
         let mut rdram = vec![0u8; 1024];
         let mut rdp = Rdp::new_for_test();
@@ -3024,7 +3041,7 @@ mod tests {
     #[test]
     fn test_g_dl_command() {
         let mut hle = RspHle::new();
-        hle.microcode = MicrocodeType::F3DEX;
+        hle.microcode = MicrocodeType::F3DEX2; // test uses F3DEX2 opcodes (0xDE=G_DL, 0x01=G_VTX, 0xDF=G_ENDDL)
 
         let mut rdram = vec![0u8; 2048];
         let mut rdp = Rdp::new_for_test();
@@ -3217,7 +3234,7 @@ mod tests {
     #[test]
     fn test_g_branch_z_command() {
         let mut hle = RspHle::new();
-        hle.microcode = MicrocodeType::F3DEX;
+        hle.microcode = MicrocodeType::F3DEX2; // test uses F3DEX2 opcodes (0x01=G_VTX, 0xB0=G_BRANCH_Z, 0xDF=G_ENDDL)
 
         let mut rdram = vec![0u8; 2048];
         let mut rdp = Rdp::new_for_test();

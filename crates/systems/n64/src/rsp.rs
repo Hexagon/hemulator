@@ -498,6 +498,7 @@ impl Rsp {
     }
 
     /// Debug: get and reset zero matrix count
+    #[allow(dead_code)]
     pub fn take_zero_mtx_count(&mut self) -> u32 {
         let c = self.hle.zero_mtx_count;
         self.hle.zero_mtx_count = 0;
