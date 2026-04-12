@@ -38,6 +38,12 @@ pub enum InspectorTab {
     ColecoVisionPalettes,
     ColecoVisionVdp, // VDP registers and state
 
+    Sg1000Tiles,
+    Sg1000Palettes,
+
+    MegaDriveTiles,
+    MegaDrivePalettes,
+
     SnesTiles,
     SnesPalettes,
     SnesLayers,
@@ -80,6 +86,10 @@ impl InspectorTab {
             InspectorTab::ColecoVisionTiles => "🎨 Tiles",
             InspectorTab::ColecoVisionPalettes => "🎨 Palettes",
             InspectorTab::ColecoVisionVdp => "📺 VDP",
+            InspectorTab::Sg1000Tiles => "🎨 Tiles",
+            InspectorTab::Sg1000Palettes => "🎨 Palettes",
+            InspectorTab::MegaDriveTiles => "🎨 Tiles",
+            InspectorTab::MegaDrivePalettes => "🎨 Palettes",
             InspectorTab::SnesTiles => "🎨 Tiles",
             InspectorTab::SnesPalettes => "🎨 Palettes",
             InspectorTab::SnesLayers => "📐 Layers",
@@ -179,9 +189,20 @@ pub fn get_tabs_for_system(system_type: Option<&SystemType>) -> Vec<InspectorTab
             SystemType::GameAndWatch => {
                 tabs.push(InspectorTab::Mounts); // Game & Watch uses Mounts tab for "Program"
             }
+            SystemType::SG1000 => {
+                tabs.push(InspectorTab::Cartridge);
+                tabs.extend_from_slice(&[InspectorTab::Sg1000Tiles, InspectorTab::Sg1000Palettes]);
+            }
+            SystemType::MegaDrive => {
+                tabs.push(InspectorTab::Cartridge);
+                tabs.extend_from_slice(&[
+                    InspectorTab::MegaDriveTiles,
+                    InspectorTab::MegaDrivePalettes,
+                ]);
+            }
             _ => {
                 // Fallback for cartridge-based systems not explicitly listed above
-                // This includes N64, SG-1000, and any future cartridge systems
+                // This includes N64 and any future cartridge systems
                 tabs.push(InspectorTab::Cartridge);
             }
         }
@@ -214,6 +235,8 @@ pub fn render_inspector_tab(tab: &InspectorTab, ui: &mut Ui, tab_manager: &mut T
         | InspectorTab::GbaTiles
         | InspectorTab::SmsTiles
         | InspectorTab::ColecoVisionTiles
+        | InspectorTab::Sg1000Tiles
+        | InspectorTab::MegaDriveTiles
         | InspectorTab::SnesTiles => {
             tab_manager.render_tiles_tab(ui);
         }
@@ -222,6 +245,8 @@ pub fn render_inspector_tab(tab: &InspectorTab, ui: &mut Ui, tab_manager: &mut T
         | InspectorTab::GbaPalettes
         | InspectorTab::SmsPalettes
         | InspectorTab::ColecoVisionPalettes
+        | InspectorTab::Sg1000Palettes
+        | InspectorTab::MegaDrivePalettes
         | InspectorTab::SnesPalettes => {
             render_palettes_tab(ui, tab_manager);
         }
@@ -495,6 +520,68 @@ fn render_palettes_tab(ui: &mut Ui, tab_manager: &TabManager) {
 
                         // Render palettes using the TabManager method
                         tab_manager.render_snes_palettes(ui, snes_data);
+                    }
+                    crate::egui_ui::SystemTileData::SG1000(sg1000_data) => {
+                        ui.heading("🎨 SG-1000 Palette Viewer");
+                        ui.separator();
+                        ui.add_space(10.0);
+                        ui.label("TMS9918A Fixed 16-Color Palette");
+                        ui.add_space(5.0);
+                        ui.horizontal_wrapped(|ui| {
+                            for (i, &color) in sg1000_data.palette.iter().enumerate() {
+                                let r = ((color >> 16) & 0xFF) as u8;
+                                let g = ((color >> 8) & 0xFF) as u8;
+                                let b = (color & 0xFF) as u8;
+                                let rect_size = egui::vec2(24.0, 24.0);
+                                let (rect, response) =
+                                    ui.allocate_exact_size(rect_size, egui::Sense::hover());
+                                ui.painter().rect_filled(
+                                    rect,
+                                    2.0,
+                                    egui::Color32::from_rgb(r, g, b),
+                                );
+                                response.on_hover_text(format!(
+                                    "Color {}: #{:02X}{:02X}{:02X}",
+                                    i, r, g, b
+                                ));
+                            }
+                        });
+                    }
+                    crate::egui_ui::SystemTileData::MegaDrive(md_data) => {
+                        ui.heading("🎮 Mega Drive Palette Viewer");
+                        ui.separator();
+                        ui.add_space(10.0);
+                        ui.label("4 Palettes × 16 Colors (64 entries total)");
+                        ui.add_space(5.0);
+                        for palette_idx in 0..4usize {
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new(format!("Palette {}:", palette_idx))
+                                        .monospace(),
+                                );
+                                for color_idx in 0..16usize {
+                                    let entry_idx = palette_idx * 16 + color_idx;
+                                    if entry_idx < md_data.palette.len() {
+                                        let color = md_data.palette[entry_idx];
+                                        let r = ((color >> 16) & 0xFF) as u8;
+                                        let g = ((color >> 8) & 0xFF) as u8;
+                                        let b = (color & 0xFF) as u8;
+                                        let rect_size = egui::vec2(16.0, 16.0);
+                                        let (rect, response) =
+                                            ui.allocate_exact_size(rect_size, egui::Sense::hover());
+                                        ui.painter().rect_filled(
+                                            rect,
+                                            0.0,
+                                            egui::Color32::from_rgb(r, g, b),
+                                        );
+                                        response.on_hover_text(format!(
+                                            "P{}·{}: #{:02X}{:02X}{:02X}",
+                                            palette_idx, color_idx, r, g, b
+                                        ));
+                                    }
+                                }
+                            });
+                        }
                     }
                     _ => {
                         ui.vertical_centered(|ui| {

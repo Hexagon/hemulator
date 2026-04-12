@@ -4868,7 +4868,13 @@ fn main() {
                     }
                 }
                 EmulatorSystem::Atari5200(_) => SystemDebugInfo::new("Atari 5200".to_string()),
-                EmulatorSystem::MegaDrive(_) => SystemDebugInfo::new("Mega Drive".to_string()),
+                EmulatorSystem::MegaDrive(s) => {
+                    if let Some(debugger) = s.debugger() {
+                        SystemDebugInfo::from_debugger("Mega Drive", debugger)
+                    } else {
+                        SystemDebugInfo::new("Mega Drive".to_string())
+                    }
+                }
                 EmulatorSystem::C64(_) => SystemDebugInfo::new("C64".to_string()),
             };
             egui_app.tab_manager.update_debug_info(debug_info);
@@ -4926,7 +4932,10 @@ fn main() {
                     Some(create_enhanced_debug_state("Game & Watch", debugger, &sys))
                 }
                 EmulatorSystem::Atari5200(_) => None,
-                EmulatorSystem::MegaDrive(_) => None,
+                EmulatorSystem::MegaDrive(s) => {
+                    let debugger: &dyn Debugger = s.as_ref();
+                    Some(create_enhanced_debug_state("Mega Drive", debugger, &sys))
+                }
                 EmulatorSystem::C64(_) => None,
             };
 
@@ -4951,7 +4960,7 @@ fn main() {
                     EmulatorSystem::PS1(_) => None,
                     EmulatorSystem::GameAndWatch(s) => Some(s.as_ref()),
                     EmulatorSystem::Atari5200(_) => None,
-                    EmulatorSystem::MegaDrive(_) => None,
+                    EmulatorSystem::MegaDrive(s) => Some(s.as_ref()),
                     EmulatorSystem::C64(_) => None,
                 };
 
@@ -5279,6 +5288,26 @@ fn main() {
                         irq: gpu_data.irq,
                     };
                     egui_app.tab_manager.update_ps1_gpu_data(ps1_gpu);
+                }
+                EmulatorSystem::SG1000(s) => {
+                    let sg_data = s.get_tile_viewer_data();
+                    let tile_data = egui_ui::SystemTileData::SG1000(egui_ui::Sg1000TileData {
+                        vram: sg_data.vram,
+                        palette: sg_data.palette,
+                        registers: sg_data.registers,
+                    });
+                    egui_app.tab_manager.update_system_tile_data(tile_data);
+                }
+                EmulatorSystem::MegaDrive(s) => {
+                    let md_data = s.get_tile_viewer_data();
+                    let tile_data =
+                        egui_ui::SystemTileData::MegaDrive(egui_ui::MegaDriveTileData {
+                            vram: md_data.vram,
+                            cram: md_data.cram,
+                            palette: md_data.palette,
+                            registers: md_data.registers,
+                        });
+                    egui_app.tab_manager.update_system_tile_data(tile_data);
                 }
                 _ => {
                     // Other systems don't have tile viewers yet

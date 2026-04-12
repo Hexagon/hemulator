@@ -24,6 +24,7 @@ pub enum SystemTileData {
     SMS(SmsTileData),
     ColecoVision(ColecoVisionTileData),
     SG1000(Sg1000TileData),
+    MegaDrive(MegaDriveTileData),
     SNES(SnesTileData),
     Atari2600(Atari2600TileData),
     Chip8(Chip8TileData),
@@ -161,6 +162,19 @@ pub struct ColecoVisionTileData {
 pub struct Sg1000TileData {
     pub vram: Vec<u8>,
     pub palette: Vec<u32>,
+    pub registers: Vec<u8>,
+}
+
+/// Mega Drive / Genesis tile viewer data
+#[derive(Clone)]
+pub struct MegaDriveTileData {
+    /// Full 64KB VRAM contents
+    pub vram: Vec<u8>,
+    /// Raw 128-byte CRAM (64 × 2-byte entries)
+    pub cram: Vec<u8>,
+    /// Decoded palette: 64 RGBA colors (0xAARRGGBB)
+    pub palette: Vec<u32>,
+    /// VDP register array (24 bytes)
     pub registers: Vec<u8>,
 }
 
@@ -1937,6 +1951,61 @@ impl TabManager {
                             ui.label(format!("VDP Registers: {}", sg1000_data.registers.len()));
                             ui.add_space(5.0);
                             ui.label("See VDP tab for detailed register information");
+                        }
+                        SystemTileData::MegaDrive(md_data) => {
+                            ui.heading("🎮 Mega Drive Tile Viewer");
+                            ui.separator();
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "VRAM: {} KB",
+                                        md_data.vram.len() / 1024
+                                    ))
+                                    .monospace(),
+                                );
+                                ui.separator();
+                                ui.label(
+                                    egui::RichText::new(format!("CRAM: {} bytes", md_data.cram.len()))
+                                        .monospace(),
+                                );
+                                ui.separator();
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "Palette: {} colors",
+                                        md_data.palette.len()
+                                    ))
+                                    .monospace(),
+                                );
+                            });
+                            ui.add_space(5.0);
+                            ui.label("VDP Tile Data (4bpp, 8×8 tiles)");
+                            ui.separator();
+                            // Show first 512 tiles (typical for a 64KB VRAM with 32-byte tiles)
+                            let tile_count = (md_data.vram.len() / 32).min(512);
+                            ui.label(format!("Tiles available: {}", tile_count));
+                            ui.add_space(5.0);
+                            // Show palette swatches for quick reference
+                            ui.label("Active Palette (first 16 colors):");
+                            ui.horizontal_wrapped(|ui| {
+                                for i in 0..16usize {
+                                    if i < md_data.palette.len() {
+                                        let color = md_data.palette[i];
+                                        let r = ((color >> 16) & 0xFF) as u8;
+                                        let g = ((color >> 8) & 0xFF) as u8;
+                                        let b = (color & 0xFF) as u8;
+                                        let rect_size = egui::vec2(16.0, 16.0);
+                                        let (rect, _response) = ui.allocate_exact_size(
+                                            rect_size,
+                                            egui::Sense::hover(),
+                                        );
+                                        ui.painter().rect_filled(
+                                            rect,
+                                            0.0,
+                                            egui::Color32::from_rgb(r, g, b),
+                                        );
+                                    }
+                                }
+                            });
                         }
                     }
                 } else {
