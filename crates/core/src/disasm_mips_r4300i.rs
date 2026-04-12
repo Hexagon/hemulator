@@ -133,7 +133,7 @@ fn decode_instruction(instr: u32, pc: u32) -> String {
         0x0E => format!("XORI     {}, {}, 0x{:04X}", reg(rt), reg(rs), imm),
         0x0F => format!("LUI      {}, 0x{:04X}", reg(rt), imm),
         0x10 => decode_cop0(rs, rt, rd, func, instr),
-        0x11 => decode_cop1(rs, rt, rd, sa, func, instr),
+        0x11 => decode_cop1(rs, rt, rd, sa, func, instr, pc),
         0x14 => format!(
             "BEQL     {}, {}, {}",
             reg(rs),
@@ -292,7 +292,7 @@ fn decode_cop0(rs: u32, rt: u32, rd: u32, _func: u32, instr: u32) -> String {
     }
 }
 
-fn decode_cop1(rs: u32, rt: u32, rd: u32, sa: u32, func: u32, instr: u32) -> String {
+fn decode_cop1(rs: u32, rt: u32, rd: u32, sa: u32, func: u32, instr: u32, pc: u32) -> String {
     let fmt = rs;
     let ft = rt;
     let fs = rd;
@@ -311,7 +311,6 @@ fn decode_cop1(rs: u32, rt: u32, rd: u32, sa: u32, func: u32, instr: u32) -> Str
             let nd = (instr >> 17) & 0x01;
             let tf = (instr >> 16) & 0x01;
             let imm = instr & 0xFFFF;
-            let pc = 0u32; // approximate
             match (nd, tf) {
                 (0, 0) => format!("BC1F     cc={}, {}", cc, branch_target(pc, imm)),
                 (0, 1) => format!("BC1T     cc={}, {}", cc, branch_target(pc, imm)),
@@ -554,6 +553,51 @@ mod tests {
         assert!(
             instr.mnemonic.starts_with("SLL"),
             "expected SLL, got: {}",
+            instr.mnemonic
+        );
+    }
+
+    #[test]
+    fn test_bc1f_uses_real_pc() {
+        // BC1F cc=0, offset=+1 (target = PC+4 + 1*4 = PC+8)
+        // BC1 encoding: opcode=0x11 (COP1), fmt=0x08 (BC1), rt=0 (nd=0, tf=0), imm=1
+        // Bits: [31:26]=0x11, [25:21]=0x08, [20:16]=0x00, [15:0]=0x0001
+        // = 0x4500_0001
+        let pc = 0x8000_0200u32;
+        let mem = [0x45u8, 0x00, 0x00, 0x01];
+        let instr = disassemble_mips(&mem, pc).unwrap();
+        assert!(
+            instr.mnemonic.starts_with("BC1F"),
+            "expected BC1F, got: {}",
+            instr.mnemonic
+        );
+        // Target should be pc+4 + 1*4 = 0x80000200 + 4 + 4 = 0x80000208
+        assert!(
+            instr.mnemonic.contains("0x80000208"),
+            "expected target 0x80000208, got: {}",
+            instr.mnemonic
+        );
+    }
+
+    #[test]
+    fn test_bc1t_uses_real_pc() {
+        // BC1T cc=0, offset=-2 (backward branch)
+        // rt bits: nd=0, tf=1 → rt = 0b00001 = 1
+        // imm = 0xFFFE (-2 in signed 16-bit)
+        // Bits: [31:26]=0x11, [25:21]=0x08, [20:16]=0x01, [15:0]=0xFFFE
+        // = 0x4501_FFFE
+        let pc = 0x8000_0100u32;
+        let mem = [0x45u8, 0x01, 0xFF, 0xFE];
+        let instr = disassemble_mips(&mem, pc).unwrap();
+        assert!(
+            instr.mnemonic.starts_with("BC1T"),
+            "expected BC1T, got: {}",
+            instr.mnemonic
+        );
+        // Target = 0x80000100 + 4 + (-2)*4 = 0x80000100 + 4 - 8 = 0x800000FC
+        assert!(
+            instr.mnemonic.contains("0x800000FC"),
+            "expected target 0x800000FC, got: {}",
             instr.mnemonic
         );
     }

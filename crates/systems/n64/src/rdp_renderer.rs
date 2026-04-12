@@ -253,7 +253,7 @@ pub trait RdpRenderer: Send {
 
     /// Get the name of this renderer (for debugging/UI)
     #[allow(dead_code)]
-    fn name(&self) -> &str;
+    fn name(&self) -> &'static str;
 
     /// Check if this renderer is hardware-accelerated
     #[allow(dead_code)]

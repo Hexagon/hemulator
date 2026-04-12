@@ -647,7 +647,7 @@ impl RdpRenderer for SoftwareRdpRenderer {
         self.alpha_blend = false;
     }
 
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "Software"
     }
 

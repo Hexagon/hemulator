@@ -397,10 +397,10 @@ pub struct N64RdpData {
     pub color_image_size: u8,
     /// Z-buffer enabled flag
     pub zbuffer_enabled: bool,
-    /// Renderer backend name
-    pub renderer_name: String,
-    /// RSP microcode type
-    pub microcode_type: String,
+    /// Renderer backend name (static string; values come from a small fixed set)
+    pub renderer_name: &'static str,
+    /// RSP microcode type (static string; values come from a small fixed set)
+    pub microcode_type: &'static str,
     /// RSP vertex buffer count
     pub vertex_count: usize,
     /// DPC start address

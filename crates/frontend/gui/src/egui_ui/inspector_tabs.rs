@@ -2561,11 +2561,11 @@ fn render_n64_rdp_content(ui: &mut Ui, rdp: &super::tabs::N64RdpData) {
             .striped(true)
             .show(ui, |ui| {
                 ui.label(egui::RichText::new("Backend:").strong());
-                ui.label(&rdp.renderer_name);
+                ui.label(rdp.renderer_name);
                 ui.end_row();
 
                 ui.label(egui::RichText::new("RSP Microcode:").strong());
-                ui.label(&rdp.microcode_type);
+                ui.label(rdp.microcode_type);
                 ui.end_row();
 
                 ui.label(egui::RichText::new("RSP Vertex Count:").strong());

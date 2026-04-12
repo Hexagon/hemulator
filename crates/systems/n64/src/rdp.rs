@@ -130,10 +130,10 @@ pub struct RdpInspectorData {
     pub color_image_size: u8,
     /// Whether z-buffering is currently enabled
     pub zbuffer_enabled: bool,
-    /// Renderer backend name
-    pub renderer_name: String,
-    /// RSP microcode type
-    pub microcode_type: String,
+    /// Renderer backend name (static; comes from a small fixed set of values)
+    pub renderer_name: &'static str,
+    /// RSP microcode type (static; comes from a small fixed set of values)
+    pub microcode_type: &'static str,
     /// RSP vertex buffer count
     pub vertex_count: usize,
     /// DPC_START register value
@@ -318,7 +318,7 @@ impl Rdp {
     }
 
     /// Get the name of the current renderer backend
-    pub fn renderer_name(&self) -> &str {
+    pub fn renderer_name(&self) -> &'static str {
         self.renderer.name()
     }
 
@@ -377,12 +377,21 @@ impl Rdp {
     /// Set othermode (64-bit combined value from RSP HLE)
     pub fn set_othermode(&mut self, othermode: u64) {
         self.othermode = othermode;
+        let othermode_l = othermode as u32;
+
         // FORCE_BL is bit 14 of othermode_l (lower 32 bits of the combined value).
         // When set, the game has configured the blender for alpha compositing, so
         // enable src-alpha / (1-src-alpha) blending in the renderer.
-        let othermode_l = othermode as u32;
         let force_bl = (othermode_l >> 14) & 0x1 != 0;
         self.renderer.set_alpha_blend(force_bl);
+
+        // Z_COMPARE_EN (bit 4) enables depth comparison; Z_UPDATE_EN (bit 5) enables
+        // writing back to the Z-buffer. Either being set means depth testing is active.
+        let z_compare_en = (othermode_l >> 4) & 0x1 != 0;
+        let z_update_en = (othermode_l >> 5) & 0x1 != 0;
+        let zbuf = z_compare_en || z_update_en;
+        self.zbuffer_enabled = zbuf;
+        self.renderer.set_zbuffer_enabled(zbuf);
     }
 
     /// Clear the framebuffer with the current fill color
@@ -2880,5 +2889,45 @@ mod tests {
         assert!(pixel != 0);
         // Check that red channel is high
         assert!((pixel >> 16) & 0xFF > 200);
+    }
+
+    #[test]
+    fn test_set_othermode_derives_zbuffer_state() {
+        let mut rdp = Rdp::new_for_test();
+
+        // Default: zbuffer_enabled should be false
+        assert!(!rdp.is_zbuffer_enabled());
+
+        // Set Z_COMPARE_EN (bit 4 of othermode_l)
+        let othermode_with_z_compare: u64 = 0x0000_0010;
+        rdp.set_othermode(othermode_with_z_compare);
+        assert!(
+            rdp.is_zbuffer_enabled(),
+            "Z_COMPARE_EN should enable zbuffer"
+        );
+
+        // Clear both Z bits → disabled
+        rdp.set_othermode(0);
+        assert!(!rdp.is_zbuffer_enabled(), "no Z bits → zbuffer disabled");
+
+        // Set Z_UPDATE_EN (bit 5 of othermode_l) alone
+        let othermode_with_z_update: u64 = 0x0000_0020;
+        rdp.set_othermode(othermode_with_z_update);
+        assert!(
+            rdp.is_zbuffer_enabled(),
+            "Z_UPDATE_EN should enable zbuffer"
+        );
+
+        // Both bits set
+        rdp.set_othermode(0x0000_0030);
+        assert!(rdp.is_zbuffer_enabled(), "both Z bits → zbuffer enabled");
+
+        // FORCE_BL bit (14) should not affect zbuffer
+        let othermode_force_bl_only: u64 = 0x0000_4000;
+        rdp.set_othermode(othermode_force_bl_only);
+        assert!(
+            !rdp.is_zbuffer_enabled(),
+            "FORCE_BL alone should not enable zbuffer"
+        );
     }
 }
