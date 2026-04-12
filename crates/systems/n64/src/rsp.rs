@@ -706,4 +706,119 @@ mod tests {
         assert_eq!(status & SP_STATUS_SIG0, 0);
         assert_eq!(status & SP_STATUS_SIG1, 0);
     }
+
+    #[test]
+    fn test_rsp_dma_read_multiline() {
+        // Test multi-line DMA: count=2 (bit 19:12 = 1 means count-1=1 → 2 lines),
+        // each line is 4 bytes, no skip between lines.
+        let mut rsp = Rsp::new();
+        let mut rdram = vec![0u8; 4096];
+
+        // Line 0: bytes at RDRAM 0x100
+        rdram[0x100] = 0x11;
+        rdram[0x101] = 0x22;
+        rdram[0x102] = 0x33;
+        rdram[0x103] = 0x44;
+        // Line 1: bytes at RDRAM 0x104 (no skip, continues immediately)
+        rdram[0x104] = 0x55;
+        rdram[0x105] = 0x66;
+        rdram[0x106] = 0x77;
+        rdram[0x107] = 0x88;
+
+        rsp.sp_dram_addr = 0x100;
+        rsp.sp_mem_addr = 0x200; // DMEM
+                                 // sp_rd_len: length-1 = 3 (bits 11:0), count-1 = 1 (bits 19:12), skip = 0 (bits 31:20)
+        rsp.sp_rd_len = (1 << 12) | 3;
+        rsp.dma_read(&rdram);
+
+        // Line 0 in DMEM at 0x200
+        assert_eq!(rsp.read_dmem(0x200), 0x11);
+        assert_eq!(rsp.read_dmem(0x201), 0x22);
+        assert_eq!(rsp.read_dmem(0x202), 0x33);
+        assert_eq!(rsp.read_dmem(0x203), 0x44);
+        // Line 1 in DMEM at 0x204
+        assert_eq!(rsp.read_dmem(0x204), 0x55);
+        assert_eq!(rsp.read_dmem(0x205), 0x66);
+        assert_eq!(rsp.read_dmem(0x206), 0x77);
+        assert_eq!(rsp.read_dmem(0x207), 0x88);
+    }
+
+    #[test]
+    fn test_rsp_dma_read_multiline_with_skip() {
+        // Test multi-line DMA with non-zero DRAM skip.
+        // 2 lines × 4 bytes, DRAM skip = 4 bytes between lines.
+        let mut rsp = Rsp::new();
+        let mut rdram = vec![0u8; 4096];
+
+        // Line 0 at RDRAM 0x100
+        rdram[0x100] = 0xAA;
+        rdram[0x101] = 0xBB;
+        rdram[0x102] = 0xCC;
+        rdram[0x103] = 0xDD;
+        // 4-byte gap (0x104..0x107) that should be skipped
+        rdram[0x104] = 0xFF; // gap – must not appear in DMEM
+        rdram[0x105] = 0xFF;
+        rdram[0x106] = 0xFF;
+        rdram[0x107] = 0xFF;
+        // Line 1 at RDRAM 0x108 (= 0x100 + length(4) + skip(4))
+        rdram[0x108] = 0x11;
+        rdram[0x109] = 0x22;
+        rdram[0x10A] = 0x33;
+        rdram[0x10B] = 0x44;
+
+        rsp.sp_dram_addr = 0x100;
+        rsp.sp_mem_addr = 0x300; // DMEM
+                                 // sp_rd_len: length-1 = 3 (bits 11:0), count-1 = 1 (bits 19:12), skip = 4 (bits 31:20)
+        rsp.sp_rd_len = (4 << 20) | (1 << 12) | 3;
+        rsp.dma_read(&rdram);
+
+        // Line 0 in DMEM at 0x300
+        assert_eq!(rsp.read_dmem(0x300), 0xAA);
+        assert_eq!(rsp.read_dmem(0x301), 0xBB);
+        assert_eq!(rsp.read_dmem(0x302), 0xCC);
+        assert_eq!(rsp.read_dmem(0x303), 0xDD);
+        // Line 1 in DMEM at 0x304 (skip did not copy 0xFF bytes)
+        assert_eq!(rsp.read_dmem(0x304), 0x11);
+        assert_eq!(rsp.read_dmem(0x305), 0x22);
+        assert_eq!(rsp.read_dmem(0x306), 0x33);
+        assert_eq!(rsp.read_dmem(0x307), 0x44);
+    }
+
+    #[test]
+    fn test_rsp_dma_write_multiline_with_skip() {
+        // Test multi-line DMA write with non-zero DRAM skip.
+        // 2 lines × 4 bytes, DRAM skip = 4 bytes – RDRAM gap bytes must remain untouched.
+        let mut rsp = Rsp::new();
+        let mut rdram = vec![0u8; 4096];
+
+        // Populate DMEM source data
+        rsp.write_dmem(0x400, 0x11);
+        rsp.write_dmem(0x401, 0x22);
+        rsp.write_dmem(0x402, 0x33);
+        rsp.write_dmem(0x403, 0x44);
+        rsp.write_dmem(0x404, 0x55);
+        rsp.write_dmem(0x405, 0x66);
+        rsp.write_dmem(0x406, 0x77);
+        rsp.write_dmem(0x407, 0x88);
+
+        rsp.sp_dram_addr = 0x800;
+        rsp.sp_mem_addr = 0x400; // DMEM
+                                 // sp_wr_len: length-1 = 3, count-1 = 1, skip = 4
+        rsp.sp_wr_len = (4 << 20) | (1 << 12) | 3;
+        rsp.dma_write(&mut rdram);
+
+        // Line 0 → RDRAM 0x800
+        assert_eq!(rdram[0x800], 0x11);
+        assert_eq!(rdram[0x801], 0x22);
+        assert_eq!(rdram[0x802], 0x33);
+        assert_eq!(rdram[0x803], 0x44);
+        // Gap 0x804..0x807 must remain 0 (untouched)
+        assert_eq!(rdram[0x804], 0x00);
+        assert_eq!(rdram[0x807], 0x00);
+        // Line 1 → RDRAM 0x808 (= 0x800 + length(4) + skip(4))
+        assert_eq!(rdram[0x808], 0x55);
+        assert_eq!(rdram[0x809], 0x66);
+        assert_eq!(rdram[0x80A], 0x77);
+        assert_eq!(rdram[0x80B], 0x88);
+    }
 }

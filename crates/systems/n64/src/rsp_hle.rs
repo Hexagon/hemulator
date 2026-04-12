@@ -1021,11 +1021,11 @@ impl RspHle {
     /// F3D format:   word1 = flag(8) | v0*10(8) | v1*10(8) | v2*10(8)
     /// F3DEX format: word1 = flag(8) | v0*2(8) | v1*2(8) | v2*2(8)
     fn handle_g_tri1_f3dex(&mut self, _word0: u32, word1: u32, rdp: &mut Rdp) -> bool {
-        // F3D uses index*10 (DMEM vertex size), F3DEX uses index*2
-        let divisor = if self.microcode == MicrocodeType::F3DEX2 {
-            2
-        } else {
-            10
+        // F3DEX/F3DEX2 encode triangle vertex indices as index*2.
+        // Only use the F3D index*10 divisor for a future explicit F3D path.
+        let divisor = match self.microcode {
+            MicrocodeType::F3DEX | MicrocodeType::F3DEX2 => 2,
+            _ => 10,
         };
         let v0 = ((word1 >> 16) & 0xFF) as usize / divisor;
         let v1 = ((word1 >> 8) & 0xFF) as usize / divisor;
@@ -1094,54 +1094,17 @@ impl RspHle {
         let raw_addr = self.resolve_segment_addr(word1);
         let matrix = self.load_matrix_from_rdram(rdram, raw_addr);
 
-        // Only log matrices that are mostly zero (likely the broken one)
+        // Track zero matrices for debug diagnostics (logged at trace level)
         let nonzero_count = matrix.iter().filter(|&&v| v.abs() > 0.001).count();
         if nonzero_count <= 1 {
             self.dl_debug_found_zero = true;
             self.zero_mtx_count += 1;
-            let phys = Self::virt_to_phys(raw_addr);
-            eprintln!("ZERO_MTX: params=0x{:02X} proj={} load={} push={} addr=0x{:08X} word1=0x{:08X} dl_depth={} dl_addr=0x{:08X}",
-                params, is_projection, is_load, is_push, raw_addr, word1, self.dl_debug_depth, self.dl_debug_addr);
-            // Also dump segment table
-            let segs: Vec<String> = self
-                .segment_bases
-                .iter()
-                .enumerate()
-                .filter(|(_, &v)| v != 0)
-                .map(|(i, &v)| format!("{}=0x{:06X}", i, v))
-                .collect();
-            eprintln!("  segments: [{}]", segs.join(", "));
-            if phys + 63 < rdram.len() {
-                // Dump all 16 u32 words (64 bytes) for full picture
-                for row in 0..4 {
-                    let o = phys + row * 8;
-                    let w0 =
-                        u32::from_be_bytes([rdram[o], rdram[o + 1], rdram[o + 2], rdram[o + 3]]);
-                    let w1 = u32::from_be_bytes([
-                        rdram[o + 4],
-                        rdram[o + 5],
-                        rdram[o + 6],
-                        rdram[o + 7],
-                    ]);
-                    let fo = phys + 32 + row * 8;
-                    let f0 = u32::from_be_bytes([
-                        rdram[fo],
-                        rdram[fo + 1],
-                        rdram[fo + 2],
-                        rdram[fo + 3],
-                    ]);
-                    let f1 = u32::from_be_bytes([
-                        rdram[fo + 4],
-                        rdram[fo + 5],
-                        rdram[fo + 6],
-                        rdram[fo + 7],
-                    ]);
-                    eprintln!(
-                        "  row{}: int={:08X} {:08X}  frac={:08X} {:08X}",
-                        row, w0, w1, f0, f1
-                    );
-                }
-            }
+            log(LogCategory::PPU, LogLevel::Debug, || {
+                format!(
+                    "RSP HLE: G_MTX near-zero matrix at addr=0x{:08X} (nonzero={}, depth={})",
+                    raw_addr, nonzero_count, self.dl_debug_depth
+                )
+            });
         }
 
         if is_projection {
@@ -2111,34 +2074,6 @@ impl RspHle {
         let clip1 = self.transform_vertex_to_clip(vert1);
         let clip2 = self.transform_vertex_to_clip(vert2);
 
-        eprintln!(
-            "TRI: v0_pos=[{},{},{}] v1_pos=[{},{},{}] v2_pos=[{},{},{}]",
-            vert0.pos[0],
-            vert0.pos[1],
-            vert0.pos[2],
-            vert1.pos[0],
-            vert1.pos[1],
-            vert1.pos[2],
-            vert2.pos[0],
-            vert2.pos[1],
-            vert2.pos[2]
-        );
-        eprintln!(
-            "TRI: MV diag=[{:.4},{:.4},{:.4},{:.4}] PJ diag=[{:.4},{:.4},{:.4},{:.4}]",
-            self.modelview_matrix[0],
-            self.modelview_matrix[5],
-            self.modelview_matrix[10],
-            self.modelview_matrix[15],
-            self.projection_matrix[0],
-            self.projection_matrix[5],
-            self.projection_matrix[10],
-            self.projection_matrix[15]
-        );
-        eprintln!("TRI: clip0=[{:.1},{:.1},{:.1},{:.1}] clip1=[{:.1},{:.1},{:.1},{:.1}] clip2=[{:.1},{:.1},{:.1},{:.1}]",
-            clip0[0], clip0[1], clip0[2], clip0[3],
-            clip1[0], clip1[1], clip1[2], clip1[3],
-            clip2[0], clip2[1], clip2[2], clip2[3]);
-
         // Near-plane clipping: clip against W = NEAR_W plane
         // Vertices with W <= NEAR_W are behind or at the camera
         const NEAR_W: f32 = 0.001;
@@ -2221,22 +2156,6 @@ impl RspHle {
         clip2: &[f32; 4],
         rdp: &mut Rdp,
     ) {
-        // Back-face culling
-        if self.geometry_mode & (G_CULL_FRONT | G_CULL_BACK) != 0 {
-            let (sx0, sy0, _) = self.clip_to_screen(clip0);
-            let (sx1, sy1, _) = self.clip_to_screen(clip1);
-            let (sx2, sy2, _) = self.clip_to_screen(clip2);
-            // 2D cross product of edges: positive = CCW, negative = CW
-            let cross =
-                (sx1 - sx0) as i64 * (sy2 - sy0) as i64 - (sx2 - sx0) as i64 * (sy1 - sy0) as i64;
-            if (self.geometry_mode & G_CULL_BACK) != 0 && cross <= 0 {
-                return; // back-facing, cull
-            }
-            if (self.geometry_mode & G_CULL_FRONT) != 0 && cross >= 0 {
-                return; // front-facing, cull
-            }
-        }
-
         // Back-face culling
         if self.geometry_mode & (G_CULL_FRONT | G_CULL_BACK) != 0 {
             let (sx0, sy0, _) = self.clip_to_screen(clip0);
