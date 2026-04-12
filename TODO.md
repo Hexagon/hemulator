@@ -39,10 +39,18 @@ setup. The "Ignored Tests" section can be considered complete; retained for refe
 - [ ] **RDP performance counters**: `DPC_CLOCK`, `DPC_BUFBUSY`, `DPC_PIPEBUSY`, and `DPC_TMEM` registers return hardcoded 0. Some games wait for these to reach expected values. — `crates/systems/n64/src/rdp.rs`
 - [x] **CPU overflow traps**: Signed arithmetic instructions (`ADD`, `ADDI`, `SUB`, `DADD`, `DADDI`, `DSUB`) now raise IntegerOverflow exception (code 12) on overflow, per MIPS III spec. — `crates/core/src/cpu_mips_r4300i.rs`
 - [ ] **Interpreter speed ceiling**: The MIPS R4300i interpreter processes one instruction per function call. At hardware speed (93.75 MHz ÷ typical IPC), a pure interpreter cannot hit 30 fps without very fast hardware. A dynamic recompiler (dynarec/JIT) is needed to reach playable speed for CPU-heavy games. — `crates/core/src/cpu_mips_r4300i.rs`
+- [ ] **RDP cycle type / full colour combiner**: Only MODULATE (TEXEL0 × SHADE) is decoded. 1-cycle, 2-cycle, copy, and fill cycle types are partially implemented. Full COMBINED/SHADE/TEXEL1/NOISE/ENVIRONMENT/CENTER/K5 mux support needed. — `crates/systems/n64/src/rdp.rs`
+- [ ] **RDP texture filtering**: SET_OTHER_MODES texture filter bits (point/bilinear/median) are stored but not applied. All sampling uses point (nearest) filtering. Bilinear needed for many games. — `crates/systems/n64/src/rdp.rs`
+- [ ] **SI (Serial Interface) DMA**: SI controller/PIF DMA transfers are instant. On real hardware they take ~8 µs and set a SI interrupt on completion. Some games rely on the interrupt timing. — `crates/systems/n64/src/bus.rs`
+- [ ] **RDRAM configuration registers (0x03F0_0000–0x03FF_FFFF)**: Reads/writes to RDRAM internal registers (device type, mode, latency, etc.) are unhandled (return 0 / ignored). Some homebrew and bootcode probes these registers. — `crates/systems/n64/src/bus.rs`
 
 ### Low
 - [x] **Memory alignment validation**: Load/store instructions now raise `AddressError` exceptions (AdEL=4 on load, AdES=5 on store) on misaligned access. `CP0_BADVADDR` is set to the faulting address. (LH/SH = 2 B, LW/SW = 4 B, LD/SD = 8 B). — `crates/core/src/cpu_mips_r4300i.rs`
 - [ ] **Full cache coherency**: The TLB/cache is direct-mapped only; cache invalidation and dirty-line write-back are not emulated. — `crates/systems/n64/src/bus.rs`
+- [ ] **RI (RDRAM Interface) registers**: Register reads at 0x0470_0000–0x047F_FFFF return 0. Some bootcode/demos write RI_REFRESH, RI_SELECT, RI_MODE. Currently silently ignored. — `crates/systems/n64/src/bus.rs`
+- [ ] **RDRAM boundary check in word/doubleword access**: `read_word` / `write_word` for RDRAM can panic if the physical address is 0x3FFFFF (offset+3 = 0x400002 > 4MB). Edge case but possible with misaligned access to end of RDRAM. — `crates/systems/n64/src/bus.rs`
+- [ ] **OpenGL state toggling overhead**: `enable/disable(SCISSOR_TEST)` and `enable/disable(DEPTH_TEST)` are called per-draw-call in the OpenGL renderer. Consider leaving scissor/depth always enabled and using glScissor / glDepthFunc state changes only. — `crates/systems/n64/src/rdp_renderer_opengl.rs`
+- [ ] **Bus read_doubleword decomposed**: `read_doubleword` calls `read_word` twice, each translating the address. Could add a RDRAM fast path similar to `read_halfword`. — `crates/systems/n64/src/bus.rs`
 
 ## Game & Watch
 

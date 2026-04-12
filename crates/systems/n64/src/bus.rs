@@ -789,6 +789,12 @@ impl MemoryMips for N64Bus {
     }
 
     fn read_halfword(&self, addr: u32) -> u16 {
+        let phys_addr = self.translate_address(addr);
+        // Fast path for RDRAM (vast majority of halfword reads)
+        if phys_addr <= 0x003F_FFFE {
+            let offset = (phys_addr & 0x003FFFFF) as usize;
+            return u16::from_be_bytes([self.rdram[offset], self.rdram[offset + 1]]);
+        }
         let b0 = self.read_byte(addr);
         let b1 = self.read_byte(addr + 1);
         u16::from_be_bytes([b0, b1])
@@ -801,12 +807,7 @@ impl MemoryMips for N64Bus {
             // RDRAM
             0x0000_0000..=0x003F_FFFF => {
                 let offset = (phys_addr & 0x003FFFFF) as usize;
-                u32::from_be_bytes([
-                    self.rdram[offset],
-                    self.rdram[offset + 1],
-                    self.rdram[offset + 2],
-                    self.rdram[offset + 3],
-                ])
+                u32::from_be_bytes(self.rdram[offset..offset + 4].try_into().unwrap_or([0; 4]))
             }
             // RSP registers (0x04040000 - 0x0404001F)
             0x0404_0000..=0x0404_001F => {
@@ -1014,6 +1015,15 @@ impl MemoryMips for N64Bus {
     }
 
     fn write_halfword(&mut self, addr: u32, val: u16) {
+        let phys_addr = self.translate_address(addr);
+        // Fast path for RDRAM
+        if phys_addr <= 0x003F_FFFE {
+            let offset = (phys_addr & 0x003FFFFF) as usize;
+            let bytes = val.to_be_bytes();
+            self.rdram[offset] = bytes[0];
+            self.rdram[offset + 1] = bytes[1];
+            return;
+        }
         let bytes = val.to_be_bytes();
         self.write_byte(addr, bytes[0]);
         self.write_byte(addr + 1, bytes[1]);
@@ -1026,11 +1036,7 @@ impl MemoryMips for N64Bus {
             // RDRAM
             0x0000_0000..=0x003F_FFFF => {
                 let offset = (phys_addr & 0x003FFFFF) as usize;
-                let bytes = val.to_be_bytes();
-                self.rdram[offset] = bytes[0];
-                self.rdram[offset + 1] = bytes[1];
-                self.rdram[offset + 2] = bytes[2];
-                self.rdram[offset + 3] = bytes[3];
+                self.rdram[offset..offset + 4].copy_from_slice(&val.to_be_bytes());
             }
             // SP DMEM (0x04000000 - 0x04000FFF)
             0x0400_0000..=0x0400_0FFF => {
@@ -1137,9 +1143,14 @@ impl MemoryMips for N64Bus {
                     }
                     0x0C => {
                         // PI_WR_LEN - DMA from cart to RDRAM (write)
-                        // Length is value + 1
-                        let len = ((val & 0x00FF_FFFF) + 1) as usize;
-                        let dram_addr = self.pi_dram_addr as usize;
+                        // Length is value + 1, hardware rounds up to 2-byte alignment.
+                        let raw_len = ((val & 0x00FF_FFFF) + 1) as usize;
+                        // PI DMA transfers are 2-byte aligned (length rounded up to
+                        // next even number). RDRAM destination must also be 2-byte
+                        // aligned (hardware masks bit 0). Source (cart) alignment
+                        // varies but cart reads are byte-addressable for the ROM bus.
+                        let len = (raw_len + 1) & !1; // round up to even
+                        let dram_addr = (self.pi_dram_addr & !1) as usize;
                         let cart_addr = self.pi_cart_addr;
 
                         log(LogCategory::Bus, LogLevel::Info, || {
@@ -1157,9 +1168,12 @@ impl MemoryMips for N64Bus {
                                 cart_addr
                             };
                             let src = cart.read_slice(cart_offset, len);
-                            let copy_len = src.len().min(self.rdram.len().saturating_sub(dram_addr));
-                            self.rdram[dram_addr..dram_addr + copy_len]
-                                .copy_from_slice(&src[..copy_len]);
+                            let copy_len =
+                                src.len().min(self.rdram.len().saturating_sub(dram_addr));
+                            if copy_len > 0 {
+                                self.rdram[dram_addr..dram_addr + copy_len]
+                                    .copy_from_slice(&src[..copy_len]);
+                            }
                         }
 
                         // Trigger PI interrupt when DMA completes

@@ -925,8 +925,7 @@ impl RdpRenderer for OpenGLRdpRenderer {
             self.gl.active_texture(glow::TEXTURE0);
             self.gl
                 .bind_texture(glow::TEXTURE_2D, Some(self.dynamic_texture));
-            self.gl
-                .uniform_1_i32(self.textured_texture_loc.as_ref(), 0);
+            self.gl.uniform_1_i32(self.textured_texture_loc.as_ref(), 0);
 
             // Convert to NDC and normalize texture coordinates
             let (nx0, ny0) = self.screen_to_ndc(x0, y0);
@@ -1045,8 +1044,7 @@ impl RdpRenderer for OpenGLRdpRenderer {
             self.gl.active_texture(glow::TEXTURE0);
             self.gl
                 .bind_texture(glow::TEXTURE_2D, Some(self.dynamic_texture));
-            self.gl
-                .uniform_1_i32(self.textured_texture_loc.as_ref(), 0);
+            self.gl.uniform_1_i32(self.textured_texture_loc.as_ref(), 0);
 
             // Convert to NDC, depth, and normalize texture coordinates
             let (nx0, ny0) = self.screen_to_ndc(x0, y0);
