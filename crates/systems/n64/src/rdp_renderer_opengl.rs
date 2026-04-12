@@ -467,6 +467,7 @@ impl RdpRenderer for OpenGLRdpRenderer {
 
             self.gl.draw_arrays(glow::TRIANGLES, 0, 6);
 
+            self.gl.disable_vertex_attrib_array(0);
             self.gl.disable(glow::SCISSOR_TEST);
             self.dirty = true;
             self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
@@ -551,6 +552,7 @@ impl RdpRenderer for OpenGLRdpRenderer {
 
             self.gl.draw_arrays(glow::TRIANGLES, 0, 3);
 
+            self.gl.disable_vertex_attrib_array(0);
             self.gl.disable(glow::SCISSOR_TEST);
             self.dirty = true;
             self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
@@ -647,6 +649,8 @@ impl RdpRenderer for OpenGLRdpRenderer {
 
             self.gl.draw_arrays(glow::TRIANGLES, 0, 3);
 
+            self.gl.disable_vertex_attrib_array(0);
+            self.gl.disable_vertex_attrib_array(2);
             self.gl.disable(glow::DEPTH_TEST);
             self.gl.disable(glow::SCISSOR_TEST);
             self.dirty = true;
@@ -726,6 +730,8 @@ impl RdpRenderer for OpenGLRdpRenderer {
 
             self.gl.draw_arrays(glow::TRIANGLES, 0, 3);
 
+            self.gl.disable_vertex_attrib_array(0);
+            self.gl.disable_vertex_attrib_array(1);
             self.gl.disable(glow::SCISSOR_TEST);
             self.dirty = true;
             self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
@@ -827,6 +833,9 @@ impl RdpRenderer for OpenGLRdpRenderer {
 
             self.gl.draw_arrays(glow::TRIANGLES, 0, 3);
 
+            self.gl.disable_vertex_attrib_array(0);
+            self.gl.disable_vertex_attrib_array(1);
+            self.gl.disable_vertex_attrib_array(2);
             self.gl.disable(glow::DEPTH_TEST);
             self.gl.disable(glow::SCISSOR_TEST);
             self.dirty = true;
@@ -936,6 +945,8 @@ impl RdpRenderer for OpenGLRdpRenderer {
 
             self.gl.draw_arrays(glow::TRIANGLES, 0, 3);
 
+            self.gl.disable_vertex_attrib_array(0);
+            self.gl.disable_vertex_attrib_array(1);
             self.gl.disable(glow::SCISSOR_TEST);
             self.dirty = true;
             self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
@@ -1073,6 +1084,9 @@ impl RdpRenderer for OpenGLRdpRenderer {
 
             self.gl.draw_arrays(glow::TRIANGLES, 0, 3);
 
+            self.gl.disable_vertex_attrib_array(0);
+            self.gl.disable_vertex_attrib_array(1);
+            self.gl.disable_vertex_attrib_array(2);
             self.gl.disable(glow::DEPTH_TEST);
             self.gl.disable(glow::BLEND);
             self.gl.disable(glow::SCISSOR_TEST);

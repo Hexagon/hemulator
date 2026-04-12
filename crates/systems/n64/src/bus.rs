@@ -586,11 +586,27 @@ impl N64Bus {
         let (_cycles, should_interrupt) = self.rsp.execute_task(&mut self.rdram, &mut self.rdp);
 
         if should_interrupt {
-            log(LogCategory::PPU, LogLevel::Info, || {
-                "N64 Bus: RSP task complete, triggering SP interrupt".to_string()
-            });
-            // Set SP interrupt in MI
+            // Read task type from DMEM[0xFC0] to decide whether to fire DP interrupt.
+            // M_GFXTASK=1 needs DP interrupt (RDP processed display list),
+            // M_AUDTASK=2 does not (no RDP involvement).
+            let task_type = u32::from_be_bytes([
+                self.rsp.read_dmem(0xFC0),
+                self.rsp.read_dmem(0xFC1),
+                self.rsp.read_dmem(0xFC2),
+                self.rsp.read_dmem(0xFC3),
+            ]);
+
+            // Fire SP interrupt immediately. The N64 OS kernel exception handler
+            // reads MI_INTR, finds the SP bit, and posts a message to the
+            // registered event queue (e.g., gIntrMesgQueue in SM64).
             self.mi.set_interrupt(super::mi::MI_INTR_SP);
+
+            // For graphics tasks, also fire DP interrupt (display processor done).
+            // SM64's scheduler uses DP_COMPLETE to know when RDP finished rendering,
+            // which triggers sending the completion message to the game thread.
+            if task_type == 1 {
+                self.mi.set_interrupt(super::mi::MI_INTR_DP);
+            }
         }
 
         should_interrupt
@@ -1048,6 +1064,7 @@ impl MemoryMips for N64Bus {
             // RSP registers (0x04040000 - 0x0404001F)
             0x0404_0000..=0x0404_001F => {
                 let offset = phys_addr & 0x1F;
+
                 self.rsp.write_register(offset, val, &mut self.rdram);
 
                 // Handle SP_STATUS write side effects
@@ -1082,6 +1099,7 @@ impl MemoryMips for N64Bus {
             // VI registers (0x04400000 - 0x04400037)
             0x0440_0000..=0x0440_0037 => {
                 let offset = phys_addr & 0x3F;
+
                 self.vi.write_register(offset, val);
 
                 // Writing to VI_CURRENT (0x10) acknowledges VI interrupt
@@ -1094,7 +1112,12 @@ impl MemoryMips for N64Bus {
                 let offset = phys_addr & 0x1F;
                 self.ai.write_register(offset, val, &self.rdram);
 
-                // Check if AI interrupt is pending
+                // Writing to AI_STATUS (0x0C) clears AI interrupt
+                if offset == 0x0C {
+                    self.mi.clear_interrupt(crate::mi::MI_INTR_AI);
+                }
+
+                // Check if AI interrupt is pending (from DMA completion)
                 if self.ai.is_interrupt_pending() {
                     self.mi.set_interrupt(crate::mi::MI_INTR_AI);
                     log(LogCategory::Interrupts, LogLevel::Info, || {

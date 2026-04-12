@@ -117,6 +117,10 @@ pub struct RspHle {
     /// Defaults to (0, 0, 320, 240, 160, 120) for 320x240 framebuffer
     viewport: (f32, f32, f32, f32, f32, f32),
 
+    /// Viewport Z scale and translate (from viewport structure)
+    viewport_z_scale: f32,
+    viewport_z_trans: f32,
+
     /// Display list call stack for G_DL commands
     /// Stores return addresses when G_DL_PUSH is used
     #[allow(dead_code)] // Reserved for future proper display list call stack implementation
@@ -158,6 +162,13 @@ pub struct RspHle {
     /// Other mode low word (rendering settings)
     /// Controls alpha compare, depth source, render mode, etc.
     othermode_l: u32,
+
+    /// Debug: current DL address and depth for diagnostics
+    dl_debug_addr: u32,
+    dl_debug_depth: u32,
+    dl_debug_found_zero: bool,
+    /// Count of zero matrices encountered per RSP task
+    pub zero_mtx_count: u32,
 }
 
 impl RspHle {
@@ -175,6 +186,8 @@ impl RspHle {
             // Default viewport for 320x240 framebuffer
             // (x, y, width, height, scale_x, scale_y)
             viewport: (0.0, 0.0, 320.0, 240.0, 160.0, 120.0),
+            viewport_z_scale: 32767.5,
+            viewport_z_trans: 32767.5,
             dl_stack: Vec::with_capacity(10),
             rdp_half: 0,
             prim_depth_z: 0,
@@ -185,6 +198,10 @@ impl RspHle {
             segment_bases: [0; 16],         // Initialize all segments to 0
             othermode_h: 0,
             othermode_l: 0,
+            dl_debug_addr: 0,
+            dl_debug_depth: 0,
+            dl_debug_found_zero: false,
+            zero_mtx_count: 0,
         }
     }
 
@@ -368,12 +385,25 @@ impl RspHle {
     /// Execute HLE task (called when RSP is triggered)
     /// Returns number of cycles consumed
     pub fn execute_task(&mut self, dmem: &[u8; 4096], rdram: &mut [u8], _rdp: &mut Rdp) -> u32 {
+        // Check the ACTUAL task type from the OSTask structure in DMEM, not just
+        // the detected microcode. Games like SM64 submit both graphics (type=1)
+        // and audio (type=2) tasks using the same RSP, and the microcode type
+        // detected from IMEM reflects graphics code even for audio tasks.
+        const TASK_BASE: usize = 0xFC0;
+        let task_type = self.read_u32(dmem, TASK_BASE);
+        let _data_ptr = self.read_u32(dmem, TASK_BASE + 0x30);
+
+        if task_type == 2 {
+            // Audio task (M_AUDTASK) - always use audio handler
+            let mut dmem_scratch = *dmem;
+            return self.execute_audio_task(&mut dmem_scratch, rdram);
+        }
+
         match self.microcode {
             MicrocodeType::F3DEX | MicrocodeType::F3DEX2 => {
                 self.execute_graphics_task(dmem, rdram, _rdp)
             }
             MicrocodeType::Audio => {
-                // Copy DMEM so we can use it as scratch space without fighting the borrow checker
                 let mut dmem_scratch = *dmem;
                 self.execute_audio_task(&mut dmem_scratch, rdram)
             }
@@ -386,77 +416,40 @@ impl RspHle {
 
     /// Execute graphics microcode task (F3DEX/F3DEX2)
     fn execute_graphics_task(&mut self, dmem: &[u8; 4096], rdram: &mut [u8], rdp: &mut Rdp) -> u32 {
-        // OSTask structure is DMA'd to DMEM at offset 0xFC0 (last 64 bytes of DMEM)
-        // OSTask fields relative to task base:
-        //   0x28: output_buff, 0x2C: output_buff_size
-        //   0x30: data_ptr (display list), 0x34: data_size
+        // Clear the OpenGL depth buffer at the start of each graphics task.
+        // The N64 game clears its Z-buffer via FILL_RECTANGLE to RDRAM, which
+        // does NOT affect the GL depth buffer. Without this clear, triangle
+        // depth values from previous frames persist and cause new triangles
+        // to fail the GL_LESS depth test.
+        rdp.clear_zbuffer();
+
         const TASK_BASE: usize = 0xFC0;
+        let _task_type = self.read_u32(dmem, TASK_BASE);
         let mut data_ptr = self.read_u32(dmem, TASK_BASE + 0x30);
         let mut data_size = self.read_u32(dmem, TASK_BASE + 0x34);
-        let mut output_buff = self.read_u32(dmem, TASK_BASE + 0x28);
-        let mut output_buff_size = self.read_u32(dmem, TASK_BASE + 0x2C);
+        let phys_data_ptr = Self::virt_to_phys(data_ptr) as u32;
 
-        log(LogCategory::PPU, LogLevel::Info, || {
-            format!(
-                "RSP HLE: DMEM task structure at 0x{:03X}: data_ptr=0x{:08X}, data_size=0x{:X}, output_buff=0x{:08X}, output_buff_size=0x{:X}",
-                TASK_BASE, data_ptr, data_size, output_buff, output_buff_size
-            )
-        });
-
-        // If DMEM task structure is empty/invalid, try reading from common RDRAM locations
-        // Some test ROMs store task structure at 0x00200000 without DMA to DMEM
-        if data_ptr == 0 || data_ptr >= 0x00800000 {
+        if phys_data_ptr == 0 || phys_data_ptr as usize >= rdram.len() {
             const TASK_STRUCT_ADDR: usize = 0x00200000;
             if TASK_STRUCT_ADDR + 0x40 <= rdram.len() {
                 data_ptr = self.read_u32_rdram(rdram, TASK_STRUCT_ADDR + 0x30);
                 data_size = self.read_u32_rdram(rdram, TASK_STRUCT_ADDR + 0x34);
-                output_buff = self.read_u32_rdram(rdram, TASK_STRUCT_ADDR + 0x28);
-                output_buff_size = self.read_u32_rdram(rdram, TASK_STRUCT_ADDR + 0x2C);
 
-                log(LogCategory::PPU, LogLevel::Info, || {
-                    format!("RSP HLE: Fallback from RDRAM 0x{:06X}: data_ptr=0x{:08X}, data_size=0x{:X}", TASK_STRUCT_ADDR, data_ptr, data_size)
-                });
-
-                if data_ptr > 0 && data_ptr < 0x00800000 && self.microcode == MicrocodeType::Unknown
-                {
+                if data_ptr > 0 && self.microcode == MicrocodeType::Unknown {
                     self.microcode = MicrocodeType::F3DEX;
                 }
             }
         }
 
-        // Parse F3DEX display list if data_ptr is provided
         if data_ptr > 0 && data_size > 0 {
-            log(LogCategory::PPU, LogLevel::Info, || {
-                format!(
-                    "RSP HLE: Calling parse_f3dex_display_list with data_ptr=0x{:08X}, data_size=0x{:X}",
-                    data_ptr, data_size
-                )
-            });
             self.parse_f3dex_display_list(rdram, data_ptr, data_size, rdp);
-        } else {
-            log(LogCategory::PPU, LogLevel::Warn, || {
-                format!(
-                    "RSP HLE: No display list to parse (data_ptr=0x{:08X}, data_size=0x{:X})",
-                    data_ptr, data_size
-                )
-            });
         }
 
-        // If there's an output buffer with data (pre-generated RDP commands),
-        // forward it directly to the RDP for processing
-        if output_buff > 0 && output_buff_size > 0 {
-            log(LogCategory::PPU, LogLevel::Info, || {
-                format!(
-                    "RSP HLE: Processing RDP output buffer at 0x{:08X}, size=0x{:X}",
-                    output_buff, output_buff_size
-                )
-            });
-            rdp.set_dpc_start(output_buff);
-            rdp.set_dpc_end(output_buff + output_buff_size);
-            rdp.process_display_list(rdram);
-        }
+        // In HLE mode, the RSP does not write to the output buffer - we handle
+        // display list commands directly via draw_triangle/fill_rect calls.
+        // Processing the output buffer would just feed garbage data to the RDP.
 
-        2000 // Average cycles for a graphics task
+        2000
     }
 
     /// Execute audio microcode task (ABI1/ABI2 high-level emulation).
@@ -856,8 +849,10 @@ impl RspHle {
     ) {
         // Convert virtual address to physical address
         let mut addr = Self::virt_to_phys(start_addr);
-        let max_commands = 1000; // Safety limit to prevent infinite loops
+        let max_commands = 100_000; // Safety limit to prevent infinite loops
         let mut commands_processed = 0;
+        self.dl_debug_addr = start_addr;
+        self.dl_debug_depth += 1;
 
         log(LogCategory::PPU, LogLevel::Info, || {
             format!(
@@ -905,8 +900,9 @@ impl RspHle {
                 rdp.execute_rdp_command(rdp_cmd_id, word0, word1, w2, w3, rdram);
                 16 // skip the 2 extra 8-byte entries
             } else {
-                // Process F3DEX command normally
-                let should_continue = self.execute_f3dex_command(cmd_id, word0, word1, rdram, rdp);
+                // Process F3DEX command normally (handles both F3DEX and F3DEX2 formats)
+                let should_continue =
+                    self.execute_display_list_command(cmd_id, word0, word1, rdram, rdp);
 
                 if !should_continue {
                     break; // G_ENDDL or branch command
@@ -916,6 +912,430 @@ impl RspHle {
 
             addr += 8 + extra_stride;
             commands_processed += 1;
+        }
+        self.dl_debug_depth -= 1;
+    }
+
+    /// Dispatch a display list command, translating F3DEX IDs to F3DEX2 equivalents.
+    ///
+    /// F3DEX (original Fast3D, used by SM64/MK64) and F3DEX2 use different command IDs:
+    ///   | Command    | F3DEX | F3DEX2 |
+    ///   |------------|-------|--------|
+    ///   | G_VTX      | 0x04  | 0x01   |
+    ///   | G_MTX      | 0x01  | 0xDA   |
+    ///   | G_DL       | 0x06  | 0xDE   |
+    ///   | G_ENDDL    | 0xB8  | 0xDF   |
+    ///   | G_TRI1     | 0xBF  | 0x05   |
+    ///   | G_TRI2     | 0xB1  | 0x06   |
+    ///   | G_TEXTURE  | 0xBB  | 0xD7   |
+    ///   | G_POPMTX   | 0xBD  | 0xD8   |
+    ///   | G_MOVEWORD | 0xBC  | 0xDB   |
+    ///   | G_MOVEMEM  | 0x03  | 0xDC   |
+    fn execute_display_list_command(
+        &mut self,
+        cmd_id: u32,
+        word0: u32,
+        word1: u32,
+        rdram: &[u8],
+        rdp: &mut Rdp,
+    ) -> bool {
+        if self.microcode == MicrocodeType::F3DEX {
+            // F3DEX (original Fast3D) command dispatch
+            match cmd_id {
+                // --- F3DEX-specific IDs that conflict with F3DEX2 ---
+                // 0x01 = G_MTX in F3DEX (vs G_VTX in F3DEX2)
+                0x01 => self.handle_g_mtx(word0, word1, rdram, rdp),
+                // 0x03 = G_MOVEMEM in F3DEX (vs unused in F3DEX2)
+                0x03 => self.handle_g_movemem(word0, word1, rdram),
+                // 0x04 = G_VTX in F3DEX (vs G_BRANCH_Z in F3DEX2)
+                0x04 => self.handle_g_vtx_f3dex(word0, word1, rdram),
+                // 0x06 = G_DL in F3DEX (vs G_TRI2 in F3DEX2!)
+                0x06 => self.handle_g_dl(word0, word1, rdram, rdp),
+                // 0xB1 = G_TRI2 in F3DEX
+                0xB1 => self.handle_g_tri2(word0, word1, rdp),
+                // 0xB8 = G_ENDDL in F3DEX
+                0xB8 => false,
+                // 0xB9 = G_SETOTHERMODE_L in F3DEX
+                0xB9 => {
+                    self.handle_g_setothermode_l(word0, word1, rdp);
+                    true
+                }
+                // 0xBA = G_SETOTHERMODE_H in F3DEX
+                0xBA => {
+                    self.handle_g_setothermode_h(word0, word1, rdp);
+                    true
+                }
+                // 0xBB = G_TEXTURE in F3DEX
+                0xBB => {
+                    self.handle_g_texture(word0, word1);
+                    true
+                }
+                // 0xBC = G_MOVEWORD in F3DEX
+                0xBC => {
+                    self.handle_g_moveword(word0, word1, rdram);
+                    true
+                }
+                // 0xB6 = G_CLEARGEOMETRYMODE in F3D/F3DEX
+                // F3D format: bits in word0 lower 24 bits, word1 = 0
+                0xB6 => {
+                    let clear_bits = word0 & 0x00FFFFFF;
+                    self.geometry_mode &= !clear_bits;
+                    log(LogCategory::PPU, LogLevel::Debug, || {
+                        format!(
+                            "RSP HLE: F3D G_CLEARGEOMETRYMODE - cleared 0x{:08X}, mode now 0x{:08X}",
+                            clear_bits, self.geometry_mode
+                        )
+                    });
+                    true
+                }
+                // 0xB7 = G_SETGEOMETRYMODE in F3D/F3DEX
+                // F3D format: bits in word0 lower 24 bits, word1 = 0
+                0xB7 => {
+                    let set_bits = word0 & 0x00FFFFFF;
+                    self.geometry_mode |= set_bits;
+                    log(LogCategory::PPU, LogLevel::Debug, || {
+                        format!(
+                            "RSP HLE: F3D G_SETGEOMETRYMODE - set 0x{:08X}, mode now 0x{:08X}",
+                            set_bits, self.geometry_mode
+                        )
+                    });
+                    true
+                }
+                // 0xBD = G_POPMTX in F3DEX
+                0xBD => {
+                    self.handle_g_popmtx();
+                    true
+                }
+                // 0xBF = G_TRI1 in F3DEX (!!!)
+                0xBF => self.handle_g_tri1_f3dex(word0, word1, rdp),
+                // Common commands shared between F3DEX and F3DEX2
+                _ => self.execute_f3dex_command(cmd_id, word0, word1, rdram, rdp),
+            }
+        } else {
+            // F3DEX2 command dispatch (existing behavior)
+            self.execute_f3dex_command(cmd_id, word0, word1, rdram, rdp)
+        }
+    }
+
+    /// Handle G_TRI1 in F3D/F3DEX format (0xBF)
+    /// F3D format:   word1 = flag(8) | v0*10(8) | v1*10(8) | v2*10(8)
+    /// F3DEX format: word1 = flag(8) | v0*2(8) | v1*2(8) | v2*2(8)
+    fn handle_g_tri1_f3dex(&mut self, _word0: u32, word1: u32, rdp: &mut Rdp) -> bool {
+        // F3DEX/F3DEX2 encode triangle vertex indices as index*2.
+        // Only use the F3D index*10 divisor for a future explicit F3D path.
+        let divisor = match self.microcode {
+            MicrocodeType::F3DEX | MicrocodeType::F3DEX2 => 2,
+            _ => 10,
+        };
+        let v0 = ((word1 >> 16) & 0xFF) as usize / divisor;
+        let v1 = ((word1 >> 8) & 0xFF) as usize / divisor;
+        let v2 = (word1 & 0xFF) as usize / divisor;
+
+        if v0 < self.vertex_count && v1 < self.vertex_count && v2 < self.vertex_count {
+            self.draw_transformed_triangle(v0, v1, v2, rdp);
+        }
+        true
+    }
+
+    /// Handle G_VTX in F3DEX format (0x04)
+    /// Format differs from F3DEX2 G_VTX (0x01)
+    fn handle_g_vtx_f3dex(&mut self, word0: u32, word1: u32, rdram: &[u8]) -> bool {
+        // F3D G_VTX (0x04) format:
+        //   word0: cmd(8) | ((n-1)<<4)|v0 (8, [23:16]) | byte_count(16, [15:0])
+        //   word1: RDRAM address of vertex data
+        // The byte at [23:16] encodes n-1 in upper nibble and v0 in lower nibble.
+        let n = (((word0 >> 20) & 0xF) + 1) as usize;
+        let v0_index = ((word0 >> 16) & 0xF) as usize;
+        let vertex_addr = self.resolve_segment_addr(word1);
+
+        for i in 0..n.min(32 - v0_index) {
+            let vaddr = vertex_addr + (i as u32 * 16);
+            self.load_vertex(rdram, vaddr, v0_index + i);
+        }
+        true
+    }
+
+    /// Handle G_TRI2 (draw two triangles)
+    fn handle_g_tri2(&mut self, word0: u32, word1: u32, rdp: &mut Rdp) -> bool {
+        // First triangle from word0
+        let v0 = ((word0 >> 16) & 0xFF) as usize / 2;
+        let v1 = ((word0 >> 8) & 0xFF) as usize / 2;
+        let v2 = (word0 & 0xFF) as usize / 2;
+        // Second triangle from word1
+        let v3 = ((word1 >> 16) & 0xFF) as usize / 2;
+        let v4 = ((word1 >> 8) & 0xFF) as usize / 2;
+        let v5 = (word1 & 0xFF) as usize / 2;
+
+        if v0 < self.vertex_count && v1 < self.vertex_count && v2 < self.vertex_count {
+            self.draw_transformed_triangle(v0, v1, v2, rdp);
+        }
+        if v3 < self.vertex_count && v4 < self.vertex_count && v5 < self.vertex_count {
+            self.draw_transformed_triangle(v3, v4, v5, rdp);
+        }
+        true
+    }
+
+    /// Handle G_MTX command (load matrix)
+    fn handle_g_mtx(&mut self, word0: u32, word1: u32, rdram: &[u8], _rdp: &mut Rdp) -> bool {
+        // F3DEX G_MTX (0x01) format:
+        //   word0: cmd(8) | params(8) | index(8) | length(8)
+        //   word1: RDRAM address of 4x4 matrix (64 bytes, N64 fixed-point format)
+        // The params byte is at bits [23:16], NOT the low bits.
+        // F3D params (from gbi.h):
+        //   bit0 = G_MTX_PROJECTION (0x01) — projection(1) or modelview(0)
+        //   bit1 = G_MTX_LOAD (0x02)       — load(1) or multiply(0)
+        //   bit2 = G_MTX_PUSH (0x04)       — push(1) or nopush(0)
+        // NOTE: F3DEX2 swaps bit0 and bit2!
+        let params = (word0 >> 16) & 0xFF;
+        let is_projection = (params & 0x01) != 0;
+        let is_load = (params & 0x02) != 0;
+        let is_push = (params & 0x04) != 0;
+
+        let raw_addr = self.resolve_segment_addr(word1);
+        let matrix = self.load_matrix_from_rdram(rdram, raw_addr);
+
+        // Track zero matrices for debug diagnostics (logged at trace level)
+        let nonzero_count = matrix.iter().filter(|&&v| v.abs() > 0.001).count();
+        if nonzero_count <= 1 {
+            self.dl_debug_found_zero = true;
+            self.zero_mtx_count += 1;
+            log(LogCategory::PPU, LogLevel::Debug, || {
+                format!(
+                    "RSP HLE: G_MTX near-zero matrix at addr=0x{:08X} (nonzero={}, depth={})",
+                    raw_addr, nonzero_count, self.dl_debug_depth
+                )
+            });
+        }
+
+        if is_projection {
+            if is_load {
+                self.projection_matrix = matrix;
+            } else {
+                self.projection_matrix = Self::multiply_matrix(&matrix, &self.projection_matrix);
+            }
+        } else {
+            if is_push && self.matrix_stack_ptr < 9 {
+                self.matrix_stack[self.matrix_stack_ptr] = self.modelview_matrix;
+                self.matrix_stack_ptr += 1;
+            }
+            if is_load {
+                self.modelview_matrix = matrix;
+            } else {
+                self.modelview_matrix = Self::multiply_matrix(&matrix, &self.modelview_matrix);
+            }
+        }
+
+        log(LogCategory::PPU, LogLevel::Debug, || {
+            format!(
+                "RSP HLE: G_MTX - proj={}, load={}, push={}, addr=0x{:08X}",
+                is_projection, is_load, is_push, raw_addr
+            )
+        });
+
+        true
+    }
+
+    /// Handle G_DL command (display list call/branch)
+    fn handle_g_dl(&mut self, word0: u32, word1: u32, rdram: &[u8], rdp: &mut Rdp) -> bool {
+        let branch_type = (word0 >> 16) & 0xFF;
+        let dl_addr = self.resolve_segment_addr(word1);
+        let is_push = branch_type == 0;
+
+        if is_push {
+            self.parse_f3dex_display_list(rdram, dl_addr, 10000, rdp);
+            true
+        } else {
+            self.parse_f3dex_display_list(rdram, dl_addr, 10000, rdp);
+            false
+        }
+    }
+
+    /// Handle G_MOVEMEM command
+    fn handle_g_movemem(&mut self, word0: u32, word1: u32, rdram: &[u8]) -> bool {
+        // F3D  (0x03): gDma1p layout: cmd(8) | index(8) | unused(8) | length(8)
+        //   index at bits[23:16] (e.g. 0x80 = viewport, 0x86+ = lights)
+        //   length at bits[7:0]
+        // F3DEX2 (0xDC): word0 = cmd(8) | (size/8-1 << 3)(5+3) | offset/8(8) | index(8)
+        //   index at bits[7:0]
+        let index = (word0 >> 16) & 0xFF;
+        let offset = (word0 >> 8) & 0xFF;
+        let addr = self.resolve_segment_addr(word1);
+        let phys_addr = Self::virt_to_phys(addr);
+
+        // Handle specific movemem types
+        match index {
+            // Viewport
+            0x80 | 0x08 => {
+                if phys_addr + 15 < rdram.len() {
+                    let scale_x =
+                        i16::from_be_bytes([rdram[phys_addr], rdram[phys_addr + 1]]) as f32 / 4.0;
+                    let scale_y = i16::from_be_bytes([rdram[phys_addr + 2], rdram[phys_addr + 3]])
+                        as f32
+                        / 4.0;
+                    let scale_z =
+                        i16::from_be_bytes([rdram[phys_addr + 4], rdram[phys_addr + 5]]) as f32;
+                    let trans_x = i16::from_be_bytes([rdram[phys_addr + 8], rdram[phys_addr + 9]])
+                        as f32
+                        / 4.0;
+                    let trans_y = i16::from_be_bytes([rdram[phys_addr + 10], rdram[phys_addr + 11]])
+                        as f32
+                        / 4.0;
+                    let trans_z =
+                        i16::from_be_bytes([rdram[phys_addr + 12], rdram[phys_addr + 13]]) as f32;
+                    self.viewport = (
+                        trans_x - scale_x,
+                        trans_y - scale_y,
+                        scale_x * 2.0,
+                        scale_y * 2.0,
+                        scale_x,
+                        scale_y,
+                    );
+                    self.viewport_z_scale = scale_z;
+                    self.viewport_z_trans = trans_z;
+                }
+            }
+            // Light data
+            0x86..=0x9E | 0x0A..=0x0E => {
+                let light_idx = if index >= 0x86 {
+                    ((index - 0x86) / 0x18) as usize
+                } else {
+                    ((index - 0x0A) / 2) as usize
+                };
+                if light_idx < 8 && phys_addr + 15 < rdram.len() {
+                    let r = rdram[phys_addr] as f32 / 255.0;
+                    let g = rdram[phys_addr + 1] as f32 / 255.0;
+                    let b = rdram[phys_addr + 2] as f32 / 255.0;
+                    let dx = rdram[phys_addr + 8] as i8 as f32 / 127.0;
+                    let dy = rdram[phys_addr + 9] as i8 as f32 / 127.0;
+                    let dz = rdram[phys_addr + 10] as i8 as f32 / 127.0;
+                    self.lights[light_idx] = [dx, dy, dz, r, g, b, 0.0];
+                }
+            }
+            _ => {}
+        }
+
+        log(LogCategory::PPU, LogLevel::Debug, || {
+            format!(
+                "RSP HLE: G_MOVEMEM - index=0x{:02X}, offset=0x{:02X}, addr=0x{:08X}",
+                index, offset, addr
+            )
+        });
+        true
+    }
+
+    /// Handle G_SETOTHERMODE_L command
+    fn handle_g_setothermode_l(&mut self, word0: u32, word1: u32, rdp: &mut Rdp) {
+        // F3D/F3DEX format: word0 = cmd(8) | 0(8) | shift(8) | length(8)
+        //   gsSPSetOtherMode: _SHIFTL(cmd,24,8) | _SHIFTL(sft,8,8) | _SHIFTL(len,0,8)
+        let (shift, length) = if self.microcode == MicrocodeType::F3DEX {
+            ((word0 >> 8) & 0xFF, word0 & 0xFF)
+        } else {
+            // F3DEX2 format: word0 = cmd(8) | (32-sft-len)(8) | (len-1)(8)
+            let n = (word0 >> 8) & 0xFF;
+            let len_m1 = word0 & 0xFF;
+            let length = len_m1 + 1;
+            let shift = 32u32.wrapping_sub(n).wrapping_sub(length);
+            (shift, length)
+        };
+        let length = length.min(32);
+        let mask = if length >= 32 {
+            !0u32
+        } else {
+            ((1u32 << length) - 1) << shift
+        };
+        self.othermode_l = (self.othermode_l & !mask) | (word1 & mask);
+
+        // Forward combined othermode to RDP as SET_OTHER_MODES
+        let combined = ((self.othermode_h as u64) << 32) | (self.othermode_l as u64);
+        rdp.set_othermode(combined);
+    }
+
+    /// Handle G_SETOTHERMODE_H command
+    fn handle_g_setothermode_h(&mut self, word0: u32, word1: u32, rdp: &mut Rdp) {
+        let (shift, length) = if self.microcode == MicrocodeType::F3DEX {
+            // F3D/F3DEX: shift at bits 15:8, length at bits 7:0
+            ((word0 >> 8) & 0xFF, word0 & 0xFF)
+        } else {
+            // F3DEX2 format
+            let n = (word0 >> 8) & 0xFF;
+            let len_m1 = word0 & 0xFF;
+            let length = len_m1 + 1;
+            let shift = 32u32.wrapping_sub(n).wrapping_sub(length);
+            (shift, length)
+        };
+        let length = length.min(32);
+        let mask = if length >= 32 {
+            !0u32
+        } else {
+            ((1u32 << length) - 1) << shift
+        };
+        self.othermode_h = (self.othermode_h & !mask) | (word1 & mask);
+
+        // Forward combined othermode to RDP
+        let combined = ((self.othermode_h as u64) << 32) | (self.othermode_l as u64);
+        rdp.set_othermode(combined);
+    }
+
+    /// Handle G_TEXTURE command (F3D/F3DEX: 0xBB)
+    fn handle_g_texture(&mut self, word0: u32, word1: u32) {
+        let _tile = (word0 >> 8) & 0x07;
+        let _level = (word0 >> 11) & 0x07;
+        // F3D format: on is at bit 1, 7 bits wide (_SHIFTL(on, 1, 7))
+        let on = (word0 >> 1) & 0x7F;
+        let _scale_s = (word1 >> 16) & 0xFFFF;
+        let _scale_t = word1 & 0xFFFF;
+
+        // Update geometry mode texture enable flag
+        if on != 0 {
+            self.geometry_mode |= G_TEXTURE_ENABLE;
+        } else {
+            self.geometry_mode &= !G_TEXTURE_ENABLE;
+        }
+
+        log(LogCategory::PPU, LogLevel::Debug, || {
+            format!("RSP HLE: G_TEXTURE - tile={}, on={}", _tile, on)
+        });
+    }
+
+    /// Handle G_MOVEWORD command
+    fn handle_g_moveword(&mut self, word0: u32, word1: u32, _rdram: &[u8]) {
+        // F3DEX and F3DEX2 have different field layouts for G_MOVEWORD:
+        //   F3DEX  (0xBC): word0 = cmd(8) | offset(16) | index(8)
+        //   F3DEX2 (0xDB): word0 = cmd(8) | index(8) | offset(16)
+        let (index, offset) = if self.microcode == MicrocodeType::F3DEX {
+            (word0 & 0xFF, (word0 >> 8) & 0xFFFF)
+        } else {
+            ((word0 >> 16) & 0xFF, word0 & 0xFFFF)
+        };
+        match index {
+            0x06 => {
+                // G_MW_SEGMENT - set segment base address
+                let segment = (offset >> 2) & 0x0F;
+                self.segment_bases[segment as usize] = word1 & 0x00FFFFFF;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("RSP HLE: G_MOVEWORD SEGMENT[{}] = 0x{:08X}", segment, word1)
+                });
+            }
+            0x0E => {
+                // G_MW_NUMLIGHT - set number of lights
+                self.num_lights = (word1 / 24) as usize;
+            }
+            _ => {
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!(
+                        "RSP HLE: G_MOVEWORD index=0x{:02X} offset=0x{:04X} data=0x{:08X}",
+                        index, offset, word1
+                    )
+                });
+            }
+        }
+    }
+
+    /// Handle G_POPMTX command
+    fn handle_g_popmtx(&mut self) {
+        if self.matrix_stack_ptr > 0 {
+            self.matrix_stack_ptr -= 1;
+            self.modelview_matrix = self.matrix_stack[self.matrix_stack_ptr];
         }
     }
 
@@ -1180,9 +1600,9 @@ impl RspHle {
                         // Replace projection matrix
                         self.projection_matrix = matrix;
                     } else {
-                        // Multiply with existing projection matrix
+                        // Multiply with existing projection matrix: stack = stack * new
                         self.projection_matrix =
-                            Self::multiply_matrix(&self.projection_matrix, &matrix);
+                            Self::multiply_matrix(&matrix, &self.projection_matrix);
                     }
                 } else {
                     // Modelview matrix
@@ -1197,9 +1617,9 @@ impl RspHle {
                         // Replace modelview matrix
                         self.modelview_matrix = matrix;
                     } else {
-                        // Multiply with existing modelview matrix
+                        // Multiply with existing modelview matrix: stack = stack * new
                         self.modelview_matrix =
-                            Self::multiply_matrix(&self.modelview_matrix, &matrix);
+                            Self::multiply_matrix(&matrix, &self.modelview_matrix);
                     }
                 }
                 true
@@ -1274,61 +1694,41 @@ impl RspHle {
             }
             // G_MOVEMEM (0xDC) - Load memory segment
             0xDC => {
-                // word0: cmd_id | size | offset
+                // F3DEX2 G_MOVEMEM: word0 = cmd(8) | ((size-1)/8 << 3)(5) | ... | (offset/8)(8) | index(8)
                 // word1: RDRAM address to load from
-                let size = ((word0 >> 16) & 0xFF) as usize;
-                let offset = (word0 & 0xFFFF) as usize;
+                let index = (word0 & 0xFF) as usize;
+                let offset = ((word0 >> 8) & 0xFF) as usize * 8; // stored as offset/8
+                let size = ((((word0 >> 19) & 0x1F) + 1) * 8) as usize;
                 let rdram_addr = self.resolve_segment_addr(word1);
 
-                // G_MOVEMEM indices (offset values):
-                // 0x80 = G_MV_VIEWPORT (8 bytes)
-                // 0x00 = G_MV_MATRIX (64 bytes, not commonly used via MOVEMEM)
-                // 0x82 = G_MV_LIGHT (16 bytes per light, offset determines which light)
+                // F3DEX2 G_MV indices:
+                // 0x08 = G_MV_VIEWPORT
+                // 0x0A = G_MV_LIGHT (with offset determining which light)
+                const G_MV_VIEWPORT: usize = 0x08;
+                const G_MV_LIGHT: usize = 0x0A;
 
-                // Check if this is a viewport load (offset 0x80)
-                const G_MV_VIEWPORT: usize = 0x80;
-                const G_MV_LIGHT_BASE: usize = 0x82; // Base offset for lights
-
-                if offset == G_MV_VIEWPORT && size >= 8 {
+                if index == G_MV_VIEWPORT {
                     // Load viewport data from RDRAM
-                    // Viewport format (8 words = 16 bytes in 16.16 fixed point):
-                    // vscale[0] = width/2, vscale[1] = height/2
-                    // vtrans[0] = x + width/2, vtrans[1] = y + height/2
+                    // Viewport format: Vp_t structure with i16 values in s13.2 format
+                    // vscale[4]: i16 (divide by 4 for pixel values)
+                    // vtrans[4]: i16 (divide by 4 for pixel values)
                     let addr = Self::virt_to_phys(rdram_addr);
                     if addr + 15 < rdram.len() {
-                        // Read scale values (vscale[0], vscale[1])
-                        let vscale_x = i32::from_be_bytes([
-                            rdram[addr],
-                            rdram[addr + 1],
-                            rdram[addr + 2],
-                            rdram[addr + 3],
-                        ]) as f32
-                            / 65536.0;
+                        // Read scale values (i16, s13.2 fixed point)
+                        let vscale_x =
+                            i16::from_be_bytes([rdram[addr], rdram[addr + 1]]) as f32 / 4.0;
+                        let vscale_y =
+                            i16::from_be_bytes([rdram[addr + 2], rdram[addr + 3]]) as f32 / 4.0;
+                        let vscale_z =
+                            i16::from_be_bytes([rdram[addr + 4], rdram[addr + 5]]) as f32;
 
-                        let vscale_y = i32::from_be_bytes([
-                            rdram[addr + 4],
-                            rdram[addr + 5],
-                            rdram[addr + 6],
-                            rdram[addr + 7],
-                        ]) as f32
-                            / 65536.0;
-
-                        // Read translation values (vtrans[0], vtrans[1])
-                        let vtrans_x = i32::from_be_bytes([
-                            rdram[addr + 8],
-                            rdram[addr + 9],
-                            rdram[addr + 10],
-                            rdram[addr + 11],
-                        ]) as f32
-                            / 65536.0;
-
-                        let vtrans_y = i32::from_be_bytes([
-                            rdram[addr + 12],
-                            rdram[addr + 13],
-                            rdram[addr + 14],
-                            rdram[addr + 15],
-                        ]) as f32
-                            / 65536.0;
+                        // Read translation values (i16, s13.2, at offset +8)
+                        let vtrans_x =
+                            i16::from_be_bytes([rdram[addr + 8], rdram[addr + 9]]) as f32 / 4.0;
+                        let vtrans_y =
+                            i16::from_be_bytes([rdram[addr + 10], rdram[addr + 11]]) as f32 / 4.0;
+                        let vtrans_z =
+                            i16::from_be_bytes([rdram[addr + 12], rdram[addr + 13]]) as f32;
 
                         // Calculate viewport bounds
                         // x = vtrans_x - vscale_x, y = vtrans_y - vscale_y
@@ -1339,6 +1739,8 @@ impl RspHle {
                         let vp_height = vscale_y * 2.0;
 
                         self.viewport = (vp_x, vp_y, vp_width, vp_height, vscale_x, vscale_y);
+                        self.viewport_z_scale = vscale_z;
+                        self.viewport_z_trans = vtrans_z;
 
                         log(LogCategory::PPU, LogLevel::Debug, || {
                             format!(
@@ -1347,16 +1749,10 @@ impl RspHle {
                             )
                         });
                     }
-                } else if (G_MV_LIGHT_BASE..=0x92).contains(&offset) && size >= 16 {
+                } else if index == G_MV_LIGHT {
                     // Load light data from RDRAM
-                    // Light format (16 bytes):
-                    // bytes 0-2: R, G, B color (0-255)
-                    // bytes 3-5: padding
-                    // bytes 6-8: X, Y, Z direction (signed bytes, normalized)
-                    // bytes 9-15: padding
-
-                    // Calculate which light this is (offset 0x82 = light 0, 0x84 = light 1, etc.)
-                    let light_index = (offset - G_MV_LIGHT_BASE) / 2;
+                    // F3DEX2: offset determines which light (offset/0x18 = light index)
+                    let light_index = offset / 0x18;
 
                     if light_index < 8 {
                         let addr = Self::virt_to_phys(rdram_addr);
@@ -1366,10 +1762,11 @@ impl RspHle {
                             let g = rdram[addr + 1] as f32 / 255.0;
                             let b = rdram[addr + 2] as f32 / 255.0;
 
-                            // Read light direction (signed bytes, treat as normalized -1 to 1)
-                            let dx = (rdram[addr + 6] as i8) as f32 / 127.0;
-                            let dy = (rdram[addr + 7] as i8) as f32 / 127.0;
-                            let dz = (rdram[addr + 8] as i8) as f32 / 127.0;
+                            // Read light direction (signed bytes at offset 8-10 in Light_t)
+                            // Light_t: col[3](0-2), pad(3), colc[3](4-6), pad(7), dir[3](8-10), pad(11)
+                            let dx = (rdram[addr + 8] as i8) as f32 / 127.0;
+                            let dy = (rdram[addr + 9] as i8) as f32 / 127.0;
+                            let dz = (rdram[addr + 10] as i8) as f32 / 127.0;
 
                             // Store light data: [dx, dy, dz, r, g, b, type]
                             // type: 0.0 = directional, 1.0 = point (for future use)
@@ -1423,7 +1820,7 @@ impl RspHle {
                 });
                 true
             }
-            // G_SETOTHERMODE_L (0xB2) - Set lower other modes
+            // G_SETOTHERMODE_L (0xB2 in F3DEX) - Set lower other modes
             0xB2 => {
                 // word0: cmd_id | shift | length
                 // word1: data to set
@@ -1454,7 +1851,7 @@ impl RspHle {
                 });
                 true
             }
-            // G_SETOTHERMODE_H (0xB3) - Set upper other modes
+            // G_SETOTHERMODE_H (0xB3 in F3DEX) - Set upper other modes
             0xB3 => {
                 // word0: cmd_id | shift | length
                 // word1: data to set
@@ -1483,6 +1880,16 @@ impl RspHle {
                         shift, length, data, self.othermode_h
                     )
                 });
+                true
+            }
+            // G_SETOTHERMODE_L (0xE2 in F3DEX2) - Set lower other modes
+            0xE2 => {
+                self.handle_g_setothermode_l(word0, word1, rdp);
+                true
+            }
+            // G_SETOTHERMODE_H (0xE3 in F3DEX2) - Set upper other modes
+            0xE3 => {
+                self.handle_g_setothermode_h(word0, word1, rdp);
                 true
             }
             // G_LOAD_UCODE (0xAF) - Load new microcode
@@ -1525,9 +1932,8 @@ impl RspHle {
             }
             // G_ENDDL (0xDF) - End display list
             0xDF => false,
-            // G_RDPHALF_2 (0xB4) - Second half of 2-word RDP command
-            0xB4 => {
-                // word0: cmd_id | padding
+            // G_RDPHALF_2 (0xB4 in F3DEX, 0xF1 in F3DEX2) - Second half of 2-word RDP command
+            0xB4 | 0xF1 => {
                 // word1: data (second word for RDP command)
                 // This completes a 2-word RDP command:
                 //   - self.rdp_half is the first word (set by G_RDPHALF_1)
@@ -1547,11 +1953,8 @@ impl RspHle {
                 rdp.execute_rdp_command(rdp_cmd_id, rdp_w0, rdp_w1, 0, 0, rdram);
                 true
             }
-            // G_RDPHALF_1 (0xBF) - First half of 2-word RDP command
-            0xBF => {
-                // word0: cmd_id | padding
-                // word1: data (first word for RDP command)
-                // Store the data for use by subsequent G_RDPHALF_2 command
+            // G_RDPHALF_1 (0xBF in F3DEX, 0xE1 in F3DEX2) - First half of 2-word RDP command
+            0xBF | 0xE1 => {
                 self.rdp_half = word1;
                 log(LogCategory::PPU, LogLevel::Debug, || {
                     format!("N64 RSP HLE: G_RDPHALF_1 - stored data=0x{:08X}", word1)
@@ -1671,26 +2074,93 @@ impl RspHle {
         let clip1 = self.transform_vertex_to_clip(vert1);
         let clip2 = self.transform_vertex_to_clip(vert2);
 
-        // Simple frustum clipping: check if all vertices are outside any frustum plane
-        // Full implementation would clip the triangle, but for now we do simple reject/accept
-        let outside0 = Self::should_clip_vertex(&clip0);
-        let outside1 = Self::should_clip_vertex(&clip1);
-        let outside2 = Self::should_clip_vertex(&clip2);
+        // Near-plane clipping: clip against W = NEAR_W plane
+        // Vertices with W <= NEAR_W are behind or at the camera
+        const NEAR_W: f32 = 0.001;
+        let behind0 = clip0[3] <= NEAR_W;
+        let behind1 = clip1[3] <= NEAR_W;
+        let behind2 = clip2[3] <= NEAR_W;
+        let num_behind = behind0 as u8 + behind1 as u8 + behind2 as u8;
 
-        // If all vertices are outside, reject the triangle entirely
-        // This is a conservative approach - a full implementation would clip the triangle
-        if outside0 && outside1 && outside2 {
-            log(LogCategory::PPU, LogLevel::Debug, || {
-                "RSP HLE: Triangle completely outside frustum, rejecting".to_string()
-            });
-            return;
+        match num_behind {
+            3 => (), // All behind camera - reject
+            0 => {
+                // All in front - check frustum for trivial reject
+                // Only reject if ALL 3 vertices are outside the SAME plane
+                let all_left = clip0[0] < -clip0[3] && clip1[0] < -clip1[3] && clip2[0] < -clip2[3];
+                let all_right = clip0[0] > clip0[3] && clip1[0] > clip1[3] && clip2[0] > clip2[3];
+                let all_below =
+                    clip0[1] < -clip0[3] && clip1[1] < -clip1[3] && clip2[1] < -clip2[3];
+                let all_above = clip0[1] > clip0[3] && clip1[1] > clip1[3] && clip2[1] > clip2[3];
+                let all_near = clip0[2] < -clip0[3] && clip1[2] < -clip1[3] && clip2[2] < -clip2[3];
+                let all_far = clip0[2] > clip0[3] && clip1[2] > clip1[3] && clip2[2] > clip2[3];
+                if all_left || all_right || all_below || all_above || all_near || all_far {
+                    return;
+                }
+                // Draw the triangle directly
+                self.draw_clipped_triangle(vert0, &clip0, vert1, &clip1, vert2, &clip2, rdp);
+            }
+            1 => {
+                // One vertex behind camera - clip to produce 2 triangles
+                // Reorder so the behind vertex is v_a
+                let (va, ca, vb, cb, vc, cc) = if behind0 {
+                    (vert0, clip0, vert1, clip1, vert2, clip2)
+                } else if behind1 {
+                    (vert1, clip1, vert2, clip2, vert0, clip0)
+                } else {
+                    (vert2, clip2, vert0, clip0, vert1, clip1)
+                };
+                // Clip edge a->b at W=NEAR_W
+                let t_ab = (NEAR_W - ca[3]) / (cb[3] - ca[3]);
+                let (v_ab, c_ab) = Self::interpolate_vertex(va, &ca, vb, &cb, t_ab.clamp(0.0, 1.0));
+                // Clip edge a->c at W=NEAR_W
+                let t_ac = (NEAR_W - ca[3]) / (cc[3] - ca[3]);
+                let (v_ac, c_ac) = Self::interpolate_vertex(va, &ca, vc, &cc, t_ac.clamp(0.0, 1.0));
+                // Two triangles: (v_ab, vb, vc) and (v_ab, vc, v_ac)
+                self.draw_clipped_triangle(&v_ab, &c_ab, vb, &cb, vc, &cc, rdp);
+                self.draw_clipped_triangle(&v_ab, &c_ab, vc, &cc, &v_ac, &c_ac, rdp);
+            }
+            2 => {
+                // Two vertices behind camera - clip to produce 1 triangle
+                // Reorder so the in-front vertex is v_a
+                let (va, ca, vb, cb, vc, cc) = if !behind0 {
+                    (vert0, clip0, vert1, clip1, vert2, clip2)
+                } else if !behind1 {
+                    (vert1, clip1, vert2, clip2, vert0, clip0)
+                } else {
+                    (vert2, clip2, vert0, clip0, vert1, clip1)
+                };
+                // Clip edge a->b at W=NEAR_W
+                let t_ab = (NEAR_W - ca[3]) / (cb[3] - ca[3]);
+                let (v_ab, c_ab) = Self::interpolate_vertex(va, &ca, vb, &cb, t_ab.clamp(0.0, 1.0));
+                // Clip edge a->c at W=NEAR_W
+                let t_ac = (NEAR_W - ca[3]) / (cc[3] - ca[3]);
+                let (v_ac, c_ac) = Self::interpolate_vertex(va, &ca, vc, &cc, t_ac.clamp(0.0, 1.0));
+                // One triangle: (va, v_ab, v_ac)
+                self.draw_clipped_triangle(va, &ca, &v_ab, &c_ab, &v_ac, &c_ac, rdp);
+            }
+            _ => unreachable!(),
         }
+    }
 
+    /// Draw a triangle that has already been clipped against the near plane.
+    /// Performs back-face culling and submits to RDP.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_clipped_triangle(
+        &self,
+        vert0: &Vertex,
+        clip0: &[f32; 4],
+        vert1: &Vertex,
+        clip1: &[f32; 4],
+        vert2: &Vertex,
+        clip2: &[f32; 4],
+        rdp: &mut Rdp,
+    ) {
         // Back-face culling
         if self.geometry_mode & (G_CULL_FRONT | G_CULL_BACK) != 0 {
-            let (sx0, sy0, _) = self.clip_to_screen(&clip0);
-            let (sx1, sy1, _) = self.clip_to_screen(&clip1);
-            let (sx2, sy2, _) = self.clip_to_screen(&clip2);
+            let (sx0, sy0, _) = self.clip_to_screen(clip0);
+            let (sx1, sy1, _) = self.clip_to_screen(clip1);
+            let (sx2, sy2, _) = self.clip_to_screen(clip2);
             // 2D cross product of edges: positive = CCW, negative = CW
             let cross =
                 (sx1 - sx0) as i64 * (sy2 - sy0) as i64 - (sx2 - sx0) as i64 * (sy1 - sy0) as i64;
@@ -1703,16 +2173,16 @@ impl RspHle {
         }
 
         // Transform to screen space
-        let (x0, y0, z0) = self.clip_to_screen(&clip0);
-        let (x1, y1, z1) = self.clip_to_screen(&clip1);
-        let (x2, y2, z2) = self.clip_to_screen(&clip2);
+        let (x0, y0, z0) = self.clip_to_screen(clip0);
+        let (x1, y1, z1) = self.clip_to_screen(clip1);
+        let (x2, y2, z2) = self.clip_to_screen(clip2);
 
         log(LogCategory::PPU, LogLevel::Debug, || {
             format!(
-                "RSP HLE: Triangle v{}({},{},{}) v{}({},{},{}) v{}({},{},{}) -> screen ({},{},{}) ({},{},{}) ({},{},{})",
-                v0, vert0.pos[0], vert0.pos[1], vert0.pos[2],
-                v1, vert1.pos[0], vert1.pos[1], vert1.pos[2],
-                v2, vert2.pos[0], vert2.pos[1], vert2.pos[2],
+                "RSP HLE: Triangle ({},{},{}) ({},{},{}) ({},{},{}) -> screen ({},{},{}) ({},{},{}) ({},{},{})",
+                vert0.pos[0], vert0.pos[1], vert0.pos[2],
+                vert1.pos[0], vert1.pos[1], vert1.pos[2],
+                vert2.pos[0], vert2.pos[1], vert2.pos[2],
                 x0, y0, z0, x1, y1, z1, x2, y2, z2
             )
         });
@@ -1916,7 +2386,7 @@ impl RspHle {
         let (vp_x, vp_y, _vp_width, _vp_height, scale_x, scale_y) = self.viewport;
         let screen_x = (vp_x + (ndc_x + 1.0) * scale_x) as i32;
         let screen_y = (vp_y + (ndc_y + 1.0) * scale_y) as i32;
-        let screen_z = ((ndc_z + 1.0) * 32767.5) as i32; // Map to 0-65535 range
+        let screen_z = (self.viewport_z_trans + ndc_z * self.viewport_z_scale) as i32;
 
         (screen_x, screen_y, screen_z)
     }
@@ -1928,24 +2398,8 @@ impl RspHle {
         self.clip_to_screen(&clip)
     }
 
-    /// Check if a vertex in clip space is inside the view frustum
-    /// Returns true if the vertex should be clipped (outside frustum)
-    fn should_clip_vertex(clip: &[f32; 4]) -> bool {
-        let w = clip[3];
-        // Vertices with w <= 0 are behind the camera or invalid
-        if w <= 0.0001 {
-            return true;
-        }
-        // Clip against all 6 frustum planes: left, right, top, bottom, near, far
-        // In clip space, a point is inside if: -w <= x/y/z <= w
-        clip[0] < -w || clip[0] > w  // Left/right planes
-            || clip[1] < -w || clip[1] > w  // Top/bottom planes
-            || clip[2] < -w || clip[2] > w // Near/far planes
-    }
-
     /// Interpolate between two vertices in clip space
     /// t = 0.0 returns v0, t = 1.0 returns v1
-    #[allow(dead_code)] // Reserved for future proper triangle clipping
     fn interpolate_vertex(
         v0: &Vertex,
         clip0: &[f32; 4],
@@ -2200,7 +2654,7 @@ mod tests {
     #[test]
     fn test_f3dex_display_list_parsing() {
         let mut hle = RspHle::new();
-        hle.microcode = MicrocodeType::F3DEX;
+        hle.microcode = MicrocodeType::F3DEX2; // test uses F3DEX2 opcodes (0x01=G_VTX, 0x05=G_TRI1, 0xDF=G_ENDDL)
 
         let mut rdram = vec![0u8; 1024];
         let mut rdp = Rdp::new_for_test();
@@ -2261,7 +2715,7 @@ mod tests {
     #[test]
     fn test_f3dex_quad_command() {
         let mut hle = RspHle::new();
-        hle.microcode = MicrocodeType::F3DEX;
+        hle.microcode = MicrocodeType::F3DEX2; // test uses F3DEX2 opcodes (0x01=G_VTX, 0xDF=G_ENDDL)
 
         let mut rdram = vec![0u8; 1024];
         let mut rdp = Rdp::new_for_test();
@@ -2506,7 +2960,7 @@ mod tests {
     #[test]
     fn test_g_dl_command() {
         let mut hle = RspHle::new();
-        hle.microcode = MicrocodeType::F3DEX;
+        hle.microcode = MicrocodeType::F3DEX2; // test uses F3DEX2 opcodes (0xDE=G_DL, 0x01=G_VTX, 0xDF=G_ENDDL)
 
         let mut rdram = vec![0u8; 2048];
         let mut rdp = Rdp::new_for_test();
@@ -2699,7 +3153,7 @@ mod tests {
     #[test]
     fn test_g_branch_z_command() {
         let mut hle = RspHle::new();
-        hle.microcode = MicrocodeType::F3DEX;
+        hle.microcode = MicrocodeType::F3DEX2; // test uses F3DEX2 opcodes (0x01=G_VTX, 0xB0=G_BRANCH_Z, 0xDF=G_ENDDL)
 
         let mut rdram = vec![0u8; 2048];
         let mut rdp = Rdp::new_for_test();
