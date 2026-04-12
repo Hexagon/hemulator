@@ -5283,6 +5283,69 @@ fn main() {
                     };
                     egui_app.tab_manager.update_ps1_gpu_data(ps1_gpu);
                 }
+                EmulatorSystem::N64(sys) => {
+                    let vi_data = sys.get_vi_inspector_data();
+                    let rdp_data = sys.get_rdp_inspector_data();
+
+                    egui_app.tab_manager.update_n64_vi_data(egui_ui::N64ViData {
+                        status: vi_data.status,
+                        origin: vi_data.origin,
+                        width: vi_data.width,
+                        intr: vi_data.intr,
+                        current: vi_data.current,
+                        v_sync: vi_data.v_sync,
+                        h_sync: vi_data.h_sync,
+                        h_start: vi_data.h_start,
+                        v_start: vi_data.v_start,
+                        x_scale: vi_data.x_scale,
+                        y_scale: vi_data.y_scale,
+                        display_width: vi_data.display_width,
+                        display_height: vi_data.display_height,
+                        color_depth: vi_data.color_depth,
+                        display_enabled: vi_data.display_enabled,
+                        video_standard: vi_data.video_standard,
+                    });
+
+                    egui_app
+                        .tab_manager
+                        .update_n64_rdp_data(egui_ui::N64RdpData {
+                            status: rdp_data.status,
+                            color_image_addr: rdp_data.color_image_addr,
+                            color_image_width: rdp_data.color_image_width,
+                            color_image_size: rdp_data.color_image_size,
+                            zbuffer_enabled: rdp_data.zbuffer_enabled,
+                            renderer_name: rdp_data.renderer_name,
+                            microcode_type: rdp_data.microcode_type,
+                            vertex_count: rdp_data.vertex_count,
+                            dpc_start: rdp_data.dpc_start,
+                            dpc_end: rdp_data.dpc_end,
+                        });
+
+                    // Update cartridge data
+                    let debug = sys.get_debug_info();
+                    let cart_data = egui_ui::CartridgeData {
+                        system_name: "N64".to_string(),
+                        crc32: 0, // N64 ROM CRC requires specific algorithm; not computed yet
+                        rom_size: (debug.rom_size_mb * 1024.0 * 1024.0) as usize,
+                        nes_mapper: None,
+                        nes_submapper: None,
+                        nes_mapper_name: None,
+                        nes_mirroring: None,
+                        nes_timing: None,
+                        nes_prg_size: None,
+                        nes_chr_size: None,
+                        nes_header_mapper: None,
+                        nes_header_submapper: None,
+                        nes_header_mirroring: None,
+                        nes_db_mapper_override: false,
+                        nes_db_mirroring_override: false,
+                        nes_board_name: None,
+                        snes_has_smc_header: None,
+                        snes_mapping_mode: None,
+                        snes_chip_type: None,
+                    };
+                    egui_app.tab_manager.update_cartridge_data(cart_data);
+                }
                 _ => {
                     // Other systems don't have tile viewers yet
                 }

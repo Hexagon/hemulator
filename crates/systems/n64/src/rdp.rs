@@ -117,6 +117,31 @@ struct TileDescriptor {
     t_shift: u32,   // T coordinate shift
 }
 
+/// Inspector data snapshot for the N64 RDP inspector tab.
+#[derive(Debug, Clone)]
+pub struct RdpInspectorData {
+    /// DPC_STATUS register value
+    pub status: u32,
+    /// Color image (framebuffer) address
+    pub color_image_addr: u32,
+    /// Color image width in pixels
+    pub color_image_width: u32,
+    /// Color image pixel size (0=4bpp, 1=8bpp, 2=16bpp, 3=32bpp)
+    pub color_image_size: u8,
+    /// Whether z-buffering is currently enabled
+    pub zbuffer_enabled: bool,
+    /// Renderer backend name (static; comes from a small fixed set of values)
+    pub renderer_name: &'static str,
+    /// RSP microcode type (static; comes from a small fixed set of values)
+    pub microcode_type: &'static str,
+    /// RSP vertex buffer count
+    pub vertex_count: usize,
+    /// DPC_START register value
+    pub dpc_start: u32,
+    /// DPC_END register value
+    pub dpc_end: u32,
+}
+
 /// RDP state and framebuffer
 pub struct Rdp {
     /// Rendering backend (software or OpenGL)
@@ -167,6 +192,9 @@ pub struct Rdp {
     /// Other mode settings (64-bit value from SET_OTHER_MODES)
     /// Controls cycle type, alpha blend, Z-buffer, texture filtering, etc.
     othermode: u64,
+
+    /// Z-buffer enable state (mirrors what was last set via set_zbuffer_enabled)
+    zbuffer_enabled: bool,
 
     /// DPC registers
     dpc_start: u32,
@@ -257,6 +285,7 @@ impl Rdp {
             color_image_width: 320,
             color_image_size: 2,
             othermode: 0,
+            zbuffer_enabled: false,
             dpc_start: 0,
             dpc_end: 0,
             dpc_current: 0,
@@ -289,7 +318,7 @@ impl Rdp {
     }
 
     /// Get the name of the current renderer backend
-    pub fn renderer_name(&self) -> &str {
+    pub fn renderer_name(&self) -> &'static str {
         self.renderer.name()
     }
 
@@ -327,6 +356,7 @@ impl Rdp {
         self.color_image_addr = 0;
         self.color_image_width = 320;
         self.color_image_size = 2;
+        self.zbuffer_enabled = false;
         self.dpc_start = 0;
         self.dpc_end = 0;
         self.dpc_current = 0;
@@ -347,12 +377,21 @@ impl Rdp {
     /// Set othermode (64-bit combined value from RSP HLE)
     pub fn set_othermode(&mut self, othermode: u64) {
         self.othermode = othermode;
+        let othermode_l = othermode as u32;
+
         // FORCE_BL is bit 14 of othermode_l (lower 32 bits of the combined value).
         // When set, the game has configured the blender for alpha compositing, so
         // enable src-alpha / (1-src-alpha) blending in the renderer.
-        let othermode_l = othermode as u32;
         let force_bl = (othermode_l >> 14) & 0x1 != 0;
         self.renderer.set_alpha_blend(force_bl);
+
+        // Z_COMPARE_EN (bit 4) enables depth comparison; Z_UPDATE_EN (bit 5) enables
+        // writing back to the Z-buffer. Either being set means depth testing is active.
+        let z_compare_en = (othermode_l >> 4) & 0x1 != 0;
+        let z_update_en = (othermode_l >> 5) & 0x1 != 0;
+        let zbuf = z_compare_en || z_update_en;
+        self.zbuffer_enabled = zbuf;
+        self.renderer.set_zbuffer_enabled(zbuf);
     }
 
     /// Clear the framebuffer with the current fill color
@@ -383,7 +422,13 @@ impl Rdp {
     /// Enable or disable Z-buffer testing
     #[allow(dead_code)] // Public API for future use
     pub fn set_zbuffer_enabled(&mut self, enabled: bool) {
+        self.zbuffer_enabled = enabled;
         self.renderer.set_zbuffer_enabled(enabled);
+    }
+
+    /// Returns whether Z-buffer testing is currently enabled.
+    pub fn is_zbuffer_enabled(&self) -> bool {
+        self.zbuffer_enabled
     }
 
     /// Draw a flat-shaded triangle (basic rasterization)
@@ -758,11 +803,13 @@ impl Rdp {
     }
 
     /// Set DPC_START register (for RSP to trigger display list processing)
+    #[allow(dead_code)]
     pub fn set_dpc_start(&mut self, addr: u32) {
         self.dpc_start = addr & 0x00FFFFFF;
     }
 
     /// Set DPC_END register (for RSP to trigger display list processing)
+    #[allow(dead_code)]
     pub fn set_dpc_end(&mut self, addr: u32) {
         self.dpc_end = addr & 0x00FFFFFF;
         if self.dpc_start != self.dpc_end {
@@ -1375,6 +1422,24 @@ impl Rdp {
                 // word1: XL(bits 23-12) | YL(bits 11-0) - START coordinates
                 // Coordinates are in 10.2 fixed point format (divide by 4 to get pixels)
 
+                // Detect Z-buffer clear: when the current color_image_addr matches
+                // z_image_addr, the game is filling the Z-buffer, not the color buffer.
+                // In this case, clear the OpenGL depth buffer instead of drawing the
+                // Z-clear color to the color FBO.
+                if self.color_image_addr != 0
+                    && self.z_image_addr != 0
+                    && self.color_image_addr == self.z_image_addr
+                {
+                    self.renderer.clear_zbuffer();
+                    log(LogCategory::PPU, LogLevel::Debug, || {
+                        format!(
+                            "N64 RDP: FILL_RECTANGLE targeting Z-buffer (addr=0x{:08X}) - clearing GL depth buffer",
+                            self.color_image_addr
+                        )
+                    });
+                    return;
+                }
+
                 let xh = ((word0 >> 12) & 0xFFF).div_ceil(4); // Right/end X, round up
                 let yh = (word0 & 0xFFF).div_ceil(4); // Bottom/end Y, round up
                 let xl = ((word1 >> 12) & 0xFFF) / 4; // Left/start X
@@ -1797,10 +1862,10 @@ impl Rdp {
             }
             // SET_COLOR_IMAGE (0x3F)
             0x3F => {
-                // word0: bits 21-19 = format, bits 18-17 = size, bits 11-0 = width-1
+                // word0: bits 23-21 = format, bits 20-19 = size, bits 11-0 = width-1
                 // word1: DRAM address of color buffer
-                let _format = (word0 >> 19) & 0x07;
-                let size = ((word0 >> 17) & 0x03) as u8;
+                let _format = (word0 >> 21) & 0x07;
+                let size = ((word0 >> 19) & 0x03) as u8;
                 let width = (word0 & 0x0FFF) + 1;
                 let addr = word1 & 0x00FFFFFF;
                 self.color_image_addr = addr;
@@ -2844,5 +2909,45 @@ mod tests {
         assert!(pixel != 0);
         // Check that red channel is high
         assert!((pixel >> 16) & 0xFF > 200);
+    }
+
+    #[test]
+    fn test_set_othermode_derives_zbuffer_state() {
+        let mut rdp = Rdp::new_for_test();
+
+        // Default: zbuffer_enabled should be false
+        assert!(!rdp.is_zbuffer_enabled());
+
+        // Set Z_COMPARE_EN (bit 4 of othermode_l)
+        let othermode_with_z_compare: u64 = 0x0000_0010;
+        rdp.set_othermode(othermode_with_z_compare);
+        assert!(
+            rdp.is_zbuffer_enabled(),
+            "Z_COMPARE_EN should enable zbuffer"
+        );
+
+        // Clear both Z bits → disabled
+        rdp.set_othermode(0);
+        assert!(!rdp.is_zbuffer_enabled(), "no Z bits → zbuffer disabled");
+
+        // Set Z_UPDATE_EN (bit 5 of othermode_l) alone
+        let othermode_with_z_update: u64 = 0x0000_0020;
+        rdp.set_othermode(othermode_with_z_update);
+        assert!(
+            rdp.is_zbuffer_enabled(),
+            "Z_UPDATE_EN should enable zbuffer"
+        );
+
+        // Both bits set
+        rdp.set_othermode(0x0000_0030);
+        assert!(rdp.is_zbuffer_enabled(), "both Z bits → zbuffer enabled");
+
+        // FORCE_BL bit (14) should not affect zbuffer
+        let othermode_force_bl_only: u64 = 0x0000_4000;
+        rdp.set_othermode(othermode_force_bl_only);
+        assert!(
+            !rdp.is_zbuffer_enabled(),
+            "FORCE_BL alone should not enable zbuffer"
+        );
     }
 }
