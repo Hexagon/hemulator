@@ -2438,7 +2438,7 @@ fn render_c64_vic_tab(ui: &mut Ui, tab_manager: &TabManager) {
                                 ui.monospace(format!("{}", data.raster_line));
                                 ui.end_row();
                                 ui.strong("IRQ raster:");
-                                ui.monospace(format!("{} (${})", raster_irq, raster_irq));
+                                ui.monospace(format!("{} (${:X})", raster_irq, raster_irq));
                                 ui.end_row();
                                 ui.strong("Cycles:");
                                 ui.monospace(format!("{}", data.total_cycles));
