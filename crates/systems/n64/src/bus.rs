@@ -635,6 +635,7 @@ impl N64Bus {
     ///
     /// Returns `Some(Frame)` if VI is enabled and has a valid framebuffer,
     /// `None` if VI is disabled or origin is 0.
+    #[allow(dead_code)]
     pub fn read_vi_framebuffer(&self) -> Option<Frame> {
         // Check if VI is enabled (color depth bits != 0)
         if !self.vi.is_enabled() {
@@ -901,20 +902,12 @@ impl MemoryMips for N64Bus {
             // SP DMEM (0x04000000 - 0x04000FFF)
             0x0400_0000..=0x0400_0FFF => {
                 let offset = phys_addr & 0xFFF;
-                let b0 = self.rsp.read_dmem(offset) as u32;
-                let b1 = self.rsp.read_dmem(offset + 1) as u32;
-                let b2 = self.rsp.read_dmem(offset + 2) as u32;
-                let b3 = self.rsp.read_dmem(offset + 3) as u32;
-                (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
+                self.rsp.read_dmem_word(offset)
             }
             // SP IMEM (0x04001000 - 0x04001FFF)
             0x0400_1000..=0x0400_1FFF => {
                 let offset = phys_addr & 0xFFF;
-                let b0 = self.rsp.read_imem(offset) as u32;
-                let b1 = self.rsp.read_imem(offset + 1) as u32;
-                let b2 = self.rsp.read_imem(offset + 2) as u32;
-                let b3 = self.rsp.read_imem(offset + 3) as u32;
-                (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
+                self.rsp.read_imem_word(offset)
             }
             // SP PC register (0x04080000)
             0x0408_0000..=0x0408_0003 => self.rsp.pc,
@@ -938,12 +931,12 @@ impl MemoryMips for N64Bus {
             0x1000_0000..=0x1FBF_FFFF => {
                 if let Some(ref cart) = self.cartridge {
                     let offset = phys_addr - 0x1000_0000;
-                    u32::from_be_bytes([
-                        cart.read(offset),
-                        cart.read(offset + 1),
-                        cart.read(offset + 2),
-                        cart.read(offset + 3),
-                    ])
+                    let src = cart.read_slice(offset, 4);
+                    if src.len() == 4 {
+                        u32::from_be_bytes([src[0], src[1], src[2], src[3]])
+                    } else {
+                        0
+                    }
                 } else {
                     0
                 }
@@ -1042,20 +1035,12 @@ impl MemoryMips for N64Bus {
             // SP DMEM (0x04000000 - 0x04000FFF)
             0x0400_0000..=0x0400_0FFF => {
                 let offset = phys_addr & 0xFFF;
-                let bytes = val.to_be_bytes();
-                self.rsp.write_dmem(offset, bytes[0]);
-                self.rsp.write_dmem(offset + 1, bytes[1]);
-                self.rsp.write_dmem(offset + 2, bytes[2]);
-                self.rsp.write_dmem(offset + 3, bytes[3]);
+                self.rsp.write_dmem_word(offset, val);
             }
             // SP IMEM (0x04001000 - 0x04001FFF)
             0x0400_1000..=0x0400_1FFF => {
                 let offset = phys_addr & 0xFFF;
-                let bytes = val.to_be_bytes();
-                self.rsp.write_imem(offset, bytes[0]);
-                self.rsp.write_imem(offset + 1, bytes[1]);
-                self.rsp.write_imem(offset + 2, bytes[2]);
-                self.rsp.write_imem(offset + 3, bytes[3]);
+                self.rsp.write_imem_word(offset, val);
             }
             // SP PC register (0x04080000)
             0x0408_0000..=0x0408_0003 => {
@@ -1171,13 +1156,10 @@ impl MemoryMips for N64Bus {
                             } else {
                                 cart_addr
                             };
-                            for i in 0..len {
-                                let src = cart_offset as usize + i;
-                                let dst = dram_addr + i;
-                                if dst < self.rdram.len() {
-                                    self.rdram[dst] = cart.read(src as u32);
-                                }
-                            }
+                            let src = cart.read_slice(cart_offset, len);
+                            let copy_len = src.len().min(self.rdram.len().saturating_sub(dram_addr));
+                            self.rdram[dram_addr..dram_addr + copy_len]
+                                .copy_from_slice(&src[..copy_len]);
                         }
 
                         // Trigger PI interrupt when DMA completes

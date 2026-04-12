@@ -170,12 +170,53 @@ impl Rsp {
     pub fn write_imem(&mut self, offset: u32, value: u8) {
         let addr = (offset & 0xFFF) as usize;
         self.imem[addr] = value;
+        // Note: microcode detection is done after DMA loads, not per-byte write.
+    }
 
-        // Detect microcode when IMEM is written
-        // (Simplified: only detect after first write, could optimize)
-        if addr == 0 {
-            self.hle.detect_microcode(&self.imem);
-        }
+    /// Read a big-endian 32-bit word from DMEM
+    #[inline]
+    pub fn read_dmem_word(&self, offset: u32) -> u32 {
+        let addr = (offset & 0xFFF) as usize;
+        u32::from_be_bytes([
+            self.dmem[addr],
+            self.dmem[addr + 1],
+            self.dmem[addr + 2],
+            self.dmem[addr + 3],
+        ])
+    }
+
+    /// Write a big-endian 32-bit word to DMEM
+    #[inline]
+    pub fn write_dmem_word(&mut self, offset: u32, value: u32) {
+        let addr = (offset & 0xFFF) as usize;
+        let bytes = value.to_be_bytes();
+        self.dmem[addr] = bytes[0];
+        self.dmem[addr + 1] = bytes[1];
+        self.dmem[addr + 2] = bytes[2];
+        self.dmem[addr + 3] = bytes[3];
+    }
+
+    /// Read a big-endian 32-bit word from IMEM
+    #[inline]
+    pub fn read_imem_word(&self, offset: u32) -> u32 {
+        let addr = (offset & 0xFFF) as usize;
+        u32::from_be_bytes([
+            self.imem[addr],
+            self.imem[addr + 1],
+            self.imem[addr + 2],
+            self.imem[addr + 3],
+        ])
+    }
+
+    /// Write a big-endian 32-bit word to IMEM
+    #[inline]
+    pub fn write_imem_word(&mut self, offset: u32, value: u32) {
+        let addr = (offset & 0xFFF) as usize;
+        let bytes = value.to_be_bytes();
+        self.imem[addr] = bytes[0];
+        self.imem[addr + 1] = bytes[1];
+        self.imem[addr + 2] = bytes[2];
+        self.imem[addr + 3] = bytes[3];
     }
 
     /// Read from RSP register
@@ -364,21 +405,34 @@ impl Rsp {
         }
 
         for _line in 0..count {
-            for i in 0..length as usize {
-                if dram_addr + i < rdram.len() {
-                    let value = rdram[dram_addr + i];
-                    let dest_addr = (mem_addr + i) & 0xFFF;
+            let len = length as usize;
+            let dst_offset = mem_addr & 0xFFF;
 
-                    if is_imem {
-                        self.imem[dest_addr] = value;
-                    } else {
-                        self.dmem[dest_addr] = value;
+            // Fast path: no memory wrapping and source is fully within RDRAM bounds
+            if dst_offset + len <= 4096 && dram_addr + len <= rdram.len() {
+                let src = &rdram[dram_addr..dram_addr + len];
+                if is_imem {
+                    self.imem[dst_offset..dst_offset + len].copy_from_slice(src);
+                } else {
+                    self.dmem[dst_offset..dst_offset + len].copy_from_slice(src);
+                }
+            } else {
+                // Slow path: byte-by-byte with address wrapping
+                for i in 0..len {
+                    if dram_addr + i < rdram.len() {
+                        let dest_addr = (mem_addr + i) & 0xFFF;
+                        if is_imem {
+                            self.imem[dest_addr] = rdram[dram_addr + i];
+                        } else {
+                            self.dmem[dest_addr] = rdram[dram_addr + i];
+                        }
                     }
                 }
             }
+
             // Advance pointers for next line
-            dram_addr += length as usize + skip as usize;
-            mem_addr += length as usize;
+            dram_addr += len + skip as usize;
+            mem_addr += len;
         }
 
         // If we just loaded IMEM, detect microcode
@@ -402,21 +456,36 @@ impl Rsp {
         let is_imem = (self.sp_mem_addr & 0x1000) != 0;
 
         for _line in 0..count {
-            for i in 0..length as usize {
-                let src_addr = (mem_addr + i) & 0xFFF;
-                let value = if is_imem {
-                    self.imem[src_addr]
-                } else {
-                    self.dmem[src_addr]
-                };
+            let len = length as usize;
+            let src_offset = mem_addr & 0xFFF;
 
-                if dram_addr + i < rdram.len() {
-                    rdram[dram_addr + i] = value;
+            // Fast path: no wrapping and fits in RDRAM
+            if src_offset + len <= 4096 && dram_addr + len <= rdram.len() {
+                let src = if is_imem {
+                    &self.imem[src_offset..src_offset + len]
+                } else {
+                    &self.dmem[src_offset..src_offset + len]
+                };
+                rdram[dram_addr..dram_addr + len].copy_from_slice(src);
+            } else {
+                // Slow path: byte-by-byte with address wrapping
+                for i in 0..len {
+                    let src_addr = (mem_addr + i) & 0xFFF;
+                    let value = if is_imem {
+                        self.imem[src_addr]
+                    } else {
+                        self.dmem[src_addr]
+                    };
+
+                    if dram_addr + i < rdram.len() {
+                        rdram[dram_addr + i] = value;
+                    }
                 }
             }
+
             // Advance pointers for next line
-            dram_addr += length as usize + skip as usize;
-            mem_addr += length as usize;
+            dram_addr += len + skip as usize;
+            mem_addr += len;
         }
     }
 
@@ -442,7 +511,7 @@ impl Rsp {
         });
 
         // Execute HLE task
-        let cycles = self.hle.execute_task(&self.dmem, rdram, rdp);
+        let cycles = self.hle.execute_task(&mut self.dmem, rdram, rdp);
 
         log(LogCategory::PPU, LogLevel::Info, || {
             format!("RSP: Task complete ({} cycles)", cycles)

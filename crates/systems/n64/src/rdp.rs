@@ -644,6 +644,7 @@ impl Rdp {
     }
 
     /// Sync GPU framebuffer to CPU-side buffer (only needed for GPU-backed renderers).
+    #[allow(dead_code)]
     pub fn sync_framebuffer(&mut self) {
         self.renderer.sync_framebuffer();
     }

@@ -201,11 +201,13 @@ impl VideoInterface {
     }
 
     /// Get the framebuffer origin address
+    #[allow(dead_code)]
     pub fn get_framebuffer_origin(&self) -> u32 {
         self.origin
     }
 
     /// Get the framebuffer width
+    #[allow(dead_code)]
     pub fn get_width(&self) -> u32 {
         self.width
     }

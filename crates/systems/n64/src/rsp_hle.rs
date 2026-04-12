@@ -384,7 +384,7 @@ impl RspHle {
 
     /// Execute HLE task (called when RSP is triggered)
     /// Returns number of cycles consumed
-    pub fn execute_task(&mut self, dmem: &[u8; 4096], rdram: &mut [u8], _rdp: &mut Rdp) -> u32 {
+    pub fn execute_task(&mut self, dmem: &mut [u8; 4096], rdram: &mut [u8], _rdp: &mut Rdp) -> u32 {
         // Check the ACTUAL task type from the OSTask structure in DMEM, not just
         // the detected microcode. Games like SM64 submit both graphics (type=1)
         // and audio (type=2) tasks using the same RSP, and the microcode type
@@ -395,18 +395,14 @@ impl RspHle {
 
         if task_type == 2 {
             // Audio task (M_AUDTASK) - always use audio handler
-            let mut dmem_scratch = *dmem;
-            return self.execute_audio_task(&mut dmem_scratch, rdram);
+            return self.execute_audio_task(dmem, rdram);
         }
 
         match self.microcode {
             MicrocodeType::F3DEX | MicrocodeType::F3DEX2 => {
                 self.execute_graphics_task(dmem, rdram, _rdp)
             }
-            MicrocodeType::Audio => {
-                let mut dmem_scratch = *dmem;
-                self.execute_audio_task(&mut dmem_scratch, rdram)
-            }
+            MicrocodeType::Audio => self.execute_audio_task(dmem, rdram),
             MicrocodeType::Unknown => {
                 // No-op for unknown microcode
                 100
@@ -2518,11 +2514,11 @@ mod tests {
     #[test]
     fn test_execute_unknown_task() {
         let mut hle = RspHle::new();
-        let dmem = [0u8; 4096];
+        let mut dmem = [0u8; 4096];
         let mut rdram = vec![0u8; 4096];
         let mut rdp = Rdp::new_for_test();
 
-        let cycles = hle.execute_task(&dmem, &mut rdram[..], &mut rdp);
+        let cycles = hle.execute_task(&mut dmem, &mut rdram[..], &mut rdp);
         assert!(cycles > 0);
     }
 

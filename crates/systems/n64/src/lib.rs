@@ -425,18 +425,14 @@ impl System for N64System {
             }
         }
 
-        // Sync RDP framebuffer to RDRAM once per display frame
-        // This is deferred from individual RSP/RDP operations for performance
+        // Sync RDP framebuffer to RDRAM once per display frame.
+        // This keeps RDRAM consistent for any CPU reads from the framebuffer region.
         self.cpu.bus_mut().sync_rdp_framebuffer();
 
-        // Get frame from VI framebuffer readback (primary display method)
-        // The game renders to RDRAM, and VI reads from RDRAM at VI_ORIGIN
-        if let Some(vi_frame) = self.cpu.bus().read_vi_framebuffer() {
-            return Ok(vi_frame);
-        }
-
-        // Fallback: return RDP internal frame (for cases where VI isn't configured yet)
-        self.cpu.bus_mut().rdp_mut().sync_framebuffer();
+        // Return the RDP renderer's frame directly.  sync_rdp_framebuffer() already
+        // called sync_framebuffer() (glReadPixels) internally, so the CPU-side frame
+        // buffer is up-to-date.  Using it directly avoids the redundant
+        // RDRAM → ARGB pixel-conversion pass that read_vi_framebuffer() would add.
         let frame = self.cpu.bus().rdp().get_frame().clone();
         Ok(frame)
     }
