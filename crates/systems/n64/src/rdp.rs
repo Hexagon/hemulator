@@ -117,6 +117,31 @@ struct TileDescriptor {
     t_shift: u32,   // T coordinate shift
 }
 
+/// Inspector data snapshot for the N64 RDP inspector tab.
+#[derive(Debug, Clone)]
+pub struct RdpInspectorData {
+    /// DPC_STATUS register value
+    pub status: u32,
+    /// Color image (framebuffer) address
+    pub color_image_addr: u32,
+    /// Color image width in pixels
+    pub color_image_width: u32,
+    /// Color image pixel size (0=4bpp, 1=8bpp, 2=16bpp, 3=32bpp)
+    pub color_image_size: u8,
+    /// Whether z-buffering is currently enabled
+    pub zbuffer_enabled: bool,
+    /// Renderer backend name
+    pub renderer_name: String,
+    /// RSP microcode type
+    pub microcode_type: String,
+    /// RSP vertex buffer count
+    pub vertex_count: usize,
+    /// DPC_START register value
+    pub dpc_start: u32,
+    /// DPC_END register value
+    pub dpc_end: u32,
+}
+
 /// RDP state and framebuffer
 pub struct Rdp {
     /// Rendering backend (software or OpenGL)
@@ -167,6 +192,9 @@ pub struct Rdp {
     /// Other mode settings (64-bit value from SET_OTHER_MODES)
     /// Controls cycle type, alpha blend, Z-buffer, texture filtering, etc.
     othermode: u64,
+
+    /// Z-buffer enable state (mirrors what was last set via set_zbuffer_enabled)
+    zbuffer_enabled: bool,
 
     /// DPC registers
     dpc_start: u32,
@@ -257,6 +285,7 @@ impl Rdp {
             color_image_width: 320,
             color_image_size: 2,
             othermode: 0,
+            zbuffer_enabled: false,
             dpc_start: 0,
             dpc_end: 0,
             dpc_current: 0,
@@ -327,6 +356,7 @@ impl Rdp {
         self.color_image_addr = 0;
         self.color_image_width = 320;
         self.color_image_size = 2;
+        self.zbuffer_enabled = false;
         self.dpc_start = 0;
         self.dpc_end = 0;
         self.dpc_current = 0;
@@ -383,7 +413,13 @@ impl Rdp {
     /// Enable or disable Z-buffer testing
     #[allow(dead_code)] // Public API for future use
     pub fn set_zbuffer_enabled(&mut self, enabled: bool) {
+        self.zbuffer_enabled = enabled;
         self.renderer.set_zbuffer_enabled(enabled);
+    }
+
+    /// Returns whether Z-buffer testing is currently enabled.
+    pub fn is_zbuffer_enabled(&self) -> bool {
+        self.zbuffer_enabled
     }
 
     /// Draw a flat-shaded triangle (basic rasterization)

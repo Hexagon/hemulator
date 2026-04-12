@@ -240,6 +240,36 @@ impl N64System {
         }
     }
 
+    /// Get Video Interface inspector data for the inspector tab.
+    pub fn get_vi_inspector_data(&self) -> crate::vi::ViInspectorData {
+        self.cpu.bus().vi().inspector_data()
+    }
+
+    /// Get RDP inspector data for the inspector tab.
+    pub fn get_rdp_inspector_data(&self) -> crate::rdp::RdpInspectorData {
+        let bus = self.cpu.bus();
+        let rdp = bus.rdp();
+        let rsp = bus.rsp();
+        let microcode_type = match rsp.microcode_type() {
+            rsp_hle::MicrocodeType::F3DEX => "F3DEX",
+            rsp_hle::MicrocodeType::F3DEX2 => "F3DEX2",
+            rsp_hle::MicrocodeType::Audio => "Audio",
+            rsp_hle::MicrocodeType::Unknown => "Unknown",
+        };
+        crate::rdp::RdpInspectorData {
+            status: rdp.read_register(0x0C),
+            color_image_addr: rdp.color_image_address(),
+            color_image_width: rdp.color_image_width_val(),
+            color_image_size: rdp.get_color_image_size(),
+            zbuffer_enabled: rdp.is_zbuffer_enabled(),
+            renderer_name: rdp.renderer_name().to_string(),
+            microcode_type: microcode_type.to_string(),
+            vertex_count: rsp.vertex_count(),
+            dpc_start: rdp.read_register(0x00),
+            dpc_end: rdp.read_register(0x04),
+        }
+    }
+
     /// Get debugger interface for this system
     pub fn debugger(&self) -> Option<&dyn emu_core::debug::Debugger> {
         Some(self)

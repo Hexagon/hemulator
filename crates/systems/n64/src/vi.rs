@@ -55,6 +55,27 @@ const VI_STATUS_SERRATE: u32 = 0x40;
 #[allow(dead_code)]
 const VI_STATUS_AA_MODE_SHIFT: u32 = 8;
 
+/// Inspector snapshot of all VI register values.
+#[derive(Debug, Clone)]
+pub struct ViInspectorData {
+    pub status: u32,
+    pub origin: u32,
+    pub width: u32,
+    pub intr: u32,
+    pub current: u32,
+    pub v_sync: u32,
+    pub h_sync: u32,
+    pub h_start: u32,
+    pub v_start: u32,
+    pub x_scale: u32,
+    pub y_scale: u32,
+    pub display_width: u32,
+    pub display_height: u32,
+    pub color_depth: u32,
+    pub display_enabled: bool,
+    pub video_standard: String,
+}
+
 /// Video Interface controller
 pub struct VideoInterface {
     /// VI registers
@@ -206,6 +227,37 @@ impl VideoInterface {
     /// 0 = blank, 2 = 16-bit (RGBA5551), 3 = 32-bit (RGBA8888)
     pub fn get_color_depth(&self) -> u32 {
         self.status & 0x03
+    }
+
+    /// Collect a complete inspector snapshot for the N64 VI inspector tab.
+    pub fn inspector_data(&self) -> ViInspectorData {
+        // Determine video standard from VI_V_SYNC value
+        // NTSC: 525 lines (0x020D), PAL: 625 lines (0x0271)
+        let video_standard = if self.v_sync == 0x020D || self.v_sync <= 0x020D {
+            "NTSC"
+        } else {
+            "PAL"
+        }
+        .to_string();
+
+        ViInspectorData {
+            status: self.status,
+            origin: self.origin,
+            width: self.width,
+            intr: self.intr,
+            current: self.current,
+            v_sync: self.v_sync,
+            h_sync: self.h_sync,
+            h_start: self.h_start,
+            v_start: self.v_start,
+            x_scale: self.x_scale,
+            y_scale: self.y_scale,
+            display_width: self.width,
+            display_height: self.get_display_height(),
+            color_depth: self.get_color_depth(),
+            display_enabled: self.is_enabled(),
+            video_standard,
+        }
     }
 }
 
