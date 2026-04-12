@@ -75,15 +75,6 @@ pub struct N64Bus {
     si_dram_addr: u32,
     /// CIC seed (detected from ROM header, used for IPL3 register init)
     cic_seed: u8,
-    /// Pending SP interrupt: number of CPU cycles remaining before MI_INTR_SP fires.
-    /// Simulates the RSP running asynchronously. 0 = no pending interrupt.
-    #[allow(dead_code)]
-    pending_sp_interrupt_cycles: u64,
-    /// Also fire MI_INTR_DP when the pending timer expires (for graphics tasks).
-    #[allow(dead_code)]
-    pending_dp_interrupt: bool,
-    /// Debug: last CPU PC for watchpoint diagnostics
-    pub last_cpu_pc: u32,
 }
 
 impl N64Bus {
@@ -107,20 +98,50 @@ impl N64Bus {
             mi: MipsInterface::new(),
             ai: AudioInterface::new(),
             tlb: Tlb::new(),
-            pending_sp_interrupt_cycles: 0,
-            pending_dp_interrupt: false,
             entry_point: None,
             pi_dram_addr: 0,
             pi_cart_addr: 0,
             si_dram_addr: 0,
             cic_seed: 0,
-            last_cpu_pc: 0,
         };
 
         // Initialize PIF ROM
         bus.pif.init_rom();
 
         Ok(bus)
+    }
+
+    /// Create a new N64 bus using the software (CPU-based) renderer.
+    ///
+    /// Does **not** require an OpenGL context, so this is suitable for unit
+    /// tests that run in CI without GPU support.
+    pub fn new_for_test() -> Self {
+        use crate::rdp_renderer_software::SoftwareRdpRenderer;
+        let rdp = Rdp::with_renderer(Box::new(SoftwareRdpRenderer::new(320, 240)));
+
+        let mut bus = Self {
+            rdram: vec![0; 4 * 1024 * 1024],
+            pif: Pif::new(),
+            cartridge: None,
+            cart_save: None,
+            save_is_flashram: false,
+            flashram_mode: FlashRamMode::Read,
+            flashram_erase_offset: 0,
+            flashram_write_offset: 0,
+            rdp,
+            rsp: Rsp::new(),
+            vi: VideoInterface::new(),
+            mi: MipsInterface::new(),
+            ai: AudioInterface::new(),
+            tlb: Tlb::new(),
+            entry_point: None,
+            pi_dram_addr: 0,
+            pi_cart_addr: 0,
+            si_dram_addr: 0,
+            cic_seed: 0,
+        };
+        bus.pif.init_rom();
+        bus
     }
 
     /// Update controller state (for input handling)
@@ -574,19 +595,18 @@ impl N64Bus {
                 self.rsp.read_dmem(0xFC2),
                 self.rsp.read_dmem(0xFC3),
             ]);
-            
+
             // Fire SP interrupt immediately. The N64 OS kernel exception handler
-            // reads MI_INTR, finds the SP bit, and posts a message to the 
+            // reads MI_INTR, finds the SP bit, and posts a message to the
             // registered event queue (e.g., gIntrMesgQueue in SM64).
             self.mi.set_interrupt(super::mi::MI_INTR_SP);
-            
+
             // For graphics tasks, also fire DP interrupt (display processor done).
             // SM64's scheduler uses DP_COMPLETE to know when RDP finished rendering,
             // which triggers sending the completion message to the game thread.
             if task_type == 1 {
                 self.mi.set_interrupt(super::mi::MI_INTR_DP);
             }
-            
         }
 
         should_interrupt
@@ -601,15 +621,9 @@ impl N64Bus {
         }
     }
 
-    /// Tick the deferred RSP interrupt timer (currently unused - interrupts fire immediately).
-    pub fn tick_rsp_interrupt(&mut self) {
-        // No-op: RSP interrupts now fire immediately in process_rsp_task
-    }
-
     /// Sync RDP framebuffer to RDRAM once per display frame.
     /// This is deferred from individual RSP/RDP operations for performance.
     pub fn sync_rdp_framebuffer(&mut self) {
-
         self.rdp.write_framebuffer_to_rdram(&mut self.rdram);
     }
 
@@ -957,11 +971,6 @@ impl MemoryMips for N64Bus {
             // RDRAM
             0x0000_0000..=0x003F_FFFF => {
                 self.rdram[(phys_addr & 0x003FFFFF) as usize] = val;
-                // Temporary watchpoint: detect byte writes to the zero-matrix region
-                let offset = (phys_addr & 0x003FFFFF) as usize;
-                if (0x220BC8..=0x220C08).contains(&offset) && val != 0 {
-                    eprintln!("RDRAM_WRITE_BYTE: phys=0x{:06X} val=0x{:02X} pc=0x{:08X}", offset, val, self.last_cpu_pc);
-                }
             }
             // SP DMEM (0x04000000 - 0x04000FFF)
             0x0400_0000..=0x0400_0FFF => {
@@ -1024,18 +1033,6 @@ impl MemoryMips for N64Bus {
             // RDRAM
             0x0000_0000..=0x003F_FFFF => {
                 let offset = (phys_addr & 0x003FFFFF) as usize;
-                // Temporary watchpoint: detect writes to the zero-matrix region
-                if (0x220BC8..=0x220C08).contains(&offset) {
-                    eprintln!("RDRAM_WRITE: phys=0x{:06X} val=0x{:08X} virt=0x{:08X}", offset, val, addr);
-                }
-                // Also check working matrix addresses (identity @ 0x220D00, projection @ 0x220C48)
-                if (0x220C48..=0x220C88).contains(&offset) || (0x220D00..=0x220D40).contains(&offset) {
-                    eprintln!("WORKING_MTX_WRITE: phys=0x{:06X} val=0x{:08X} pc=0x{:08X}", offset, val, self.last_cpu_pc);
-                }
-                // Watchpoint: detect DL command that references the zero matrix addresses
-                if val == 0x00220BC8 || val == 0x00214378 {
-                    eprintln!("DL_MTX_REF: storing 0x{:08X} at phys=0x{:06X} pc=0x{:08X}", val, offset, self.last_cpu_pc);
-                }
                 let bytes = val.to_be_bytes();
                 self.rdram[offset] = bytes[0];
                 self.rdram[offset + 1] = bytes[1];
@@ -1174,10 +1171,6 @@ impl MemoryMips for N64Bus {
                             } else {
                                 cart_addr
                             };
-                            // Temporary: check if DMA touches the zero-matrix region
-                            if dram_addr <= 0x220C08 && dram_addr + len > 0x220BC8 {
-                                eprintln!("PI_DMA: cart=0x{:08X} -> RDRAM 0x{:06X}, len=0x{:X} (overlaps matrix!)", cart_addr, dram_addr, len);
-                            }
                             for i in 0..len {
                                 let src = cart_offset as usize + i;
                                 let dst = dram_addr + i;

@@ -27,6 +27,7 @@ pub enum SystemType {
     GameAndWatch,
     Atari5200,
     MegaDrive,
+    C64,
 }
 
 #[derive(Debug)]
@@ -60,6 +61,7 @@ pub fn detect_rom_type_with_extension(
             "gw" | "gnw" | "mgw" => return Ok(SystemType::GameAndWatch),
             "a52" => return Ok(SystemType::Atari5200),
             "md" | "gen" | "smd" => return Ok(SystemType::MegaDrive),
+            "prg" | "crt" => return Ok(SystemType::C64),
             "nes" => {
                 // For .nes extension, still verify it has iNES header
                 if data.len() >= 16 && &data[0..4] == b"NES\x1A" {

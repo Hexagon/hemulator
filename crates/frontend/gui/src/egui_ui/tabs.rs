@@ -86,6 +86,10 @@ pub struct NesTileData {
     pub scroll_y: u8,
     /// Current mirroring mode
     pub mirroring: String,
+    /// Sprite 0 hit status snapshot
+    pub sprite0_status: emu_nes::Sprite0Status,
+    /// Sprite 0 hit configuration (read-only snapshot; changes are sent via DebugAction)
+    pub sprite0_config: emu_nes::Sprite0Config,
 }
 
 /// Game Boy tile viewer data
@@ -343,6 +347,68 @@ pub struct Ps1GpuData {
     pub irq: bool,
 }
 
+/// N64 Video Interface inspector data
+#[derive(Clone, Debug)]
+pub struct N64ViData {
+    /// VI_STATUS: video control/status register
+    pub status: u32,
+    /// VI_ORIGIN: framebuffer origin address in RDRAM
+    pub origin: u32,
+    /// VI_WIDTH: framebuffer width in pixels
+    pub width: u32,
+    /// VI_INTR: vertical interrupt scanline (stored * 2)
+    pub intr: u32,
+    /// VI_CURRENT: current scanline counter
+    pub current: u32,
+    /// VI_V_SYNC: vertical sync period
+    pub v_sync: u32,
+    /// VI_H_SYNC: horizontal sync period
+    pub h_sync: u32,
+    /// VI_X_SCALE: horizontal scale factor
+    pub x_scale: u32,
+    /// VI_Y_SCALE: vertical scale factor
+    pub y_scale: u32,
+    /// VI_H_START: horizontal display start/end
+    pub h_start: u32,
+    /// VI_V_START: vertical display start/end
+    pub v_start: u32,
+    /// Display width derived from VI registers
+    pub display_width: u32,
+    /// Display height derived from VI registers
+    pub display_height: u32,
+    /// Color depth (0=blank, 2=16-bit, 3=32-bit)
+    pub color_depth: u32,
+    /// Whether display is enabled
+    pub display_enabled: bool,
+    /// Video standard ("NTSC" / "PAL")
+    pub video_standard: String,
+}
+
+/// N64 Reality Display Processor inspector data
+#[derive(Clone, Debug)]
+pub struct N64RdpData {
+    /// RDP status flags
+    pub status: u32,
+    /// Color image (framebuffer) address
+    pub color_image_addr: u32,
+    /// Color image width
+    pub color_image_width: u32,
+    /// Color image pixel size (0=4bpp, 1=8bpp, 2=16bpp, 3=32bpp)
+    pub color_image_size: u8,
+    /// Z-buffer enabled flag
+    pub zbuffer_enabled: bool,
+    /// Renderer backend name (static string; values come from a small fixed set)
+    pub renderer_name: &'static str,
+    /// RSP microcode type (static string; values come from a small fixed set)
+    pub microcode_type: &'static str,
+    /// RSP vertex buffer count
+    pub vertex_count: usize,
+    /// DPC start address
+    pub dpc_start: u32,
+    /// DPC end address
+    pub dpc_end: u32,
+}
+
 /// Mount point information for inspector
 #[derive(Clone, Debug)]
 pub struct MountInfo {
@@ -366,7 +432,7 @@ pub enum TabAction {
 }
 
 /// Debug actions that can be triggered from the debug tab
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum DebugAction {
     Step,                                                         // Step one instruction
     Pause,                                                        // Pause emulation
@@ -376,6 +442,8 @@ pub enum DebugAction {
     AddBreakpoint(u32, emu_core::breakpoints::BreakpointType), // Add breakpoint (address, type)
     RemoveBreakpoint(u32, emu_core::breakpoints::BreakpointType), // Remove breakpoint
     SetGbAudioChannels([bool; 4]), // Pulse1, Pulse2, Wave, Noise
+    /// Update the NES PPU sprite 0 hit configuration.
+    SetNesPpuConfig(emu_nes::Sprite0Config),
 }
 
 pub struct TabManager {
@@ -387,6 +455,8 @@ pub struct TabManager {
     pub system_tile_data: Option<SystemTileData>,
     pub pc_bda_data: Option<PcBdaData>,
     pub ps1_gpu_data: Option<Ps1GpuData>,
+    pub n64_vi_data: Option<N64ViData>,
+    pub n64_rdp_data: Option<N64RdpData>,
     pub cartridge_data: Option<CartridgeData>,
     pub mount_info: Vec<MountInfo>,
     pub system_loaded: bool,
@@ -410,6 +480,10 @@ pub struct TabManager {
     pub breakpoint_type_selected: usize, // 0=Execute, 1=Read, 2=Write
     pub show_breakpoint_panel: bool,
     pub gb_audio_channels: [bool; 4], // Pulse1, Pulse2, Wave, Noise
+    /// Local copy of the NES sprite 0 hit configuration (for the inspector tab).
+    /// Updated from the emulator each frame via NesTileData; changes are sent back
+    /// via DebugAction::SetNesPpuConfig.
+    pub nes_sprite0_config: emu_nes::Sprite0Config,
 }
 
 impl TabManager {
@@ -423,6 +497,8 @@ impl TabManager {
             system_tile_data: None,
             pc_bda_data: None,
             ps1_gpu_data: None,
+            n64_vi_data: None,
+            n64_rdp_data: None,
             cartridge_data: None,
             mount_info: Vec::new(),
             system_loaded: false,
@@ -441,6 +517,7 @@ impl TabManager {
             breakpoint_type_selected: 0,
             show_breakpoint_panel: false,
             gb_audio_channels: [true, true, true, true],
+            nes_sprite0_config: emu_nes::Sprite0Config::default(),
         }
     }
 
@@ -462,6 +539,14 @@ impl TabManager {
 
     pub fn update_ps1_gpu_data(&mut self, data: Ps1GpuData) {
         self.ps1_gpu_data = Some(data);
+    }
+
+    pub fn update_n64_vi_data(&mut self, data: N64ViData) {
+        self.n64_vi_data = Some(data);
+    }
+
+    pub fn update_n64_rdp_data(&mut self, data: N64RdpData) {
+        self.n64_rdp_data = Some(data);
     }
 
     pub fn update_cartridge_data(&mut self, data: CartridgeData) {
@@ -519,6 +604,8 @@ impl TabManager {
         self.system_tile_data = None;
         self.pc_bda_data = None;
         self.ps1_gpu_data = None;
+        self.n64_vi_data = None;
+        self.n64_rdp_data = None;
         self.cartridge_data = None;
         self.cached_memory.clear();
         self.cached_memory_start = 0;
@@ -1498,6 +1585,7 @@ impl TabManager {
                             8 => format!("${:02X}", reg.value),
                             16 => format!("${:04X}", reg.value),
                             32 => format!("${:08X}", reg.value),
+                            64 => format!("${:016X}", reg.value64),
                             _ => format!("${:X}", reg.value),
                         };
                         ui.label(egui::RichText::new(value_str).monospace());

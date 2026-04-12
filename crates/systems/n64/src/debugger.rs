@@ -156,7 +156,7 @@ impl Debugger for N64System {
         let pc = self.cpu.cpu.pc;
         let mut state = CpuState::new(pc as u32);
 
-        // Add general-purpose registers
+        // Add general-purpose registers (64-bit MIPS III registers)
         for i in 0..32 {
             let name = match i {
                 0 => "zero",
@@ -193,30 +193,41 @@ impl Debugger for N64System {
                 31 => "ra",
                 _ => unreachable!(),
             };
-            state.add_register(CpuRegister::new_32bit(
+            state.add_register(CpuRegister::new_64bit(
                 format!("${}", name),
-                self.cpu.cpu.gpr[i] as u32,
+                self.cpu.cpu.gpr[i],
             ));
         }
 
-        // Add special registers
-        state.add_register(CpuRegister::new_32bit("PC", self.cpu.cpu.pc as u32));
-        state.add_register(CpuRegister::new_32bit("HI", self.cpu.cpu.hi as u32));
-        state.add_register(CpuRegister::new_32bit("LO", self.cpu.cpu.lo as u32));
+        // Add special registers (64-bit)
+        state.add_register(CpuRegister::new_64bit("PC", self.cpu.cpu.pc));
+        state.add_register(CpuRegister::new_64bit("HI", self.cpu.cpu.hi));
+        state.add_register(CpuRegister::new_64bit("LO", self.cpu.cpu.lo));
 
-        // Add CP0 registers (key ones)
-        state.add_register(CpuRegister::new_32bit(
-            "CP0_Status",
-            self.cpu.cpu.cp0[12] as u32,
-        ));
-        state.add_register(CpuRegister::new_32bit(
-            "CP0_Cause",
-            self.cpu.cpu.cp0[13] as u32,
-        ));
-        state.add_register(CpuRegister::new_32bit(
-            "CP0_EPC",
-            self.cpu.cpu.cp0[14] as u32,
-        ));
+        // Add CP0 registers (full set of relevant registers)
+        let cp0 = &self.cpu.cpu.cp0;
+        state.add_register(CpuRegister::new_32bit("Index", cp0[0] as u32));
+        state.add_register(CpuRegister::new_32bit("Random", cp0[1] as u32));
+        state.add_register(CpuRegister::new_32bit("EntryLo0", cp0[2] as u32));
+        state.add_register(CpuRegister::new_32bit("EntryLo1", cp0[3] as u32));
+        state.add_register(CpuRegister::new_32bit("Context", cp0[4] as u32));
+        state.add_register(CpuRegister::new_32bit("PageMask", cp0[5] as u32));
+        state.add_register(CpuRegister::new_32bit("Wired", cp0[6] as u32));
+        state.add_register(CpuRegister::new_32bit("BadVAddr", cp0[8] as u32));
+        state.add_register(CpuRegister::new_32bit("Count", cp0[9] as u32));
+        state.add_register(CpuRegister::new_32bit("EntryHi", cp0[10] as u32));
+        state.add_register(CpuRegister::new_32bit("Compare", cp0[11] as u32));
+        state.add_register(CpuRegister::new_32bit("Status", cp0[12] as u32));
+        state.add_register(CpuRegister::new_32bit("Cause", cp0[13] as u32));
+        state.add_register(CpuRegister::new_32bit("EPC", cp0[14] as u32));
+        state.add_register(CpuRegister::new_32bit("PRId", cp0[15] as u32));
+        state.add_register(CpuRegister::new_32bit("Config", cp0[16] as u32));
+        state.add_register(CpuRegister::new_32bit("LLAddr", cp0[17] as u32));
+        state.add_register(CpuRegister::new_32bit("WatchLo", cp0[18] as u32));
+        state.add_register(CpuRegister::new_32bit("WatchHi", cp0[19] as u32));
+        state.add_register(CpuRegister::new_32bit("TagLo", cp0[28] as u32));
+        state.add_register(CpuRegister::new_32bit("TagHi", cp0[29] as u32));
+        state.add_register(CpuRegister::new_32bit("ErrorEPC", cp0[30] as u32));
 
         state
     }
@@ -229,7 +240,6 @@ mod tests {
     use super::*;
 
     #[test]
-    #[ignore] // Requires GL context
     fn test_n64_memory_regions() {
         let system = N64System::new_for_test();
         let regions = system.get_memory_regions();
@@ -257,7 +267,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires GL context
     fn test_n64_cpu_state() {
         let system = N64System::new_for_test();
         let state = system.get_cpu_state();
@@ -311,14 +320,24 @@ mod tests {
         assert!(state.registers.iter().any(|r| r.name == "HI"));
         assert!(state.registers.iter().any(|r| r.name == "LO"));
 
-        // Should have CP0 registers
-        assert!(state.registers.iter().any(|r| r.name == "CP0_Status"));
-        assert!(state.registers.iter().any(|r| r.name == "CP0_Cause"));
-        assert!(state.registers.iter().any(|r| r.name == "CP0_EPC"));
+        // Should have CP0 registers (now using friendly names)
+        assert!(state.registers.iter().any(|r| r.name == "Status"));
+        assert!(state.registers.iter().any(|r| r.name == "Cause"));
+        assert!(state.registers.iter().any(|r| r.name == "EPC"));
+        assert!(state.registers.iter().any(|r| r.name == "BadVAddr"));
+        assert!(state.registers.iter().any(|r| r.name == "Count"));
+        assert!(state.registers.iter().any(|r| r.name == "Compare"));
+
+        // GPRs should be 64-bit
+        let v0 = state.registers.iter().find(|r| r.name == "$v0").unwrap();
+        assert_eq!(v0.width, 64);
+
+        // PC, HI, LO should be 64-bit
+        let pc_reg = state.registers.iter().find(|r| r.name == "PC").unwrap();
+        assert_eq!(pc_reg.width, 64);
     }
 
     #[test]
-    #[ignore] // Requires GL context
     fn test_n64_read_memory() {
         let system = N64System::new_for_test();
 
@@ -334,7 +353,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires GL context
     fn test_n64_disassemble() {
         let system = N64System::new_for_test();
 
@@ -348,7 +366,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires GL context
     fn test_n64_check_breakpoint() {
         let mut system = N64System::new_for_test();
 

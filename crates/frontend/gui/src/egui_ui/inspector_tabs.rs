@@ -20,6 +20,7 @@ pub enum InspectorTab {
     NesTiles,
     NesPalettes,
     NesNametables,
+    NesSprite0Hit, // Sprite 0 hit debugger / configuration
 
     GbTiles,
     GbPalettes,
@@ -52,6 +53,9 @@ pub enum InspectorTab {
     PcBda, // BIOS Data Area
 
     Ps1Gpu, // GPU state and VRAM viewer
+
+    N64Vi,  // Video Interface registers and display configuration
+    N64Rdp, // Reality Display Processor state
 }
 
 impl InspectorTab {
@@ -66,6 +70,7 @@ impl InspectorTab {
             InspectorTab::NesTiles => "🎨 Tiles",
             InspectorTab::NesPalettes => "🎨 Palettes",
             InspectorTab::NesNametables => "🗺️ Nametables",
+            InspectorTab::NesSprite0Hit => "🎯 Sprite 0",
             InspectorTab::GbTiles => "🎨 Tiles",
             InspectorTab::GbPalettes => "🎨 Palettes",
             InspectorTab::GbTilemaps => "🗺️ Tilemaps",
@@ -89,6 +94,8 @@ impl InspectorTab {
             InspectorTab::Chip8Registers => "📝 Registers",
             InspectorTab::PcBda => "🖥️ BDA/EBDA",
             InspectorTab::Ps1Gpu => "🎮 GPU",
+            InspectorTab::N64Vi => "📺 VI",
+            InspectorTab::N64Rdp => "🖼️ RDP",
         }
     }
 
@@ -113,6 +120,7 @@ pub fn get_tabs_for_system(system_type: Option<&SystemType>) -> Vec<InspectorTab
                     InspectorTab::NesTiles,
                     InspectorTab::NesPalettes,
                     InspectorTab::NesNametables,
+                    InspectorTab::NesSprite0Hit,
                 ]);
             }
             SystemType::GameBoy => {
@@ -173,6 +181,10 @@ pub fn get_tabs_for_system(system_type: Option<&SystemType>) -> Vec<InspectorTab
                 tabs.push(InspectorTab::Mounts); // PS1 uses Mounts tab (BIOS, disc)
                 tabs.push(InspectorTab::Ps1Gpu);
             }
+            SystemType::N64 => {
+                tabs.push(InspectorTab::Cartridge); // N64 uses cartridge tab
+                tabs.extend_from_slice(&[InspectorTab::N64Vi, InspectorTab::N64Rdp]);
+            }
             SystemType::GameAndWatch => {
                 tabs.push(InspectorTab::Mounts); // Game & Watch uses Mounts tab for "Program"
             }
@@ -228,6 +240,9 @@ pub fn render_inspector_tab(tab: &InspectorTab, ui: &mut Ui, tab_manager: &mut T
         InspectorTab::NesNametables | InspectorTab::GbTilemaps => {
             tab_manager.render_tilemaps_tab(ui);
         }
+        InspectorTab::NesSprite0Hit => {
+            render_nes_sprite0_tab(ui, tab_manager);
+        }
         InspectorTab::GbaOam => {
             render_gba_oam_tab(ui, tab_manager);
         }
@@ -260,6 +275,12 @@ pub fn render_inspector_tab(tab: &InspectorTab, ui: &mut Ui, tab_manager: &mut T
         }
         InspectorTab::Ps1Gpu => {
             render_ps1_gpu_tab(ui, tab_manager);
+        }
+        InspectorTab::N64Vi => {
+            render_n64_vi_tab(ui, tab_manager);
+        }
+        InspectorTab::N64Rdp => {
+            render_n64_rdp_tab(ui, tab_manager);
         }
     }
 }
@@ -2131,4 +2152,543 @@ fn render_ps1_gpu_tab(ui: &mut Ui, tab_manager: &mut TabManager) {
                 });
             }
         });
+}
+
+/// Render the NES Sprite 0 Hit debugger/configuration tab.
+///
+/// Shows the current sprite 0 hit status (live, each frame) and lets the user
+/// tweak the three configurable knobs of the hit-detection algorithm.  Changes
+/// are dispatched as `DebugAction::SetNesPpuConfig` so main.rs can forward them
+/// to the running NES system.
+fn render_nes_sprite0_tab(ui: &mut Ui, tab_manager: &mut TabManager) {
+    use crate::egui_ui::tabs::DebugAction;
+    use egui::ScrollArea;
+
+    let available_height = ui.available_height();
+    ScrollArea::vertical()
+        .auto_shrink([false; 2])
+        .max_height(available_height)
+        .show(ui, |ui| {
+            // ── Live status ─────────────────────────────────────────────────
+            if let Some(crate::egui_ui::SystemTileData::NES(ref nes)) =
+                tab_manager.system_tile_data
+            {
+                // Sync the local config copy from the emulator (read-only snapshot).
+                // We only overwrite if the user hasn't already made a local edit this frame.
+                let emulator_config = nes.sprite0_config.clone();
+                if tab_manager.nes_sprite0_config != emulator_config
+                    && tab_manager.pending_debug_action.is_none()
+                {
+                    tab_manager.nes_sprite0_config = emulator_config;
+                }
+
+                let status = &nes.sprite0_status;
+
+                ui.heading("🎯 Sprite 0 Hit Debugger");
+                ui.separator();
+                ui.add_space(6.0);
+
+                // Status panel
+                ui.heading("Current Frame Status");
+                ui.add_space(4.0);
+                egui::Grid::new("nes_sprite0_status_grid")
+                    .num_columns(2)
+                    .spacing([40.0, 6.0])
+                    .striped(true)
+                    .show(ui, |ui| {
+                        ui.label(egui::RichText::new("Hit flag active:").strong());
+                        let hit_text = if status.hit_active {
+                            egui::RichText::new("✅ SET").color(egui::Color32::GREEN)
+                        } else {
+                            egui::RichText::new("❌ CLEAR").color(egui::Color32::GRAY)
+                        };
+                        ui.label(hit_text);
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("Last hit scanline:").strong());
+                        ui.label(match status.last_hit_scanline {
+                            Some(sl) => format!("{sl}"),
+                            None => "—".to_string(),
+                        });
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("Last hit dot:").strong());
+                        ui.label(match status.last_hit_dot {
+                            Some(d) => format!("{d}"),
+                            None => "—".to_string(),
+                        });
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("Pending hit:").strong());
+                        ui.label(if status.pending {
+                            match status.pending_pos {
+                                Some((sl, x)) => {
+                                    let fire_dot = (x as isize)
+                                        .saturating_add(1)
+                                        .saturating_add(
+                                            tab_manager.nes_sprite0_config.hit_dot_offset
+                                                as isize,
+                                        )
+                                        .max(0);
+                                    format!("scanline {sl}, x={x} (fires at dot {fire_dot})")
+                                }
+                                None => "yes (unknown position)".to_string(),
+                            }
+                        } else {
+                            "none".to_string()
+                        });
+                        ui.end_row();
+                    });
+
+                ui.add_space(10.0);
+                ui.separator();
+                ui.add_space(6.0);
+            } else {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(40.0);
+                    ui.label(egui::RichText::new("🎯").size(48.0));
+                    ui.add_space(10.0);
+                    ui.heading("No NES Data");
+                    ui.add_space(10.0);
+                    ui.label("Load a NES ROM to use this tab.");
+                });
+                return;
+            }
+
+            // ── Configuration ────────────────────────────────────────────────
+            ui.heading("⚙️ Hit Detection Configuration");
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new(
+                    "Adjust these options to debug games with sprite 0 hit issues \
+                     (e.g. Bee 52, Battletoads).  Changes take effect immediately.",
+                )
+                .weak(),
+            );
+            ui.add_space(8.0);
+
+            let mut cfg = tab_manager.nes_sprite0_config.clone();
+            let mut changed = false;
+
+            // — VBlank early clear ———————————————————————————————————————
+            ui.group(|ui| {
+                ui.label(egui::RichText::new("VBlank early clear").strong());
+                ui.add_space(2.0);
+                ui.label(
+                    "When ON (default), the sprite 0 hit flag is cleared at the start of VBlank \
+                     (scanline 241, dot 1) in addition to the hardware-accurate clear on the \
+                     pre-render scanline.  This prevents Battletoads from reading a stale hit \
+                     flag from the previous frame.  Toggle OFF to test hardware-accurate behaviour.",
+                );
+                ui.add_space(4.0);
+                if ui
+                    .checkbox(&mut cfg.vblank_early_clear, "Clear at VBlank start (default: ON)")
+                    .changed()
+                {
+                    changed = true;
+                }
+            });
+
+            ui.add_space(8.0);
+
+            // — Dot offset ———————————————————————————————————————————————
+            ui.group(|ui| {
+                ui.label(egui::RichText::new("Hit timing offset (dots)").strong());
+                ui.add_space(2.0);
+                ui.label(
+                    "Shifts the dot at which the hit flag is set relative to the \
+                     hardware-accurate value of dot = sprite_x + 1.  Default: 0.  \
+                     Increase if the hit fires too early; decrease if too late.",
+                );
+                ui.add_space(4.0);
+                let mut offset_i32 = cfg.hit_dot_offset as i32;
+                if ui
+                    .add(
+                        egui::Slider::new(&mut offset_i32, -4..=4)
+                            .text("dots")
+                            .clamping(egui::SliderClamping::Always),
+                    )
+                    .changed()
+                {
+                    cfg.hit_dot_offset = offset_i32 as i8;
+                    changed = true;
+                }
+            });
+
+            ui.add_space(8.0);
+
+            // — Left column suppression ——————————————————————————————————
+            ui.group(|ui| {
+                ui.label(egui::RichText::new("Left-column suppression").strong());
+                ui.add_space(2.0);
+                ui.label(
+                    "When ON (default, hardware-accurate), sprite 0 hits are suppressed \
+                     in pixels 0–7 if either PPUMASK bit 1 (show BG left) or bit 2 \
+                     (show sprites left) is clear.  Toggle OFF to bypass this for debugging.",
+                );
+                ui.add_space(4.0);
+                if ui
+                    .checkbox(
+                        &mut cfg.left_col_suppression,
+                        "Suppress hits in left 8 pixels when clipping active (default: ON)",
+                    )
+                    .changed()
+                {
+                    changed = true;
+                }
+            });
+
+            if changed {
+                tab_manager.nes_sprite0_config = cfg.clone();
+                tab_manager.pending_debug_action = Some(DebugAction::SetNesPpuConfig(cfg));
+            }
+
+            ui.add_space(10.0);
+            ui.separator();
+            ui.add_space(4.0);
+
+            // Reference / help text
+            ui.label(
+                egui::RichText::new(
+                    "Reference: https://www.nesdev.org/wiki/PPU_OAM#Sprite_zero_hits",
+                )
+                .weak()
+                .small(),
+            );
+            ui.label(
+                egui::RichText::new(
+                    "PAL NES: pre-render scanline 311, 312 total scanlines, no odd-frame skip.",
+                )
+                .weak()
+                .small(),
+            );
+        });
+}
+
+/// Render the N64 Video Interface (VI) inspector tab.
+fn render_n64_vi_tab(ui: &mut Ui, tab_manager: &TabManager) {
+    egui::ScrollArea::vertical()
+        .id_salt("n64_vi_scroll")
+        .auto_shrink([false; 2])
+        .show(ui, |ui| {
+            if let Some(vi) = &tab_manager.n64_vi_data {
+                render_n64_vi_content(ui, vi);
+            } else {
+                ui.centered_and_justified(|ui| {
+                    ui.label("Load an N64 ROM to see Video Interface information.");
+                });
+            }
+        });
+}
+
+fn render_n64_vi_content(ui: &mut Ui, vi: &super::tabs::N64ViData) {
+    ui.heading("📺 Video Interface (VI)");
+    ui.separator();
+    ui.add_space(4.0);
+
+    // --- Display configuration ---
+    ui.group(|ui| {
+        ui.label(egui::RichText::new("Display Configuration").strong());
+        ui.add_space(4.0);
+        egui::Grid::new("n64_vi_display_grid")
+            .num_columns(2)
+            .spacing([12.0, 4.0])
+            .striped(true)
+            .show(ui, |ui| {
+                ui.label(egui::RichText::new("Video Standard:").strong());
+                ui.label(&vi.video_standard);
+                ui.end_row();
+
+                ui.label(egui::RichText::new("Display Enabled:").strong());
+                ui.label(if vi.display_enabled {
+                    "✅ Yes"
+                } else {
+                    "❌ No"
+                });
+                ui.end_row();
+
+                ui.label(egui::RichText::new("Resolution:").strong());
+                ui.label(format!("{}×{}", vi.display_width, vi.display_height));
+                ui.end_row();
+
+                ui.label(egui::RichText::new("Color Depth:").strong());
+                let depth_str = match vi.color_depth {
+                    0 => "Blank (disabled)",
+                    1 => "Reserved",
+                    2 => "16-bit (RGBA5551)",
+                    3 => "32-bit (RGBA8888)",
+                    _ => "Unknown",
+                };
+                ui.label(depth_str);
+                ui.end_row();
+
+                ui.label(egui::RichText::new("Framebuffer Addr:").strong());
+                ui.label(egui::RichText::new(format!("0x{:08X}", vi.origin)).monospace());
+                ui.end_row();
+
+                ui.label(egui::RichText::new("Framebuffer Width:").strong());
+                ui.label(format!("{} px", vi.width));
+                ui.end_row();
+            });
+    });
+
+    ui.add_space(6.0);
+
+    // --- Timing ---
+    ui.group(|ui| {
+        ui.label(egui::RichText::new("Timing Registers").strong());
+        ui.add_space(4.0);
+        egui::Grid::new("n64_vi_timing_grid")
+            .num_columns(2)
+            .spacing([12.0, 4.0])
+            .striped(true)
+            .show(ui, |ui| {
+                ui.label(egui::RichText::new("VI_V_SYNC:").strong());
+                ui.label(egui::RichText::new(format!("0x{:03X}", vi.v_sync)).monospace());
+                ui.end_row();
+
+                ui.label(egui::RichText::new("VI_H_SYNC:").strong());
+                ui.label(egui::RichText::new(format!("0x{:03X}", vi.h_sync)).monospace());
+                ui.end_row();
+
+                ui.label(egui::RichText::new("VI_H_START:").strong());
+                ui.label(egui::RichText::new(format!("0x{:08X}", vi.h_start)).monospace());
+                ui.end_row();
+
+                ui.label(egui::RichText::new("VI_V_START:").strong());
+                ui.label(egui::RichText::new(format!("0x{:08X}", vi.v_start)).monospace());
+                ui.end_row();
+
+                ui.label(egui::RichText::new("VI_X_SCALE:").strong());
+                ui.label(egui::RichText::new(format!("0x{:04X}", vi.x_scale)).monospace());
+                ui.end_row();
+
+                ui.label(egui::RichText::new("VI_Y_SCALE:").strong());
+                ui.label(egui::RichText::new(format!("0x{:04X}", vi.y_scale)).monospace());
+                ui.end_row();
+
+                ui.label(egui::RichText::new("VI_INTR:").strong());
+                ui.label(
+                    egui::RichText::new(format!("0x{:03X} (scanline {})", vi.intr, vi.intr >> 1))
+                        .monospace(),
+                );
+                ui.end_row();
+
+                ui.label(egui::RichText::new("VI_CURRENT:").strong());
+                ui.label(egui::RichText::new(format!("scanline {}", vi.current)).monospace());
+                ui.end_row();
+            });
+    });
+
+    ui.add_space(6.0);
+
+    // --- Status register bit breakdown ---
+    ui.group(|ui| {
+        ui.label(egui::RichText::new("VI_STATUS Bits").strong());
+        ui.add_space(4.0);
+        let s = vi.status;
+        egui::Grid::new("n64_vi_status_grid")
+            .num_columns(2)
+            .spacing([12.0, 4.0])
+            .striped(true)
+            .show(ui, |ui| {
+                ui.label("Raw value:");
+                ui.label(egui::RichText::new(format!("0x{:08X}", s)).monospace());
+                ui.end_row();
+                ui.label("Bits [1:0] Color type:");
+                ui.label(match s & 0x3 {
+                    0 => "0 – blank",
+                    1 => "1 – reserved",
+                    2 => "2 – 16bpp",
+                    3 => "3 – 32bpp",
+                    _ => "?",
+                });
+                ui.end_row();
+                ui.label("Bit 2 Gamma dither:");
+                ui.label(if (s >> 2) & 1 != 0 { "on" } else { "off" });
+                ui.end_row();
+                ui.label("Bit 3 Gamma correct:");
+                ui.label(if (s >> 3) & 1 != 0 { "on" } else { "off" });
+                ui.end_row();
+                ui.label("Bit 4 Divot filter:");
+                ui.label(if (s >> 4) & 1 != 0 { "on" } else { "off" });
+                ui.end_row();
+                ui.label("Bit 6 Serrate:");
+                ui.label(if (s >> 6) & 1 != 0 { "on" } else { "off" });
+                ui.end_row();
+                let aa = (s >> 8) & 0x3;
+                ui.label("Bits [9:8] AA mode:");
+                ui.label(match aa {
+                    0 => "0 – AA & resampling",
+                    1 => "1 – AA & no resampling",
+                    2 => "2 – no AA & resampling",
+                    3 => "3 – no AA & no resampling",
+                    _ => "?",
+                });
+                ui.end_row();
+            });
+    });
+}
+
+/// Render the N64 Reality Display Processor (RDP) inspector tab.
+fn render_n64_rdp_tab(ui: &mut Ui, tab_manager: &TabManager) {
+    egui::ScrollArea::vertical()
+        .id_salt("n64_rdp_scroll")
+        .auto_shrink([false; 2])
+        .show(ui, |ui| {
+            if let Some(rdp) = &tab_manager.n64_rdp_data {
+                render_n64_rdp_content(ui, rdp);
+            } else {
+                ui.centered_and_justified(|ui| {
+                    ui.label("Load an N64 ROM to see RDP information.");
+                });
+            }
+        });
+}
+
+fn render_n64_rdp_content(ui: &mut Ui, rdp: &super::tabs::N64RdpData) {
+    ui.heading("🖼️ Reality Display Processor (RDP)");
+    ui.separator();
+    ui.add_space(4.0);
+
+    // --- Renderer info ---
+    ui.group(|ui| {
+        ui.label(egui::RichText::new("Renderer").strong());
+        ui.add_space(4.0);
+        egui::Grid::new("n64_rdp_renderer_grid")
+            .num_columns(2)
+            .spacing([12.0, 4.0])
+            .striped(true)
+            .show(ui, |ui| {
+                ui.label(egui::RichText::new("Backend:").strong());
+                ui.label(rdp.renderer_name);
+                ui.end_row();
+
+                ui.label(egui::RichText::new("RSP Microcode:").strong());
+                ui.label(rdp.microcode_type);
+                ui.end_row();
+
+                ui.label(egui::RichText::new("RSP Vertex Count:").strong());
+                ui.label(format!("{}", rdp.vertex_count));
+                ui.end_row();
+            });
+    });
+
+    ui.add_space(6.0);
+
+    // --- Framebuffer ---
+    ui.group(|ui| {
+        ui.label(egui::RichText::new("Framebuffer").strong());
+        ui.add_space(4.0);
+        egui::Grid::new("n64_rdp_fb_grid")
+            .num_columns(2)
+            .spacing([12.0, 4.0])
+            .striped(true)
+            .show(ui, |ui| {
+                ui.label(egui::RichText::new("Color Image Addr:").strong());
+                ui.label(
+                    egui::RichText::new(format!("0x{:08X}", rdp.color_image_addr)).monospace(),
+                );
+                ui.end_row();
+
+                ui.label(egui::RichText::new("Color Image Width:").strong());
+                ui.label(format!("{} px", rdp.color_image_width));
+                ui.end_row();
+
+                ui.label(egui::RichText::new("Pixel Size:").strong());
+                let size_str = match rdp.color_image_size {
+                    0 => "4 bpp",
+                    1 => "8 bpp",
+                    2 => "16 bpp",
+                    3 => "32 bpp",
+                    _ => "unknown",
+                };
+                ui.label(size_str);
+                ui.end_row();
+
+                ui.label(egui::RichText::new("Z-Buffer:").strong());
+                ui.label(if rdp.zbuffer_enabled {
+                    "✅ Enabled"
+                } else {
+                    "❌ Disabled"
+                });
+                ui.end_row();
+            });
+    });
+
+    ui.add_space(6.0);
+
+    // --- DPC command registers ---
+    ui.group(|ui| {
+        ui.label(egui::RichText::new("DPC Command Registers").strong());
+        ui.add_space(4.0);
+        egui::Grid::new("n64_rdp_dpc_grid")
+            .num_columns(2)
+            .spacing([12.0, 4.0])
+            .striped(true)
+            .show(ui, |ui| {
+                ui.label(egui::RichText::new("DPC_START:").strong());
+                ui.label(egui::RichText::new(format!("0x{:08X}", rdp.dpc_start)).monospace());
+                ui.end_row();
+
+                ui.label(egui::RichText::new("DPC_END:").strong());
+                ui.label(egui::RichText::new(format!("0x{:08X}", rdp.dpc_end)).monospace());
+                ui.end_row();
+            });
+    });
+
+    ui.add_space(6.0);
+
+    // --- Status register breakdown ---
+    ui.group(|ui| {
+        ui.label(egui::RichText::new("DPC_STATUS Bits").strong());
+        ui.add_space(4.0);
+        let s = rdp.status;
+        egui::Grid::new("n64_rdp_status_grid")
+            .num_columns(2)
+            .spacing([12.0, 4.0])
+            .striped(true)
+            .show(ui, |ui| {
+                ui.label("Raw value:");
+                ui.label(egui::RichText::new(format!("0x{:08X}", s)).monospace());
+                ui.end_row();
+                ui.label("Bit 0 XBUS_DMEM_DMA:");
+                ui.label(if s & (1 << 0) != 0 { "on" } else { "off" });
+                ui.end_row();
+                ui.label("Bit 1 FREEZE:");
+                ui.label(if s & (1 << 1) != 0 { "on" } else { "off" });
+                ui.end_row();
+                ui.label("Bit 2 FLUSH:");
+                ui.label(if s & (1 << 2) != 0 { "on" } else { "off" });
+                ui.end_row();
+                ui.label("Bit 3 START_GCLK:");
+                ui.label(if s & (1 << 3) != 0 { "on" } else { "off" });
+                ui.end_row();
+                ui.label("Bit 4 TMEM_BUSY:");
+                ui.label(if s & (1 << 4) != 0 { "busy" } else { "idle" });
+                ui.end_row();
+                ui.label("Bit 5 PIPE_BUSY:");
+                ui.label(if s & (1 << 5) != 0 { "busy" } else { "idle" });
+                ui.end_row();
+                ui.label("Bit 6 CMD_BUSY:");
+                ui.label(if s & (1 << 6) != 0 { "busy" } else { "idle" });
+                ui.end_row();
+                ui.label("Bit 7 CBUF_READY:");
+                ui.label(if s & (1 << 7) != 0 {
+                    "ready"
+                } else {
+                    "not ready"
+                });
+                ui.end_row();
+                ui.label("Bit 8 DMA_BUSY:");
+                ui.label(if s & (1 << 8) != 0 { "busy" } else { "idle" });
+                ui.end_row();
+                ui.label("Bit 9 END_VALID:");
+                ui.label(if s & (1 << 9) != 0 { "on" } else { "off" });
+                ui.end_row();
+                ui.label("Bit 10 START_VALID:");
+                ui.label(if s & (1 << 10) != 0 { "on" } else { "off" });
+                ui.end_row();
+            });
+    });
 }

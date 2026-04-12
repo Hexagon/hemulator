@@ -14,6 +14,7 @@ This document describes the overall architecture of the Hemulator multi-system c
 - **[GBA](https://github.com/Hexagon/hemulator/blob/main/crates/systems/gba/README.md)**: Game Boy Advance implementation
 - **[Atari 2600](https://github.com/Hexagon/hemulator/blob/main/crates/systems/atari2600/README.md)**: Atari 2600 implementation
 - **[Atari 5200](https://github.com/Hexagon/hemulator/blob/main/crates/systems/atari5200/README.md)**: Atari 5200 implementation
+- **[C64](https://github.com/Hexagon/hemulator/blob/main/crates/systems/c64/README.md)**: Commodore 64 implementation
 - **[CHIP-8](https://github.com/Hexagon/hemulator/blob/main/crates/systems/chip8/README.md)**: CHIP-8 / Super-CHIP / XO-CHIP / Mega-CHIP implementation
 - **[SMS](https://github.com/Hexagon/hemulator/blob/main/crates/systems/sms/README.md)**: Sega Master System implementation
 - **[ColecoVision](https://github.com/Hexagon/hemulator/blob/main/crates/systems/colecovision/README.md)**: ColecoVision implementation

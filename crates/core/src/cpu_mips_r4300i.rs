@@ -39,20 +39,19 @@
 //!
 //! ## Overflow Handling
 //!
-//! Signed arithmetic instructions (ADD, ADDI, SUB, DADD, DADDI, DSUB) should trap on overflow
-//! per MIPS spec, but this implementation uses wrapping arithmetic:
-//! - **Current behavior**: Uses `wrapping_add`/`wrapping_sub` (no trap)
-//! - **Rationale**: Most N64 software doesn't rely on overflow traps
-//! - **Unsigned variants**: ADDU, ADDIU, SUBU never trap (correct behavior)
+//! Signed arithmetic instructions (ADD, ADDI, SUB, DADD, DADDI, DSUB) raise IntegerOverflow
+//! exception (code 12) when overflow occurs, per the MIPS III specification:
+//! - **Current behavior**: Uses `checked_add`/`checked_sub`; raises exception on overflow
+//! - **Unsigned variants**: ADDU, ADDIU, SUBU, DADDU, DADDIU, DSUBU never trap (correct)
 //!
 //! ## Memory Alignment
 //!
-//! Load/store instructions have specific alignment requirements:
-//! - **LH/LHU/SH**: Must be 2-byte aligned
-//! - **LW/LWU/SW**: Must be 4-byte aligned
-//! - **LD/SD**: Must be 8-byte aligned
-//! - **Unaligned access**: Logs a warning (alignment validated)
+//! Load/store instructions raise AddressError exceptions on misaligned access:
+//! - **LH/LHU/SH**: Must be 2-byte aligned; raises AdEL (4) / AdES (5) if not
+//! - **LW/LWU/SW**: Must be 4-byte aligned; raises AdEL (4) / AdES (5) if not
+//! - **LD/SD**: Must be 8-byte aligned; raises AdEL (4) / AdES (5) if not
 //! - **LWL/LWR/LDL/LDR**: Used for unaligned access, don't require alignment
+//! - **BadVAddr** (CP0 reg 8) is set to the faulting address before the exception
 //!
 //! ## Register 0 Immutability
 //!
@@ -67,8 +66,6 @@
 //! - **32-bit shifts**: Shift amount masked to 5 bits (0-31)
 //! - **64-bit shifts**: Shift amount masked to 6 bits (0-63)
 //! - Safe against overflow/underflow
-
-use crate::logging::{log, LogCategory, LogLevel};
 
 /// TLB entry data structure for CP0 TLB instructions
 /// This is a simplified representation that matches CP0 register format
@@ -215,7 +212,6 @@ const CP0_CONTEXT: usize = 4;
 const CP0_PAGEMASK: usize = 5;
 #[allow(dead_code)]
 const CP0_WIRED: usize = 6;
-#[allow(dead_code)]
 const CP0_BADVADDR: usize = 8;
 #[allow(dead_code)]
 const CP0_COUNT: usize = 9;
@@ -392,13 +388,17 @@ impl<M: MemoryMips> CpuMips<M> {
         // Update CP0 Count register (increments at half the pipeline clock rate)
         // On real R4300i, Count increments once every 2 PCycles (i.e., once per instruction)
         // Count is a 32-bit register that wraps around
-        let old_count = (self.cp0[CP0_COUNT] & 0xFFFF_FFFF) as u32;
-        let new_count = old_count.wrapping_add(1);
-        self.cp0[CP0_COUNT] = new_count as u64;
+        let elapsed = self.cycles - start_cycles;
+        let old_count = self.cp0[CP0_COUNT] & 0xFFFF_FFFF;
+        let new_count = old_count.wrapping_add(elapsed) & 0xFFFF_FFFF;
+        self.cp0[CP0_COUNT] = new_count;
 
         // Check if Count crossed Compare → set timer interrupt (IP7)
-        let compare = (self.cp0[CP0_COMPARE] & 0xFFFF_FFFF) as u32;
-        if old_count < compare && new_count >= compare {
+        let compare = self.cp0[CP0_COMPARE] & 0xFFFF_FFFF;
+        if compare != 0
+            && ((old_count < compare && new_count >= compare)
+                || (old_count > new_count && (new_count >= compare || old_count < compare)))
+        {
             // Set IP7 (bit 15 in Cause register = interrupt pending bit 7)
             self.cp0[CP0_CAUSE] |= 1u64 << 15;
         }
@@ -677,12 +677,13 @@ impl<M: MemoryMips> CpuMips<M> {
             }
             0x20 => {
                 // ADD - Add (with overflow trap)
-                // NOTE: Should trap on overflow, but not implemented in this emulator
-                // Most N64 software doesn't rely on overflow traps
+                // Raises IntegerOverflow exception (code 12) on signed 32-bit overflow
                 let a = self.gpr[rs] as i32;
                 let b = self.gpr[rt] as i32;
-                // Result is sign-extended to 64 bits
-                self.gpr[rd] = a.wrapping_add(b) as u64;
+                match a.checked_add(b) {
+                    Some(result) => self.gpr[rd] = result as u64,
+                    None => self.handle_exception(12), // IntegerOverflow
+                }
                 self.cycles += 1;
             }
             0x21 => {
@@ -694,11 +695,13 @@ impl<M: MemoryMips> CpuMips<M> {
             }
             0x22 => {
                 // SUB - Subtract (with overflow trap)
-                // NOTE: Should trap on overflow, but not implemented
+                // Raises IntegerOverflow exception (code 12) on signed 32-bit overflow
                 let a = self.gpr[rs] as i32;
                 let b = self.gpr[rt] as i32;
-                // Result is sign-extended to 64 bits
-                self.gpr[rd] = a.wrapping_sub(b) as u64;
+                match a.checked_sub(b) {
+                    Some(result) => self.gpr[rd] = result as u64,
+                    None => self.handle_exception(12), // IntegerOverflow
+                }
                 self.cycles += 1;
             }
             0x23 => {
@@ -744,10 +747,13 @@ impl<M: MemoryMips> CpuMips<M> {
             }
             0x2C => {
                 // DADD - Doubleword Add (with overflow trap)
+                // Raises IntegerOverflow exception (code 12) on signed 64-bit overflow
                 let a = self.gpr[rs] as i64;
                 let b = self.gpr[rt] as i64;
-                // For now, we don't implement traps, just perform the addition
-                self.gpr[rd] = a.wrapping_add(b) as u64;
+                match a.checked_add(b) {
+                    Some(result) => self.gpr[rd] = result as u64,
+                    None => self.handle_exception(12), // IntegerOverflow
+                }
                 self.cycles += 1;
             }
             0x2D => {
@@ -757,10 +763,13 @@ impl<M: MemoryMips> CpuMips<M> {
             }
             0x2E => {
                 // DSUB - Doubleword Subtract (with overflow trap)
+                // Raises IntegerOverflow exception (code 12) on signed 64-bit overflow
                 let a = self.gpr[rs] as i64;
                 let b = self.gpr[rt] as i64;
-                // For now, we don't implement traps, just perform the subtraction
-                self.gpr[rd] = a.wrapping_sub(b) as u64;
+                match a.checked_sub(b) {
+                    Some(result) => self.gpr[rd] = result as u64,
+                    None => self.handle_exception(12), // IntegerOverflow
+                }
                 self.cycles += 1;
             }
             0x2F => {
@@ -836,14 +845,11 @@ impl<M: MemoryMips> CpuMips<M> {
 
         let addr = (self.gpr[rs] as i64).wrapping_add(offset as i64) as u32;
 
-        // Validate 4-byte alignment
+        // Raise AddressError exception (AdEL) on misaligned access
         if addr & 3 != 0 {
-            log(LogCategory::CPU, LogLevel::Warn, || {
-                format!(
-                    "LW: Unaligned word access at 0x{:08X} (PC=0x{:016X})",
-                    addr, self.pc
-                )
-            });
+            self.cp0[CP0_BADVADDR] = addr as u64;
+            self.handle_exception(4); // AdEL - Address Error on Load
+            return;
         }
 
         let val = self.memory.read_word(addr);
@@ -861,14 +867,11 @@ impl<M: MemoryMips> CpuMips<M> {
 
         let addr = (self.gpr[rs] as i64).wrapping_add(offset as i64) as u32;
 
-        // Validate 4-byte alignment
+        // Raise AddressError exception (AdES) on misaligned access
         if addr & 3 != 0 {
-            log(LogCategory::CPU, LogLevel::Warn, || {
-                format!(
-                    "SW: Unaligned word access at 0x{:08X} (PC=0x{:016X})",
-                    addr, self.pc
-                )
-            });
+            self.cp0[CP0_BADVADDR] = addr as u64;
+            self.handle_exception(5); // AdES - Address Error on Store
+            return;
         }
 
         self.memory.write_word(addr, self.gpr[rt] as u32);
@@ -1205,8 +1208,11 @@ impl<M: MemoryMips> CpuMips<M> {
         let rt = ((instr >> 16) & 0x1F) as usize;
         let imm = (instr & 0xFFFF) as i16 as i32;
 
-        // For now, we don't implement traps
-        self.gpr[rt] = (self.gpr[rs] as i32).wrapping_add(imm) as u64;
+        let a = self.gpr[rs] as i32;
+        match a.checked_add(imm) {
+            Some(result) => self.gpr[rt] = result as u64,
+            None => self.handle_exception(12), // IntegerOverflow
+        }
         self.cycles += 1;
     }
 
@@ -1266,8 +1272,11 @@ impl<M: MemoryMips> CpuMips<M> {
         let rt = ((instr >> 16) & 0x1F) as usize;
         let imm = (instr & 0xFFFF) as i16 as i64;
 
-        // For now, we don't implement traps
-        self.gpr[rt] = (self.gpr[rs] as i64).wrapping_add(imm) as u64;
+        let a = self.gpr[rs] as i64;
+        match a.checked_add(imm) {
+            Some(result) => self.gpr[rt] = result as u64,
+            None => self.handle_exception(12), // IntegerOverflow
+        }
         self.cycles += 1;
     }
 
@@ -1317,14 +1326,11 @@ impl<M: MemoryMips> CpuMips<M> {
 
         let addr = (self.gpr[rs] as i64).wrapping_add(offset as i64) as u32;
 
-        // Validate 2-byte alignment
+        // Raise AddressError exception (AdEL) on misaligned access
         if addr & 1 != 0 {
-            log(LogCategory::CPU, LogLevel::Warn, || {
-                format!(
-                    "LH: Unaligned halfword access at 0x{:08X} (PC=0x{:016X})",
-                    addr, self.pc
-                )
-            });
+            self.cp0[CP0_BADVADDR] = addr as u64;
+            self.handle_exception(4); // AdEL - Address Error on Load
+            return;
         }
 
         let val = self.memory.read_halfword(addr);
@@ -1340,14 +1346,11 @@ impl<M: MemoryMips> CpuMips<M> {
 
         let addr = (self.gpr[rs] as i64).wrapping_add(offset as i64) as u32;
 
-        // Validate 2-byte alignment
+        // Raise AddressError exception (AdEL) on misaligned access
         if addr & 1 != 0 {
-            log(LogCategory::CPU, LogLevel::Warn, || {
-                format!(
-                    "LHU: Unaligned halfword access at 0x{:08X} (PC=0x{:016X})",
-                    addr, self.pc
-                )
-            });
+            self.cp0[CP0_BADVADDR] = addr as u64;
+            self.handle_exception(4); // AdEL - Address Error on Load
+            return;
         }
 
         let val = self.memory.read_halfword(addr);
@@ -1363,14 +1366,11 @@ impl<M: MemoryMips> CpuMips<M> {
 
         let addr = (self.gpr[rs] as i64).wrapping_add(offset as i64) as u32;
 
-        // Validate 4-byte alignment
+        // Raise AddressError exception (AdEL) on misaligned access
         if addr & 3 != 0 {
-            log(LogCategory::CPU, LogLevel::Warn, || {
-                format!(
-                    "LWU: Unaligned word access at 0x{:08X} (PC=0x{:016X})",
-                    addr, self.pc
-                )
-            });
+            self.cp0[CP0_BADVADDR] = addr as u64;
+            self.handle_exception(4); // AdEL - Address Error on Load
+            return;
         }
 
         let val = self.memory.read_word(addr);
@@ -1386,14 +1386,11 @@ impl<M: MemoryMips> CpuMips<M> {
 
         let addr = (self.gpr[rs] as i64).wrapping_add(offset as i64) as u32;
 
-        // Validate 8-byte alignment
+        // Raise AddressError exception (AdEL) on misaligned access
         if addr & 7 != 0 {
-            log(LogCategory::CPU, LogLevel::Warn, || {
-                format!(
-                    "LD: Unaligned doubleword access at 0x{:08X} (PC=0x{:016X})",
-                    addr, self.pc
-                )
-            });
+            self.cp0[CP0_BADVADDR] = addr as u64;
+            self.handle_exception(4); // AdEL - Address Error on Load
+            return;
         }
 
         let val = self.memory.read_doubleword(addr);
@@ -1496,14 +1493,11 @@ impl<M: MemoryMips> CpuMips<M> {
 
         let addr = (self.gpr[rs] as i64).wrapping_add(offset as i64) as u32;
 
-        // Validate 2-byte alignment
+        // Raise AddressError exception (AdES) on misaligned access
         if addr & 1 != 0 {
-            log(LogCategory::CPU, LogLevel::Warn, || {
-                format!(
-                    "SH: Unaligned halfword access at 0x{:08X} (PC=0x{:016X})",
-                    addr, self.pc
-                )
-            });
+            self.cp0[CP0_BADVADDR] = addr as u64;
+            self.handle_exception(5); // AdES - Address Error on Store
+            return;
         }
 
         self.memory.write_halfword(addr, self.gpr[rt] as u16);
@@ -1518,14 +1512,11 @@ impl<M: MemoryMips> CpuMips<M> {
 
         let addr = (self.gpr[rs] as i64).wrapping_add(offset as i64) as u32;
 
-        // Validate 8-byte alignment
+        // Raise AddressError exception (AdES) on misaligned access
         if addr & 7 != 0 {
-            log(LogCategory::CPU, LogLevel::Warn, || {
-                format!(
-                    "SD: Unaligned doubleword access at 0x{:08X} (PC=0x{:016X})",
-                    addr, self.pc
-                )
-            });
+            self.cp0[CP0_BADVADDR] = addr as u64;
+            self.handle_exception(5); // AdES - Address Error on Store
+            return;
         }
 
         self.memory.write_doubleword(addr, self.gpr[rt]);
@@ -2971,5 +2962,215 @@ mod tests {
         cpu.memory.write_word(12, 0x462208C3);
         cpu.step();
         assert_eq!(cpu.fpr[3], 4.2_f64.to_bits());
+    }
+
+    // ============================================================================
+    // Overflow Trap Tests
+    // ============================================================================
+
+    #[test]
+    fn test_add_overflow_trap() {
+        let mem = ArrayMemory::new();
+        let mut cpu = CpuMips::new(mem);
+        cpu.pc = 0;
+
+        // Overflow: i32::MAX + 1 should trap (exception code 12)
+        cpu.gpr[1] = i32::MAX as u64;
+        cpu.gpr[2] = 1;
+        // ADD $3, $1, $2  →  overflows, triggers exception
+        cpu.memory.write_word(0, 0x00221820);
+        // Set IE=1 so interrupts fire, but EXL=0 so they can be taken
+        cpu.cp0[12] = 0x01; // Status: IE=1, EXL=0
+        cpu.step();
+        // Overflow exception should redirect PC to 0x80000180
+        assert_eq!(
+            cpu.pc, 0x80000180,
+            "ADD overflow should jump to exception vector"
+        );
+        // Exception code in Cause should be 12 (bits 2-6)
+        let exc_code = (cpu.cp0[13] >> 2) & 0x1F;
+        assert_eq!(
+            exc_code, 12,
+            "Exception code should be IntegerOverflow (12)"
+        );
+    }
+
+    #[test]
+    fn test_add_no_overflow() {
+        let mem = ArrayMemory::new();
+        let mut cpu = CpuMips::new(mem);
+        cpu.pc = 0;
+
+        // No overflow: normal addition
+        cpu.gpr[1] = 10;
+        cpu.gpr[2] = 20;
+        // ADD $3, $1, $2
+        cpu.memory.write_word(0, 0x00221820);
+        cpu.step();
+        assert_eq!(
+            cpu.gpr[3], 30,
+            "ADD without overflow should produce correct result"
+        );
+    }
+
+    #[test]
+    fn test_sub_overflow_trap() {
+        let mem = ArrayMemory::new();
+        let mut cpu = CpuMips::new(mem);
+        cpu.pc = 0;
+
+        // Overflow: i32::MIN - 1 should trap
+        cpu.gpr[1] = i32::MIN as i64 as u64;
+        cpu.gpr[2] = 1;
+        // SUB $3, $1, $2  →  overflows
+        cpu.memory.write_word(0, 0x00221822);
+        cpu.cp0[12] = 0x01; // Status: IE=1
+        cpu.step();
+        assert_eq!(
+            cpu.pc, 0x80000180,
+            "SUB overflow should jump to exception vector"
+        );
+        let exc_code = (cpu.cp0[13] >> 2) & 0x1F;
+        assert_eq!(exc_code, 12);
+    }
+
+    #[test]
+    fn test_addi_overflow_trap() {
+        let mem = ArrayMemory::new();
+        let mut cpu = CpuMips::new(mem);
+        cpu.pc = 0;
+
+        // ADDI: i32::MAX + 1 overflows
+        cpu.gpr[1] = i32::MAX as u64;
+        // ADDI $2, $1, 1  (opcode 0x08, rs=1, rt=2, imm=1)
+        // Encoding: 0010_00 00001 00010 0000000000000001
+        //         = 0x20220001
+        cpu.memory.write_word(0, 0x20220001);
+        cpu.cp0[12] = 0x01;
+        cpu.step();
+        assert_eq!(
+            cpu.pc, 0x80000180,
+            "ADDI overflow should jump to exception vector"
+        );
+        let exc_code = (cpu.cp0[13] >> 2) & 0x1F;
+        assert_eq!(exc_code, 12);
+    }
+
+    #[test]
+    fn test_dadd_overflow_trap() {
+        let mem = ArrayMemory::new();
+        let mut cpu = CpuMips::new(mem);
+        cpu.pc = 0;
+
+        // DADD overflow: i64::MAX + 1
+        cpu.gpr[1] = i64::MAX as u64;
+        cpu.gpr[2] = 1;
+        // DADD $3, $1, $2  (opcode 0x2C in SPECIAL)
+        // Encoding: 000000 00001 00010 00011 00000 101100
+        //         = 0x0022182C
+        cpu.memory.write_word(0, 0x0022182C);
+        cpu.cp0[12] = 0x01;
+        cpu.step();
+        assert_eq!(
+            cpu.pc, 0x80000180,
+            "DADD overflow should jump to exception vector"
+        );
+        let exc_code = (cpu.cp0[13] >> 2) & 0x1F;
+        assert_eq!(exc_code, 12);
+    }
+
+    // ============================================================================
+    // Alignment Exception Tests
+    // ============================================================================
+
+    #[test]
+    fn test_lh_alignment_exception() {
+        let mem = ArrayMemory::new();
+        let mut cpu = CpuMips::new(mem);
+        cpu.pc = 0;
+
+        // LH from misaligned address (0x1001 — odd address)
+        cpu.gpr[1] = 0x1001;
+        // LH $2, 0($1)  (opcode 0x21, rs=1, rt=2, offset=0)
+        cpu.memory.write_word(0, 0x84220000);
+        cpu.cp0[12] = 0x01; // IE=1
+        cpu.step();
+        assert_eq!(
+            cpu.pc, 0x80000180,
+            "LH misaligned should cause AdEL exception"
+        );
+        let exc_code = (cpu.cp0[13] >> 2) & 0x1F;
+        assert_eq!(exc_code, 4, "AdEL exception code should be 4");
+        assert_eq!(
+            cpu.cp0[8], 0x1001,
+            "BadVAddr should hold the faulting address"
+        );
+    }
+
+    #[test]
+    fn test_lw_alignment_exception() {
+        let mem = ArrayMemory::new();
+        let mut cpu = CpuMips::new(mem);
+        cpu.pc = 0;
+
+        // LW from 3-byte misaligned address
+        cpu.gpr[1] = 0x1003;
+        // LW $2, 0($1)  (opcode 0x23, rs=1, rt=2, offset=0)
+        cpu.memory.write_word(0, 0x8C220000);
+        cpu.cp0[12] = 0x01;
+        cpu.step();
+        assert_eq!(
+            cpu.pc, 0x80000180,
+            "LW misaligned should cause AdEL exception"
+        );
+        let exc_code = (cpu.cp0[13] >> 2) & 0x1F;
+        assert_eq!(exc_code, 4);
+        assert_eq!(
+            cpu.cp0[8], 0x1003,
+            "BadVAddr should hold the faulting address"
+        );
+    }
+
+    #[test]
+    fn test_sw_alignment_exception() {
+        let mem = ArrayMemory::new();
+        let mut cpu = CpuMips::new(mem);
+        cpu.pc = 0;
+
+        // SW to misaligned address
+        cpu.gpr[1] = 0x1002;
+        cpu.gpr[2] = 0xDEADBEEF;
+        // SW $2, 0($1)  (opcode 0x2B, rs=1, rt=2, offset=0)
+        cpu.memory.write_word(0, 0xAC220000);
+        cpu.cp0[12] = 0x01;
+        cpu.step();
+        assert_eq!(
+            cpu.pc, 0x80000180,
+            "SW misaligned should cause AdES exception"
+        );
+        let exc_code = (cpu.cp0[13] >> 2) & 0x1F;
+        assert_eq!(exc_code, 5, "AdES exception code should be 5");
+        assert_eq!(
+            cpu.cp0[8], 0x1002,
+            "BadVAddr should hold the faulting address"
+        );
+    }
+
+    #[test]
+    fn test_lw_aligned_ok() {
+        let mem = ArrayMemory::new();
+        let mut cpu = CpuMips::new(mem);
+        cpu.pc = 0;
+
+        // LW from aligned address — should succeed
+        cpu.gpr[1] = 0x1000;
+        cpu.memory.write_word(0x1000, 0xDEADBEEF);
+        // LW $2, 0($1)
+        cpu.memory.write_word(0, 0x8C220000);
+        cpu.step();
+        assert_eq!(
+            cpu.gpr[2], 0xDEADBEEF_u32 as i32 as u64,
+            "LW aligned should load correct value"
+        );
     }
 }

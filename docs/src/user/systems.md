@@ -6,7 +6,7 @@ nav_order: 5
 
 # Supported Systems
 
-This emulator supports 15 different retro gaming systems. **NES and SMS emulation are fully working**. Other systems are in various stages of development.
+This emulator supports 16 different retro gaming systems. **NES and SMS emulation are fully working**. Other systems are in various stages of development.
 
 | System | Status | What Works | What's Missing | Recommended For |
 |--------|--------|------------|----------------|-----------------|
@@ -19,6 +19,7 @@ This emulator supports 15 different retro gaming systems. **NES and SMS emulatio
 | **Game & Watch** | 🚧 In Development | SM510 CPU, LCD artwork rendering, .mgw container | SM511/SM5A variants, melody playback | Playing .mgw games |
 | **SMS** | ✅ Fully Working | Z80 CPU, VDP, PSG, ROM banking | Some edge cases | Playing SMS games |
 | **ColecoVision** | 🚧 In Development | Z80 CPU, TMS9918A VDP, SN76489 PSG | Not producing image, audio output, BIOS required | Development only |
+| **C64** | 🚧 In Development | 6510 CPU, VIC-II, SID 3-voice audio, CIA timers | SID filter, sprite collision, disk drive | Development/testing |
 | **SG-1000** | ⚠️ Experimental | Z80 CPU, TMS9918A VDP, SN76489 PSG | Audio output, test ROM | Development/testing |
 | **Mega Drive** | 🚧 In Development | M68000 CPU, VDP, YM2612, SN76489 PSG | Full game support, audio mixing | Development/testing |
 | **SNES** | ✅ Functional | CPU, all PPU modes 0-7, sprites, DMA/HDMA, SPC700+DSP audio | Some enhancement chips | Playing most games with audio |
@@ -1154,3 +1155,35 @@ Sega Mega Drive / Genesis (1988) — one of the defining 16-bit home consoles.
 **Known Limitations**:
 - Full game compatibility is not yet achieved
 - Audio mixing and Z80 sub-CPU integration in progress
+
+### C64 (Commodore 64)
+
+**Status**: 🚧 In Development
+
+The Commodore 64 (1982) — one of the best-selling home computers of all time, renowned for its
+custom VIC-II graphics and SID audio chips.
+
+**Hardware**:
+- **CPU**: MOS 6510 (6502 + I/O port) @ 0.985 MHz (PAL)
+- **Video**: MOS 6569 VIC-II — 320×200, 16 colors, 8 sprites
+- **Audio**: MOS 6581 SID — 3 voices, ADSR envelopes, multimode filter
+- **I/O**: 2× MOS 6526 CIA — Timers, keyboard matrix, joystick
+
+**What Works**:
+- 6510 CPU with I/O port memory banking (LORAM/HIRAM/CHAREN)
+- VIC-II: Standard/multicolor text, standard/multicolor bitmap, ECM modes
+- VIC-II: 8 hardware sprites with expansion and multicolor
+- VIC-II: Raster interrupt, bad line detection
+- SID: 3 voices with triangle/sawtooth/pulse/noise waveforms
+- SID: Full ADSR envelope, ring modulation, hard sync
+- CIA: Timers, keyboard matrix, joystick, IRQ/NMI
+- PRG file loading
+
+**ROM Format**: `.prg` (2-byte load address + data)
+
+**Known Limitations**:
+- SID multimode filter not yet applied to audio
+- Sprite collision detection not populated
+- Smooth scrolling not applied
+- No .d64 disk drive emulation
+- Requires stub ROMs (real KERNAL/BASIC/CHAR ROMs can be loaded separately)

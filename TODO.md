@@ -2,26 +2,27 @@
 
 ## Ignored Tests
 
-All tests below are marked `#[ignore]` because they require an OpenGL context that is
-not available in CI or in headless `cargo test` runs.  They can be run manually with
-`cargo test --package <pkg> -- --ignored`.
+All tests listed here were previously marked `#[ignore]` because they required an OpenGL
+context. That blocker has been removed: a `SoftwareRdpRenderer` now serves as the default
+renderer for `Rdp::new_for_test()`, so all N64 tests run in headless CI without any GL
+setup. The "Ignored Tests" section can be considered complete; retained for reference only.
 
-### N64 — Requires OpenGL context
+### N64 — ✅ Resolved (software renderer added)
 
 #### Low
-- [ ] **Enable N64 system tests** (18 tests): Remove `#[ignore]` once a headless GL context is available in CI — `crates/systems/n64/src/lib.rs`
-- [ ] **Enable N64 debugger tests** (5 tests): Remove `#[ignore]` once a headless GL context is available in CI — `crates/systems/n64/src/debugger.rs`
-- [ ] **Enable RDP tests** (38 tests): Remove `#[ignore]` once a headless GL context is available in CI — `crates/systems/n64/src/rdp.rs`
-- [ ] **Enable RSP HLE tests** (20 tests): Remove `#[ignore]` once a headless GL context is available in CI — `crates/systems/n64/src/rsp_hle.rs`
-- [ ] **Enable GUI logging integration test** (1 test, `test_logging_n64_rdp_unknown_command`): Remove `#[ignore]` once a headless GL context is available in CI — `crates/frontend/gui/tests/logging_integration.rs`
+- [x] **Enable N64 system tests** (18 tests): Software renderer removes GL dependency — `crates/systems/n64/src/lib.rs`
+- [x] **Enable N64 debugger tests** (5 tests): Software renderer removes GL dependency — `crates/systems/n64/src/debugger.rs`
+- [x] **Enable RDP tests** (38 tests): Software renderer removes GL dependency — `crates/systems/n64/src/rdp.rs`
+- [x] **Enable RSP HLE tests** (20 tests): Software renderer removes GL dependency — `crates/systems/n64/src/rsp_hle.rs`
+- [x] **Enable GUI logging integration test** (1 test, `test_logging_n64_rdp_unknown_command`): Software renderer removes GL dependency — `crates/frontend/gui/tests/logging_integration.rs`
 
 ## N64
 
 ### Critical
-- [ ] **Save type detection for unlisted games**: Only common retail titles are in the save-type database. Unknown games silently receive `SaveType::None`. Consider implementing a checksum-based database fallback (e.g. using the ipl3 CRC or the CIC seed) so that unlisted games still get a sensible default. — `crates/systems/n64/src/cartridge.rs`
+- [ ] **Save type detection for unlisted games**: The save-type database has been expanded with ~80 additional titles covering common N64 games. Unknown games silently receive `SaveType::None`. Consider implementing a checksum-based database fallback (e.g. using the ipl3 CRC or the CIC seed) so that unlisted games still get a sensible default. — `crates/systems/n64/src/cartridge.rs`
 
 ### High
-- [ ] **RDP Blend/Combine pipeline**: `SET_OTHER_MODES` values are stored in both the RDP (`rdp.rs`) and RSP HLE (`rsp_hle.rs`) but are never consumed by the rendering pipeline. Applying cycle type, texture filtering, and alpha-blending modes would significantly improve visual accuracy. — `crates/systems/n64/src/rdp.rs`, `crates/systems/n64/src/rdp_renderer_opengl.rs`
+- [x] **RDP Blend/Combine pipeline**: ~~`SET_OTHER_MODES` values are stored but never consumed by the rendering pipeline.~~ Implemented: (1) Z-buffer depth now correctly applied to `gl_Position` so GPU depth ordering matches the N64 scene depth; (2) new `draw_triangle_textured_shaded_zbuf` method applies colour-combiner MODULATE mode (TEXEL0 × SHADE) — RSP HLE passes per-vertex shade colours for lit textures; (3) alpha blending (src-alpha / 1-src-alpha) is automatically enabled when the FORCE_BL bit is set in `othermode_l`. Remaining: cycle type, texture filtering, full multi-cycle combine. — `crates/systems/n64/src/rdp.rs`, `crates/systems/n64/src/rdp_renderer_opengl.rs`, `crates/systems/n64/src/rsp_hle.rs`
 - [x] **RDP textured triangle rendering**: ~~Texture coordinates from RSP vertex data are loaded but not used in triangle rasterization.~~ Implemented textured triangle rendering via `draw_triangle_textured_zbuf` with UV coordinate passthrough from RSP HLE when G_TEXTURE_ENABLE is active. — `crates/systems/n64/src/rdp.rs`, `crates/systems/n64/src/rsp_hle.rs`
 
 ### Medium
@@ -31,12 +32,12 @@ not available in CI or in headless `cargo test` runs.  They can be run manually 
 - [x] **RSP HLE Back-face culling**: ~~Geometry mode G_CULL_FRONT/G_CULL_BACK flags were not enforced.~~ Implemented screen-space cross product culling for both front and back facing triangles. — `crates/systems/n64/src/rsp_hle.rs`
 - [x] **RSP Audio ENVMIXER**: ~~ENVMIXER (0x0D) was a no-op.~~ Implemented envelope-controlled mixing that adds source samples to left/right channels with saturation. — `crates/systems/n64/src/rsp_hle.rs`
 - [x] **PI register readback**: ~~PI_DRAM_ADDR and PI_CART_ADDR reads returned hardcoded 0.~~ Now return the stored values written by game code. — `crates/systems/n64/src/bus.rs`
-- [ ] **RSP F3DEX fog / clipping commands**: Several less-common F3DEX commands still log as stubs: `G_SETPRIMDEPTH`, `G_TEXTURE` (texture coordinate scaling not forwarded to RDP), `G_LOAD_UCODE` (microcode reload). — `crates/systems/n64/src/rsp_hle.rs`
+- [x] **RSP F3DEX fog / clipping commands**: Implemented `G_MODIFYVTX` (vertex attribute modification: RGBA, ST, XY, Z), `G_RDPHALF_2` (now forwards the combined 2-word RDP command via stored `rdp_half`), and `G_SETPRIMDEPTH` (stores z/dz in `prim_depth_z`/`prim_depth_dz`). `G_LOAD_UCODE` and fog commands remain stubs. — `crates/systems/n64/src/rsp_hle.rs`
 - [ ] **RDP performance counters**: `DPC_CLOCK`, `DPC_BUFBUSY`, `DPC_PIPEBUSY`, and `DPC_TMEM` registers return hardcoded 0. Some games wait for these to reach expected values. — `crates/systems/n64/src/rdp.rs`
-- [ ] **CPU overflow traps**: Signed arithmetic instructions (`ADD`, `ADDI`, `SUB`) should raise an overflow exception on overflow, but currently use wrapping arithmetic. Most commercial software does not rely on this, but some may. — `crates/core/src/cpu_mips_r4300i/`
+- [x] **CPU overflow traps**: Signed arithmetic instructions (`ADD`, `ADDI`, `SUB`, `DADD`, `DADDI`, `DSUB`) now raise IntegerOverflow exception (code 12) on overflow, per MIPS III spec. — `crates/core/src/cpu_mips_r4300i.rs`
 
 ### Low
-- [ ] **Memory alignment validation**: Load/store instructions that require alignment (LH/SH = 2 B, LW/SW = 4 B, LD/SD = 8 B) do not raise `AddressError` exceptions on misaligned access. — `crates/core/src/cpu_mips_r4300i/`
+- [x] **Memory alignment validation**: Load/store instructions now raise `AddressError` exceptions (AdEL=4 on load, AdES=5 on store) on misaligned access. `CP0_BADVADDR` is set to the faulting address. (LH/SH = 2 B, LW/SW = 4 B, LD/SD = 8 B). — `crates/core/src/cpu_mips_r4300i.rs`
 - [ ] **Full cache coherency**: The TLB/cache is direct-mapped only; cache invalidation and dirty-line write-back are not emulated. — `crates/systems/n64/src/bus.rs`
 
 ## Game & Watch
@@ -107,3 +108,16 @@ not available in CI or in headless `cargo test` runs.  They can be run manually 
 - [ ] **Interlace modes**: Interlaced display modes (reg $0C bits 1-2) not implemented. — `crates/systems/megadrive/src/vdp.rs`
 - [ ] **SRAM save/load persistence**: SRAM is detected but not persisted to disk between sessions. — `crates/systems/megadrive/src/bus.rs`
 - [ ] **Controller input 6-button support**: Only 3-button controller protocol emulated. — `crates/systems/megadrive/src/bus.rs`
+
+## Commodore 64
+
+### Medium
+- [ ] **.d64 disk image support**: 1541 floppy drive emulation not implemented. Only .prg files can be loaded. — `crates/systems/c64/src/bus.rs`
+
+### Low
+- [ ] **NTSC timing mode**: Only PAL timing (63 cycles/line × 312 lines) is implemented. NTSC (65 cycles/line × 263 lines) constants exist but are not selectable. — `crates/systems/c64/src/vic.rs`
+- [ ] **.crt cartridge bank switching**: CRT format files are detected but cartridge banking hardware is not emulated. — `crates/systems/c64/src/bus.rs`
+- [ ] **Border 38/40 column mode**: $D016 CSEL bit for 38-column border not applied. — `crates/systems/c64/src/vic.rs`
+- [ ] **Light pen**: Light pen registers return fixed values; actual pen input not supported. — `crates/systems/c64/src/vic.rs`
+- [ ] **Paddle inputs**: SID paddle registers ($D419/$D41A) return 0. — `crates/systems/c64/src/sid.rs`
+- [ ] **SID filter accuracy**: Basic state-variable filter implemented but not fully hardware-accurate (no MOS 6581 non-linearity / distortion model). — `crates/systems/c64/src/sid.rs`

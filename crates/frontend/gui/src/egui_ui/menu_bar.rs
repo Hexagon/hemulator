@@ -191,6 +191,11 @@ impl MenuBar {
                         ui.close();
                     }
 
+                    if ui.button("C64").on_hover_text("Commodore 64").clicked() {
+                        self.pending_action = Some(MenuAction::NewProjectSystem("C64".to_string()));
+                        ui.close();
+                    }
+
                     if ui
                         .button("ColecoVision")
                         .on_hover_text("ColecoVision")
