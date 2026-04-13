@@ -937,10 +937,16 @@ impl MemoryMips for N64Bus {
                 if let Some(ref cart) = self.cartridge {
                     let offset = phys_addr - 0x1000_0000;
                     let src = cart.read_slice(offset, 4);
-                    if src.len() == 4 {
-                        u32::from_be_bytes([src[0], src[1], src[2], src[3]])
-                    } else {
-                        0
+                    match src.len() {
+                        4 => u32::from_be_bytes([src[0], src[1], src[2], src[3]]),
+                        // Partial read at ROM end: available bytes contribute,
+                        // remaining bytes read as 0 (matches Cartridge::read semantics).
+                        1..=3 => {
+                            let mut buf = [0u8; 4];
+                            buf[..src.len()].copy_from_slice(src);
+                            u32::from_be_bytes(buf)
+                        }
+                        _ => 0,
                     }
                 } else {
                     0
@@ -1174,11 +1180,20 @@ impl MemoryMips for N64Bus {
                                 cart_addr
                             };
                             let src = cart.read_slice(cart_offset, len);
-                            let copy_len =
-                                src.len().min(self.rdram.len().saturating_sub(dram_addr));
+                            let rdram_end = self.rdram.len();
+                            // Bulk-copy available ROM bytes
+                            let copy_len = src.len().min(rdram_end.saturating_sub(dram_addr));
                             if copy_len > 0 {
                                 self.rdram[dram_addr..dram_addr + copy_len]
                                     .copy_from_slice(&src[..copy_len]);
+                            }
+                            // Zero-fill trailing bytes when DMA length exceeds ROM
+                            // (matches original per-byte loop where cart.read() returns 0
+                            // for out-of-range offsets).
+                            let fill_end = (dram_addr + len).min(rdram_end);
+                            let fill_start = dram_addr + copy_len;
+                            if fill_start < fill_end {
+                                self.rdram[fill_start..fill_end].fill(0);
                             }
                         }
 

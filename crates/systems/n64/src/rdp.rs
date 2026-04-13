@@ -699,9 +699,6 @@ impl Rdp {
             return;
         }
 
-        // Clear the flag *before* the work so a re-entrant call won't repeat.
-        self.framebuffer_dirty = false;
-
         // Ensure GPU framebuffer is synced to CPU before reading pixels
         self.renderer.sync_framebuffer();
 
@@ -756,6 +753,11 @@ impl Rdp {
             }
             _ => {}
         }
+
+        // Only clear the dirty flag after a successful writeback.
+        // If we returned early (e.g. bounds check failed), the flag stays set
+        // so the next call retries once the address/size is corrected.
+        self.framebuffer_dirty = false;
     }
 
     /// Read from RDP register
@@ -930,11 +932,11 @@ impl Rdp {
         self.dpc_status |= DPC_STATUS_CBUF_READY;
         self.dpc_status &= !DPC_STATUS_DMA_BUSY;
 
-        // Mark framebuffer as modified so write_framebuffer_to_rdram will
-        // actually do the expensive readback + pixel conversion.
-        if executed_commands > 0 {
-            self.framebuffer_dirty = true;
-        }
+        // Note: framebuffer_dirty is set by individual drawing commands (triangles,
+        // fill rects, texture rects, set_pixel, clear) rather than here.  State-only
+        // display lists (e.g. SET_TILE, SET_SCISSOR, SET_OTHER_MODES) that execute
+        // commands without touching the color buffer will not trigger the expensive
+        // write_framebuffer_to_rdram sync.
 
         log(LogCategory::PPU, LogLevel::Debug, || {
             "N64 RDP: Display list processing completed".to_string()
@@ -1393,6 +1395,7 @@ impl Rdp {
                     &texture_sampler,
                     &self.scissor,
                 );
+                self.framebuffer_dirty = true;
             }
             // Textured triangle with Z-buffer (0x0B)
             0x0B => {
@@ -1443,6 +1446,7 @@ impl Rdp {
                     &texture_sampler,
                     &self.scissor,
                 );
+                self.framebuffer_dirty = true;
             }
             // FILL_RECTANGLE (0x36)
             0x36 => {
@@ -1512,6 +1516,7 @@ impl Rdp {
 
                 self.renderer
                     .fill_rect(xl, yl, width, height, argb_color, &self.scissor);
+                self.framebuffer_dirty = true;
             }
             // SET_FILL_COLOR (0x37)
             0x37 => {
@@ -1605,6 +1610,7 @@ impl Rdp {
                         }
                         t = t.wrapping_add(dtdy);
                     }
+                    self.framebuffer_dirty = true;
                 } else {
                     // Fallback to solid fill if texture is not available
                     self.fill_rect(xl, yl, width, height);
@@ -1672,6 +1678,7 @@ impl Rdp {
                         }
                         s = s.wrapping_add(dsdx);
                     }
+                    self.framebuffer_dirty = true;
                 } else {
                     self.fill_rect(xl, yl, width, height);
                 }
