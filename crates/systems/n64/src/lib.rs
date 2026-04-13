@@ -431,7 +431,7 @@ impl System for N64System {
         self.cpu.bus_mut().sync_rdp_framebuffer();
 
         // Primary path: read the framebuffer through VI (RDRAM-based).
-        // This respects VI origin/width/height/colour-depth configuration so
+        // This respects VI origin/width/height/color-depth configuration so
         // CPU-rendered framebuffers (written directly into RDRAM) display correctly.
         if let Some(vi_frame) = self.cpu.bus().read_vi_framebuffer() {
             return Ok(vi_frame);
