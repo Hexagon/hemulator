@@ -966,15 +966,22 @@ impl MemoryMips for N64Bus {
         let phys_addr = self.translate_address(addr);
         // Fast path for RDRAM – avoids two translate_address calls and two
         // match dispatches for the most common case.
-        if phys_addr <= 0x003F_FFF8 {
-            let offset = (phys_addr & 0x003F_FFFF) as usize;
-            let hi = u32::from_be_bytes(self.rdram[offset..offset + 4].try_into().unwrap_or([0; 4]))
-                as u64;
-            let lo = u32::from_be_bytes(
-                self.rdram[offset + 4..offset + 8]
-                    .try_into()
-                    .unwrap_or([0; 4]),
-            ) as u64;
+        // The guard `phys_addr <= 0x003F_FFF8` ensures offset+8 ≤ 0x400000 =
+        // rdram.len(), so the slice accesses below are always in-bounds.
+        if phys_addr <= 0x003F_FFF8 && (phys_addr as usize + 8) <= self.rdram.len() {
+            let offset = phys_addr as usize;
+            let hi = u32::from_be_bytes([
+                self.rdram[offset],
+                self.rdram[offset + 1],
+                self.rdram[offset + 2],
+                self.rdram[offset + 3],
+            ]) as u64;
+            let lo = u32::from_be_bytes([
+                self.rdram[offset + 4],
+                self.rdram[offset + 5],
+                self.rdram[offset + 6],
+                self.rdram[offset + 7],
+            ]) as u64;
             return (hi << 32) | lo;
         }
         let hi = self.read_word(addr) as u64;
