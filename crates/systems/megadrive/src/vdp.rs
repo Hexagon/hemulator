@@ -1132,6 +1132,23 @@ impl Vdp {
 
     // ── Save State ──────────────────────────────────────────────
 
+    /// Get data for the inspector tile viewer.
+    ///
+    /// Returns `(vram, cram, palette, registers)`:
+    /// - `vram`: full 64KB VRAM contents
+    /// - `cram`: raw 128-byte CRAM
+    /// - `palette`: 64 decoded RGBA colors (0xAARRGGBB)
+    /// - `registers`: VDP register array (24 bytes)
+    pub fn get_tile_viewer_data(&self) -> crate::system::TileViewerData {
+        let palette: Vec<u32> = (0..64).map(|i| self.get_cram_color(i)).collect();
+        crate::system::TileViewerData {
+            vram: self.vram.clone(),
+            cram: self.cram.clone(),
+            palette,
+            registers: self.regs.to_vec(),
+        }
+    }
+
     pub fn get_state(&self) -> serde_json::Value {
         serde_json::json!({
             "regs": self.regs.to_vec(),
