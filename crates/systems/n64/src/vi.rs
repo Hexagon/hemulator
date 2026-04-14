@@ -55,6 +55,27 @@ const VI_STATUS_SERRATE: u32 = 0x40;
 #[allow(dead_code)]
 const VI_STATUS_AA_MODE_SHIFT: u32 = 8;
 
+/// Inspector snapshot of all VI register values.
+#[derive(Debug, Clone)]
+pub struct ViInspectorData {
+    pub status: u32,
+    pub origin: u32,
+    pub width: u32,
+    pub intr: u32,
+    pub current: u32,
+    pub v_sync: u32,
+    pub h_sync: u32,
+    pub h_start: u32,
+    pub v_start: u32,
+    pub x_scale: u32,
+    pub y_scale: u32,
+    pub display_width: u32,
+    pub display_height: u32,
+    pub color_depth: u32,
+    pub display_enabled: bool,
+    pub video_standard: String,
+}
+
 /// Video Interface controller
 pub struct VideoInterface {
     /// VI registers
@@ -167,20 +188,26 @@ impl VideoInterface {
     }
 
     /// Update current scanline (called per frame)
-    /// Returns true if scanline matches VI_INTR and interrupt should be triggered
+    /// Returns true if scanline matches VI_INTR and interrupt should be triggered.
+    /// VI_INTR and VI_CURRENT use half-line values (NTSC has 525 half-lines).
+    /// Our scanline parameter is 0..262, so we compare using half-lines.
     pub fn update_scanline(&mut self, scanline: u32) -> bool {
-        self.current = scanline;
+        // Store current half-line (scanline * 2) for games that read VI_CURRENT
+        let half_line = scanline * 2;
+        self.current = half_line;
 
-        // Check if scanline matches interrupt line
-        scanline == (self.intr >> 1) // VI_INTR is stored as scanline * 2
+        // Check if either half-line for this scanline matches VI_INTR
+        half_line == self.intr || half_line + 1 == self.intr
     }
 
     /// Get the framebuffer origin address
+    #[allow(dead_code)]
     pub fn get_framebuffer_origin(&self) -> u32 {
         self.origin
     }
 
     /// Get the framebuffer width
+    #[allow(dead_code)]
     pub fn get_width(&self) -> u32 {
         self.width
     }
@@ -197,6 +224,18 @@ impl VideoInterface {
         }
     }
 
+    /// Get display width calculated from VI_H_START register.
+    /// VI_H_START bits [25:16] = h_start, bits [9:0] = h_end (half-pixel units).
+    pub fn get_display_width(&self) -> u32 {
+        let h_start = (self.h_start >> 16) & 0x3FF;
+        let h_end = self.h_start & 0x3FF;
+        if h_end > h_start {
+            (h_end - h_start) / 2 // Half-pixel units → pixels
+        } else {
+            320 // Default NTSC width
+        }
+    }
+
     /// Check if display is enabled
     pub fn is_enabled(&self) -> bool {
         self.status & 0x03 != 0
@@ -206,6 +245,37 @@ impl VideoInterface {
     /// 0 = blank, 2 = 16-bit (RGBA5551), 3 = 32-bit (RGBA8888)
     pub fn get_color_depth(&self) -> u32 {
         self.status & 0x03
+    }
+
+    /// Collect a complete inspector snapshot for the N64 VI inspector tab.
+    pub fn inspector_data(&self) -> ViInspectorData {
+        // Determine video standard from VI_V_SYNC value.
+        // NTSC: 525 lines (VI_V_SYNC = 0x020D), PAL: 625 lines (VI_V_SYNC = 0x0271).
+        let video_standard = match self.v_sync {
+            0x020D => "NTSC",
+            0x0271 => "PAL",
+            _ => "Unknown",
+        }
+        .to_string();
+
+        ViInspectorData {
+            status: self.status,
+            origin: self.origin,
+            width: self.width,
+            intr: self.intr,
+            current: self.current,
+            v_sync: self.v_sync,
+            h_sync: self.h_sync,
+            h_start: self.h_start,
+            v_start: self.v_start,
+            x_scale: self.x_scale,
+            y_scale: self.y_scale,
+            display_width: self.get_display_width(),
+            display_height: self.get_display_height(),
+            color_depth: self.get_color_depth(),
+            display_enabled: self.is_enabled(),
+            video_standard,
+        }
     }
 }
 
@@ -258,7 +328,8 @@ mod tests {
     fn test_vi_current_register() {
         let mut vi = VideoInterface::new();
         vi.update_scanline(100);
-        assert_eq!(vi.read_register(VI_CURRENT), 100);
+        // VI_CURRENT reports half-lines (scanline * 2)
+        assert_eq!(vi.read_register(VI_CURRENT), 200);
 
         // Writing to VI_CURRENT clears it
         vi.write_register(VI_CURRENT, 0);
@@ -330,5 +401,58 @@ mod tests {
         // Verify masking (10 bits)
         vi.write_register(VI_INTR, 0xFFFFFFFF);
         assert_eq!(vi.read_register(VI_INTR), 0x3FF);
+    }
+
+    #[test]
+    fn test_vi_display_width_ntsc() {
+        let vi = VideoInterface::new();
+        // NTSC default: h_start = 0x006C02EC → start=0x6C=108, end=0x2EC=748
+        // width = (748 - 108) / 2 = 320
+        assert_eq!(vi.get_display_width(), 320);
+    }
+
+    #[test]
+    fn test_vi_display_width_custom() {
+        let mut vi = VideoInterface::new();
+        // Set h_start: start=0x80 (128), end=0x380 (896) → (896-128)/2 = 384
+        vi.write_register(VI_H_START, (0x080u32 << 16) | 0x380);
+        assert_eq!(vi.get_display_width(), 384);
+    }
+
+    #[test]
+    fn test_vi_display_width_fallback() {
+        let mut vi = VideoInterface::new();
+        // Set h_end <= h_start to trigger fallback
+        vi.write_register(VI_H_START, (0x300u32 << 16) | 0x100);
+        assert_eq!(vi.get_display_width(), 320);
+    }
+
+    #[test]
+    fn test_vi_inspector_data_video_standard() {
+        let mut vi = VideoInterface::new();
+
+        // NTSC default (v_sync = 0x020D)
+        let data = vi.inspector_data();
+        assert_eq!(data.video_standard, "NTSC");
+
+        // PAL (v_sync = 0x0271)
+        vi.write_register(VI_V_SYNC, 0x0271);
+        let data = vi.inspector_data();
+        assert_eq!(data.video_standard, "PAL");
+
+        // Unknown value
+        vi.write_register(VI_V_SYNC, 0x01FF);
+        let data = vi.inspector_data();
+        assert_eq!(data.video_standard, "Unknown");
+    }
+
+    #[test]
+    fn test_vi_inspector_data_display_width() {
+        let vi = VideoInterface::new();
+        let data = vi.inspector_data();
+        // With NTSC defaults, display_width should be 320 (from H_START)
+        assert_eq!(data.display_width, 320);
+        // framebuffer width (VI_WIDTH) is also 320
+        assert_eq!(data.width, 320);
     }
 }

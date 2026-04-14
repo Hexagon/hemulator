@@ -56,6 +56,9 @@ pub enum InspectorTab {
 
     C64Vic, // VIC-II video chip state
     C64Sid, // SID audio chip state
+
+    N64Vi,  // Video Interface registers and display configuration
+    N64Rdp, // Reality Display Processor state
 }
 
 impl InspectorTab {
@@ -96,6 +99,8 @@ impl InspectorTab {
             InspectorTab::Ps1Gpu => "🎮 GPU",
             InspectorTab::C64Vic => "📺 VIC-II",
             InspectorTab::C64Sid => "🎵 SID",
+            InspectorTab::N64Vi => "📺 VI",
+            InspectorTab::N64Rdp => "🖼️ RDP",
         }
     }
 
@@ -184,6 +189,10 @@ pub fn get_tabs_for_system(system_type: Option<&SystemType>) -> Vec<InspectorTab
             SystemType::C64 => {
                 tabs.push(InspectorTab::Cartridge); // PRG/CRT
                 tabs.extend_from_slice(&[InspectorTab::C64Vic, InspectorTab::C64Sid]);
+            }
+            SystemType::N64 => {
+                tabs.push(InspectorTab::Cartridge); // N64 uses cartridge tab
+                tabs.extend_from_slice(&[InspectorTab::N64Vi, InspectorTab::N64Rdp]);
             }
             SystemType::GameAndWatch => {
                 tabs.push(InspectorTab::Mounts); // Game & Watch uses Mounts tab for "Program"
@@ -281,6 +290,12 @@ pub fn render_inspector_tab(tab: &InspectorTab, ui: &mut Ui, tab_manager: &mut T
         }
         InspectorTab::C64Sid => {
             render_c64_sid_tab(ui, tab_manager);
+        }
+        InspectorTab::N64Vi => {
+            render_n64_vi_tab(ui, tab_manager);
+        }
+        InspectorTab::N64Rdp => {
+            render_n64_rdp_tab(ui, tab_manager);
         }
     }
 }
@@ -2764,6 +2779,22 @@ fn render_c64_vic_tab(ui: &mut Ui, tab_manager: &TabManager) {
         });
 }
 
+/// Render the N64 Video Interface (VI) inspector tab.
+fn render_n64_vi_tab(ui: &mut Ui, tab_manager: &TabManager) {
+    egui::ScrollArea::vertical()
+        .id_salt("n64_vi_scroll")
+        .auto_shrink([false; 2])
+        .show(ui, |ui| {
+            if let Some(vi) = &tab_manager.n64_vi_data {
+                render_n64_vi_content(ui, vi);
+            } else {
+                ui.centered_and_justified(|ui| {
+                    ui.label("Load an N64 ROM to see Video Interface information.");
+                });
+            }
+        });
+}
+
 /// Render the C64 SID inspector tab
 fn render_c64_sid_tab(ui: &mut Ui, tab_manager: &TabManager) {
     use egui::ScrollArea;
@@ -3021,4 +3052,316 @@ fn render_c64_sid_tab(ui: &mut Ui, tab_manager: &TabManager) {
                 });
             }
         });
+}
+
+fn render_n64_vi_content(ui: &mut Ui, vi: &super::tabs::N64ViData) {
+    ui.heading("📺 Video Interface (VI)");
+    ui.separator();
+    ui.add_space(4.0);
+
+    // --- Display configuration ---
+    ui.group(|ui| {
+        ui.label(egui::RichText::new("Display Configuration").strong());
+        ui.add_space(4.0);
+        egui::Grid::new("n64_vi_display_grid")
+            .num_columns(2)
+            .spacing([12.0, 4.0])
+            .striped(true)
+            .show(ui, |ui| {
+                ui.label(egui::RichText::new("Video Standard:").strong());
+                ui.label(&vi.video_standard);
+                ui.end_row();
+
+                ui.label(egui::RichText::new("Display Enabled:").strong());
+                ui.label(if vi.display_enabled {
+                    "✅ Yes"
+                } else {
+                    "❌ No"
+                });
+                ui.end_row();
+
+                ui.label(egui::RichText::new("Resolution:").strong());
+                ui.label(format!("{}×{}", vi.display_width, vi.display_height));
+                ui.end_row();
+
+                ui.label(egui::RichText::new("Color Depth:").strong());
+                let depth_str = match vi.color_depth {
+                    0 => "Blank (disabled)",
+                    1 => "Reserved",
+                    2 => "16-bit (RGBA5551)",
+                    3 => "32-bit (RGBA8888)",
+                    _ => "Unknown",
+                };
+                ui.label(depth_str);
+                ui.end_row();
+
+                ui.label(egui::RichText::new("Framebuffer Addr:").strong());
+                ui.label(egui::RichText::new(format!("0x{:08X}", vi.origin)).monospace());
+                ui.end_row();
+
+                ui.label(egui::RichText::new("Framebuffer Width:").strong());
+                ui.label(format!("{} px", vi.width));
+                ui.end_row();
+            });
+    });
+
+    ui.add_space(6.0);
+
+    // --- Timing ---
+    ui.group(|ui| {
+        ui.label(egui::RichText::new("Timing Registers").strong());
+        ui.add_space(4.0);
+        egui::Grid::new("n64_vi_timing_grid")
+            .num_columns(2)
+            .spacing([12.0, 4.0])
+            .striped(true)
+            .show(ui, |ui| {
+                ui.label(egui::RichText::new("VI_V_SYNC:").strong());
+                ui.label(egui::RichText::new(format!("0x{:03X}", vi.v_sync)).monospace());
+                ui.end_row();
+
+                ui.label(egui::RichText::new("VI_H_SYNC:").strong());
+                ui.label(egui::RichText::new(format!("0x{:03X}", vi.h_sync)).monospace());
+                ui.end_row();
+
+                ui.label(egui::RichText::new("VI_H_START:").strong());
+                ui.label(egui::RichText::new(format!("0x{:08X}", vi.h_start)).monospace());
+                ui.end_row();
+
+                ui.label(egui::RichText::new("VI_V_START:").strong());
+                ui.label(egui::RichText::new(format!("0x{:08X}", vi.v_start)).monospace());
+                ui.end_row();
+
+                ui.label(egui::RichText::new("VI_X_SCALE:").strong());
+                ui.label(egui::RichText::new(format!("0x{:04X}", vi.x_scale)).monospace());
+                ui.end_row();
+
+                ui.label(egui::RichText::new("VI_Y_SCALE:").strong());
+                ui.label(egui::RichText::new(format!("0x{:04X}", vi.y_scale)).monospace());
+                ui.end_row();
+
+                ui.label(egui::RichText::new("VI_INTR:").strong());
+                ui.label(
+                    egui::RichText::new(format!("0x{:03X} (scanline {})", vi.intr, vi.intr >> 1))
+                        .monospace(),
+                );
+                ui.end_row();
+
+                ui.label(egui::RichText::new("VI_CURRENT:").strong());
+                ui.label(egui::RichText::new(format!("scanline {}", vi.current)).monospace());
+                ui.end_row();
+            });
+    });
+
+    ui.add_space(6.0);
+
+    // --- Status register bit breakdown ---
+    ui.group(|ui| {
+        ui.label(egui::RichText::new("VI_STATUS Bits").strong());
+        ui.add_space(4.0);
+        let s = vi.status;
+        egui::Grid::new("n64_vi_status_grid")
+            .num_columns(2)
+            .spacing([12.0, 4.0])
+            .striped(true)
+            .show(ui, |ui| {
+                ui.label("Raw value:");
+                ui.label(egui::RichText::new(format!("0x{:08X}", s)).monospace());
+                ui.end_row();
+                ui.label("Bits [1:0] Color type:");
+                ui.label(match s & 0x3 {
+                    0 => "0 – blank",
+                    1 => "1 – reserved",
+                    2 => "2 – 16bpp",
+                    3 => "3 – 32bpp",
+                    _ => "?",
+                });
+                ui.end_row();
+                ui.label("Bit 2 Gamma dither:");
+                ui.label(if (s >> 2) & 1 != 0 { "on" } else { "off" });
+                ui.end_row();
+                ui.label("Bit 3 Gamma correct:");
+                ui.label(if (s >> 3) & 1 != 0 { "on" } else { "off" });
+                ui.end_row();
+                ui.label("Bit 4 Divot filter:");
+                ui.label(if (s >> 4) & 1 != 0 { "on" } else { "off" });
+                ui.end_row();
+                ui.label("Bit 6 Serrate:");
+                ui.label(if (s >> 6) & 1 != 0 { "on" } else { "off" });
+                ui.end_row();
+                let aa = (s >> 8) & 0x3;
+                ui.label("Bits [9:8] AA mode:");
+                ui.label(match aa {
+                    0 => "0 – AA & resampling",
+                    1 => "1 – AA & no resampling",
+                    2 => "2 – no AA & resampling",
+                    3 => "3 – no AA & no resampling",
+                    _ => "?",
+                });
+                ui.end_row();
+            });
+    });
+}
+
+/// Render the N64 Reality Display Processor (RDP) inspector tab.
+fn render_n64_rdp_tab(ui: &mut Ui, tab_manager: &TabManager) {
+    egui::ScrollArea::vertical()
+        .id_salt("n64_rdp_scroll")
+        .auto_shrink([false; 2])
+        .show(ui, |ui| {
+            if let Some(rdp) = &tab_manager.n64_rdp_data {
+                render_n64_rdp_content(ui, rdp);
+            } else {
+                ui.centered_and_justified(|ui| {
+                    ui.label("Load an N64 ROM to see RDP information.");
+                });
+            }
+        });
+}
+
+fn render_n64_rdp_content(ui: &mut Ui, rdp: &super::tabs::N64RdpData) {
+    ui.heading("🖼️ Reality Display Processor (RDP)");
+    ui.separator();
+    ui.add_space(4.0);
+
+    // --- Renderer info ---
+    ui.group(|ui| {
+        ui.label(egui::RichText::new("Renderer").strong());
+        ui.add_space(4.0);
+        egui::Grid::new("n64_rdp_renderer_grid")
+            .num_columns(2)
+            .spacing([12.0, 4.0])
+            .striped(true)
+            .show(ui, |ui| {
+                ui.label(egui::RichText::new("Backend:").strong());
+                ui.label(rdp.renderer_name);
+                ui.end_row();
+
+                ui.label(egui::RichText::new("RSP Microcode:").strong());
+                ui.label(rdp.microcode_type);
+                ui.end_row();
+
+                ui.label(egui::RichText::new("RSP Vertex Count:").strong());
+                ui.label(format!("{}", rdp.vertex_count));
+                ui.end_row();
+            });
+    });
+
+    ui.add_space(6.0);
+
+    // --- Framebuffer ---
+    ui.group(|ui| {
+        ui.label(egui::RichText::new("Framebuffer").strong());
+        ui.add_space(4.0);
+        egui::Grid::new("n64_rdp_fb_grid")
+            .num_columns(2)
+            .spacing([12.0, 4.0])
+            .striped(true)
+            .show(ui, |ui| {
+                ui.label(egui::RichText::new("Color Image Addr:").strong());
+                ui.label(
+                    egui::RichText::new(format!("0x{:08X}", rdp.color_image_addr)).monospace(),
+                );
+                ui.end_row();
+
+                ui.label(egui::RichText::new("Color Image Width:").strong());
+                ui.label(format!("{} px", rdp.color_image_width));
+                ui.end_row();
+
+                ui.label(egui::RichText::new("Pixel Size:").strong());
+                let size_str = match rdp.color_image_size {
+                    0 => "4 bpp",
+                    1 => "8 bpp",
+                    2 => "16 bpp",
+                    3 => "32 bpp",
+                    _ => "unknown",
+                };
+                ui.label(size_str);
+                ui.end_row();
+
+                ui.label(egui::RichText::new("Z-Buffer:").strong());
+                ui.label(if rdp.zbuffer_enabled {
+                    "✅ Enabled"
+                } else {
+                    "❌ Disabled"
+                });
+                ui.end_row();
+            });
+    });
+
+    ui.add_space(6.0);
+
+    // --- DPC command registers ---
+    ui.group(|ui| {
+        ui.label(egui::RichText::new("DPC Command Registers").strong());
+        ui.add_space(4.0);
+        egui::Grid::new("n64_rdp_dpc_grid")
+            .num_columns(2)
+            .spacing([12.0, 4.0])
+            .striped(true)
+            .show(ui, |ui| {
+                ui.label(egui::RichText::new("DPC_START:").strong());
+                ui.label(egui::RichText::new(format!("0x{:08X}", rdp.dpc_start)).monospace());
+                ui.end_row();
+
+                ui.label(egui::RichText::new("DPC_END:").strong());
+                ui.label(egui::RichText::new(format!("0x{:08X}", rdp.dpc_end)).monospace());
+                ui.end_row();
+            });
+    });
+
+    ui.add_space(6.0);
+
+    // --- Status register breakdown ---
+    ui.group(|ui| {
+        ui.label(egui::RichText::new("DPC_STATUS Bits").strong());
+        ui.add_space(4.0);
+        let s = rdp.status;
+        egui::Grid::new("n64_rdp_status_grid")
+            .num_columns(2)
+            .spacing([12.0, 4.0])
+            .striped(true)
+            .show(ui, |ui| {
+                ui.label("Raw value:");
+                ui.label(egui::RichText::new(format!("0x{:08X}", s)).monospace());
+                ui.end_row();
+                ui.label("Bit 0 XBUS_DMEM_DMA:");
+                ui.label(if s & (1 << 0) != 0 { "on" } else { "off" });
+                ui.end_row();
+                ui.label("Bit 1 FREEZE:");
+                ui.label(if s & (1 << 1) != 0 { "on" } else { "off" });
+                ui.end_row();
+                ui.label("Bit 2 FLUSH:");
+                ui.label(if s & (1 << 2) != 0 { "on" } else { "off" });
+                ui.end_row();
+                ui.label("Bit 3 START_GCLK:");
+                ui.label(if s & (1 << 3) != 0 { "on" } else { "off" });
+                ui.end_row();
+                ui.label("Bit 4 TMEM_BUSY:");
+                ui.label(if s & (1 << 4) != 0 { "busy" } else { "idle" });
+                ui.end_row();
+                ui.label("Bit 5 PIPE_BUSY:");
+                ui.label(if s & (1 << 5) != 0 { "busy" } else { "idle" });
+                ui.end_row();
+                ui.label("Bit 6 CMD_BUSY:");
+                ui.label(if s & (1 << 6) != 0 { "busy" } else { "idle" });
+                ui.end_row();
+                ui.label("Bit 7 CBUF_READY:");
+                ui.label(if s & (1 << 7) != 0 {
+                    "ready"
+                } else {
+                    "not ready"
+                });
+                ui.end_row();
+                ui.label("Bit 8 DMA_BUSY:");
+                ui.label(if s & (1 << 8) != 0 { "busy" } else { "idle" });
+                ui.end_row();
+                ui.label("Bit 9 END_VALID:");
+                ui.label(if s & (1 << 9) != 0 { "on" } else { "off" });
+                ui.end_row();
+                ui.label("Bit 10 START_VALID:");
+                ui.label(if s & (1 << 10) != 0 { "on" } else { "off" });
+                ui.end_row();
+            });
+    });
 }
