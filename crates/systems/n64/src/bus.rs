@@ -963,6 +963,20 @@ impl MemoryMips for N64Bus {
     }
 
     fn read_doubleword(&self, addr: u32) -> u64 {
+        let phys_addr = self.translate_address(addr);
+        // Fast path for RDRAM – avoids two translate_address calls and two
+        // match dispatches for the most common case.
+        if phys_addr <= 0x003F_FFF8 {
+            let offset = (phys_addr & 0x003F_FFFF) as usize;
+            let hi = u32::from_be_bytes(self.rdram[offset..offset + 4].try_into().unwrap_or([0; 4]))
+                as u64;
+            let lo = u32::from_be_bytes(
+                self.rdram[offset + 4..offset + 8]
+                    .try_into()
+                    .unwrap_or([0; 4]),
+            ) as u64;
+            return (hi << 32) | lo;
+        }
         let hi = self.read_word(addr) as u64;
         let lo = self.read_word(addr + 4) as u64;
         (hi << 32) | lo

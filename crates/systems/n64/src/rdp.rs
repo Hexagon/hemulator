@@ -384,6 +384,7 @@ impl Rdp {
     pub fn set_othermode(&mut self, othermode: u64) {
         self.othermode = othermode;
         let othermode_l = othermode as u32;
+        let othermode_h = (othermode >> 32) as u32;
 
         // FORCE_BL is bit 14 of othermode_l (lower 32 bits of the combined value).
         // When set, the game has configured the blender for alpha compositing, so
@@ -398,6 +399,11 @@ impl Rdp {
         let zbuf = z_compare_en || z_update_en;
         self.zbuffer_enabled = zbuf;
         self.renderer.set_zbuffer_enabled(zbuf);
+
+        // Texture filter: sample_type field is bits 11-10 of othermode_h.
+        // 0 = 1×1 point sample, 2 = 2×2 average (bilinear).
+        let sample_type = (othermode_h >> 10) & 0x3;
+        self.renderer.set_texture_filter(sample_type == 2);
     }
 
     /// Clear the framebuffer with the current fill color
@@ -997,6 +1003,10 @@ impl Rdp {
 
             // Increment TMEM counter for texture load operations
             self.dpc_tmem = self.dpc_tmem.wrapping_add(1);
+
+            // Notify the renderer that TMEM has changed so it re-uploads on
+            // the next textured draw call (avoids stale GPU texture).
+            self.renderer.notify_tmem_loaded();
         }
     }
 
@@ -1689,20 +1699,22 @@ impl Rdp {
                 // word0: upper 32 bits of othermode
                 // word1: lower 32 bits of othermode
                 let othermode = ((word0 as u64) << 32) | (word1 as u64);
-                self.othermode = othermode;
 
                 // Extract some common fields for logging
-                let cycle_type = (othermode >> 52) & 0x3;
-                let text_filt = (othermode >> 53) & 0x3;
+                let cycle_type = (othermode >> 54) & 0x3;
+                let sample_type = (word0 >> 10) & 0x3; // bits 11-10 of othermode_h
                 let alpha_compare = othermode & 0x3;
                 let z_mode = (othermode >> 10) & 0x3;
 
                 log(LogCategory::PPU, LogLevel::Debug, || {
                     format!(
-                        "N64 RDP: SET_OTHER_MODES - cycle={}, filt={}, alpha={}, z={}, full=0x{:016X}",
-                        cycle_type, text_filt, alpha_compare, z_mode, othermode
+                        "N64 RDP: SET_OTHER_MODES - cycle={}, sample_type={}, alpha={}, z={}, full=0x{:016X}",
+                        cycle_type, sample_type, alpha_compare, z_mode, othermode
                     )
                 });
+
+                // Delegate to set_othermode to apply all mode bits (filter, zbuf, blend)
+                self.set_othermode(othermode);
             }
             // SET_TILE (0x35)
             0x35 => {
@@ -1837,6 +1849,9 @@ impl Rdp {
                 if tile < 8 {
                     self.tiles[tile].palette = (ult >> 6) & 0xF; // Palette index from ult parameter
                 }
+
+                // Palette was written into TMEM – invalidate GPU texture cache
+                self.renderer.notify_tmem_loaded();
             }
             // SYNC_FULL (0x29)
             0x29 => {
