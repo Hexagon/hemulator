@@ -196,6 +196,11 @@ pub struct Rdp {
     /// Z-buffer enable state (mirrors what was last set via set_zbuffer_enabled)
     zbuffer_enabled: bool,
 
+    /// True when the renderer has drawn something since the last
+    /// `write_framebuffer_to_rdram` call. Avoids the expensive per-pixel
+    /// ARGB→RGBA5551/8888 conversion + glReadPixels when nothing changed.
+    framebuffer_dirty: bool,
+
     /// DPC registers
     dpc_start: u32,
     dpc_end: u32,
@@ -286,6 +291,7 @@ impl Rdp {
             color_image_size: 2,
             othermode: 0,
             zbuffer_enabled: false,
+            framebuffer_dirty: false,
             dpc_start: 0,
             dpc_end: 0,
             dpc_current: 0,
@@ -398,6 +404,7 @@ impl Rdp {
     #[allow(dead_code)] // Used in tests and reserved for future display list commands
     pub fn clear(&mut self) {
         self.renderer.clear(self.fill_color);
+        self.framebuffer_dirty = true;
     }
 
     /// Fill a rectangle with the current fill color
@@ -405,18 +412,21 @@ impl Rdp {
     pub fn fill_rect(&mut self, x: u32, y: u32, width: u32, height: u32) {
         self.renderer
             .fill_rect(x, y, width, height, self.fill_color, &self.scissor);
+        self.framebuffer_dirty = true;
     }
 
     /// Set a pixel at the given coordinates
     #[allow(dead_code)] // Used in tests and reserved for future display list commands
     pub fn set_pixel(&mut self, x: u32, y: u32, color: u32) {
         self.renderer.set_pixel(x, y, color);
+        self.framebuffer_dirty = true;
     }
 
     /// Clear the Z-buffer to maximum depth (far plane)
     #[allow(dead_code)] // Public API for future use
     pub fn clear_zbuffer(&mut self) {
         self.renderer.clear_zbuffer();
+        // Z-buffer clear doesn't change the color buffer, no need to set dirty
     }
 
     /// Enable or disable Z-buffer testing
@@ -438,6 +448,7 @@ impl Rdp {
     fn draw_triangle(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, x2: i32, y2: i32, color: u32) {
         self.renderer
             .draw_triangle(x0, y0, x1, y1, x2, y2, color, &self.scissor);
+        self.framebuffer_dirty = true;
     }
 
     /// Draw a flat-shaded triangle with Z-buffer support
@@ -470,6 +481,7 @@ impl Rdp {
             color,
             &self.scissor,
         );
+        self.framebuffer_dirty = true;
     }
 
     /// Draw a Gouraud-shaded triangle (per-vertex color interpolation)
@@ -490,6 +502,7 @@ impl Rdp {
     ) {
         self.renderer
             .draw_triangle_shaded(x0, y0, c0, x1, y1, c1, x2, y2, c2, &self.scissor);
+        self.framebuffer_dirty = true;
     }
 
     /// Draw a Gouraud-shaded triangle with Z-buffer support
@@ -525,6 +538,7 @@ impl Rdp {
             c2,
             &self.scissor,
         );
+        self.framebuffer_dirty = true;
     }
 
     /// Draw a textured triangle with Z-buffer, sampling from TMEM tile.
@@ -565,6 +579,7 @@ impl Rdp {
         self.renderer.draw_triangle_textured_zbuffer(
             x0, y0, z0, s0, t0, x1, y1, z1, s1, t1, x2, y2, z2, s2, t2, &sampler, &scissor,
         );
+        self.framebuffer_dirty = true;
     }
 
     /// Draw a textured triangle with per-vertex shade colours and Z-buffer,
@@ -621,6 +636,7 @@ impl Rdp {
             x0, y0, z0, s0, t0, sc0, x1, y1, z1, s1, t1, sc1, x2, y2, z2, s2, t2, sc2, &sampler,
             &scissor,
         );
+        self.framebuffer_dirty = true;
     }
 
     /// Return `true` when the current colour-combiner mode encodes the
@@ -644,6 +660,7 @@ impl Rdp {
     }
 
     /// Sync GPU framebuffer to CPU-side buffer (only needed for GPU-backed renderers).
+    #[allow(dead_code)]
     pub fn sync_framebuffer(&mut self) {
         self.renderer.sync_framebuffer();
     }
@@ -674,8 +691,11 @@ impl Rdp {
 
     /// Write the RDP internal framebuffer to RDRAM at the color_image_addr.
     /// This bridges the gap between the RDP renderer and VI's RDRAM readback.
+    ///
+    /// Skipped entirely when nothing has been drawn since the last writeback,
+    /// avoiding the expensive glReadPixels + per-pixel colour-space conversion.
     pub fn write_framebuffer_to_rdram(&mut self, rdram: &mut [u8]) {
-        if self.color_image_addr == 0 {
+        if self.color_image_addr == 0 || !self.framebuffer_dirty {
             return;
         }
 
@@ -733,6 +753,11 @@ impl Rdp {
             }
             _ => {}
         }
+
+        // Only clear the dirty flag after a successful writeback.
+        // If we returned early (e.g. bounds check failed), the flag stays set
+        // so the next call retries once the address/size is corrected.
+        self.framebuffer_dirty = false;
     }
 
     /// Read from RDP register
@@ -906,6 +931,12 @@ impl Rdp {
         self.dpc_current = self.dpc_end;
         self.dpc_status |= DPC_STATUS_CBUF_READY;
         self.dpc_status &= !DPC_STATUS_DMA_BUSY;
+
+        // Note: framebuffer_dirty is set by individual drawing commands (triangles,
+        // fill rects, texture rects, set_pixel, clear) rather than here.  State-only
+        // display lists (e.g. SET_TILE, SET_SCISSOR, SET_OTHER_MODES) that execute
+        // commands without touching the color buffer will not trigger the expensive
+        // write_framebuffer_to_rdram sync.
 
         log(LogCategory::PPU, LogLevel::Debug, || {
             "N64 RDP: Display list processing completed".to_string()
@@ -1364,6 +1395,7 @@ impl Rdp {
                     &texture_sampler,
                     &self.scissor,
                 );
+                self.framebuffer_dirty = true;
             }
             // Textured triangle with Z-buffer (0x0B)
             0x0B => {
@@ -1414,6 +1446,7 @@ impl Rdp {
                     &texture_sampler,
                     &self.scissor,
                 );
+                self.framebuffer_dirty = true;
             }
             // FILL_RECTANGLE (0x36)
             0x36 => {
@@ -1483,6 +1516,7 @@ impl Rdp {
 
                 self.renderer
                     .fill_rect(xl, yl, width, height, argb_color, &self.scissor);
+                self.framebuffer_dirty = true;
             }
             // SET_FILL_COLOR (0x37)
             0x37 => {
@@ -1576,6 +1610,7 @@ impl Rdp {
                         }
                         t = t.wrapping_add(dtdy);
                     }
+                    self.framebuffer_dirty = true;
                 } else {
                     // Fallback to solid fill if texture is not available
                     self.fill_rect(xl, yl, width, height);
@@ -1643,6 +1678,7 @@ impl Rdp {
                         }
                         s = s.wrapping_add(dsdx);
                     }
+                    self.framebuffer_dirty = true;
                 } else {
                     self.fill_rect(xl, yl, width, height);
                 }

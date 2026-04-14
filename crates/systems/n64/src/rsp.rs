@@ -170,12 +170,55 @@ impl Rsp {
     pub fn write_imem(&mut self, offset: u32, value: u8) {
         let addr = (offset & 0xFFF) as usize;
         self.imem[addr] = value;
+        // Note: microcode detection is done after DMA loads, not per-byte write.
+    }
 
-        // Detect microcode when IMEM is written
-        // (Simplified: only detect after first write, could optimize)
-        if addr == 0 {
-            self.hle.detect_microcode(&self.imem);
-        }
+    /// Read a big-endian 32-bit word from DMEM
+    /// N64 hardware word-accesses to DMEM are always 4-byte aligned;
+    /// we mask to 0xFFC to enforce this and prevent out-of-bounds panics.
+    #[inline]
+    pub fn read_dmem_word(&self, offset: u32) -> u32 {
+        let addr = (offset & 0xFFC) as usize;
+        u32::from_be_bytes([
+            self.dmem[addr],
+            self.dmem[addr + 1],
+            self.dmem[addr + 2],
+            self.dmem[addr + 3],
+        ])
+    }
+
+    /// Write a big-endian 32-bit word to DMEM
+    #[inline]
+    pub fn write_dmem_word(&mut self, offset: u32, value: u32) {
+        let addr = (offset & 0xFFC) as usize;
+        let bytes = value.to_be_bytes();
+        self.dmem[addr] = bytes[0];
+        self.dmem[addr + 1] = bytes[1];
+        self.dmem[addr + 2] = bytes[2];
+        self.dmem[addr + 3] = bytes[3];
+    }
+
+    /// Read a big-endian 32-bit word from IMEM
+    #[inline]
+    pub fn read_imem_word(&self, offset: u32) -> u32 {
+        let addr = (offset & 0xFFC) as usize;
+        u32::from_be_bytes([
+            self.imem[addr],
+            self.imem[addr + 1],
+            self.imem[addr + 2],
+            self.imem[addr + 3],
+        ])
+    }
+
+    /// Write a big-endian 32-bit word to IMEM
+    #[inline]
+    pub fn write_imem_word(&mut self, offset: u32, value: u32) {
+        let addr = (offset & 0xFFC) as usize;
+        let bytes = value.to_be_bytes();
+        self.imem[addr] = bytes[0];
+        self.imem[addr + 1] = bytes[1];
+        self.imem[addr + 2] = bytes[2];
+        self.imem[addr + 3] = bytes[3];
     }
 
     /// Read from RSP register
@@ -349,13 +392,22 @@ impl Rsp {
     }
 
     /// DMA read from RDRAM to RSP memory
-    /// Supports multi-line transfers with count and skip fields
+    /// Supports multi-line transfers with count and skip fields.
+    ///
+    /// Hardware enforces 8-byte alignment: the low 3 bits of the length register
+    /// are OR'd to 1 (rounding UP to the next 8-byte boundary), and the low 3
+    /// bits of both addresses are forced to 0. This matches the behaviour of
+    /// mupen64plus, Project64, and confirmed hardware tests.
     fn dma_read(&mut self, rdram: &[u8]) {
-        let length = (self.sp_rd_len & 0xFFF) + 1; // bytes per line
+        // Length: OR low 3 bits → 1, then add 1.  E.g. reg=3 → (3|7)+1 = 8,
+        // reg=7 → 8, reg=8 → (8|7)+1 = 16.  Always a multiple of 8.
+        let length = ((self.sp_rd_len & 0xFFF) | 7) + 1; // bytes per line (8-byte aligned, rounds up)
         let count = ((self.sp_rd_len >> 12) & 0xFF) + 1; // number of lines
         let skip = (self.sp_rd_len >> 20) & 0xFFF; // DRAM skip between lines
-        let mut dram_addr = (self.sp_dram_addr & 0x00FFFFFF) as usize;
-        let mut mem_addr = (self.sp_mem_addr & 0x1FFF) as usize;
+
+        // Hardware masks low 3 bits of addresses (force 8-byte alignment).
+        let mut dram_addr = (self.sp_dram_addr & 0x00FF_FFF8) as usize;
+        let mut mem_addr = (self.sp_mem_addr & 0x1FF8) as usize;
         let is_imem = (self.sp_mem_addr & 0x1000) != 0;
 
         // Track if this DMA loads the task structure area (DMEM[FC0..FFF])
@@ -364,21 +416,34 @@ impl Rsp {
         }
 
         for _line in 0..count {
-            for i in 0..length as usize {
-                if dram_addr + i < rdram.len() {
-                    let value = rdram[dram_addr + i];
-                    let dest_addr = (mem_addr + i) & 0xFFF;
+            let len = length as usize;
+            let dst_offset = mem_addr & 0xFFF;
 
-                    if is_imem {
-                        self.imem[dest_addr] = value;
-                    } else {
-                        self.dmem[dest_addr] = value;
+            // Fast path: no memory wrapping and source is fully within RDRAM bounds
+            if dst_offset + len <= 4096 && dram_addr + len <= rdram.len() {
+                let src = &rdram[dram_addr..dram_addr + len];
+                if is_imem {
+                    self.imem[dst_offset..dst_offset + len].copy_from_slice(src);
+                } else {
+                    self.dmem[dst_offset..dst_offset + len].copy_from_slice(src);
+                }
+            } else {
+                // Slow path: byte-by-byte with address wrapping
+                for i in 0..len {
+                    if dram_addr + i < rdram.len() {
+                        let dest_addr = (mem_addr + i) & 0xFFF;
+                        if is_imem {
+                            self.imem[dest_addr] = rdram[dram_addr + i];
+                        } else {
+                            self.dmem[dest_addr] = rdram[dram_addr + i];
+                        }
                     }
                 }
             }
+
             // Advance pointers for next line
-            dram_addr += length as usize + skip as usize;
-            mem_addr += length as usize;
+            dram_addr += len + skip as usize;
+            mem_addr += len;
         }
 
         // If we just loaded IMEM, detect microcode
@@ -392,31 +457,48 @@ impl Rsp {
     }
 
     /// DMA write from RSP memory to RDRAM
-    /// Supports multi-line transfers with count and skip fields
+    /// Supports multi-line transfers with count and skip fields.
+    ///
+    /// Hardware enforces 8-byte alignment — see dma_read for details.
     fn dma_write(&mut self, rdram: &mut [u8]) {
-        let length = (self.sp_wr_len & 0xFFF) + 1; // bytes per line
-        let count = ((self.sp_wr_len >> 12) & 0xFF) + 1; // number of lines
-        let skip = (self.sp_wr_len >> 20) & 0xFFF; // DRAM skip between lines
-        let mut dram_addr = (self.sp_dram_addr & 0x00FFFFFF) as usize;
-        let mut mem_addr = (self.sp_mem_addr & 0x1FFF) as usize;
+        let length = ((self.sp_wr_len & 0xFFF) | 7) + 1; // 8-byte aligned (rounds up)
+        let count = ((self.sp_wr_len >> 12) & 0xFF) + 1;
+        let skip = (self.sp_wr_len >> 20) & 0xFFF;
+        let mut dram_addr = (self.sp_dram_addr & 0x00FF_FFF8) as usize;
+        let mut mem_addr = (self.sp_mem_addr & 0x1FF8) as usize;
         let is_imem = (self.sp_mem_addr & 0x1000) != 0;
 
         for _line in 0..count {
-            for i in 0..length as usize {
-                let src_addr = (mem_addr + i) & 0xFFF;
-                let value = if is_imem {
-                    self.imem[src_addr]
-                } else {
-                    self.dmem[src_addr]
-                };
+            let len = length as usize;
+            let src_offset = mem_addr & 0xFFF;
 
-                if dram_addr + i < rdram.len() {
-                    rdram[dram_addr + i] = value;
+            // Fast path: no wrapping and fits in RDRAM
+            if src_offset + len <= 4096 && dram_addr + len <= rdram.len() {
+                let src = if is_imem {
+                    &self.imem[src_offset..src_offset + len]
+                } else {
+                    &self.dmem[src_offset..src_offset + len]
+                };
+                rdram[dram_addr..dram_addr + len].copy_from_slice(src);
+            } else {
+                // Slow path: byte-by-byte with address wrapping
+                for i in 0..len {
+                    let src_addr = (mem_addr + i) & 0xFFF;
+                    let value = if is_imem {
+                        self.imem[src_addr]
+                    } else {
+                        self.dmem[src_addr]
+                    };
+
+                    if dram_addr + i < rdram.len() {
+                        rdram[dram_addr + i] = value;
+                    }
                 }
             }
+
             // Advance pointers for next line
-            dram_addr += length as usize + skip as usize;
-            mem_addr += length as usize;
+            dram_addr += len + skip as usize;
+            mem_addr += len;
         }
     }
 
@@ -442,7 +524,7 @@ impl Rsp {
         });
 
         // Execute HLE task
-        let cycles = self.hle.execute_task(&self.dmem, rdram, rdp);
+        let cycles = self.hle.execute_task(&mut self.dmem, rdram, rdp);
 
         log(LogCategory::PPU, LogLevel::Info, || {
             format!("RSP: Task complete ({} cycles)", cycles)
@@ -560,16 +642,21 @@ mod tests {
         let mut rsp = Rsp::new();
         let mut rdram = vec![0u8; 1024];
 
-        // Write test data to RDRAM
+        // Write test data to RDRAM (8 bytes – minimum DMA transfer)
         rdram[0x100] = 0x11;
         rdram[0x101] = 0x22;
         rdram[0x102] = 0x33;
         rdram[0x103] = 0x44;
+        rdram[0x104] = 0x55;
+        rdram[0x105] = 0x66;
+        rdram[0x106] = 0x77;
+        rdram[0x107] = 0x88;
 
-        // Set up DMA: copy 4 bytes from RDRAM 0x100 to DMEM 0x200
+        // Set up DMA: copy 8 bytes from RDRAM 0x100 to DMEM 0x200
+        // Hardware rounds length up to 8 bytes: (7|7)+1 = 8
         rsp.sp_dram_addr = 0x100;
         rsp.sp_mem_addr = 0x200; // DMEM (bit 12 clear)
-        rsp.sp_rd_len = 3; // length - 1
+        rsp.sp_rd_len = 7; // length - 1 = 7, hardware sees (7|7)+1 = 8 bytes
         rsp.dma_read(&rdram);
 
         // Verify data was copied
@@ -577,6 +664,10 @@ mod tests {
         assert_eq!(rsp.read_dmem(0x201), 0x22);
         assert_eq!(rsp.read_dmem(0x202), 0x33);
         assert_eq!(rsp.read_dmem(0x203), 0x44);
+        assert_eq!(rsp.read_dmem(0x204), 0x55);
+        assert_eq!(rsp.read_dmem(0x205), 0x66);
+        assert_eq!(rsp.read_dmem(0x206), 0x77);
+        assert_eq!(rsp.read_dmem(0x207), 0x88);
     }
 
     #[test]
@@ -584,16 +675,21 @@ mod tests {
         let mut rsp = Rsp::new();
         let mut rdram = vec![0u8; 4096]; // Increased size to accommodate test
 
-        // Write test data to DMEM
+        // Write test data to DMEM (8 bytes for 8-byte-aligned transfer)
         rsp.write_dmem(0x300, 0xAA);
         rsp.write_dmem(0x301, 0xBB);
         rsp.write_dmem(0x302, 0xCC);
         rsp.write_dmem(0x303, 0xDD);
+        rsp.write_dmem(0x304, 0xEE);
+        rsp.write_dmem(0x305, 0xFF);
+        rsp.write_dmem(0x306, 0x12);
+        rsp.write_dmem(0x307, 0x34);
 
-        // Set up DMA: copy 4 bytes from DMEM 0x300 to RDRAM 0x500
+        // Set up DMA: copy 8 bytes from DMEM 0x300 to RDRAM 0x500
+        // Hardware: (7|7)+1 = 8 bytes
         rsp.sp_dram_addr = 0x500;
         rsp.sp_mem_addr = 0x300; // DMEM
-        rsp.sp_wr_len = 3; // length - 1
+        rsp.sp_wr_len = 7; // length - 1 = 7
         rsp.dma_write(&mut rdram);
 
         // Verify data was copied
@@ -601,6 +697,10 @@ mod tests {
         assert_eq!(rdram[0x501], 0xBB);
         assert_eq!(rdram[0x502], 0xCC);
         assert_eq!(rdram[0x503], 0xDD);
+        assert_eq!(rdram[0x504], 0xEE);
+        assert_eq!(rdram[0x505], 0xFF);
+        assert_eq!(rdram[0x506], 0x12);
+        assert_eq!(rdram[0x507], 0x34);
     }
 
     #[test]
@@ -625,19 +725,28 @@ mod tests {
         let mut rsp = Rsp::new();
         let mut rdram = vec![0u8; 1024];
 
-        // Write test data to RDRAM
+        // Write test data to RDRAM (8 bytes minimum transfer)
         rdram[0x100] = 0x12;
         rdram[0x101] = 0x34;
+        rdram[0x102] = 0x56;
+        rdram[0x103] = 0x78;
+        rdram[0x104] = 0x9A;
+        rdram[0x105] = 0xBC;
+        rdram[0x106] = 0xDE;
+        rdram[0x107] = 0xF0;
 
         // Set up DMA to IMEM (bit 12 set in mem_addr)
+        // Hardware: (7|7)+1 = 8 bytes
         rsp.sp_dram_addr = 0x100;
         rsp.sp_mem_addr = 0x1000; // IMEM (bit 12 set)
-        rsp.sp_rd_len = 1; // 2 bytes
+        rsp.sp_rd_len = 7; // 8 bytes
         rsp.dma_read(&rdram);
 
         // Verify data was copied to IMEM
         assert_eq!(rsp.read_imem(0x000), 0x12);
         assert_eq!(rsp.read_imem(0x001), 0x34);
+        assert_eq!(rsp.read_imem(0x002), 0x56);
+        assert_eq!(rsp.read_imem(0x003), 0x78);
     }
 
     #[test]
@@ -710,7 +819,7 @@ mod tests {
     #[test]
     fn test_rsp_dma_read_multiline() {
         // Test multi-line DMA: count=2 (bit 19:12 = 1 means count-1=1 → 2 lines),
-        // each line is 4 bytes, no skip between lines.
+        // each line is 8 bytes (hardware minimum), no skip between lines.
         let mut rsp = Rsp::new();
         let mut rdram = vec![0u8; 4096];
 
@@ -719,16 +828,24 @@ mod tests {
         rdram[0x101] = 0x22;
         rdram[0x102] = 0x33;
         rdram[0x103] = 0x44;
-        // Line 1: bytes at RDRAM 0x104 (no skip, continues immediately)
         rdram[0x104] = 0x55;
         rdram[0x105] = 0x66;
         rdram[0x106] = 0x77;
         rdram[0x107] = 0x88;
+        // Line 1: bytes at RDRAM 0x108 (no skip, continues immediately)
+        rdram[0x108] = 0xAA;
+        rdram[0x109] = 0xBB;
+        rdram[0x10A] = 0xCC;
+        rdram[0x10B] = 0xDD;
+        rdram[0x10C] = 0xEE;
+        rdram[0x10D] = 0xFF;
+        rdram[0x10E] = 0x12;
+        rdram[0x10F] = 0x34;
 
         rsp.sp_dram_addr = 0x100;
         rsp.sp_mem_addr = 0x200; // DMEM
-                                 // sp_rd_len: length-1 = 3 (bits 11:0), count-1 = 1 (bits 19:12), skip = 0 (bits 31:20)
-        rsp.sp_rd_len = (1 << 12) | 3;
+                                 // sp_rd_len: length-1 = 7 (bits 11:0), count-1 = 1 (bits 19:12), skip = 0 (bits 31:20)
+        rsp.sp_rd_len = (1 << 12) | 7;
         rsp.dma_read(&rdram);
 
         // Line 0 in DMEM at 0x200
@@ -736,89 +853,80 @@ mod tests {
         assert_eq!(rsp.read_dmem(0x201), 0x22);
         assert_eq!(rsp.read_dmem(0x202), 0x33);
         assert_eq!(rsp.read_dmem(0x203), 0x44);
-        // Line 1 in DMEM at 0x204
         assert_eq!(rsp.read_dmem(0x204), 0x55);
         assert_eq!(rsp.read_dmem(0x205), 0x66);
         assert_eq!(rsp.read_dmem(0x206), 0x77);
         assert_eq!(rsp.read_dmem(0x207), 0x88);
+        // Line 1 in DMEM at 0x208
+        assert_eq!(rsp.read_dmem(0x208), 0xAA);
+        assert_eq!(rsp.read_dmem(0x209), 0xBB);
+        assert_eq!(rsp.read_dmem(0x20A), 0xCC);
+        assert_eq!(rsp.read_dmem(0x20B), 0xDD);
     }
 
     #[test]
     fn test_rsp_dma_read_multiline_with_skip() {
         // Test multi-line DMA with non-zero DRAM skip.
-        // 2 lines × 4 bytes, DRAM skip = 4 bytes between lines.
+        // 2 lines × 8 bytes, DRAM skip = 8 bytes between lines.
         let mut rsp = Rsp::new();
         let mut rdram = vec![0u8; 4096];
 
         // Line 0 at RDRAM 0x100
-        rdram[0x100] = 0xAA;
-        rdram[0x101] = 0xBB;
-        rdram[0x102] = 0xCC;
-        rdram[0x103] = 0xDD;
-        // 4-byte gap (0x104..0x107) that should be skipped
-        rdram[0x104] = 0xFF; // gap – must not appear in DMEM
-        rdram[0x105] = 0xFF;
-        rdram[0x106] = 0xFF;
-        rdram[0x107] = 0xFF;
-        // Line 1 at RDRAM 0x108 (= 0x100 + length(4) + skip(4))
-        rdram[0x108] = 0x11;
-        rdram[0x109] = 0x22;
-        rdram[0x10A] = 0x33;
-        rdram[0x10B] = 0x44;
+        for i in 0..8 {
+            rdram[0x100 + i] = (0xA0 + i) as u8;
+        }
+        // 8-byte gap (0x108..0x10F) that should be skipped
+        for i in 0..8 {
+            rdram[0x108 + i] = 0xFF; // gap – must not appear in DMEM
+        }
+        // Line 1 at RDRAM 0x110 (= 0x100 + length(8) + skip(8))
+        for i in 0..8 {
+            rdram[0x110 + i] = (0xB0 + i) as u8;
+        }
 
         rsp.sp_dram_addr = 0x100;
         rsp.sp_mem_addr = 0x300; // DMEM
-                                 // sp_rd_len: length-1 = 3 (bits 11:0), count-1 = 1 (bits 19:12), skip = 4 (bits 31:20)
-        rsp.sp_rd_len = (4 << 20) | (1 << 12) | 3;
+                                 // sp_rd_len: length-1 = 7 (bits 11:0), count-1 = 1 (bits 19:12), skip = 8 (bits 31:20)
+        rsp.sp_rd_len = (8 << 20) | (1 << 12) | 7;
         rsp.dma_read(&rdram);
 
         // Line 0 in DMEM at 0x300
-        assert_eq!(rsp.read_dmem(0x300), 0xAA);
-        assert_eq!(rsp.read_dmem(0x301), 0xBB);
-        assert_eq!(rsp.read_dmem(0x302), 0xCC);
-        assert_eq!(rsp.read_dmem(0x303), 0xDD);
-        // Line 1 in DMEM at 0x304 (skip did not copy 0xFF bytes)
-        assert_eq!(rsp.read_dmem(0x304), 0x11);
-        assert_eq!(rsp.read_dmem(0x305), 0x22);
-        assert_eq!(rsp.read_dmem(0x306), 0x33);
-        assert_eq!(rsp.read_dmem(0x307), 0x44);
+        assert_eq!(rsp.read_dmem(0x300), 0xA0);
+        assert_eq!(rsp.read_dmem(0x307), 0xA7);
+        // Line 1 in DMEM at 0x308 (skip did not copy 0xFF bytes)
+        assert_eq!(rsp.read_dmem(0x308), 0xB0);
+        assert_eq!(rsp.read_dmem(0x30F), 0xB7);
     }
 
     #[test]
     fn test_rsp_dma_write_multiline_with_skip() {
         // Test multi-line DMA write with non-zero DRAM skip.
-        // 2 lines × 4 bytes, DRAM skip = 4 bytes – RDRAM gap bytes must remain untouched.
+        // 2 lines × 8 bytes, DRAM skip = 8 bytes – RDRAM gap bytes must remain untouched.
         let mut rsp = Rsp::new();
         let mut rdram = vec![0u8; 4096];
 
-        // Populate DMEM source data
-        rsp.write_dmem(0x400, 0x11);
-        rsp.write_dmem(0x401, 0x22);
-        rsp.write_dmem(0x402, 0x33);
-        rsp.write_dmem(0x403, 0x44);
-        rsp.write_dmem(0x404, 0x55);
-        rsp.write_dmem(0x405, 0x66);
-        rsp.write_dmem(0x406, 0x77);
-        rsp.write_dmem(0x407, 0x88);
+        // Populate DMEM source data (16 bytes for 2 × 8-byte lines)
+        for i in 0..8 {
+            rsp.write_dmem(0x400 + i, (0x10 + i) as u8);
+        }
+        for i in 0..8 {
+            rsp.write_dmem(0x408 + i, (0x20 + i) as u8);
+        }
 
         rsp.sp_dram_addr = 0x800;
         rsp.sp_mem_addr = 0x400; // DMEM
-                                 // sp_wr_len: length-1 = 3, count-1 = 1, skip = 4
-        rsp.sp_wr_len = (4 << 20) | (1 << 12) | 3;
+                                 // sp_wr_len: length-1 = 7, count-1 = 1, skip = 8
+        rsp.sp_wr_len = (8 << 20) | (1 << 12) | 7;
         rsp.dma_write(&mut rdram);
 
         // Line 0 → RDRAM 0x800
-        assert_eq!(rdram[0x800], 0x11);
-        assert_eq!(rdram[0x801], 0x22);
-        assert_eq!(rdram[0x802], 0x33);
-        assert_eq!(rdram[0x803], 0x44);
-        // Gap 0x804..0x807 must remain 0 (untouched)
-        assert_eq!(rdram[0x804], 0x00);
-        assert_eq!(rdram[0x807], 0x00);
-        // Line 1 → RDRAM 0x808 (= 0x800 + length(4) + skip(4))
-        assert_eq!(rdram[0x808], 0x55);
-        assert_eq!(rdram[0x809], 0x66);
-        assert_eq!(rdram[0x80A], 0x77);
-        assert_eq!(rdram[0x80B], 0x88);
+        assert_eq!(rdram[0x800], 0x10);
+        assert_eq!(rdram[0x807], 0x17);
+        // Gap 0x808..0x80F must remain 0 (untouched)
+        assert_eq!(rdram[0x808], 0x00);
+        assert_eq!(rdram[0x80F], 0x00);
+        // Line 1 → RDRAM 0x810 (= 0x800 + length(8) + skip(8))
+        assert_eq!(rdram[0x810], 0x20);
+        assert_eq!(rdram[0x817], 0x27);
     }
 }

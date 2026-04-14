@@ -635,6 +635,7 @@ impl N64Bus {
     ///
     /// Returns `Some(Frame)` if VI is enabled and has a valid framebuffer,
     /// `None` if VI is disabled or origin is 0.
+    #[allow(dead_code)]
     pub fn read_vi_framebuffer(&self) -> Option<Frame> {
         // Check if VI is enabled (color depth bits != 0)
         if !self.vi.is_enabled() {
@@ -788,6 +789,12 @@ impl MemoryMips for N64Bus {
     }
 
     fn read_halfword(&self, addr: u32) -> u16 {
+        let phys_addr = self.translate_address(addr);
+        // Fast path for RDRAM (vast majority of halfword reads)
+        if phys_addr <= 0x003F_FFFE {
+            let offset = (phys_addr & 0x003FFFFF) as usize;
+            return u16::from_be_bytes([self.rdram[offset], self.rdram[offset + 1]]);
+        }
         let b0 = self.read_byte(addr);
         let b1 = self.read_byte(addr + 1);
         u16::from_be_bytes([b0, b1])
@@ -800,12 +807,11 @@ impl MemoryMips for N64Bus {
             // RDRAM
             0x0000_0000..=0x003F_FFFF => {
                 let offset = (phys_addr & 0x003FFFFF) as usize;
-                u32::from_be_bytes([
-                    self.rdram[offset],
-                    self.rdram[offset + 1],
-                    self.rdram[offset + 2],
-                    self.rdram[offset + 3],
-                ])
+                if let Some(bytes) = self.rdram.get(offset..offset + 4) {
+                    u32::from_be_bytes(bytes.try_into().unwrap_or([0; 4]))
+                } else {
+                    0
+                }
             }
             // RSP registers (0x04040000 - 0x0404001F)
             0x0404_0000..=0x0404_001F => {
@@ -901,20 +907,12 @@ impl MemoryMips for N64Bus {
             // SP DMEM (0x04000000 - 0x04000FFF)
             0x0400_0000..=0x0400_0FFF => {
                 let offset = phys_addr & 0xFFF;
-                let b0 = self.rsp.read_dmem(offset) as u32;
-                let b1 = self.rsp.read_dmem(offset + 1) as u32;
-                let b2 = self.rsp.read_dmem(offset + 2) as u32;
-                let b3 = self.rsp.read_dmem(offset + 3) as u32;
-                (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
+                self.rsp.read_dmem_word(offset)
             }
             // SP IMEM (0x04001000 - 0x04001FFF)
             0x0400_1000..=0x0400_1FFF => {
                 let offset = phys_addr & 0xFFF;
-                let b0 = self.rsp.read_imem(offset) as u32;
-                let b1 = self.rsp.read_imem(offset + 1) as u32;
-                let b2 = self.rsp.read_imem(offset + 2) as u32;
-                let b3 = self.rsp.read_imem(offset + 3) as u32;
-                (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
+                self.rsp.read_imem_word(offset)
             }
             // SP PC register (0x04080000)
             0x0408_0000..=0x0408_0003 => self.rsp.pc,
@@ -938,12 +936,18 @@ impl MemoryMips for N64Bus {
             0x1000_0000..=0x1FBF_FFFF => {
                 if let Some(ref cart) = self.cartridge {
                     let offset = phys_addr - 0x1000_0000;
-                    u32::from_be_bytes([
-                        cart.read(offset),
-                        cart.read(offset + 1),
-                        cart.read(offset + 2),
-                        cart.read(offset + 3),
-                    ])
+                    let src = cart.read_slice(offset, 4);
+                    match src.len() {
+                        4 => u32::from_be_bytes([src[0], src[1], src[2], src[3]]),
+                        // Partial read at ROM end: available bytes contribute,
+                        // remaining bytes read as 0 (matches Cartridge::read semantics).
+                        1..=3 => {
+                            let mut buf = [0u8; 4];
+                            buf[..src.len()].copy_from_slice(src);
+                            u32::from_be_bytes(buf)
+                        }
+                        _ => 0,
+                    }
                 } else {
                     0
                 }
@@ -1021,6 +1025,15 @@ impl MemoryMips for N64Bus {
     }
 
     fn write_halfword(&mut self, addr: u32, val: u16) {
+        let phys_addr = self.translate_address(addr);
+        // Fast path for RDRAM
+        if phys_addr <= 0x003F_FFFE {
+            let offset = (phys_addr & 0x003FFFFF) as usize;
+            let bytes = val.to_be_bytes();
+            self.rdram[offset] = bytes[0];
+            self.rdram[offset + 1] = bytes[1];
+            return;
+        }
         let bytes = val.to_be_bytes();
         self.write_byte(addr, bytes[0]);
         self.write_byte(addr + 1, bytes[1]);
@@ -1033,29 +1046,19 @@ impl MemoryMips for N64Bus {
             // RDRAM
             0x0000_0000..=0x003F_FFFF => {
                 let offset = (phys_addr & 0x003FFFFF) as usize;
-                let bytes = val.to_be_bytes();
-                self.rdram[offset] = bytes[0];
-                self.rdram[offset + 1] = bytes[1];
-                self.rdram[offset + 2] = bytes[2];
-                self.rdram[offset + 3] = bytes[3];
+                if let Some(dest) = self.rdram.get_mut(offset..offset + 4) {
+                    dest.copy_from_slice(&val.to_be_bytes());
+                }
             }
             // SP DMEM (0x04000000 - 0x04000FFF)
             0x0400_0000..=0x0400_0FFF => {
                 let offset = phys_addr & 0xFFF;
-                let bytes = val.to_be_bytes();
-                self.rsp.write_dmem(offset, bytes[0]);
-                self.rsp.write_dmem(offset + 1, bytes[1]);
-                self.rsp.write_dmem(offset + 2, bytes[2]);
-                self.rsp.write_dmem(offset + 3, bytes[3]);
+                self.rsp.write_dmem_word(offset, val);
             }
             // SP IMEM (0x04001000 - 0x04001FFF)
             0x0400_1000..=0x0400_1FFF => {
                 let offset = phys_addr & 0xFFF;
-                let bytes = val.to_be_bytes();
-                self.rsp.write_imem(offset, bytes[0]);
-                self.rsp.write_imem(offset + 1, bytes[1]);
-                self.rsp.write_imem(offset + 2, bytes[2]);
-                self.rsp.write_imem(offset + 3, bytes[3]);
+                self.rsp.write_imem_word(offset, val);
             }
             // SP PC register (0x04080000)
             0x0408_0000..=0x0408_0003 => {
@@ -1152,9 +1155,14 @@ impl MemoryMips for N64Bus {
                     }
                     0x0C => {
                         // PI_WR_LEN - DMA from cart to RDRAM (write)
-                        // Length is value + 1
-                        let len = ((val & 0x00FF_FFFF) + 1) as usize;
-                        let dram_addr = self.pi_dram_addr as usize;
+                        // Length is value + 1, hardware rounds up to 2-byte alignment.
+                        let raw_len = ((val & 0x00FF_FFFF) + 1) as usize;
+                        // PI DMA transfers are 2-byte aligned (length rounded up to
+                        // next even number). RDRAM destination must also be 2-byte
+                        // aligned (hardware masks bit 0). Source (cart) alignment
+                        // varies but cart reads are byte-addressable for the ROM bus.
+                        let len = (raw_len + 1) & !1; // round up to even
+                        let dram_addr = (self.pi_dram_addr & !1) as usize;
                         let cart_addr = self.pi_cart_addr;
 
                         log(LogCategory::Bus, LogLevel::Info, || {
@@ -1171,12 +1179,21 @@ impl MemoryMips for N64Bus {
                             } else {
                                 cart_addr
                             };
-                            for i in 0..len {
-                                let src = cart_offset as usize + i;
-                                let dst = dram_addr + i;
-                                if dst < self.rdram.len() {
-                                    self.rdram[dst] = cart.read(src as u32);
-                                }
+                            let src = cart.read_slice(cart_offset, len);
+                            let rdram_end = self.rdram.len();
+                            // Bulk-copy available ROM bytes
+                            let copy_len = src.len().min(rdram_end.saturating_sub(dram_addr));
+                            if copy_len > 0 {
+                                self.rdram[dram_addr..dram_addr + copy_len]
+                                    .copy_from_slice(&src[..copy_len]);
+                            }
+                            // Zero-fill trailing bytes when DMA length exceeds ROM
+                            // (matches original per-byte loop where cart.read() returns 0
+                            // for out-of-range offsets).
+                            let fill_end = (dram_addr + len).min(rdram_end);
+                            let fill_start = dram_addr + copy_len;
+                            if fill_start < fill_end {
+                                self.rdram[fill_start..fill_end].fill(0);
                             }
                         }
 

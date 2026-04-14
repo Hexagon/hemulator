@@ -123,6 +123,20 @@ impl Cartridge {
         self.rom.get(start..end).unwrap_or(&[]).to_vec()
     }
 
+    /// Borrow a contiguous slice of ROM bytes (no allocation).
+    ///
+    /// The returned slice is clamped to the ROM bounds; callers must check its
+    /// length if they need exactly `len` bytes.
+    pub fn read_slice(&self, offset: u32, len: usize) -> &[u8] {
+        let start = offset as usize;
+        let end = (start + len).min(self.rom.len());
+        if start >= self.rom.len() {
+            &[]
+        } else {
+            &self.rom[start..end]
+        }
+    }
+
     /// Get ROM size in bytes
     pub fn size(&self) -> usize {
         self.rom.len()

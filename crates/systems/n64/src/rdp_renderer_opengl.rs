@@ -67,6 +67,11 @@ pub struct OpenGLRdpRenderer {
     textured_shaded_program: glow::Program,
     current_program: ShaderProgram,
 
+    // Cached uniform locations (queried once at init, re-used every draw call)
+    flat_color_loc: Option<glow::UniformLocation>,
+    textured_texture_loc: Option<glow::UniformLocation>,
+    textured_shaded_texture_loc: Option<glow::UniformLocation>,
+
     // Vertex data
     vao: glow::VertexArray,
     vbo: glow::Buffer,
@@ -81,6 +86,9 @@ pub struct OpenGLRdpRenderer {
 
     // Alpha-blend state
     alpha_blend_enabled: bool,
+
+    /// Whether the FBO is currently bound (avoids redundant bind/unbind per draw)
+    fbo_bound: bool,
 
     /// Whether the GPU framebuffer has been modified since the last read_pixels
     dirty: bool,
@@ -161,6 +169,13 @@ impl OpenGLRdpRenderer {
             let textured_program = create_textured_program(&gl)?;
             let textured_shaded_program = create_textured_shaded_program(&gl)?;
 
+            // Cache uniform locations once — calling get_uniform_location on every draw
+            // call is expensive (driver round-trip).  Query them here and reuse.
+            let flat_color_loc = gl.get_uniform_location(flat_program, "uColor");
+            let textured_texture_loc = gl.get_uniform_location(textured_program, "uTexture");
+            let textured_shaded_texture_loc =
+                gl.get_uniform_location(textured_shaded_program, "uTexture");
+
             // Create VAO and VBO
             let vao = gl
                 .create_vertex_array()
@@ -214,6 +229,9 @@ impl OpenGLRdpRenderer {
                 textured_program,
                 textured_shaded_program,
                 current_program: ShaderProgram::Flat,
+                flat_color_loc,
+                textured_texture_loc,
+                textured_shaded_texture_loc,
                 vao,
                 vbo,
                 dynamic_texture,
@@ -221,6 +239,7 @@ impl OpenGLRdpRenderer {
                 dynamic_texture_height: 0,
                 zbuffer_enabled: false,
                 alpha_blend_enabled: false,
+                fbo_bound: false,
                 dirty: false,
             })
         }
@@ -228,7 +247,10 @@ impl OpenGLRdpRenderer {
 
     /// Read pixels from framebuffer to CPU memory
     unsafe fn read_pixels(&mut self) {
-        self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.fbo));
+        // Ensure FBO is bound for reading
+        if !self.fbo_bound {
+            self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.fbo));
+        }
 
         // Read pixels in RGBA format
         let mut pixels = vec![0u8; (self.width * self.height * 4) as usize];
@@ -259,6 +281,17 @@ impl OpenGLRdpRenderer {
         }
 
         self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+        self.fbo_bound = false;
+    }
+
+    /// Bind the FBO if not already bound.  All draw calls use this to avoid
+    /// redundant bind/unbind pairs on every primitive.
+    #[inline]
+    unsafe fn ensure_fbo_bound(&mut self) {
+        if !self.fbo_bound {
+            self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.fbo));
+            self.fbo_bound = true;
+        }
     }
 
     /// Convert screen coordinates to normalized device coordinates
@@ -339,6 +372,8 @@ impl RdpRenderer for OpenGLRdpRenderer {
             self.width = width;
             self.height = height;
             self.framebuffer = Frame::new(width, height);
+            // Resizing detaches us from the current GL state; force a rebind on the next draw.
+            self.fbo_bound = false;
 
             // Resize textures
             self.gl
@@ -387,7 +422,7 @@ impl RdpRenderer for OpenGLRdpRenderer {
 
     fn clear(&mut self, color: u32) {
         unsafe {
-            self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.fbo));
+            self.ensure_fbo_bound();
 
             let rgba = Self::argb_to_rgba(color);
             self.gl.clear_color(rgba[0], rgba[1], rgba[2], rgba[3]);
@@ -395,7 +430,6 @@ impl RdpRenderer for OpenGLRdpRenderer {
                 .clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
 
             self.dirty = true;
-            self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
         }
     }
 
@@ -409,7 +443,7 @@ impl RdpRenderer for OpenGLRdpRenderer {
         scissor: &ScissorBox,
     ) {
         unsafe {
-            self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.fbo));
+            self.ensure_fbo_bound();
 
             // Enable scissor test
             self.gl.enable(glow::SCISSOR_TEST);
@@ -424,13 +458,15 @@ impl RdpRenderer for OpenGLRdpRenderer {
             self.gl.use_program(Some(self.flat_program));
             self.current_program = ShaderProgram::Flat;
 
-            // Set color uniform
+            // Set color uniform (use cached location)
             let rgba = Self::argb_to_rgba(color);
-            let u_color = self.gl.get_uniform_location(self.flat_program, "uColor");
-            if let Some(loc) = u_color {
-                self.gl
-                    .uniform_4_f32(Some(&loc), rgba[0], rgba[1], rgba[2], rgba[3]);
-            }
+            self.gl.uniform_4_f32(
+                self.flat_color_loc.as_ref(),
+                rgba[0],
+                rgba[1],
+                rgba[2],
+                rgba[3],
+            );
 
             // Create rectangle as two triangles
             let (x0, y0) = self.screen_to_ndc(x as i32, y as i32);
@@ -470,7 +506,6 @@ impl RdpRenderer for OpenGLRdpRenderer {
             self.gl.disable_vertex_attrib_array(0);
             self.gl.disable(glow::SCISSOR_TEST);
             self.dirty = true;
-            self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
         }
     }
 
@@ -496,7 +531,7 @@ impl RdpRenderer for OpenGLRdpRenderer {
         scissor: &ScissorBox,
     ) {
         unsafe {
-            self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.fbo));
+            self.ensure_fbo_bound();
 
             // Enable scissor test
             self.gl.enable(glow::SCISSOR_TEST);
@@ -511,13 +546,15 @@ impl RdpRenderer for OpenGLRdpRenderer {
             self.gl.use_program(Some(self.flat_program));
             self.current_program = ShaderProgram::Flat;
 
-            // Set color uniform
+            // Set color uniform (use cached location)
             let rgba = Self::argb_to_rgba(color);
-            let u_color = self.gl.get_uniform_location(self.flat_program, "uColor");
-            if let Some(loc) = u_color {
-                self.gl
-                    .uniform_4_f32(Some(&loc), rgba[0], rgba[1], rgba[2], rgba[3]);
-            }
+            self.gl.uniform_4_f32(
+                self.flat_color_loc.as_ref(),
+                rgba[0],
+                rgba[1],
+                rgba[2],
+                rgba[3],
+            );
 
             // Convert to NDC
             let (nx0, ny0) = self.screen_to_ndc(x0, y0);
@@ -555,7 +592,6 @@ impl RdpRenderer for OpenGLRdpRenderer {
             self.gl.disable_vertex_attrib_array(0);
             self.gl.disable(glow::SCISSOR_TEST);
             self.dirty = true;
-            self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
         }
     }
 
@@ -574,7 +610,7 @@ impl RdpRenderer for OpenGLRdpRenderer {
         scissor: &ScissorBox,
     ) {
         unsafe {
-            self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.fbo));
+            self.ensure_fbo_bound();
 
             // Enable depth testing
             if self.zbuffer_enabled {
@@ -595,13 +631,15 @@ impl RdpRenderer for OpenGLRdpRenderer {
             self.gl.use_program(Some(self.flat_program));
             self.current_program = ShaderProgram::Flat;
 
-            // Set color uniform
+            // Set color uniform (use cached location)
             let rgba = Self::argb_to_rgba(color);
-            let u_color = self.gl.get_uniform_location(self.flat_program, "uColor");
-            if let Some(loc) = u_color {
-                self.gl
-                    .uniform_4_f32(Some(&loc), rgba[0], rgba[1], rgba[2], rgba[3]);
-            }
+            self.gl.uniform_4_f32(
+                self.flat_color_loc.as_ref(),
+                rgba[0],
+                rgba[1],
+                rgba[2],
+                rgba[3],
+            );
 
             // Convert to NDC and depth
             let (nx0, ny0) = self.screen_to_ndc(x0, y0);
@@ -654,7 +692,6 @@ impl RdpRenderer for OpenGLRdpRenderer {
             self.gl.disable(glow::DEPTH_TEST);
             self.gl.disable(glow::SCISSOR_TEST);
             self.dirty = true;
-            self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
         }
     }
 
@@ -672,7 +709,7 @@ impl RdpRenderer for OpenGLRdpRenderer {
         scissor: &ScissorBox,
     ) {
         unsafe {
-            self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.fbo));
+            self.ensure_fbo_bound();
 
             // Enable scissor test
             self.gl.enable(glow::SCISSOR_TEST);
@@ -734,7 +771,6 @@ impl RdpRenderer for OpenGLRdpRenderer {
             self.gl.disable_vertex_attrib_array(1);
             self.gl.disable(glow::SCISSOR_TEST);
             self.dirty = true;
-            self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
         }
     }
 
@@ -755,7 +791,7 @@ impl RdpRenderer for OpenGLRdpRenderer {
         scissor: &ScissorBox,
     ) {
         unsafe {
-            self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.fbo));
+            self.ensure_fbo_bound();
 
             // Enable depth testing
             if self.zbuffer_enabled {
@@ -839,7 +875,6 @@ impl RdpRenderer for OpenGLRdpRenderer {
             self.gl.disable(glow::DEPTH_TEST);
             self.gl.disable(glow::SCISSOR_TEST);
             self.dirty = true;
-            self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
         }
     }
 
@@ -861,7 +896,7 @@ impl RdpRenderer for OpenGLRdpRenderer {
         scissor: &ScissorBox,
     ) {
         unsafe {
-            self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.fbo));
+            self.ensure_fbo_bound();
 
             // Enable scissor test
             self.gl.enable(glow::SCISSOR_TEST);
@@ -886,16 +921,11 @@ impl RdpRenderer for OpenGLRdpRenderer {
             self.gl.use_program(Some(self.textured_program));
             self.current_program = ShaderProgram::Textured;
 
-            // Bind dynamic texture
+            // Bind dynamic texture and set sampler uniform (use cached location)
             self.gl.active_texture(glow::TEXTURE0);
             self.gl
                 .bind_texture(glow::TEXTURE_2D, Some(self.dynamic_texture));
-            let u_texture = self
-                .gl
-                .get_uniform_location(self.textured_program, "uTexture");
-            if let Some(loc) = u_texture {
-                self.gl.uniform_1_i32(Some(&loc), 0);
-            }
+            self.gl.uniform_1_i32(self.textured_texture_loc.as_ref(), 0);
 
             // Convert to NDC and normalize texture coordinates
             let (nx0, ny0) = self.screen_to_ndc(x0, y0);
@@ -949,7 +979,6 @@ impl RdpRenderer for OpenGLRdpRenderer {
             self.gl.disable_vertex_attrib_array(1);
             self.gl.disable(glow::SCISSOR_TEST);
             self.dirty = true;
-            self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
         }
     }
 
@@ -974,7 +1003,7 @@ impl RdpRenderer for OpenGLRdpRenderer {
         scissor: &ScissorBox,
     ) {
         unsafe {
-            self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.fbo));
+            self.ensure_fbo_bound();
 
             // Enable depth testing
             if self.zbuffer_enabled {
@@ -1007,20 +1036,15 @@ impl RdpRenderer for OpenGLRdpRenderer {
             // Upload texture data
             self.upload_dynamic_texture(tex_width, tex_height, texture);
 
-            // Use textured shader
+            // Use textured shader (cached sampler uniform)
             self.gl.use_program(Some(self.textured_program));
             self.current_program = ShaderProgram::Textured;
 
-            // Bind dynamic texture
+            // Bind dynamic texture and set sampler uniform (use cached location)
             self.gl.active_texture(glow::TEXTURE0);
             self.gl
                 .bind_texture(glow::TEXTURE_2D, Some(self.dynamic_texture));
-            let u_texture = self
-                .gl
-                .get_uniform_location(self.textured_program, "uTexture");
-            if let Some(loc) = u_texture {
-                self.gl.uniform_1_i32(Some(&loc), 0);
-            }
+            self.gl.uniform_1_i32(self.textured_texture_loc.as_ref(), 0);
 
             // Convert to NDC, depth, and normalize texture coordinates
             let (nx0, ny0) = self.screen_to_ndc(x0, y0);
@@ -1091,15 +1115,13 @@ impl RdpRenderer for OpenGLRdpRenderer {
             self.gl.disable(glow::BLEND);
             self.gl.disable(glow::SCISSOR_TEST);
             self.dirty = true;
-            self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
         }
     }
 
     fn clear_zbuffer(&mut self) {
         unsafe {
-            self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.fbo));
+            self.ensure_fbo_bound();
             self.gl.clear(glow::DEPTH_BUFFER_BIT);
-            self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
         }
     }
 
@@ -1135,7 +1157,7 @@ impl RdpRenderer for OpenGLRdpRenderer {
         scissor: &ScissorBox,
     ) {
         unsafe {
-            self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.fbo));
+            self.ensure_fbo_bound();
 
             if self.zbuffer_enabled {
                 self.gl.enable(glow::DEPTH_TEST);
@@ -1166,15 +1188,12 @@ impl RdpRenderer for OpenGLRdpRenderer {
             self.gl.use_program(Some(self.textured_shaded_program));
             self.current_program = ShaderProgram::TexturedShaded;
 
+            // Bind dynamic texture and set sampler uniform (use cached location)
             self.gl.active_texture(glow::TEXTURE0);
             self.gl
                 .bind_texture(glow::TEXTURE_2D, Some(self.dynamic_texture));
-            let u_texture = self
-                .gl
-                .get_uniform_location(self.textured_shaded_program, "uTexture");
-            if let Some(loc) = u_texture {
-                self.gl.uniform_1_i32(Some(&loc), 0);
-            }
+            self.gl
+                .uniform_1_i32(self.textured_shaded_texture_loc.as_ref(), 0);
 
             let (nx0, ny0) = self.screen_to_ndc(x0, y0);
             let (nx1, ny1) = self.screen_to_ndc(x1, y1);
@@ -1256,7 +1275,6 @@ impl RdpRenderer for OpenGLRdpRenderer {
             self.gl.disable(glow::BLEND);
             self.gl.disable(glow::SCISSOR_TEST);
             self.dirty = true;
-            self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
         }
     }
 
