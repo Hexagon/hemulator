@@ -244,6 +244,20 @@ pub trait RdpRenderer: Send {
     /// composited correctly over the existing framebuffer contents.
     fn set_alpha_blend(&mut self, enabled: bool);
 
+    /// Notify the renderer that TMEM has been updated (LOAD_TILE / LOAD_BLOCK /
+    /// LOAD_TLUT).  Hardware-accelerated renderers use this to invalidate any
+    /// cached GPU texture so that the next draw call re-uploads the tile data.
+    /// The default implementation is a no-op (software renderer never caches).
+    fn notify_tmem_loaded(&mut self) {}
+
+    /// Set the texture sampling filter for subsequent textured draw calls.
+    ///
+    /// When `bilinear` is `true` the renderer uses bilinear (GL_LINEAR)
+    /// filtering; when `false` it uses nearest-neighbour (GL_NEAREST).
+    /// The default implementation is a no-op (software renderer uses
+    /// nearest-neighbour unconditionally).
+    fn set_texture_filter(&mut self, _bilinear: bool) {}
+
     /// Resize the renderer to new dimensions
     #[allow(dead_code)]
     fn resize(&mut self, width: u32, height: u32);
