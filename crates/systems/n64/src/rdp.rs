@@ -672,13 +672,17 @@ impl Rdp {
     ///
     /// | bits  | field       | width |
     /// |-------|-------------|-------|
-    /// | 55:52 | sub_a_rgb0  |   4   |  ← A mux
-    /// | 51:48 | sub_b_rgb0  |   4   |  ← B mux
-    /// | 47:43 | mul_rgb0    |   5   |  ← C mux
-    /// | 42:39 | add_rgb0    |   4   |  ← D mux
+    /// | 55:52 | sub_a_rgb0  |   4   |  ← A mux (0-15)
+    /// | 51:48 | sub_b_rgb0  |   4   |  ← B mux (0-15)
+    /// | 47:43 | mul_rgb0    |   5   |  ← C mux (0-31)
+    /// | 42:39 | add_rgb0    |   4   |  ← D mux (0-15)
     ///
-    /// A mux codes: COMBINED=0, TEXEL0=1, TEXEL1=2, PRIMITIVE=3, SHADE=4, ENVIRONMENT=5
-    /// C mux codes: COMBINED=0, TEXEL0=1, TEXEL1=2, PRIMITIVE=3, SHADE=4, ENVIRONMENT=5
+    /// A mux codes relevant here: COMBINED=0, TEXEL0=1, TEXEL1=2, PRIMITIVE=3,
+    ///   SHADE=4, ENVIRONMENT=5, ONE=6, NOISE=7; 8-15 = 0.
+    /// C mux codes relevant here: COMBINED=0, TEXEL0=1, TEXEL1=2, PRIMITIVE=3,
+    ///   SHADE=4, ENVIRONMENT=5; 6-13 = alpha/LOD inputs; 14-31 = 0.
+    /// Only the patterns that affect the textured draw path are decoded; all
+    /// other A/C combinations fall back to [`TextureCombineMode::Decal`].
     fn detect_combine_mode(combine_mode: u64) -> TextureCombineMode {
         let a0 = (combine_mode >> 52) & 0xF; // A mux, 4-bit
         let c0 = (combine_mode >> 43) & 0x1F; // C mux, 5-bit
