@@ -54,6 +54,9 @@ pub enum InspectorTab {
 
     Ps1Gpu, // GPU state and VRAM viewer
 
+    C64Vic, // VIC-II video chip state
+    C64Sid, // SID audio chip state
+
     N64Vi,  // Video Interface registers and display configuration
     N64Rdp, // Reality Display Processor state
 }
@@ -94,6 +97,8 @@ impl InspectorTab {
             InspectorTab::Chip8Registers => "📝 Registers",
             InspectorTab::PcBda => "🖥️ BDA/EBDA",
             InspectorTab::Ps1Gpu => "🎮 GPU",
+            InspectorTab::C64Vic => "📺 VIC-II",
+            InspectorTab::C64Sid => "🎵 SID",
             InspectorTab::N64Vi => "📺 VI",
             InspectorTab::N64Rdp => "🖼️ RDP",
         }
@@ -180,6 +185,10 @@ pub fn get_tabs_for_system(system_type: Option<&SystemType>) -> Vec<InspectorTab
             SystemType::PS1 => {
                 tabs.push(InspectorTab::Mounts); // PS1 uses Mounts tab (BIOS, disc)
                 tabs.push(InspectorTab::Ps1Gpu);
+            }
+            SystemType::C64 => {
+                tabs.push(InspectorTab::Cartridge); // PRG/CRT
+                tabs.extend_from_slice(&[InspectorTab::C64Vic, InspectorTab::C64Sid]);
             }
             SystemType::N64 => {
                 tabs.push(InspectorTab::Cartridge); // N64 uses cartridge tab
@@ -275,6 +284,12 @@ pub fn render_inspector_tab(tab: &InspectorTab, ui: &mut Ui, tab_manager: &mut T
         }
         InspectorTab::Ps1Gpu => {
             render_ps1_gpu_tab(ui, tab_manager);
+        }
+        InspectorTab::C64Vic => {
+            render_c64_vic_tab(ui, tab_manager);
+        }
+        InspectorTab::C64Sid => {
+            render_c64_sid_tab(ui, tab_manager);
         }
         InspectorTab::N64Vi => {
             render_n64_vi_tab(ui, tab_manager);
@@ -2365,6 +2380,405 @@ fn render_nes_sprite0_tab(ui: &mut Ui, tab_manager: &mut TabManager) {
         });
 }
 
+/// Render the C64 VIC-II inspector tab
+fn render_c64_vic_tab(ui: &mut Ui, tab_manager: &TabManager) {
+    use egui::ScrollArea;
+
+    // C64 hardware color palette (VICE-style, RGBA 0xRRGGBB)
+    let palette: [u32; 16] = [
+        0x000000, // 0: Black
+        0xFFFFFF, // 1: White
+        0x880000, // 2: Red
+        0xAAFFEE, // 3: Cyan
+        0xCC44CC, // 4: Purple
+        0x00CC55, // 5: Green
+        0x0000AA, // 6: Blue
+        0xEEEE77, // 7: Yellow
+        0xDD8855, // 8: Orange
+        0x664400, // 9: Brown
+        0xFF7777, // 10: Light Red
+        0x333333, // 11: Dark Grey
+        0x777777, // 12: Medium Grey
+        0xAAFF66, // 13: Light Green
+        0x0088FF, // 14: Light Blue
+        0xBBBBBB, // 15: Light Grey
+    ];
+    let color_names = [
+        "Black",
+        "White",
+        "Red",
+        "Cyan",
+        "Purple",
+        "Green",
+        "Blue",
+        "Yellow",
+        "Orange",
+        "Brown",
+        "Light Red",
+        "Dark Grey",
+        "Med. Grey",
+        "Light Green",
+        "Light Blue",
+        "Light Grey",
+    ];
+
+    let available_height = ui.available_height();
+    ScrollArea::vertical()
+        .auto_shrink([false; 2])
+        .max_height(available_height)
+        .show(ui, |ui| {
+            if let Some(crate::egui_ui::SystemTileData::C64(data)) =
+                tab_manager.system_tile_data.as_ref()
+            {
+                let r = &data.vic_regs;
+
+                ui.heading("📺 VIC-II State");
+                ui.separator();
+                ui.add_space(6.0);
+
+                // ---- Timing ----
+                egui::CollapsingHeader::new("⏱ Timing")
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        let raster_irq_lo = r[0x12] as u32;
+                        let raster_irq_hi = ((r[0x11] >> 7) & 1) as u32;
+                        let raster_irq = raster_irq_lo | (raster_irq_hi << 8);
+
+                        egui::Grid::new("vic_timing_grid")
+                            .num_columns(2)
+                            .spacing([20.0, 4.0])
+                            .striped(true)
+                            .show(ui, |ui| {
+                                ui.strong("Raster line:");
+                                ui.monospace(format!("{}", data.raster_line));
+                                ui.end_row();
+                                ui.strong("IRQ raster:");
+                                ui.monospace(format!("{} (${:X})", raster_irq, raster_irq));
+                                ui.end_row();
+                                ui.strong("Cycles:");
+                                ui.monospace(format!("{}", data.total_cycles));
+                                ui.end_row();
+                            });
+                    });
+
+                ui.add_space(4.0);
+
+                // ---- Display mode ----
+                egui::CollapsingHeader::new("🖥 Display Mode")
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        let d011 = r[0x11];
+                        let d016 = r[0x16];
+                        let den = d011 & 0x10 != 0;
+                        let bmm = d011 & 0x20 != 0; // Bitmap mode
+                        let ecm = d011 & 0x40 != 0; // Extended color mode
+                        let mcm = d016 & 0x10 != 0; // Multicolor mode
+                        let rsel = d011 & 0x08 != 0; // 25/24 rows
+                        let csel = d016 & 0x08 != 0; // 40/38 cols
+                        let yscroll = d011 & 0x07;
+                        let xscroll = d016 & 0x07;
+
+                        let mode_name = match (ecm, bmm, mcm) {
+                            (false, false, false) => "Standard Character",
+                            (false, false, true) => "Multicolor Character",
+                            (false, true, false) => "Standard Bitmap",
+                            (false, true, true) => "Multicolor Bitmap",
+                            (true, false, false) => "Extended Background Color",
+                            _ => "Invalid",
+                        };
+
+                        egui::Grid::new("vic_mode_grid")
+                            .num_columns(2)
+                            .spacing([20.0, 4.0])
+                            .striped(true)
+                            .show(ui, |ui| {
+                                ui.strong("Mode:");
+                                ui.label(mode_name);
+                                ui.end_row();
+                                ui.strong("DEN:");
+                                ui.label(if den { "✅ On" } else { "❌ Off" });
+                                ui.end_row();
+                                ui.strong("ECM:");
+                                ui.label(if ecm { "✅" } else { "❌" });
+                                ui.end_row();
+                                ui.strong("BMM:");
+                                ui.label(if bmm { "✅" } else { "❌" });
+                                ui.end_row();
+                                ui.strong("MCM:");
+                                ui.label(if mcm { "✅" } else { "❌" });
+                                ui.end_row();
+                                ui.strong("RSEL (rows):");
+                                ui.label(if rsel { "25" } else { "24" });
+                                ui.end_row();
+                                ui.strong("CSEL (cols):");
+                                ui.label(if csel { "40" } else { "38" });
+                                ui.end_row();
+                                ui.strong("YSCROLL:");
+                                ui.monospace(format!("{}", yscroll));
+                                ui.end_row();
+                                ui.strong("XSCROLL:");
+                                ui.monospace(format!("{}", xscroll));
+                                ui.end_row();
+                            });
+                    });
+
+                ui.add_space(4.0);
+
+                // ---- Colors ----
+                egui::CollapsingHeader::new("🎨 Colors")
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        let border_idx = (r[0x20] & 0x0F) as usize;
+                        let bg0_idx = (r[0x21] & 0x0F) as usize;
+                        let bg1_idx = (r[0x22] & 0x0F) as usize;
+                        let bg2_idx = (r[0x23] & 0x0F) as usize;
+                        let bg3_idx = (r[0x24] & 0x0F) as usize;
+
+                        let swatch_color = |idx: usize| -> egui::Color32 {
+                            let rgb = palette[idx];
+                            egui::Color32::from_rgb(
+                                ((rgb >> 16) & 0xFF) as u8,
+                                ((rgb >> 8) & 0xFF) as u8,
+                                (rgb & 0xFF) as u8,
+                            )
+                        };
+
+                        egui::Grid::new("vic_colors_grid")
+                            .num_columns(3)
+                            .spacing([12.0, 4.0])
+                            .striped(true)
+                            .show(ui, |ui| {
+                                for (label, idx) in [
+                                    ("Border ($D020):", border_idx),
+                                    ("BG Color 0 ($D021):", bg0_idx),
+                                    ("BG Color 1 ($D022):", bg1_idx),
+                                    ("BG Color 2 ($D023):", bg2_idx),
+                                    ("BG Color 3 ($D024):", bg3_idx),
+                                ] {
+                                    ui.strong(label);
+                                    let (rect, _) = ui.allocate_exact_size(
+                                        egui::vec2(18.0, 14.0),
+                                        egui::Sense::hover(),
+                                    );
+                                    ui.painter().rect_filled(rect, 2.0, swatch_color(idx));
+                                    ui.painter().rect_stroke(
+                                        rect,
+                                        2.0,
+                                        egui::Stroke::new(1.0, egui::Color32::DARK_GRAY),
+                                        egui::StrokeKind::Inside,
+                                    );
+                                    ui.label(format!("{} ({})", color_names[idx], idx));
+                                    ui.end_row();
+                                }
+                            });
+
+                        ui.add_space(6.0);
+                        ui.label("C64 Palette:");
+                        ui.add_space(4.0);
+                        ui.horizontal_wrapped(|ui| {
+                            for (i, &rgb) in palette.iter().enumerate() {
+                                let color = egui::Color32::from_rgb(
+                                    ((rgb >> 16) & 0xFF) as u8,
+                                    ((rgb >> 8) & 0xFF) as u8,
+                                    (rgb & 0xFF) as u8,
+                                );
+                                let (rect, resp) = ui.allocate_exact_size(
+                                    egui::vec2(24.0, 18.0),
+                                    egui::Sense::hover(),
+                                );
+                                ui.painter().rect_filled(rect, 2.0, color);
+                                ui.painter().rect_stroke(
+                                    rect,
+                                    2.0,
+                                    egui::Stroke::new(1.0, egui::Color32::DARK_GRAY),
+                                    egui::StrokeKind::Inside,
+                                );
+                                resp.on_hover_text(format!("{}: {}", i, color_names[i]));
+                            }
+                        });
+                    });
+
+                ui.add_space(4.0);
+
+                // ---- Memory layout ----
+                egui::CollapsingHeader::new("💾 Memory Layout")
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        let d018 = r[0x18];
+                        let screen_base = ((d018 >> 4) & 0x0F) as u32 * 0x400;
+                        let char_base = ((d018 >> 1) & 0x07) as u32 * 0x800;
+
+                        egui::Grid::new("vic_mem_grid")
+                            .num_columns(2)
+                            .spacing([20.0, 4.0])
+                            .striped(true)
+                            .show(ui, |ui| {
+                                ui.strong("$D018 (Video matrix/char base):");
+                                ui.monospace(format!("${:02X}", d018));
+                                ui.end_row();
+                                ui.strong("Screen memory (within VIC bank):");
+                                ui.monospace(format!("${:04X}", screen_base));
+                                ui.end_row();
+                                ui.strong("Char/bitmap base (within VIC bank):");
+                                ui.monospace(format!("${:04X}", char_base));
+                                ui.end_row();
+                            });
+                    });
+
+                ui.add_space(4.0);
+
+                // ---- Sprites ----
+                egui::CollapsingHeader::new("👾 Sprites")
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        let sp_enable = r[0x15];
+                        let sp_mc = r[0x1C];
+                        let sp_exp_x = r[0x1D];
+                        let sp_exp_y = r[0x17];
+                        let sp_priority = r[0x1B];
+                        let sp_sp_coll = r[0x1E];
+                        let sp_bg_coll = r[0x1F];
+
+                        egui::Grid::new("vic_sprite_overview")
+                            .num_columns(2)
+                            .spacing([20.0, 4.0])
+                            .striped(true)
+                            .show(ui, |ui| {
+                                ui.strong("Enable ($D015):");
+                                ui.monospace(format!("${:02X} ({:08b}b)", sp_enable, sp_enable));
+                                ui.end_row();
+                                ui.strong("Multicolor ($D01C):");
+                                ui.monospace(format!("${:02X}", sp_mc));
+                                ui.end_row();
+                                ui.strong("X-expand ($D01D):");
+                                ui.monospace(format!("${:02X}", sp_exp_x));
+                                ui.end_row();
+                                ui.strong("Y-expand ($D017):");
+                                ui.monospace(format!("${:02X}", sp_exp_y));
+                                ui.end_row();
+                                ui.strong("Priority ($D01B):");
+                                ui.monospace(format!("${:02X}", sp_priority));
+                                ui.end_row();
+                                ui.strong("SP-SP collision ($D01E):");
+                                ui.monospace(format!("${:02X}", sp_sp_coll));
+                                ui.end_row();
+                                ui.strong("SP-BG collision ($D01F):");
+                                ui.monospace(format!("${:02X}", sp_bg_coll));
+                                ui.end_row();
+                            });
+
+                        ui.add_space(6.0);
+                        ui.label("Per-sprite positions:");
+                        egui::Grid::new("vic_sprite_pos")
+                            .num_columns(5)
+                            .spacing([8.0, 4.0])
+                            .striped(true)
+                            .show(ui, |ui| {
+                                ui.strong("#");
+                                ui.strong("X");
+                                ui.strong("Y");
+                                ui.strong("En");
+                                ui.strong("MC");
+                                ui.end_row();
+                                let x_msb = r[0x10]; // Sprite X MSBs
+                                for i in 0..8_usize {
+                                    let xlo = r[i * 2] as u32;
+                                    let xhi = ((x_msb >> i) & 1) as u32;
+                                    let x = xlo | (xhi << 8);
+                                    let y = r[i * 2 + 1];
+                                    let enabled = (sp_enable >> i) & 1 != 0;
+                                    let multicolor = (sp_mc >> i) & 1 != 0;
+                                    ui.label(format!("{}", i));
+                                    ui.monospace(format!("{}", x));
+                                    ui.monospace(format!("{}", y));
+                                    ui.label(if enabled { "✅" } else { "❌" });
+                                    ui.label(if multicolor { "MC" } else { "—" });
+                                    ui.end_row();
+                                }
+                            });
+                    });
+
+                ui.add_space(4.0);
+
+                // ---- IRQ ----
+                egui::CollapsingHeader::new("🔔 IRQ")
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        let irq_flag = r[0x19];
+                        let irq_mask = r[0x1A];
+                        egui::Grid::new("vic_irq_grid")
+                            .num_columns(2)
+                            .spacing([20.0, 4.0])
+                            .striped(true)
+                            .show(ui, |ui| {
+                                ui.strong("IRQ flags ($D019):");
+                                ui.monospace(format!("${:02X}", irq_flag));
+                                ui.end_row();
+                                ui.strong("IRQ mask ($D01A):");
+                                ui.monospace(format!("${:02X}", irq_mask));
+                                ui.end_row();
+                                ui.strong("Raster IRQ:");
+                                ui.label(if irq_mask & 0x01 != 0 {
+                                    "enabled"
+                                } else {
+                                    "disabled"
+                                });
+                                ui.end_row();
+                                ui.strong("Sprite-BG collision IRQ:");
+                                ui.label(if irq_mask & 0x02 != 0 {
+                                    "enabled"
+                                } else {
+                                    "disabled"
+                                });
+                                ui.end_row();
+                                ui.strong("Sprite-Sprite collision IRQ:");
+                                ui.label(if irq_mask & 0x04 != 0 {
+                                    "enabled"
+                                } else {
+                                    "disabled"
+                                });
+                                ui.end_row();
+                            });
+                    });
+
+                ui.add_space(4.0);
+
+                // ---- Raw register dump ----
+                egui::CollapsingHeader::new("🔬 Raw VIC-II Registers ($D000–$D02E)")
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        egui::Grid::new("vic_raw_regs")
+                            .num_columns(4)
+                            .spacing([8.0, 4.0])
+                            .striped(true)
+                            .show(ui, |ui| {
+                                ui.strong("Reg");
+                                ui.strong("Hex");
+                                ui.strong("Dec");
+                                ui.strong("Bin");
+                                ui.end_row();
+                                for (i, &v) in r[..=0x2E].iter().enumerate() {
+                                    ui.monospace(format!("$D{:03X}", i));
+                                    ui.monospace(format!("${:02X}", v));
+                                    ui.monospace(format!("{}", v));
+                                    ui.monospace(format!("{:08b}", v));
+                                    ui.end_row();
+                                }
+                            });
+                    });
+            } else {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(40.0);
+                    ui.label(egui::RichText::new("📺").size(48.0));
+                    ui.add_space(10.0);
+                    ui.heading("VIC-II State");
+                    ui.add_space(10.0);
+                    ui.label("Load a C64 program to inspect the VIC-II video chip.");
+                });
+            }
+        });
+}
+
 /// Render the N64 Video Interface (VI) inspector tab.
 fn render_n64_vi_tab(ui: &mut Ui, tab_manager: &TabManager) {
     egui::ScrollArea::vertical()
@@ -2376,6 +2790,265 @@ fn render_n64_vi_tab(ui: &mut Ui, tab_manager: &TabManager) {
             } else {
                 ui.centered_and_justified(|ui| {
                     ui.label("Load an N64 ROM to see Video Interface information.");
+                });
+            }
+        });
+}
+
+/// Render the C64 SID inspector tab
+fn render_c64_sid_tab(ui: &mut Ui, tab_manager: &TabManager) {
+    use egui::ScrollArea;
+
+    let available_height = ui.available_height();
+    ScrollArea::vertical()
+        .auto_shrink([false; 2])
+        .max_height(available_height)
+        .show(ui, |ui| {
+            if let Some(crate::egui_ui::SystemTileData::C64(data)) =
+                tab_manager.system_tile_data.as_ref()
+            {
+                let r = &data.sid_regs;
+
+                ui.heading("🎵 SID State");
+                ui.separator();
+                ui.add_space(6.0);
+
+                // Helper: decode waveform name
+                let waveform_name = |ctrl: u8| -> &'static str {
+                    match (ctrl >> 4) & 0x0F {
+                        0x00 => "Off",
+                        0x01 => "Triangle",
+                        0x02 => "Sawtooth",
+                        0x04 => "Pulse",
+                        0x08 => "Noise",
+                        0x03 => "Tri+Saw",
+                        0x05 => "Tri+Pulse",
+                        0x06 => "Saw+Pulse",
+                        0x09 => "Tri+Noise",
+                        _ => "Combined",
+                    }
+                };
+
+                // Voice details
+                for voice_idx in 0..3_usize {
+                    let base = voice_idx * 7;
+                    let freq_lo = r[base] as u16;
+                    let freq_hi = r[base + 1] as u16;
+                    let freq = (freq_hi << 8) | freq_lo;
+                    let pw_lo = r[base + 2] as u16;
+                    let pw_hi = (r[base + 3] & 0x0F) as u16;
+                    let pw = (pw_hi << 8) | pw_lo;
+                    let ctrl = r[base + 4];
+                    let ad = r[base + 5];
+                    let sr = r[base + 6];
+                    let attack = (ad >> 4) & 0x0F;
+                    let decay = ad & 0x0F;
+                    let sustain = (sr >> 4) & 0x0F;
+                    let release_val = sr & 0x0F;
+                    let gate = ctrl & 0x01 != 0;
+                    let sync = ctrl & 0x02 != 0;
+                    let ring = ctrl & 0x04 != 0;
+                    let test = ctrl & 0x08 != 0;
+                    // Frequency in Hz (PAL: 985248 Hz clock, 16-bit divider)
+                    let freq_hz = if freq > 0 {
+                        (freq as f32 * 985_248.0) / 16_777_216.0
+                    } else {
+                        0.0
+                    };
+
+                    egui::CollapsingHeader::new(format!(
+                        "Voice {} — {} ({:.1} Hz)",
+                        voice_idx + 1,
+                        waveform_name(ctrl),
+                        freq_hz
+                    ))
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        egui::Grid::new(format!("sid_voice_{}_grid", voice_idx))
+                            .num_columns(2)
+                            .spacing([20.0, 4.0])
+                            .striped(true)
+                            .show(ui, |ui| {
+                                ui.strong("Frequency ($00/$01):");
+                                ui.monospace(format!("${:04X} ({:.2} Hz)", freq, freq_hz));
+                                ui.end_row();
+                                ui.strong("Pulse width ($02/$03):");
+                                ui.monospace(format!("${:03X}", pw));
+                                ui.end_row();
+                                ui.strong("Waveform:");
+                                ui.label(waveform_name(ctrl));
+                                ui.end_row();
+                                ui.strong("Gate:");
+                                ui.label(if gate { "✅ On" } else { "❌ Off" });
+                                ui.end_row();
+                                ui.strong("Sync:");
+                                ui.label(if sync { "✅" } else { "❌" });
+                                ui.end_row();
+                                ui.strong("Ring mod:");
+                                ui.label(if ring { "✅" } else { "❌" });
+                                ui.end_row();
+                                ui.strong("Test bit:");
+                                ui.label(if test { "✅" } else { "❌" });
+                                ui.end_row();
+                                ui.strong("Attack:");
+                                ui.monospace(format!("{}", attack));
+                                ui.end_row();
+                                ui.strong("Decay:");
+                                ui.monospace(format!("{}", decay));
+                                ui.end_row();
+                                ui.strong("Sustain:");
+                                ui.monospace(format!("{}", sustain));
+                                ui.end_row();
+                                ui.strong("Release:");
+                                ui.monospace(format!("{}", release_val));
+                                ui.end_row();
+                                ui.strong("Control byte ($04):");
+                                ui.monospace(format!("${:02X} ({:08b}b)", ctrl, ctrl));
+                                ui.end_row();
+                            });
+
+                        // Envelope bar (sustain level visualisation)
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            ui.strong("Sustain level:");
+                            let frac = sustain as f32 / 15.0;
+                            let desired = egui::vec2(120.0, 14.0);
+                            let (rect, _) = ui.allocate_exact_size(desired, egui::Sense::hover());
+                            ui.painter()
+                                .rect_filled(rect, 2.0, egui::Color32::from_gray(40));
+                            let fill = egui::Rect::from_min_size(
+                                rect.min,
+                                egui::vec2(rect.width() * frac, rect.height()),
+                            );
+                            ui.painter().rect_filled(
+                                fill,
+                                2.0,
+                                egui::Color32::from_rgb(100, 200, 100),
+                            );
+                            ui.label(format!("{}/15", sustain));
+                        });
+                    });
+
+                    ui.add_space(4.0);
+                }
+
+                // ---- Filter ----
+                egui::CollapsingHeader::new("🔀 Filter ($D415–$D418)")
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        let fc_lo = (r[0x15] & 0x07) as u16;
+                        let fc_hi = r[0x16] as u16;
+                        let cutoff = (fc_hi << 3) | fc_lo;
+                        let res_filt = r[0x17];
+                        let resonance = (res_filt >> 4) & 0x0F;
+                        let filt_v1 = res_filt & 0x01 != 0;
+                        let filt_v2 = res_filt & 0x02 != 0;
+                        let filt_v3 = res_filt & 0x04 != 0;
+                        let filt_ext = res_filt & 0x08 != 0;
+                        let mode_vol = r[0x18];
+                        let lp = mode_vol & 0x10 != 0;
+                        let bp = mode_vol & 0x20 != 0;
+                        let hp = mode_vol & 0x40 != 0;
+                        let v3off = mode_vol & 0x80 != 0;
+                        let volume = mode_vol & 0x0F;
+                        let cutoff_hz = cutoff as f32 * 985_248.0 / (2048.0 * 2048.0);
+
+                        egui::Grid::new("sid_filter_grid")
+                            .num_columns(2)
+                            .spacing([20.0, 4.0])
+                            .striped(true)
+                            .show(ui, |ui| {
+                                ui.strong("Cutoff ($D415/$D416):");
+                                ui.monospace(format!("{} ({:.0} Hz approx.)", cutoff, cutoff_hz));
+                                ui.end_row();
+                                ui.strong("Resonance:");
+                                ui.monospace(format!("{}", resonance));
+                                ui.end_row();
+                                ui.strong("Filter routing:");
+                                ui.label(format!(
+                                    "V1:{} V2:{} V3:{} Ext:{}",
+                                    if filt_v1 { "✅" } else { "❌" },
+                                    if filt_v2 { "✅" } else { "❌" },
+                                    if filt_v3 { "✅" } else { "❌" },
+                                    if filt_ext { "✅" } else { "❌" },
+                                ));
+                                ui.end_row();
+                                ui.strong("Filter mode:");
+                                let mode_str = match (hp, bp, lp) {
+                                    (false, false, false) => "Off".to_string(),
+                                    (false, false, true) => "Low-pass".to_string(),
+                                    (false, true, false) => "Band-pass".to_string(),
+                                    (true, false, false) => "High-pass".to_string(),
+                                    (false, true, true) => "LP + BP".to_string(),
+                                    (true, false, true) => "Notch (HP+LP)".to_string(),
+                                    (true, true, false) => "HP + BP".to_string(),
+                                    (true, true, true) => "All-pass".to_string(),
+                                };
+                                ui.label(mode_str);
+                                ui.end_row();
+                                ui.strong("Voice 3 disconnect:");
+                                ui.label(if v3off { "✅" } else { "❌" });
+                                ui.end_row();
+                                ui.strong("Master volume:");
+                                ui.monospace(format!("{}/15", volume));
+                                ui.end_row();
+                            });
+
+                        // Volume bar
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            ui.strong("Volume:");
+                            let frac = volume as f32 / 15.0;
+                            let desired = egui::vec2(120.0, 14.0);
+                            let (rect, _) = ui.allocate_exact_size(desired, egui::Sense::hover());
+                            ui.painter()
+                                .rect_filled(rect, 2.0, egui::Color32::from_gray(40));
+                            let fill = egui::Rect::from_min_size(
+                                rect.min,
+                                egui::vec2(rect.width() * frac, rect.height()),
+                            );
+                            ui.painter().rect_filled(
+                                fill,
+                                2.0,
+                                egui::Color32::from_rgb(100, 200, 255),
+                            );
+                            ui.label(format!("{}/15", volume));
+                        });
+                    });
+
+                ui.add_space(4.0);
+
+                // ---- Raw SID register dump ----
+                egui::CollapsingHeader::new("🔬 Raw SID Registers ($D400–$D41C)")
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        egui::Grid::new("sid_raw_regs")
+                            .num_columns(4)
+                            .spacing([8.0, 4.0])
+                            .striped(true)
+                            .show(ui, |ui| {
+                                ui.strong("Reg");
+                                ui.strong("Hex");
+                                ui.strong("Dec");
+                                ui.strong("Bin");
+                                ui.end_row();
+                                for (i, &v) in r[..=0x1C].iter().enumerate() {
+                                    ui.monospace(format!("$D4{:02X}", i));
+                                    ui.monospace(format!("${:02X}", v));
+                                    ui.monospace(format!("{}", v));
+                                    ui.monospace(format!("{:08b}", v));
+                                    ui.end_row();
+                                }
+                            });
+                    });
+            } else {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(40.0);
+                    ui.label(egui::RichText::new("🎵").size(48.0));
+                    ui.add_space(10.0);
+                    ui.heading("SID State");
+                    ui.add_space(10.0);
+                    ui.label("Load a C64 program to inspect the SID audio chip.");
                 });
             }
         });

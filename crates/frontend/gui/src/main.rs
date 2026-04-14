@@ -4872,7 +4872,13 @@ fn main() {
                 }
                 EmulatorSystem::Atari5200(_) => SystemDebugInfo::new("Atari 5200".to_string()),
                 EmulatorSystem::MegaDrive(_) => SystemDebugInfo::new("Mega Drive".to_string()),
-                EmulatorSystem::C64(_) => SystemDebugInfo::new("C64".to_string()),
+                EmulatorSystem::C64(s) => {
+                    if let Some(debugger) = s.debugger() {
+                        SystemDebugInfo::from_debugger("C64", debugger)
+                    } else {
+                        SystemDebugInfo::new("C64".to_string())
+                    }
+                }
             };
             egui_app.tab_manager.update_debug_info(debug_info);
 
@@ -4930,7 +4936,10 @@ fn main() {
                 }
                 EmulatorSystem::Atari5200(_) => None,
                 EmulatorSystem::MegaDrive(_) => None,
-                EmulatorSystem::C64(_) => None,
+                EmulatorSystem::C64(s) => {
+                    let debugger: &dyn Debugger = s.as_ref();
+                    Some(create_enhanced_debug_state("C64", debugger, &sys))
+                }
             };
 
             if let Some(enhanced_state) = enhanced_state_opt {
@@ -4955,7 +4964,7 @@ fn main() {
                     EmulatorSystem::GameAndWatch(s) => Some(s.as_ref()),
                     EmulatorSystem::Atari5200(_) => None,
                     EmulatorSystem::MegaDrive(_) => None,
-                    EmulatorSystem::C64(_) => None,
+                    EmulatorSystem::C64(s) => Some(s.as_ref()),
                 };
 
                 if let Some(debugger) = debugger {
@@ -5282,6 +5291,15 @@ fn main() {
                         irq: gpu_data.irq,
                     };
                     egui_app.tab_manager.update_ps1_gpu_data(ps1_gpu);
+                }
+                EmulatorSystem::C64(s) => {
+                    let tile_data = egui_ui::SystemTileData::C64(egui_ui::C64InspectorData {
+                        vic_regs: s.get_vic_regs(),
+                        sid_regs: s.get_sid_regs(),
+                        raster_line: s.get_raster_line(),
+                        total_cycles: s.get_total_cycles(),
+                    });
+                    egui_app.tab_manager.update_system_tile_data(tile_data);
                 }
                 EmulatorSystem::N64(sys) => {
                     let vi_data = sys.get_vi_inspector_data();

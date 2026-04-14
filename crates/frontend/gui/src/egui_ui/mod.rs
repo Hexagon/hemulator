@@ -19,7 +19,7 @@ pub use layout::EguiApp;
 pub use menu_bar::MenuAction;
 pub use property_pane::{InputConfigSource, PropertyAction};
 pub use tabs::{
-    Atari2600TileData, CartridgeData, Chip8TileData, ColecoVisionTileData, DebugAction, GbTileData,
-    GbaTileData, MountInfo, N64RdpData, N64ViData, NesTileData, PcBdaData, Ps1GpuData,
-    Sg1000TileData, SmsTileData, SnesTileData, SystemTileData, Tab, TabAction,
+    Atari2600TileData, C64InspectorData, CartridgeData, Chip8TileData, ColecoVisionTileData,
+    DebugAction, GbTileData, GbaTileData, MountInfo, N64RdpData, N64ViData, NesTileData, PcBdaData,
+    Ps1GpuData, Sg1000TileData, SmsTileData, SnesTileData, SystemTileData, Tab, TabAction,
 };
