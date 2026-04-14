@@ -92,6 +92,26 @@ pub struct OpenGLRdpRenderer {
 
     /// Whether the GPU framebuffer has been modified since the last read_pixels
     dirty: bool,
+
+    // ── TMEM texture cache ────────────────────────────────────────────────────
+    /// Set to `true` by `notify_tmem_loaded()` and cleared after each texture
+    /// upload.  When `false` and dimensions match, `upload_dynamic_texture`
+    /// skips both CPU sampling and `tex_image_2d`, reusing the existing GPU
+    /// texture from the previous draw.
+    tmem_dirty: bool,
+    /// Whether the current dynamic texture uses bilinear (GL_LINEAR) sampling.
+    texture_filter_linear: bool,
+
+    // ── GL render-state cache ─────────────────────────────────────────────────
+    /// Cached GL SCISSOR_TEST enable/disable state (avoid driver round-trips).
+    scissor_test_enabled: bool,
+    /// Cached GL DEPTH_TEST enable/disable state.
+    depth_test_enabled: bool,
+    /// Cached GL BLEND enable/disable state.
+    blend_enabled: bool,
+    /// Cached scissor rectangle `(x, y, width, height)` in GL convention
+    /// (y from bottom, height upwards).  `None` means unknown / never set.
+    current_scissor: Option<(i32, i32, i32, i32)>,
 }
 
 impl OpenGLRdpRenderer {
@@ -241,6 +261,14 @@ impl OpenGLRdpRenderer {
                 alpha_blend_enabled: false,
                 fbo_bound: false,
                 dirty: false,
+                // TMEM cache: start dirty so the first draw always uploads
+                tmem_dirty: true,
+                texture_filter_linear: false,
+                // GL state cache: unknown initial state, force-set on first use
+                scissor_test_enabled: false,
+                depth_test_enabled: false,
+                blend_enabled: false,
+                current_scissor: None,
             })
         }
     }
@@ -294,6 +322,55 @@ impl OpenGLRdpRenderer {
         }
     }
 
+    // ── Cached GL state helpers ───────────────────────────────────────────────
+    // Each helper calls the underlying GL function only when the desired state
+    // differs from the cached value, eliminating redundant driver round-trips.
+
+    #[inline]
+    unsafe fn set_scissor_test(&mut self, enabled: bool) {
+        if self.scissor_test_enabled != enabled {
+            if enabled {
+                self.gl.enable(glow::SCISSOR_TEST);
+            } else {
+                self.gl.disable(glow::SCISSOR_TEST);
+            }
+            self.scissor_test_enabled = enabled;
+        }
+    }
+
+    #[inline]
+    unsafe fn set_depth_test(&mut self, enabled: bool) {
+        if self.depth_test_enabled != enabled {
+            if enabled {
+                self.gl.enable(glow::DEPTH_TEST);
+            } else {
+                self.gl.disable(glow::DEPTH_TEST);
+            }
+            self.depth_test_enabled = enabled;
+        }
+    }
+
+    #[inline]
+    unsafe fn set_blend(&mut self, enabled: bool) {
+        if self.blend_enabled != enabled {
+            if enabled {
+                self.gl.enable(glow::BLEND);
+            } else {
+                self.gl.disable(glow::BLEND);
+            }
+            self.blend_enabled = enabled;
+        }
+    }
+
+    /// Apply scissor rectangle only when it differs from the cached value.
+    #[inline]
+    unsafe fn apply_scissor(&mut self, x: i32, y: i32, w: i32, h: i32) {
+        if self.current_scissor != Some((x, y, w, h)) {
+            self.gl.scissor(x, y, w, h);
+            self.current_scissor = Some((x, y, w, h));
+        }
+    }
+
     /// Convert screen coordinates to normalized device coordinates
     fn screen_to_ndc(&self, x: i32, y: i32) -> (f32, f32) {
         let nx = (x as f32 / self.width as f32) * 2.0 - 1.0;
@@ -315,19 +392,32 @@ impl OpenGLRdpRenderer {
         z as f32 / 65535.0
     }
 
-    /// Upload texture data from CPU-sampled texture function
-    /// This samples the texture function and uploads it to GPU
+    /// Upload texture data from CPU-sampled texture function.
+    ///
+    /// Skips the expensive CPU sampling and `tex_image_2d` call when the TMEM
+    /// contents have not changed since the last upload (`tmem_dirty == false`)
+    /// and the tile dimensions are identical.  This avoids re-uploading the
+    /// same texture for every triangle in a batch.
     unsafe fn upload_dynamic_texture(
         &mut self,
         width: u32,
         height: u32,
         texture_fn: &dyn Fn(f32, f32) -> u32,
     ) {
-        // Only recreate if size changed
-        if width != self.dynamic_texture_width || height != self.dynamic_texture_height {
-            self.dynamic_texture_width = width;
-            self.dynamic_texture_height = height;
+        let dims_changed =
+            width != self.dynamic_texture_width || height != self.dynamic_texture_height;
+
+        // Skip upload if TMEM is unchanged and dimensions are the same
+        if !self.tmem_dirty && !dims_changed {
+            // Just bind the previously uploaded texture – no re-upload needed.
+            self.gl
+                .bind_texture(glow::TEXTURE_2D, Some(self.dynamic_texture));
+            return;
         }
+
+        // Update cached dimensions
+        self.dynamic_texture_width = width;
+        self.dynamic_texture_height = height;
 
         // Sample the texture function into a buffer
         let mut pixels = vec![0u8; (width * height * 4) as usize];
@@ -363,6 +453,9 @@ impl OpenGLRdpRenderer {
             glow::UNSIGNED_BYTE,
             glow::PixelUnpackData::Slice(Some(&pixels)),
         );
+
+        // Mark TMEM as clean: the GPU texture now reflects current TMEM
+        self.tmem_dirty = false;
     }
 }
 
@@ -446,8 +539,8 @@ impl RdpRenderer for OpenGLRdpRenderer {
             self.ensure_fbo_bound();
 
             // Enable scissor test
-            self.gl.enable(glow::SCISSOR_TEST);
-            self.gl.scissor(
+            self.set_scissor_test(true);
+            self.apply_scissor(
                 scissor.x_min as i32,
                 (self.height - scissor.y_max) as i32,
                 (scissor.x_max - scissor.x_min) as i32,
@@ -504,7 +597,7 @@ impl RdpRenderer for OpenGLRdpRenderer {
             self.gl.draw_arrays(glow::TRIANGLES, 0, 6);
 
             self.gl.disable_vertex_attrib_array(0);
-            self.gl.disable(glow::SCISSOR_TEST);
+            self.set_scissor_test(false);
             self.dirty = true;
         }
     }
@@ -534,8 +627,8 @@ impl RdpRenderer for OpenGLRdpRenderer {
             self.ensure_fbo_bound();
 
             // Enable scissor test
-            self.gl.enable(glow::SCISSOR_TEST);
-            self.gl.scissor(
+            self.set_scissor_test(true);
+            self.apply_scissor(
                 scissor.x_min as i32,
                 (self.height - scissor.y_max) as i32,
                 (scissor.x_max - scissor.x_min) as i32,
@@ -590,7 +683,7 @@ impl RdpRenderer for OpenGLRdpRenderer {
             self.gl.draw_arrays(glow::TRIANGLES, 0, 3);
 
             self.gl.disable_vertex_attrib_array(0);
-            self.gl.disable(glow::SCISSOR_TEST);
+            self.set_scissor_test(false);
             self.dirty = true;
         }
     }
@@ -614,13 +707,13 @@ impl RdpRenderer for OpenGLRdpRenderer {
 
             // Enable depth testing
             if self.zbuffer_enabled {
-                self.gl.enable(glow::DEPTH_TEST);
+                self.set_depth_test(true);
                 self.gl.depth_func(glow::LESS);
             }
 
             // Enable scissor test
-            self.gl.enable(glow::SCISSOR_TEST);
-            self.gl.scissor(
+            self.set_scissor_test(true);
+            self.apply_scissor(
                 scissor.x_min as i32,
                 (self.height - scissor.y_max) as i32,
                 (scissor.x_max - scissor.x_min) as i32,
@@ -689,8 +782,8 @@ impl RdpRenderer for OpenGLRdpRenderer {
 
             self.gl.disable_vertex_attrib_array(0);
             self.gl.disable_vertex_attrib_array(2);
-            self.gl.disable(glow::DEPTH_TEST);
-            self.gl.disable(glow::SCISSOR_TEST);
+            self.set_depth_test(false);
+            self.set_scissor_test(false);
             self.dirty = true;
         }
     }
@@ -712,8 +805,8 @@ impl RdpRenderer for OpenGLRdpRenderer {
             self.ensure_fbo_bound();
 
             // Enable scissor test
-            self.gl.enable(glow::SCISSOR_TEST);
-            self.gl.scissor(
+            self.set_scissor_test(true);
+            self.apply_scissor(
                 scissor.x_min as i32,
                 (self.height - scissor.y_max) as i32,
                 (scissor.x_max - scissor.x_min) as i32,
@@ -769,7 +862,7 @@ impl RdpRenderer for OpenGLRdpRenderer {
 
             self.gl.disable_vertex_attrib_array(0);
             self.gl.disable_vertex_attrib_array(1);
-            self.gl.disable(glow::SCISSOR_TEST);
+            self.set_scissor_test(false);
             self.dirty = true;
         }
     }
@@ -795,13 +888,13 @@ impl RdpRenderer for OpenGLRdpRenderer {
 
             // Enable depth testing
             if self.zbuffer_enabled {
-                self.gl.enable(glow::DEPTH_TEST);
+                self.set_depth_test(true);
                 self.gl.depth_func(glow::LESS);
             }
 
             // Enable scissor test
-            self.gl.enable(glow::SCISSOR_TEST);
-            self.gl.scissor(
+            self.set_scissor_test(true);
+            self.apply_scissor(
                 scissor.x_min as i32,
                 (self.height - scissor.y_max) as i32,
                 (scissor.x_max - scissor.x_min) as i32,
@@ -872,8 +965,8 @@ impl RdpRenderer for OpenGLRdpRenderer {
             self.gl.disable_vertex_attrib_array(0);
             self.gl.disable_vertex_attrib_array(1);
             self.gl.disable_vertex_attrib_array(2);
-            self.gl.disable(glow::DEPTH_TEST);
-            self.gl.disable(glow::SCISSOR_TEST);
+            self.set_depth_test(false);
+            self.set_scissor_test(false);
             self.dirty = true;
         }
     }
@@ -899,8 +992,8 @@ impl RdpRenderer for OpenGLRdpRenderer {
             self.ensure_fbo_bound();
 
             // Enable scissor test
-            self.gl.enable(glow::SCISSOR_TEST);
-            self.gl.scissor(
+            self.set_scissor_test(true);
+            self.apply_scissor(
                 scissor.x_min as i32,
                 (self.height - scissor.y_max) as i32,
                 (scissor.x_max - scissor.x_min) as i32,
@@ -977,7 +1070,7 @@ impl RdpRenderer for OpenGLRdpRenderer {
 
             self.gl.disable_vertex_attrib_array(0);
             self.gl.disable_vertex_attrib_array(1);
-            self.gl.disable(glow::SCISSOR_TEST);
+            self.set_scissor_test(false);
             self.dirty = true;
         }
     }
@@ -1007,20 +1100,20 @@ impl RdpRenderer for OpenGLRdpRenderer {
 
             // Enable depth testing
             if self.zbuffer_enabled {
-                self.gl.enable(glow::DEPTH_TEST);
+                self.set_depth_test(true);
                 self.gl.depth_func(glow::LESS);
             }
 
             // Enable alpha blending if requested
             if self.alpha_blend_enabled {
-                self.gl.enable(glow::BLEND);
+                self.set_blend(true);
                 self.gl
                     .blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
             }
 
             // Enable scissor test
-            self.gl.enable(glow::SCISSOR_TEST);
-            self.gl.scissor(
+            self.set_scissor_test(true);
+            self.apply_scissor(
                 scissor.x_min as i32,
                 (self.height - scissor.y_max) as i32,
                 (scissor.x_max - scissor.x_min) as i32,
@@ -1111,9 +1204,9 @@ impl RdpRenderer for OpenGLRdpRenderer {
             self.gl.disable_vertex_attrib_array(0);
             self.gl.disable_vertex_attrib_array(1);
             self.gl.disable_vertex_attrib_array(2);
-            self.gl.disable(glow::DEPTH_TEST);
-            self.gl.disable(glow::BLEND);
-            self.gl.disable(glow::SCISSOR_TEST);
+            self.set_depth_test(false);
+            self.set_blend(false);
+            self.set_scissor_test(false);
             self.dirty = true;
         }
     }
@@ -1160,18 +1253,18 @@ impl RdpRenderer for OpenGLRdpRenderer {
             self.ensure_fbo_bound();
 
             if self.zbuffer_enabled {
-                self.gl.enable(glow::DEPTH_TEST);
+                self.set_depth_test(true);
                 self.gl.depth_func(glow::LESS);
             }
 
             if self.alpha_blend_enabled {
-                self.gl.enable(glow::BLEND);
+                self.set_blend(true);
                 self.gl
                     .blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
             }
 
-            self.gl.enable(glow::SCISSOR_TEST);
-            self.gl.scissor(
+            self.set_scissor_test(true);
+            self.apply_scissor(
                 scissor.x_min as i32,
                 (self.height - scissor.y_max) as i32,
                 (scissor.x_max - scissor.x_min) as i32,
@@ -1271,9 +1364,9 @@ impl RdpRenderer for OpenGLRdpRenderer {
 
             self.gl.draw_arrays(glow::TRIANGLES, 0, 3);
 
-            self.gl.disable(glow::DEPTH_TEST);
-            self.gl.disable(glow::BLEND);
-            self.gl.disable(glow::SCISSOR_TEST);
+            self.set_depth_test(false);
+            self.set_blend(false);
+            self.set_scissor_test(false);
             self.dirty = true;
         }
     }
@@ -1285,6 +1378,13 @@ impl RdpRenderer for OpenGLRdpRenderer {
     fn reset(&mut self) {
         self.clear(0xFF000000);
         self.clear_zbuffer();
+        // Invalidate TMEM cache so the first draw after reset re-uploads
+        self.tmem_dirty = true;
+        // Reset GL state cache (clear / clear_zbuffer may leave unknown state)
+        self.scissor_test_enabled = false;
+        self.depth_test_enabled = false;
+        self.blend_enabled = false;
+        self.current_scissor = None;
     }
 
     fn name(&self) -> &'static str {
@@ -1293,6 +1393,31 @@ impl RdpRenderer for OpenGLRdpRenderer {
 
     fn is_hardware_accelerated(&self) -> bool {
         true
+    }
+
+    fn notify_tmem_loaded(&mut self) {
+        // Mark the GPU texture as stale so the next textured draw re-uploads it.
+        self.tmem_dirty = true;
+    }
+
+    fn set_texture_filter(&mut self, bilinear: bool) {
+        if self.texture_filter_linear == bilinear {
+            return; // No change – avoid the GL call
+        }
+        self.texture_filter_linear = bilinear;
+        let filter = if bilinear {
+            glow::LINEAR
+        } else {
+            glow::NEAREST
+        } as i32;
+        unsafe {
+            self.gl
+                .bind_texture(glow::TEXTURE_2D, Some(self.dynamic_texture));
+            self.gl
+                .tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, filter);
+            self.gl
+                .tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, filter);
+        }
     }
 }
 
