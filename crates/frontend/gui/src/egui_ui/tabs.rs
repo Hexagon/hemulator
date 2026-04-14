@@ -2085,7 +2085,7 @@ impl TabManager {
                                         let g = ((color >> 8) & 0xFF) as u8;
                                         let b = (color & 0xFF) as u8;
                                         let rect_size = egui::vec2(16.0, 16.0);
-                                        let (rect, _response) = ui.allocate_exact_size(
+                                        let (rect, response) = ui.allocate_exact_size(
                                             rect_size,
                                             egui::Sense::hover(),
                                         );
@@ -2094,6 +2094,10 @@ impl TabManager {
                                             0.0,
                                             egui::Color32::from_rgb(r, g, b),
                                         );
+                                        response.on_hover_text(format!(
+                                            "Color {}: #{:02X}{:02X}{:02X}",
+                                            i, r, g, b
+                                        ));
                                     }
                                 }
                             });

@@ -220,7 +220,6 @@ pub fn get_tabs_for_system(system_type: Option<&SystemType>) -> Vec<InspectorTab
             }
             _ => {
                 // Fallback for cartridge-based systems not explicitly listed above
-                // This includes N64 and any future cartridge systems
                 tabs.push(InspectorTab::Cartridge);
             }
         }

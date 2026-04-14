@@ -1139,14 +1139,14 @@ impl Vdp {
     /// - `cram`: raw 128-byte CRAM
     /// - `palette`: 64 decoded RGBA colors (0xAARRGGBB)
     /// - `registers`: VDP register array (24 bytes)
-    pub fn get_tile_viewer_data(&self) -> (Vec<u8>, Vec<u8>, Vec<u32>, Vec<u8>) {
+    pub fn get_tile_viewer_data(&self) -> crate::system::TileViewerData {
         let palette: Vec<u32> = (0..64).map(|i| self.get_cram_color(i)).collect();
-        (
-            self.vram.clone(),
-            self.cram.clone(),
+        crate::system::TileViewerData {
+            vram: self.vram.clone(),
+            cram: self.cram.clone(),
             palette,
-            self.regs.to_vec(),
-        )
+            registers: self.regs.to_vec(),
+        }
     }
 
     pub fn get_state(&self) -> serde_json::Value {

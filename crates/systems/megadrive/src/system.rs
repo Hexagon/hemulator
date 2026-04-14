@@ -82,13 +82,7 @@ impl MegaDriveSystem {
 
     /// Get tile/palette data for the inspector.
     pub fn get_tile_viewer_data(&self) -> TileViewerData {
-        let (vram, cram, palette, registers) = self.cpu.memory.vdp.borrow().get_tile_viewer_data();
-        TileViewerData {
-            vram,
-            cram,
-            palette,
-            registers,
-        }
+        self.cpu.memory.vdp.borrow().get_tile_viewer_data()
     }
 
     /// Get audio samples (interleaved stereo i16)
