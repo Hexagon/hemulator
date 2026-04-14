@@ -297,10 +297,12 @@ impl DisassembledInstruction {
 pub struct CpuRegister {
     /// Register name (e.g., "PC", "A", "X", "Y", "SP")
     pub name: String,
-    /// Register value
+    /// Register value (lower 32 bits; use `value64` for full 64-bit value)
     pub value: u32,
     /// Register width in bits (8, 16, 32, 64)
     pub width: u8,
+    /// Full 64-bit value — only valid when `width == 64`
+    pub value64: u64,
 }
 
 impl CpuRegister {
@@ -310,6 +312,7 @@ impl CpuRegister {
             name: name.into(),
             value,
             width,
+            value64: value as u64,
         }
     }
 
@@ -326,6 +329,21 @@ impl CpuRegister {
     /// Create a 32-bit register
     pub fn new_32bit(name: impl Into<String>, value: u32) -> Self {
         Self::new(name, value, 32)
+    }
+
+    /// Create a 64-bit register
+    pub fn new_64bit(name: impl Into<String>, value: u64) -> Self {
+        Self {
+            name: name.into(),
+            value: value as u32,
+            width: 64,
+            value64: value,
+        }
+    }
+
+    /// Alias for `width` — provided for ergonomic access (`reg.bits`).
+    pub fn bits(&self) -> u8 {
+        self.width
     }
 }
 

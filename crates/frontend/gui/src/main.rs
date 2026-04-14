@@ -1093,7 +1093,7 @@ impl EmulatorSystem {
             EmulatorSystem::Chip8(sys) => sys.check_breakpoint(),
             EmulatorSystem::ColecoVision(sys) => sys.check_breakpoint(),
             EmulatorSystem::SG1000(sys) => sys.check_breakpoint(),
-            EmulatorSystem::PS1(_) => None,
+            EmulatorSystem::PS1(sys) => sys.check_breakpoint(),
             EmulatorSystem::GameAndWatch(_) => None,
             EmulatorSystem::Atari5200(sys) => sys.check_breakpoint(),
             EmulatorSystem::MegaDrive(sys) => sys.check_breakpoint(),
@@ -1115,7 +1115,7 @@ impl EmulatorSystem {
             EmulatorSystem::Chip8(sys) => sys.get_breakpoint_manager().get_all(),
             EmulatorSystem::ColecoVision(sys) => sys.get_breakpoint_manager().get_all(),
             EmulatorSystem::SG1000(sys) => sys.get_breakpoint_manager().get_all(),
-            EmulatorSystem::PS1(_) => Vec::new(),
+            EmulatorSystem::PS1(sys) => sys.get_breakpoint_manager().get_all(),
             EmulatorSystem::GameAndWatch(_) => Vec::new(),
             EmulatorSystem::Atari5200(sys) => sys.get_breakpoint_manager().get_all(),
             EmulatorSystem::MegaDrive(sys) => sys.get_breakpoint_manager().get_all(),
@@ -1137,7 +1137,7 @@ impl EmulatorSystem {
             EmulatorSystem::Chip8(sys) => Some(sys.get_instruction_tracer()),
             EmulatorSystem::ColecoVision(sys) => Some(sys.get_instruction_tracer()),
             EmulatorSystem::SG1000(sys) => Some(sys.get_instruction_tracer()),
-            EmulatorSystem::PS1(_) => None,
+            EmulatorSystem::PS1(sys) => Some(sys.get_instruction_tracer()),
             EmulatorSystem::GameAndWatch(_) => None,
             EmulatorSystem::Atari5200(sys) => Some(sys.get_instruction_tracer()),
             EmulatorSystem::MegaDrive(sys) => Some(sys.get_instruction_tracer()),
@@ -1161,7 +1161,7 @@ impl EmulatorSystem {
             EmulatorSystem::Chip8(sys) => Some(sys.get_instruction_tracer_mut()),
             EmulatorSystem::ColecoVision(sys) => Some(sys.get_instruction_tracer_mut()),
             EmulatorSystem::SG1000(sys) => Some(sys.get_instruction_tracer_mut()),
-            EmulatorSystem::PS1(_) => None,
+            EmulatorSystem::PS1(sys) => Some(sys.get_instruction_tracer_mut()),
             EmulatorSystem::GameAndWatch(_) => None,
             EmulatorSystem::Atari5200(sys) => Some(sys.get_instruction_tracer_mut()),
             EmulatorSystem::MegaDrive(sys) => Some(sys.get_instruction_tracer_mut()),
@@ -2511,8 +2511,11 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
                     s.get_instruction_tracer_mut().set_max_history(limit);
                 }
             }
-            EmulatorSystem::PS1(_) => {
-                // PS1 instruction tracing not yet implemented
+            EmulatorSystem::PS1(s) => {
+                s.set_instruction_tracing(true);
+                if let Some(limit) = cli_args.trace_limit {
+                    s.get_instruction_tracer_mut().set_max_history(limit);
+                }
             }
             EmulatorSystem::GameAndWatch(_) => {
                 // Game & Watch instruction tracing not yet implemented
@@ -2552,7 +2555,7 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
             EmulatorSystem::PC(s) => s.add_breakpoint(addr),
             EmulatorSystem::ColecoVision(s) => s.add_breakpoint(addr),
             EmulatorSystem::SG1000(s) => s.add_breakpoint(addr),
-            EmulatorSystem::PS1(_) => {} // PS1 breakpoints not yet implemented
+            EmulatorSystem::PS1(s) => s.add_breakpoint(addr),
             EmulatorSystem::GameAndWatch(_) => {} // Game & Watch breakpoints not yet implemented
             EmulatorSystem::Atari5200(s) => s.add_breakpoint(addr),
             EmulatorSystem::MegaDrive(s) => s.add_breakpoint(addr),
@@ -2574,7 +2577,7 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
             EmulatorSystem::PC(s) => s.add_read_breakpoint(addr),
             EmulatorSystem::ColecoVision(s) => s.add_read_breakpoint(addr),
             EmulatorSystem::SG1000(s) => s.add_read_breakpoint(addr),
-            EmulatorSystem::PS1(_) => {}
+            EmulatorSystem::PS1(s) => s.add_read_breakpoint(addr),
             EmulatorSystem::GameAndWatch(_) => {}
             EmulatorSystem::Atari5200(s) => s.add_read_breakpoint(addr),
             EmulatorSystem::MegaDrive(s) => s.add_read_breakpoint(addr),
@@ -2596,7 +2599,7 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
             EmulatorSystem::PC(s) => s.add_write_breakpoint(addr),
             EmulatorSystem::ColecoVision(s) => s.add_write_breakpoint(addr),
             EmulatorSystem::SG1000(s) => s.add_write_breakpoint(addr),
-            EmulatorSystem::PS1(_) => {}
+            EmulatorSystem::PS1(s) => s.add_write_breakpoint(addr),
             EmulatorSystem::GameAndWatch(_) => {}
             EmulatorSystem::Atari5200(s) => s.add_write_breakpoint(addr),
             EmulatorSystem::MegaDrive(s) => s.add_write_breakpoint(addr),
@@ -4875,7 +4878,13 @@ fn main() {
                         SystemDebugInfo::new("Mega Drive".to_string())
                     }
                 }
-                EmulatorSystem::C64(_) => SystemDebugInfo::new("C64".to_string()),
+                EmulatorSystem::C64(s) => {
+                    if let Some(debugger) = s.debugger() {
+                        SystemDebugInfo::from_debugger("C64", debugger)
+                    } else {
+                        SystemDebugInfo::new("C64".to_string())
+                    }
+                }
             };
             egui_app.tab_manager.update_debug_info(debug_info);
 
@@ -4936,7 +4945,10 @@ fn main() {
                     let debugger: &dyn Debugger = s.as_ref();
                     Some(create_enhanced_debug_state("Mega Drive", debugger, &sys))
                 }
-                EmulatorSystem::C64(_) => None,
+                EmulatorSystem::C64(s) => {
+                    let debugger: &dyn Debugger = s.as_ref();
+                    Some(create_enhanced_debug_state("C64", debugger, &sys))
+                }
             };
 
             if let Some(enhanced_state) = enhanced_state_opt {
@@ -4961,7 +4973,7 @@ fn main() {
                     EmulatorSystem::GameAndWatch(s) => Some(s.as_ref()),
                     EmulatorSystem::Atari5200(_) => None,
                     EmulatorSystem::MegaDrive(s) => Some(s.as_ref()),
-                    EmulatorSystem::C64(_) => None,
+                    EmulatorSystem::C64(s) => Some(s.as_ref()),
                 };
 
                 if let Some(debugger) = debugger {
@@ -5308,6 +5320,78 @@ fn main() {
                             registers: md_data.registers,
                         });
                     egui_app.tab_manager.update_system_tile_data(tile_data);
+                }
+                EmulatorSystem::C64(s) => {
+                    let tile_data = egui_ui::SystemTileData::C64(egui_ui::C64InspectorData {
+                        vic_regs: s.get_vic_regs(),
+                        sid_regs: s.get_sid_regs(),
+                        raster_line: s.get_raster_line(),
+                        total_cycles: s.get_total_cycles(),
+                    });
+                    egui_app.tab_manager.update_system_tile_data(tile_data);
+                }
+                EmulatorSystem::N64(sys) => {
+                    let vi_data = sys.get_vi_inspector_data();
+                    let rdp_data = sys.get_rdp_inspector_data();
+
+                    egui_app.tab_manager.update_n64_vi_data(egui_ui::N64ViData {
+                        status: vi_data.status,
+                        origin: vi_data.origin,
+                        width: vi_data.width,
+                        intr: vi_data.intr,
+                        current: vi_data.current,
+                        v_sync: vi_data.v_sync,
+                        h_sync: vi_data.h_sync,
+                        h_start: vi_data.h_start,
+                        v_start: vi_data.v_start,
+                        x_scale: vi_data.x_scale,
+                        y_scale: vi_data.y_scale,
+                        display_width: vi_data.display_width,
+                        display_height: vi_data.display_height,
+                        color_depth: vi_data.color_depth,
+                        display_enabled: vi_data.display_enabled,
+                        video_standard: vi_data.video_standard,
+                    });
+
+                    egui_app
+                        .tab_manager
+                        .update_n64_rdp_data(egui_ui::N64RdpData {
+                            status: rdp_data.status,
+                            color_image_addr: rdp_data.color_image_addr,
+                            color_image_width: rdp_data.color_image_width,
+                            color_image_size: rdp_data.color_image_size,
+                            zbuffer_enabled: rdp_data.zbuffer_enabled,
+                            renderer_name: rdp_data.renderer_name,
+                            microcode_type: rdp_data.microcode_type,
+                            vertex_count: rdp_data.vertex_count,
+                            dpc_start: rdp_data.dpc_start,
+                            dpc_end: rdp_data.dpc_end,
+                        });
+
+                    // Update cartridge data
+                    let debug = sys.get_debug_info();
+                    let cart_data = egui_ui::CartridgeData {
+                        system_name: "N64".to_string(),
+                        crc32: 0, // N64 ROM CRC requires specific algorithm; not computed yet
+                        rom_size: (debug.rom_size_mb * 1024.0 * 1024.0) as usize,
+                        nes_mapper: None,
+                        nes_submapper: None,
+                        nes_mapper_name: None,
+                        nes_mirroring: None,
+                        nes_timing: None,
+                        nes_prg_size: None,
+                        nes_chr_size: None,
+                        nes_header_mapper: None,
+                        nes_header_submapper: None,
+                        nes_header_mirroring: None,
+                        nes_db_mapper_override: false,
+                        nes_db_mirroring_override: false,
+                        nes_board_name: None,
+                        snes_has_smc_header: None,
+                        snes_mapping_mode: None,
+                        snes_chip_type: None,
+                    };
+                    egui_app.tab_manager.update_cartridge_data(cart_data);
                 }
                 _ => {
                     // Other systems don't have tile viewers yet
@@ -8571,6 +8655,17 @@ fn main() {
                                     s.add_write_breakpoint(address)
                                 }
                             },
+                            EmulatorSystem::PS1(s) => match bp_type {
+                                emu_core::breakpoints::BreakpointType::Execute => {
+                                    s.add_breakpoint(address)
+                                }
+                                emu_core::breakpoints::BreakpointType::Read => {
+                                    s.add_read_breakpoint(address)
+                                }
+                                emu_core::breakpoints::BreakpointType::Write => {
+                                    s.add_write_breakpoint(address)
+                                }
+                            },
                             _ => {} // SMS, ColecoVision, SG1000 don't have breakpoint manager yet
                         }
                         let type_str = match bp_type {
@@ -8605,6 +8700,7 @@ fn main() {
                             }
                             EmulatorSystem::N64(s) => s.remove_breakpoint_by_type(address, bp_type),
                             EmulatorSystem::PC(s) => s.remove_breakpoint_by_type(address, bp_type),
+                            EmulatorSystem::PS1(s) => s.remove_breakpoint_by_type(address, bp_type),
                             _ => false, // SMS, ColecoVision, SG1000 don't have breakpoint manager yet
                         };
 

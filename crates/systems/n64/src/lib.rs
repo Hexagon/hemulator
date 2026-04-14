@@ -240,6 +240,36 @@ impl N64System {
         }
     }
 
+    /// Get Video Interface inspector data for the inspector tab.
+    pub fn get_vi_inspector_data(&self) -> crate::vi::ViInspectorData {
+        self.cpu.bus().vi().inspector_data()
+    }
+
+    /// Get RDP inspector data for the inspector tab.
+    pub fn get_rdp_inspector_data(&self) -> crate::rdp::RdpInspectorData {
+        let bus = self.cpu.bus();
+        let rdp = bus.rdp();
+        let rsp = bus.rsp();
+        let microcode_type = match rsp.microcode_type() {
+            rsp_hle::MicrocodeType::F3DEX => "F3DEX",
+            rsp_hle::MicrocodeType::F3DEX2 => "F3DEX2",
+            rsp_hle::MicrocodeType::Audio => "Audio",
+            rsp_hle::MicrocodeType::Unknown => "Unknown",
+        };
+        crate::rdp::RdpInspectorData {
+            status: rdp.read_register(0x0C),
+            color_image_addr: rdp.color_image_address(),
+            color_image_width: rdp.color_image_width_val(),
+            color_image_size: rdp.get_color_image_size(),
+            zbuffer_enabled: rdp.is_zbuffer_enabled(),
+            renderer_name: rdp.renderer_name(),
+            microcode_type,
+            vertex_count: rsp.vertex_count(),
+            dpc_start: rdp.read_register(0x00),
+            dpc_end: rdp.read_register(0x04),
+        }
+    }
+
     /// Get debugger interface for this system
     pub fn debugger(&self) -> Option<&dyn emu_core::debug::Debugger> {
         Some(self)
@@ -395,18 +425,20 @@ impl System for N64System {
             }
         }
 
-        // Sync RDP framebuffer to RDRAM once per display frame
-        // This is deferred from individual RSP/RDP operations for performance
+        // Sync RDP framebuffer to RDRAM once per display frame.
+        // This keeps RDRAM consistent for any CPU reads from the framebuffer region
+        // and is required so the VI RDRAM readback below sees the latest pixels.
         self.cpu.bus_mut().sync_rdp_framebuffer();
 
-        // Get frame from VI framebuffer readback (primary display method)
-        // The game renders to RDRAM, and VI reads from RDRAM at VI_ORIGIN
+        // Primary path: read the framebuffer through VI (RDRAM-based).
+        // This respects VI origin/width/height/color-depth configuration so
+        // CPU-rendered framebuffers (written directly into RDRAM) display correctly.
         if let Some(vi_frame) = self.cpu.bus().read_vi_framebuffer() {
             return Ok(vi_frame);
         }
 
-        // Fallback: return RDP internal frame (for cases where VI isn't configured yet)
-        self.cpu.bus_mut().rdp_mut().sync_framebuffer();
+        // Fallback: return the RDP internal frame when VI isn't configured yet
+        // (e.g. during early boot before the game sets VI registers).
         let frame = self.cpu.bus().rdp().get_frame().clone();
         Ok(frame)
     }

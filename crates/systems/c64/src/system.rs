@@ -172,6 +172,23 @@ impl C64System {
         vic.color_ram.extend_from_slice(&self.cpu.memory.color_ram);
     }
 
+    // --- Inspector data access ---
+
+    /// Return a snapshot of all 64 VIC-II registers ($D000–$D03F).
+    pub fn get_vic_regs(&self) -> [u8; 64] {
+        self.vic.borrow().regs
+    }
+
+    /// Return a snapshot of all 32 SID registers ($D400–$D41F).
+    pub fn get_sid_regs(&self) -> [u8; 32] {
+        self.sid.borrow().regs
+    }
+
+    /// Return the current raster line (0–311 PAL).
+    pub fn get_raster_line(&self) -> u32 {
+        self.vic.borrow().raster_line()
+    }
+
     // --- Debugging infrastructure ---
 
     pub fn get_breakpoint_manager(&self) -> &emu_core::breakpoints::BreakpointManager {
