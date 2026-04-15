@@ -17,6 +17,18 @@ pub enum MegaDriveError {
     InvalidMountPoint,
 }
 
+/// Tile viewer data snapshot for the inspector
+pub struct TileViewerData {
+    /// Full 64KB VRAM contents
+    pub vram: Vec<u8>,
+    /// Raw 128-byte CRAM (64 × 2-byte entries)
+    pub cram: Vec<u8>,
+    /// Decoded palette: 64 RGBA colors (0xAARRGGBB)
+    pub palette: Vec<u32>,
+    /// VDP registers (24 bytes)
+    pub registers: Vec<u8>,
+}
+
 /// NTSC timing constants
 const M68K_CLOCK: u64 = 7_670_453; // ~7.67 MHz
 const NTSC_SCANLINES: u64 = 262;
@@ -66,6 +78,11 @@ impl MegaDriveSystem {
     /// Set controller 2 state
     pub fn set_controller_2(&mut self, state: u16) {
         self.cpu.memory.controller_2 = state;
+    }
+
+    /// Get tile/palette data for the inspector.
+    pub fn get_tile_viewer_data(&self) -> TileViewerData {
+        self.cpu.memory.vdp.borrow().get_tile_viewer_data()
     }
 
     /// Get audio samples (interleaved stereo i16)
@@ -459,6 +476,8 @@ impl Debugger for MegaDriveSystem {
 
         state
     }
+
+    emu_core::impl_debugger_execution_history!();
 }
 
 impl MegaDriveSystem {
@@ -1373,5 +1392,116 @@ mod tests {
         assert_eq!(vdp.vram[0x1002], 0x00, "Even byte should be unchanged");
         assert_eq!(vdp.vram[0x1004], 0x00, "Even byte should be unchanged");
         assert_eq!(vdp.vram[0x1006], 0x00, "Even byte should be unchanged");
+    }
+
+    #[test]
+    fn test_debugger_memory_regions() {
+        let system = MegaDriveSystem::new();
+        let regions = system.get_memory_regions();
+
+        // Must have at least the standard regions
+        let names: Vec<&str> = regions.iter().map(|r| r.name.as_str()).collect();
+        assert!(names.contains(&"Work RAM"), "Work RAM region required");
+        assert!(names.contains(&"VDP"), "VDP region required");
+
+        // Work RAM should be readable and writable
+        let wram = regions.iter().find(|r| r.name == "Work RAM").unwrap();
+        assert!(wram.readable);
+        assert!(wram.writable);
+        assert_eq!(wram.start, 0xFF0000);
+        assert_eq!(wram.end, 0xFFFFFF);
+    }
+
+    #[test]
+    fn test_debugger_cpu_state() {
+        let system = MegaDriveSystem::new();
+        let state = system.get_cpu_state();
+
+        // Should have all M68000 data registers
+        for i in 0..8 {
+            assert!(
+                state.registers.iter().any(|r| r.name == format!("D{}", i)),
+                "D{} missing",
+                i
+            );
+            assert!(
+                state.registers.iter().any(|r| r.name == format!("A{}", i)),
+                "A{} missing",
+                i
+            );
+        }
+        // SR, USP, SSP
+        assert!(state.registers.iter().any(|r| r.name == "SR"));
+        assert!(state.registers.iter().any(|r| r.name == "USP"));
+        assert!(state.registers.iter().any(|r| r.name == "SSP"));
+
+        // Flags: C V Z N X S T
+        let flag_names: Vec<&str> = state.flags.flags.iter().map(|(n, _)| n.as_str()).collect();
+        for flag in &["C", "V", "Z", "N", "X", "S", "T"] {
+            assert!(flag_names.contains(flag), "Flag {} missing", flag);
+        }
+    }
+
+    #[test]
+    fn test_debugger_read_memory() {
+        let system = MegaDriveSystem::new();
+
+        // Should read from valid 24-bit address space
+        let mem = system.read_memory(0x000000, 16);
+        assert!(mem.is_some());
+        assert_eq!(mem.unwrap().len(), 16);
+
+        // Addresses beyond 24-bit space are invalid
+        let invalid = system.read_memory(0x01000000, 1);
+        assert!(invalid.is_none());
+    }
+
+    #[test]
+    fn test_debugger_disassemble() {
+        let system = MegaDriveSystem::new();
+        // NOP instruction at address 0 (not necessarily valid code,
+        // but disassemble_instruction should return Some for any readable address)
+        // We just verify it doesn't panic and returns a result.
+        let _result = system.disassemble_instruction(0x000000);
+        // Out-of-range address should return None
+        let out_of_range = system.disassemble_instruction(0x01000000);
+        assert!(out_of_range.is_none());
+    }
+
+    #[test]
+    fn test_debugger_breakpoints() {
+        let mut system = MegaDriveSystem::new();
+
+        // No breakpoints initially
+        assert!(system.check_breakpoint().is_none());
+
+        // Add a breakpoint at the current PC
+        let pc = system.cpu.pc;
+        system.add_breakpoint(pc);
+        assert!(system.check_breakpoint().is_some());
+        assert_eq!(system.check_breakpoint().unwrap(), pc);
+
+        // Remove the breakpoint
+        system.remove_breakpoint(pc);
+        assert!(system.check_breakpoint().is_none());
+    }
+
+    #[test]
+    fn test_tile_viewer_data() {
+        let system = MegaDriveSystem::new();
+        let data = system.get_tile_viewer_data();
+
+        // VRAM is 64KB
+        assert_eq!(data.vram.len(), 0x10000);
+        // CRAM is 128 bytes (64 × 2)
+        assert_eq!(data.cram.len(), 128);
+        // Palette has 64 entries
+        assert_eq!(data.palette.len(), 64);
+        // 24 VDP registers
+        assert_eq!(data.registers.len(), 24);
+        // Each palette entry has full alpha
+        for color in &data.palette {
+            assert_eq!(color >> 24, 0xFF, "Alpha should be 0xFF");
+        }
     }
 }
