@@ -102,6 +102,26 @@ pub enum ColorFormat {
     RGBA8888,
 }
 
+/// How a textured triangle's pixel colour is computed from texture and other sources.
+///
+/// Derived from the RDP SET_COMBINE_MODE command: the cycle-1 A and C mux codes
+/// select the input operands for the formula `(A − B) × C + D`.  For the simple
+/// patterns where B=0 and D=0 this reduces to `A × C`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TextureCombineMode {
+    /// `TEXEL0 × SHADE` – per-vertex shade colour modulates the texture.
+    /// A=TEXEL0(1), C=SHADE(4).  The most common lit-texture mode.
+    Modulate,
+    /// `TEXEL0 × PRIMITIVE` – the RDP primitive colour is used as a flat tint.
+    /// A=TEXEL0(1), C=PRIMITIVE(3).
+    PrimModulate,
+    /// `TEXEL0 × ENVIRONMENT` – environment colour as a flat tint.
+    /// A=TEXEL0(1), C=ENVIRONMENT(5).
+    EnvModulate,
+    /// All other patterns: texture is displayed unmodified (equivalent to DECAL).
+    Decal,
+}
+
 /// Texture tile descriptor
 #[derive(Debug, Clone, Copy)]
 #[allow(dead_code)] // Fields reserved for future texture mapping implementation
@@ -592,11 +612,13 @@ impl Rdp {
     /// applying the current colour-combiner mode.
     ///
     /// The combine mode is inspected to decide how to blend texel and shade:
-    /// * **MODULATE** (`TEXEL0 × SHADE`): the shader multiplies the texture
-    ///   sample by the interpolated shade colour – the most common lit-texture
-    ///   mode used in N64 games.
-    /// * **All other modes**: shade colours are forced to opaque white so the
-    ///   texture is displayed unmodified (equivalent to DECAL).
+    /// * **MODULATE** (`TEXEL0 × SHADE`): per-vertex shade colour multiplied by
+    ///   the texture sample – the most common lit-texture mode in N64 games.
+    /// * **PRIM_MODULATE** (`TEXEL0 × PRIMITIVE`): flat primitive colour used as
+    ///   the multiplier instead of per-vertex shade.
+    /// * **ENV_MODULATE** (`TEXEL0 × ENVIRONMENT`): environment colour as multiplier.
+    /// * **DECAL / all others**: shade forced to opaque white so the texture is
+    ///   displayed unmodified.
     #[allow(clippy::too_many_arguments)]
     pub fn draw_triangle_textured_shaded_zbuf(
         &mut self,
@@ -621,12 +643,11 @@ impl Rdp {
         tile: usize,
     ) {
         // Determine the effective shade colours based on the colour-combiner mode.
-        // Only the MODULATE pattern (A=TEXEL0, C=SHADE) uses the per-vertex colour;
-        // everything else falls back to opaque white (no tinting).
-        let (sc0, sc1, sc2) = if Self::combine_mode_is_modulate(self.combine_mode) {
-            (c0, c1, c2)
-        } else {
-            (0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF)
+        let (sc0, sc1, sc2) = match Self::detect_combine_mode(self.combine_mode) {
+            TextureCombineMode::Modulate => (c0, c1, c2),
+            TextureCombineMode::PrimModulate => (self.prim_color, self.prim_color, self.prim_color),
+            TextureCombineMode::EnvModulate => (self.env_color, self.env_color, self.env_color),
+            TextureCombineMode::Decal => (0xFFFF_FFFF, 0xFFFF_FFFF, 0xFFFF_FFFF),
         };
 
         let tile_idx = tile.min(7);
@@ -645,19 +666,42 @@ impl Rdp {
         self.framebuffer_dirty = true;
     }
 
-    /// Return `true` when the current colour-combiner mode encodes the
-    /// `TEXEL0 × SHADE` (MODULATE) pattern.
+    /// Decode the colour-combiner mode for textured triangles.
     ///
-    /// The combine_mode 64-bit word layout (bits relative to MSB = bit 63):
-    /// * `[55:52]` sub_a_rgb0 (A0): colour mux A for cycle 1
-    /// * `[51:47]` mul_rgb0   (C0): colour mux C for cycle 1 (5-bit)
+    /// SET_COMBINE_MODE stores a 64-bit word whose cycle-1 fields are:
     ///
-    /// MODULATE is detected when A0 = TEXEL0 (1) **and** C0 = SHADE (11).
-    fn combine_mode_is_modulate(combine_mode: u64) -> bool {
-        let sub_a_rgb0 = (combine_mode >> 52) & 0xF; // A source, 4-bit
-        let mul_rgb0 = (combine_mode >> 47) & 0x1F; // C source, 5-bit
-                                                    // TEXEL0 = 1 for A; SHADE = 11 for C (5-bit mux)
-        sub_a_rgb0 == 1 && mul_rgb0 == 11
+    /// | bits  | field       | width |
+    /// |-------|-------------|-------|
+    /// | 55:52 | sub_a_rgb0  |   4   |  ← A mux (0-15)
+    /// | 51:48 | sub_b_rgb0  |   4   |  ← B mux (0-15)
+    /// | 47:43 | mul_rgb0    |   5   |  ← C mux (0-31)
+    /// | 42:39 | add_rgb0    |   4   |  ← D mux (0-15)
+    ///
+    /// A mux codes relevant here: COMBINED=0, TEXEL0=1, TEXEL1=2, PRIMITIVE=3,
+    ///   SHADE=4, ENVIRONMENT=5, ONE=6, NOISE=7; 8-15 = 0.
+    /// C mux codes relevant here: COMBINED=0, TEXEL0=1, TEXEL1=2, PRIMITIVE=3,
+    ///   SHADE=4, ENVIRONMENT=5; 6-13 = alpha/LOD inputs; 14-31 = 0.
+    /// Only the patterns that affect the textured draw path are decoded; all
+    /// other combine equations fall back to [`TextureCombineMode::Decal`].
+    fn detect_combine_mode(combine_mode: u64) -> TextureCombineMode {
+        let a0 = (combine_mode >> 52) & 0xF; // A mux, 4-bit
+        let b0 = (combine_mode >> 48) & 0xF; // B mux, 4-bit
+        let c0 = (combine_mode >> 43) & 0x1F; // C mux, 5-bit
+        let d0 = (combine_mode >> 39) & 0xF; // D mux, 4-bit
+
+        // The simplified textured path only supports cycle-1 RGB of the form
+        // (A - B) * C + D when it reduces to A * C.
+        if a0 == 1 && b0 == 0 && d0 == 0 {
+            // A = TEXEL0, B = 0, D = 0
+            match c0 {
+                4 => TextureCombineMode::Modulate,     // C = SHADE
+                3 => TextureCombineMode::PrimModulate, // C = PRIMITIVE
+                5 => TextureCombineMode::EnvModulate,  // C = ENVIRONMENT
+                _ => TextureCombineMode::Decal,
+            }
+        } else {
+            TextureCombineMode::Decal
+        }
     }
 
     /// Get the current framebuffer
@@ -3000,5 +3044,60 @@ mod tests {
             !rdp.is_zbuffer_enabled(),
             "FORCE_BL alone should not enable zbuffer"
         );
+    }
+
+    /// Build a SET_COMBINE_MODE 64-bit value from cycle-1 mux codes.
+    ///
+    /// Bit layout: [63:56]=cmd, [55:52]=A0, [51:48]=B0, [47:43]=C0, [42:39]=D0
+    fn make_combine_mode(a0: u64, b0: u64, c0: u64, d0: u64) -> u64 {
+        let cmd: u64 = 0x3C;
+        (cmd << 56) | (a0 << 52) | (b0 << 48) | (c0 << 43) | (d0 << 39)
+    }
+
+    #[test]
+    fn test_combine_mode_modulate() {
+        // A=TEXEL0(1), C=SHADE(4) → Modulate
+        let cm = make_combine_mode(1, 0, 4, 0);
+        assert_eq!(Rdp::detect_combine_mode(cm), TextureCombineMode::Modulate);
+    }
+
+    #[test]
+    fn test_combine_mode_prim_modulate() {
+        // A=TEXEL0(1), C=PRIMITIVE(3) → PrimModulate
+        let cm = make_combine_mode(1, 0, 3, 0);
+        assert_eq!(
+            Rdp::detect_combine_mode(cm),
+            TextureCombineMode::PrimModulate
+        );
+    }
+
+    #[test]
+    fn test_combine_mode_env_modulate() {
+        // A=TEXEL0(1), C=ENVIRONMENT(5) → EnvModulate
+        let cm = make_combine_mode(1, 0, 5, 0);
+        assert_eq!(
+            Rdp::detect_combine_mode(cm),
+            TextureCombineMode::EnvModulate
+        );
+    }
+
+    #[test]
+    fn test_combine_mode_decal_texel0_only() {
+        // A=TEXEL0(1), C=TEXEL0(1) → Decal (unrecognised C mux)
+        let cm = make_combine_mode(1, 0, 1, 0);
+        assert_eq!(Rdp::detect_combine_mode(cm), TextureCombineMode::Decal);
+    }
+
+    #[test]
+    fn test_combine_mode_decal_no_texel0() {
+        // A=SHADE(4), C=SHADE(4) → Decal (A is not TEXEL0)
+        let cm = make_combine_mode(4, 0, 4, 0);
+        assert_eq!(Rdp::detect_combine_mode(cm), TextureCombineMode::Decal);
+    }
+
+    #[test]
+    fn test_combine_mode_zero_is_decal() {
+        // combine_mode=0 → Decal
+        assert_eq!(Rdp::detect_combine_mode(0), TextureCombineMode::Decal);
     }
 }

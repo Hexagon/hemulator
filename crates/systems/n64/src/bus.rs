@@ -33,6 +33,10 @@ enum FlashRamMode {
 /// FlashRAM sector size in bytes (Macronix MX29L1100 uses 128-byte pages)
 const FLASH_SECTOR_SIZE: usize = 128;
 
+/// CPU cycles to delay the SI DMA completion interrupt.
+/// On real hardware SI DMA takes ~8 µs; at 93.75 MHz that is ~750 cycles.
+const SI_DMA_DELAY_CYCLES: u32 = 750;
+
 /// N64 memory bus
 pub struct N64Bus {
     /// 4MB RDRAM
@@ -73,6 +77,10 @@ pub struct N64Bus {
     pi_cart_addr: u32,
     /// SI DMA address
     si_dram_addr: u32,
+    /// Remaining CPU cycles before the pending SI DMA interrupt fires.
+    /// Set to SI_DMA_DELAY_CYCLES when a DMA is initiated; decremented by
+    /// `tick_si()` and fires `MI_INTR_SI` when it reaches zero.
+    si_pending_cycles: u32,
     /// CIC seed (detected from ROM header, used for IPL3 register init)
     cic_seed: u8,
 }
@@ -102,6 +110,7 @@ impl N64Bus {
             pi_dram_addr: 0,
             pi_cart_addr: 0,
             si_dram_addr: 0,
+            si_pending_cycles: 0,
             cic_seed: 0,
         };
 
@@ -138,6 +147,7 @@ impl N64Bus {
             pi_dram_addr: 0,
             pi_cart_addr: 0,
             si_dram_addr: 0,
+            si_pending_cycles: 0,
             cic_seed: 0,
         };
         bus.pif.init_rom();
@@ -159,6 +169,23 @@ impl N64Bus {
 
     pub fn set_controller4(&mut self, state: crate::pif::ControllerState) {
         self.pif.set_controller4(state);
+    }
+
+    /// Advance SI DMA timing by `cycles` CPU cycles.
+    ///
+    /// When a SI DMA is initiated the completion interrupt is deferred by
+    /// [`SI_DMA_DELAY_CYCLES`].  This method decrements the counter and fires
+    /// `MI_INTR_SI` exactly once when it reaches zero.  Should be called once
+    /// per CPU instruction from the main execution loop.
+    pub fn tick_si(&mut self, cycles: u32) {
+        if self.si_pending_cycles > 0 {
+            if cycles >= self.si_pending_cycles {
+                self.si_pending_cycles = 0;
+                self.mi.set_interrupt(crate::mi::MI_INTR_SI);
+            } else {
+                self.si_pending_cycles -= cycles;
+            }
+        }
     }
 
     pub fn load_cartridge(&mut self, data: &[u8]) -> Result<(), N64Error> {
@@ -880,10 +907,23 @@ impl MemoryMips for N64Bus {
             0x0480_0000..=0x048F_FFFF => {
                 let offset = phys_addr & 0x1F;
                 match offset {
-                    0x00 => 0,    // SI_DRAM_ADDR
-                    0x04 => 0,    // SI_PIF_ADDR_RD64B
-                    0x10 => 0,    // SI_PIF_ADDR_WR64B
-                    0x18 => 0x00, // SI_STATUS - 0 means ready
+                    0x00 => 0, // SI_DRAM_ADDR
+                    0x04 => 0, // SI_PIF_ADDR_RD64B
+                    0x10 => 0, // SI_PIF_ADDR_WR64B
+                    // SI_STATUS: bit 0 = DMA busy, bit 12 = interrupt pending
+                    0x18 => {
+                        let busy = if self.si_pending_cycles > 0 {
+                            0x0001
+                        } else {
+                            0
+                        };
+                        let intr = if self.mi.get_interrupt_status() & crate::mi::MI_INTR_SI != 0 {
+                            0x1000
+                        } else {
+                            0
+                        };
+                        busy | intr
+                    }
                     _ => 0,
                 }
             }
@@ -1258,8 +1298,8 @@ impl MemoryMips for N64Bus {
                                     self.pif.read_ram(PIF_RAM_OFFSET + i as u32);
                             }
                         }
-                        // Trigger SI interrupt
-                        self.mi.set_interrupt(crate::mi::MI_INTR_SI);
+                        // Defer SI interrupt: on real hardware DMA takes ~8 µs (~750 cycles)
+                        self.si_pending_cycles = SI_DMA_DELAY_CYCLES;
                     }
                     0x10 => {
                         // SI_PIF_ADDR_WR64B - DMA: RDRAM -> PIF
@@ -1280,8 +1320,8 @@ impl MemoryMips for N64Bus {
                         }
                         // Process PIF commands (controller/EEPROM)
                         self.pif.process_commands();
-                        // Trigger SI interrupt
-                        self.mi.set_interrupt(crate::mi::MI_INTR_SI);
+                        // Defer SI interrupt: on real hardware DMA takes ~8 µs (~750 cycles)
+                        self.si_pending_cycles = SI_DMA_DELAY_CYCLES;
                     }
                     0x18 => {
                         // SI_STATUS - writing clears SI interrupt
@@ -1419,6 +1459,7 @@ impl MemoryMips for N64Bus {
 
 #[cfg(test)]
 mod tests {
+    use emu_core::cpu_mips_r4300i::MemoryMips;
     /// PI register readback is validated through N64Bus::read_word / write_word.
     /// However, constructing N64Bus requires a real OpenGL context (for the RDP
     /// renderer), so bus-level integration tests must run in a windowed environment.
@@ -1431,5 +1472,87 @@ mod tests {
         // in the field definitions without needing a full OpenGL context.
         let _: fn(&super::N64Bus) -> u32 = |bus| bus.pi_dram_addr;
         let _: fn(&super::N64Bus) -> u32 = |bus| bus.pi_cart_addr;
+    }
+
+    #[test]
+    fn test_si_dma_deferred_interrupt() {
+        let mut bus = super::N64Bus::new_for_test();
+
+        // Initially no SI pending and no interrupt
+        assert_eq!(bus.si_pending_cycles, 0);
+        assert_eq!(
+            bus.mi.get_interrupt_status() & crate::mi::MI_INTR_SI,
+            0,
+            "no interrupt before DMA"
+        );
+
+        // SI_STATUS should be 0 (not busy) before DMA
+        let status_before = bus.read_word(0x04800018);
+        assert_eq!(status_before & 0x0001, 0, "SI not busy before DMA");
+
+        // Trigger SI DMA by writing to SI_DRAM_ADDR then SI_PIF_ADDR_RD64B
+        bus.write_word(0x04800000, 0x0000_0100); // SI_DRAM_ADDR
+        bus.write_word(0x04800004, 0x1FC007C0); // SI_PIF_ADDR_RD64B
+
+        // DMA is now pending – interrupt should NOT have fired yet
+        assert!(
+            bus.si_pending_cycles > 0,
+            "pending cycles should be set after DMA"
+        );
+        assert_eq!(
+            bus.mi.get_interrupt_status() & crate::mi::MI_INTR_SI,
+            0,
+            "interrupt must not fire immediately"
+        );
+
+        // SI_STATUS bit 0 should be set (DMA busy)
+        let status_busy = bus.read_word(0x04800018);
+        assert_ne!(status_busy & 0x0001, 0, "SI busy bit should be set");
+
+        // Tick just under the delay – still pending
+        bus.tick_si(super::SI_DMA_DELAY_CYCLES - 1);
+        assert!(bus.si_pending_cycles > 0, "still pending with 1 cycle left");
+        assert_eq!(
+            bus.mi.get_interrupt_status() & crate::mi::MI_INTR_SI,
+            0,
+            "interrupt still not fired"
+        );
+
+        // Tick the final cycle – interrupt should fire now
+        bus.tick_si(1);
+        assert_eq!(bus.si_pending_cycles, 0, "no more pending cycles");
+        assert_ne!(
+            bus.mi.get_interrupt_status() & crate::mi::MI_INTR_SI,
+            0,
+            "interrupt must fire after delay"
+        );
+
+        // SI_STATUS bit 12 should reflect the pending interrupt
+        let status_intr = bus.read_word(0x04800018);
+        assert_ne!(
+            status_intr & 0x1000,
+            0,
+            "SI_STATUS interrupt bit should be set"
+        );
+
+        // Writing to SI_STATUS should clear the interrupt
+        bus.write_word(0x04800018, 0);
+        assert_eq!(
+            bus.mi.get_interrupt_status() & crate::mi::MI_INTR_SI,
+            0,
+            "interrupt cleared by SI_STATUS write"
+        );
+    }
+
+    #[test]
+    fn test_si_tick_is_idempotent_when_idle() {
+        let mut bus = super::N64Bus::new_for_test();
+        // Calling tick_si when idle should never set the interrupt
+        bus.tick_si(10000);
+        assert_eq!(
+            bus.mi.get_interrupt_status() & crate::mi::MI_INTR_SI,
+            0,
+            "no spurious interrupt when idle"
+        );
     }
 }

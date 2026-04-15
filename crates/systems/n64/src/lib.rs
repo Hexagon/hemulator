@@ -391,6 +391,9 @@ impl System for N64System {
                 let cycles = self.cpu.step();
                 self.current_cycles += cycles;
 
+                // Advance deferred SI DMA interrupt counter.
+                self.cpu.bus_mut().tick_si(cycles);
+
                 // Propagate MI interrupts to CPU IP2 after every step.
                 // Bus operations (RSP task, RDP display list) can set MI interrupts
                 // during a CPU write, so we must update IP2 promptly.
