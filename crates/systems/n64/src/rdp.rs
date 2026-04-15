@@ -682,12 +682,17 @@ impl Rdp {
     /// C mux codes relevant here: COMBINED=0, TEXEL0=1, TEXEL1=2, PRIMITIVE=3,
     ///   SHADE=4, ENVIRONMENT=5; 6-13 = alpha/LOD inputs; 14-31 = 0.
     /// Only the patterns that affect the textured draw path are decoded; all
-    /// other A/C combinations fall back to [`TextureCombineMode::Decal`].
+    /// other combine equations fall back to [`TextureCombineMode::Decal`].
     fn detect_combine_mode(combine_mode: u64) -> TextureCombineMode {
         let a0 = (combine_mode >> 52) & 0xF; // A mux, 4-bit
+        let b0 = (combine_mode >> 48) & 0xF; // B mux, 4-bit
         let c0 = (combine_mode >> 43) & 0x1F; // C mux, 5-bit
-        if a0 == 1 {
-            // A = TEXEL0
+        let d0 = (combine_mode >> 39) & 0xF; // D mux, 4-bit
+
+        // The simplified textured path only supports cycle-1 RGB of the form
+        // (A - B) * C + D when it reduces to A * C.
+        if a0 == 1 && b0 == 0 && d0 == 0 {
+            // A = TEXEL0, B = 0, D = 0
             match c0 {
                 4 => TextureCombineMode::Modulate,     // C = SHADE
                 3 => TextureCombineMode::PrimModulate, // C = PRIMITIVE
