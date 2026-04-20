@@ -69,7 +69,10 @@
 //! 3. Mixing the active channels
 //! 4. Downsampling to the target sample rate
 
-use emu_core::apu::{Envelope, LengthCounter, NoiseChannel, PulseChannel, SweepUnit, WaveChannel};
+use emu_core::apu::{
+    DcBlockFilter, Envelope, LengthCounter, LowPassFilter, NoiseChannel, PulseChannel, SweepUnit,
+    WaveChannel,
+};
 
 /// Game Boy APU with 4 sound channels.
 ///
@@ -158,10 +161,10 @@ pub struct GbApu {
     last_pulse2_sample: i16,
     last_wave_sample: i16,
     channel_mask: [bool; 4],
-    dc_prev_input_l: f32,
-    dc_prev_output_l: f32,
-    dc_prev_input_r: f32,
-    dc_prev_output_r: f32,
+    dc_filter_l: DcBlockFilter,
+    dc_filter_r: DcBlockFilter,
+    lp_filter_l: LowPassFilter,
+    lp_filter_r: LowPassFilter,
 }
 
 impl GbApu {
@@ -206,10 +209,10 @@ impl GbApu {
             last_pulse2_sample: 0,
             last_wave_sample: 0,
             channel_mask: [true, true, true, true],
-            dc_prev_input_l: 0.0,
-            dc_prev_output_l: 0.0,
-            dc_prev_input_r: 0.0,
-            dc_prev_output_r: 0.0,
+            dc_filter_l: DcBlockFilter::new(0.995),
+            dc_filter_r: DcBlockFilter::new(0.995),
+            lp_filter_l: LowPassFilter::new(0.08),
+            lp_filter_r: LowPassFilter::new(0.08),
         }
     }
 
@@ -740,10 +743,10 @@ impl GbApu {
         self.pulse2_frequency = 0;
         self.wave_frequency = 0;
         self.wave_dac_enabled = false;
-        self.dc_prev_input_l = 0.0;
-        self.dc_prev_output_l = 0.0;
-        self.dc_prev_input_r = 0.0;
-        self.dc_prev_output_r = 0.0;
+        self.dc_filter_l.reset();
+        self.dc_filter_r.reset();
+        self.lp_filter_l.reset();
+        self.lp_filter_r.reset();
     }
 
     /// Clock the APU for `cpu_cycles` CPU cycles, generating internal
@@ -889,17 +892,9 @@ impl GbApu {
         let left_i16 = (left * left_scale).clamp(-32768.0, 32767.0);
         let right_i16 = (right * right_scale).clamp(-32768.0, 32767.0);
 
-        // DC-blocking high-pass filter
-        let left_out = apply_filters(
-            left_i16,
-            &mut self.dc_prev_input_l,
-            &mut self.dc_prev_output_l,
-        );
-        let right_out = apply_filters(
-            right_i16,
-            &mut self.dc_prev_input_r,
-            &mut self.dc_prev_output_r,
-        );
+        // DC-block → low-pass → soft-clip → clamp
+        let left_out = apply_gb_filters(left_i16, &mut self.dc_filter_l, &mut self.lp_filter_l);
+        let right_out = apply_gb_filters(right_i16, &mut self.dc_filter_r, &mut self.lp_filter_r);
 
         (left_out, right_out)
     }
@@ -916,15 +911,12 @@ fn gb_wave_timer(freq: u16) -> u16 {
     period.saturating_sub(1) as u16
 }
 
-fn apply_filters(input: f32, prev_input: &mut f32, prev_output: &mut f32) -> i16 {
-    // DC-blocking high-pass filter
-    let y = input - *prev_input + (0.995 * *prev_output);
-    *prev_input = input;
-    *prev_output = y;
-
+/// Apply the full GB audio filter pipeline: DC-block → low-pass → soft-clip → clamp.
+fn apply_gb_filters(input: f32, dc: &mut DcBlockFilter, lp: &mut LowPassFilter) -> i16 {
+    let dc_out = dc.process(input);
+    let lp_out = lp.process(dc_out);
     // Soft clip to avoid hard saturation
-    let clipped = y / (1.0 + y.abs() / 32768.0);
-
+    let clipped = lp_out / (1.0 + lp_out.abs() / 32768.0);
     clipped.clamp(i16::MIN as f32, i16::MAX as f32) as i16
 }
 
